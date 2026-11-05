@@ -415,6 +415,13 @@ export class ClaudeRunner implements Runner {
       };
     }
 
+    // Full access means no prompts. Bypass mode still sends Claude Code's own safety checks
+    // here, and a switch to Full access mid-turn only reaches the CLI when the turn ends, so
+    // allow from the live setting. An ask rule the user wrote in their settings still asks.
+    if (this.ctx.agent().autonomy === 'full' && !options.matchedAskRule) {
+      return { behavior: 'allow', updatedInput: input };
+    }
+
     const decision = await hooks.approval(
       {
         type: 'tool',

@@ -96,6 +96,54 @@ test('the Claude runner wires the comms server, instructions and turn results', 
   runner.close();
 });
 
+test('Full access answers tool prompts itself, but questions and the user\'s ask rules still reach the user', async () => {
+  const captured: { options?: Options; prompts: unknown[] } = { prompts: [] };
+  const live: Agent = { ...agent, autonomy: 'edits' };
+  const approvals: ApprovalRequest[] = [];
+  const hooks: RunnerHooks = {
+    session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, turnEnd: () => {},
+    approval: async (request): Promise<ApprovalDecision> => { approvals.push(request); return { allow: true, answers: { q: 'yes' } }; },
+    closed: () => {},
+  };
+  const runner = new ClaudeRunner({
+    agent: () => live,
+    project: { id: 'p1', name: 'App', path: '/tmp/app', createdAt: 0, exists: true, isGit: false },
+    cwd: '/tmp/app', binPath: null, hooks, preparePrompt: text => text,
+  }, fakeQuery(captured));
+  runner.send('Tidy the build');
+  await settle(10);
+  const canUseTool = captured.options!.canUseTool;
+  const base = () => ({ signal: new AbortController().signal, suggestions: [], toolUseID: 't1' });
+  const bash = { command: "python3 - <<'EOF'\nprint(1)\nEOF" };
+
+  // Auto-accept edits still asks before a command.
+  await canUseTool('Bash', bash, base());
+  assert.equal(approvals.length, 1);
+
+  // Switched to Full access: the CLI may still route its own safety checks here, and a
+  // mid-turn switch has not reached the CLI yet. Neither should prompt.
+  live.autonomy = 'full';
+  const allowed = await canUseTool('Bash', bash, { ...base(), decisionReason: 'Writes to .git need approval' });
+  assert.equal(allowed.behavior, 'allow');
+  assert.deepEqual((allowed as { updatedInput?: unknown }).updatedInput, bash);
+  const edit = await canUseTool('Write', { file_path: '/tmp/app/.claude/settings.json', content: '{}' }, base());
+  assert.equal(edit.behavior, 'allow');
+  assert.equal(approvals.length, 1);
+
+  // An ask rule from the user's settings still prompts.
+  const ruled = await canUseTool('Bash', { command: 'git push' }, { ...base(), matchedAskRule: { source: 'userSettings', toolName: 'Bash', ruleContent: 'git push:*' } });
+  assert.equal(ruled.behavior, 'allow');
+  assert.equal(approvals.length, 2);
+  assert.equal(approvals[1].type, 'tool');
+
+  // The agent's own questions still need real answers.
+  const asked = await canUseTool('AskUserQuestion', { questions: [{ question: 'Ship it?', header: 'Ship', options: [], multiSelect: false }] }, base());
+  assert.equal(asked.behavior, 'allow');
+  assert.equal(approvals.length, 3);
+  assert.equal(approvals[2].type, 'question');
+  runner.close();
+});
+
 test('slash commands reach Claude Code unchanged', async () => {
   const captured: { options?: Options; prompts: unknown[] } = { prompts: [] };
   const hooks: RunnerHooks = { session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, turnEnd: () => {}, approval: async () => ({ allow: true }), closed: () => {} };
