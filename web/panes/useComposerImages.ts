@@ -1,4 +1,4 @@
-import { useCallback, useState, useSyncExternalStore } from 'react';
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import type { ImageAttachment } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { imageName, MAX_IMAGES, prepareImage } from '../attachments.ts';
@@ -13,7 +13,10 @@ export interface PendingImage {
   error?: string;
 }
 
-// Kept outside the component, per agent, like the text drafts: switching tabs keeps the images,
+/** Sends one image's bytes to where the message will be posted, and returns its attachment. */
+export type ImageUploader = (image: Blob, name: string) => Promise<ImageAttachment>;
+
+// Kept outside the component, per composer, like the text drafts: switching tabs keeps the images,
 // and an upload that finishes while the composer is closed still lands.
 const lists = new Map<string, PendingImage[]>();
 const listeners = new Set<() => void>();
@@ -35,17 +38,25 @@ function patch(agentId: string, key: string, update: Partial<PendingImage>): voi
   change(agentId, list => list.map(image => (image.key === key ? { ...image, ...update } : image)));
 }
 
-async function upload(agentId: string, key: string, file: File, name: string): Promise<void> {
+async function upload(agentId: string, key: string, file: File, name: string, uploader: ImageUploader): Promise<void> {
   try {
-    const attachment = await api.attach(agentId, await prepareImage(file), name);
+    const attachment = await uploader(await prepareImage(file), name);
     patch(agentId, key, { attachment });
   } catch (err) {
     patch(agentId, key, { error: err instanceof Error ? err.message : String(err) });
   }
 }
 
-/** The composer's images for one agent, and what can be done with them. */
-export function useComposerImages(agentId: string) {
+const toAgent = (agentId: string): ImageUploader => (image, name) => api.attach(agentId, image, name);
+
+/**
+ * The composer's images, and what can be done with them. `agentId` keys the list: an agent's id,
+ * or any other draft key (a channel or thread composer's). Uploads go to that agent unless an
+ * `uploader` says where else; it is read when images are added, so it need not be stable.
+ */
+export function useComposerImages(agentId: string, uploader?: ImageUploader) {
+  const uploaderRef = useRef(uploader);
+  uploaderRef.current = uploader;
   const images = useSyncExternalStore(subscribe, () => lists.get(agentId) ?? EMPTY);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -58,7 +69,8 @@ export function useComposerImages(agentId: string) {
     const pending = taken.map(file => ({ key: crypto.randomUUID(), name: imageName(file), preview: URL.createObjectURL(file) }));
     if (!pending.length) return;
     change(agentId, list => [...list, ...pending]);
-    taken.forEach((file, i) => void upload(agentId, pending[i].key, file, pending[i].name));
+    const send = uploaderRef.current ?? toAgent(agentId);
+    taken.forEach((file, i) => void upload(agentId, pending[i].key, file, pending[i].name, send));
   }, [agentId]);
 
   const remove = useCallback((key: string) => {

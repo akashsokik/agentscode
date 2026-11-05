@@ -81,11 +81,20 @@ export function AttachmentChip({ name, preview, uploading, error, onRemove }: {
   );
 }
 
-/** The images a sent message carried, as photos above its bubble. */
-export function MessageImages({ agentId, images }: { agentId: string; images: ImageAttachment[] }) {
+/**
+ * The images a sent message carried, as photos above its bubble. Agent messages load them by
+ * `agentId`; anything else (a channel post) passes `url`. `align="start"` lines them up on the left.
+ */
+export function MessageImages({ agentId, url, images, align = 'end' }: {
+  agentId?: string;
+  url?: (image: ImageAttachment) => string;
+  images: ImageAttachment[];
+  align?: 'start' | 'end';
+}) {
   const [open, setOpen] = useState<ImageAttachment | null>(null);
+  const src = url ?? ((image: ImageAttachment) => attachmentUrl(agentId ?? '', image));
   return (
-    <div className="flex max-w-full flex-wrap justify-end gap-1.5 pb-1.5">
+    <div className={`flex max-w-full flex-wrap gap-1.5 pb-1.5 ${align === 'start' ? 'justify-start' : 'justify-end'}`}>
       {images.map(image => (
         <button
           key={image.id}
@@ -96,7 +105,7 @@ export function MessageImages({ agentId, images }: { agentId: string; images: Im
           className="cursor-zoom-in rounded-2xl outline-none"
         >
           <img
-            src={attachmentUrl(agentId, image)}
+            src={src(image)}
             alt={image.name}
             loading="lazy"
             draggable={false}
@@ -104,7 +113,7 @@ export function MessageImages({ agentId, images }: { agentId: string; images: Im
           />
         </button>
       ))}
-      {open ? <ImageLightbox src={attachmentUrl(agentId, open)} alt={open.name} onClose={() => setOpen(null)} /> : null}
+      {open ? <ImageLightbox src={src(open)} alt={open.name} onClose={() => setOpen(null)} /> : null}
     </div>
   );
 }

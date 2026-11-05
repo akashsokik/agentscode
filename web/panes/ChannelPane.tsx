@@ -14,6 +14,7 @@ import { ChannelDialog } from '../dialogs/ChannelDialog.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ChipButton, Empty, HeaderButton, MenuLabel, MenuRow } from '../ui/common.tsx';
 import { Bot, ChevronDown, Search, Settings } from '../mono/icons.tsx';
+import { DiscussionMark } from '../mono/DiscussionMark.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { TabLabel } from '../mono/TabLabel.tsx';
@@ -74,6 +75,25 @@ function Members({ channel, members, onEdit }: { channel: Channel; members: Agen
   );
 }
 
+/**
+ * The top of a channel, as MonoCode's MonoHeader: its mark, the name in a pill, and one line on how
+ * it works. With no posts yet it is the greeting, centred in the view.
+ */
+function ChannelIntro({ channel, empty, onAddMembers }: { channel: Channel; empty: boolean; onAddMembers?: () => void }) {
+  return (
+    <header className={`flex flex-col items-center px-6 text-center font-sans ${empty ? 'flex-1 justify-center py-12' : 'pb-6 pt-8'}`}>
+      <DiscussionMark className={`${empty ? 'w-20' : 'w-12'} text-content/25`} />
+      <div className="mono-pill mt-3 flex h-8 items-center rounded-full border px-3.5 backdrop-blur-md">
+        <h2 className="text-[13px] font-semibold leading-none text-content">#{channel.name}</h2>
+      </div>
+      <p className="mt-3 max-w-sm text-[13px] leading-relaxed text-content/50">
+        Mention @name to start an agent in its own project; its reply lands in a thread under your post. Posts without a mention are notes.
+      </p>
+      {onAddMembers ? <ChipButton className="mt-3" onClick={onAddMembers}>Add members</ChipButton> : null}
+    </header>
+  );
+}
+
 /** A channel with the user and invited agents. */
 export function ChannelPane({ channelId, chrome }: { channelId: string; chrome: PaneChrome }) {
   const channel = useApp(s => s.snapshot?.channels.find(c => c.id === channelId));
@@ -128,16 +148,11 @@ export function ChannelPane({ channelId, chrome }: { channelId: string; chrome: 
         <div className={`min-h-0 min-w-0 flex-1 flex-col ${root ? 'hidden @min-[44rem]:flex' : 'flex'}`}>
           <div className="relative flex min-h-0 flex-1 flex-col">
             <div ref={follow.ref} onScroll={follow.onScroll} className="agent-transcript min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-3xl pb-4 pt-2">
-                <div className="px-4 pb-2 pt-4 font-sans">
-                  <p className="text-[13px] font-medium text-content/80">This is the start of #{channel.name}.</p>
-                  <p className="mt-1 text-[12px] leading-relaxed text-content/45">
-                    Mention @name to start an agent in its own project; its reply lands in a thread under your post. Agents can mention each other too. Posts without a mention are notes that start nobody.
-                  </p>
-                  {members.length ? null : <ChipButton className="mt-3" onClick={() => setEditing(true)}>Add members</ChipButton>}
-                </div>
+              {/* MonoCode's bottom-aligned chat column: a short channel sits on the composer, the way a chat does. */}
+              <div className="mx-auto flex min-h-full w-full min-w-0 max-w-3xl flex-col justify-end pb-4 pt-2">
+                <ChannelIntro channel={channel} empty={posts !== undefined && !main.length} onAddMembers={members.length ? undefined : () => setEditing(true)} />
                 {posts === undefined ? <div className="px-4 py-8 text-center font-sans text-sm text-content/40"><Shimmer duration={1.6}>Loading…</Shimmer></div> : null}
-                <PostList posts={main} agents={agents} threads={threads} onOpenThread={setThreadId} />
+                <PostList posts={main} agents={agents} threads={threads} openThreadId={root?.id} onOpenThread={setThreadId} />
                 <ActivityLine working={running} waiting={waiting} />
               </div>
             </div>

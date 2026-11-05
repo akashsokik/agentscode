@@ -222,6 +222,8 @@ export interface ChannelPost {
   /** The top-level post this thread belongs to; absent on top-level posts. */
   threadId?: string;
   meta?: TurnMeta;
+  /** Images the user attached; stored per channel, under /api/channels/:id/attachments/. */
+  images?: ImageAttachment[];
 }
 
 export interface ChannelInput {

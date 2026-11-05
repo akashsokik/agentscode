@@ -85,6 +85,23 @@ export class Attachments {
     });
   }
 
+  /**
+   * Copy an image stored elsewhere (a channel post's) into this owner's folder under the same id,
+   * so a message that carries it reads and shows it like one the user attached here.
+   */
+  adopt(agentId: string, image: { attachment: ImageAttachment; path: string }): { attachment: ImageAttachment; path: string } {
+    if (!STORED_NAME.test(image.attachment.id)) throw new HttpError(400, 'An attached image is no longer available. Attach it again.');
+    const target = path.join(this.dir(agentId), image.attachment.id);
+    fs.mkdirSync(this.dir(agentId), { recursive: true });
+    try {
+      fs.copyFileSync(image.path, target, fs.constants.COPYFILE_EXCL);
+    } catch (err) {
+      // Ids are never reused, so a file already there is this same image, delivered before.
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+    return { attachment: image.attachment, path: target };
+  }
+
   remove(agentId: string): void {
     fs.rmSync(this.dir(agentId), { recursive: true, force: true });
   }

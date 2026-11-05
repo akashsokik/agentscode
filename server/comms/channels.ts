@@ -6,6 +6,7 @@ import type {
   ChannelDeliveryStatus,
   ChannelInput,
   ChannelPost,
+  ImageAttachment,
   PeerMessage,
   ServerEvent,
 } from '../../shared/types.ts';
@@ -19,9 +20,12 @@ import { threadRoot, withThreadRoots } from './threads.ts';
 /** What channels need from the AgentManager. */
 export interface ChannelHost {
   broadcast(event: ServerEvent): void;
-  /** Start a user-priority task in an agent's session, the way a direct message does. */
-  startUserTask(agentId: string, text: string, prompt: string, task: AgentTask, channel: { id: string; postId: string }): void;
+  /** Start a user-priority task in an agent's session, the way a direct message does, with the post's images. */
+  startUserTask(agentId: string, text: string, prompt: string, task: AgentTask, channel: { id: string; postId: string }, images: PostImage[]): void;
 }
+
+/** An image on a user post: what the post shows, and the stored file the agents are sent. */
+export type PostImage = { attachment: ImageAttachment; path: string };
 
 type Meta = ChannelPost['meta'];
 
@@ -52,6 +56,18 @@ export function channelName(raw: unknown): string {
 
 function oneLine(text: string, max: number): string {
   return clip(text.replace(/\s+/g, ' ').trim(), max);
+}
+
+/** "an image", "3 images" */
+function pictures(count: number): string {
+  return count === 1 ? 'an image' : `${count} images`;
+}
+
+/** How a post reads in a turn prompt: its text, and a note for any images. */
+function postText(post: ChannelPost): string {
+  const count = post.images?.length ?? 0;
+  if (!count) return post.text;
+  return post.text ? `${post.text} [${pictures(count)} attached]` : `[${pictures(count)}, no text]`;
 }
 
 function clock(ts: number): string {
@@ -167,11 +183,14 @@ export class Channels {
 
   // ---- posting ---------------------------------------------------------------
 
-  /** The user posts. Mentions are agent ids the client resolved from @names. */
-  postAsUser(id: string, rawText: unknown, rawMentions: unknown, rawThreadId?: unknown): ChannelPost {
+  /**
+   * The user posts. Mentions are agent ids the client resolved from @names. Images were already
+   * checked against this channel's uploads; a post may be images alone.
+   */
+  postAsUser(id: string, rawText: unknown, rawMentions: unknown, rawThreadId?: unknown, images: PostImage[] = []): ChannelPost {
     const channel = this.get(id);
     const text = String(rawText ?? '').trim();
-    if (!text) throw new HttpError(400, 'Message is empty.');
+    if (!text && !images.length) throw new HttpError(400, 'Message is empty.');
     if (text.length > 100_000) throw new HttpError(400, 'Message is too long.');
     const thread = rawThreadId === undefined ? {} : this.threadReference(channel, rawThreadId);
     const mentions = Array.isArray(rawMentions) ? [...new Set(rawMentions.map(String))] : [];
@@ -184,13 +203,15 @@ export class Channels {
     const post = this.save(channel, {
       from: 'user', fromName: 'You', kind: 'post', text, ...thread,
       to: recipients.map(a => ({ agentId: a.id, name: a.name, status: 'queued' })),
+      ...(images.length ? { images: images.map(i => i.attachment) } : {}),
     });
+    const summary = text ? oneLine(text, 280) : `Posted ${pictures(images.length)}`;
     // One missing workspace should not keep the post from the other recipients.
     for (const agent of recipients) {
       try {
         this.host.startUserTask(agent.id, text, this.userPrompt(channel, post, agent), {
-          summary: oneLine(text, 280), source: 'user', channelId: channel.id, channelPostId: post.id,
-        }, { id: channel.id, postId: post.id });
+          summary, source: 'user', channelId: channel.id, channelPostId: post.id,
+        }, { id: channel.id, postId: post.id }, images);
       } catch (error) {
         this.setDelivery(post.id, agent.id, 'failed', (error as Error).message);
       }
@@ -279,7 +300,7 @@ export class Channels {
       id: channel.id, name: `#${channel.name}`, topic: channel.topic || undefined,
       thread_id: root?.id,
       posts: posts.map(p => ({
-        id: p.id, from: p.fromName, kind: p.kind, at: new Date(p.ts).toISOString(), text: clip(p.text, 4000),
+        id: p.id, from: p.fromName, kind: p.kind, at: new Date(p.ts).toISOString(), text: clip(postText(p), 4000),
         thread_id: p.threadId,
         reply_count: p.threadId ? undefined : counts.get(p.id) ?? 0,
         mentions: p.to.length ? p.to.map(d => d.name) : undefined,
@@ -420,7 +441,7 @@ export class Channels {
     const root = current ? this.root(channel, current.id) : undefined;
     const recent = backlog.filter(p => !p.threadId).slice(-BACKLOG);
     const replies = root ? backlog.filter(p => p.threadId === root.id).slice(-(BACKLOG - 1)) : [];
-    const line = (p: ChannelPost) => `[${clock(p.ts)}] ${p.fromName}${p.kind === 'reply' ? ' (reply)' : p.kind === 'error' ? ' (problem)' : ''}: ${oneLine(p.text, 500)} (post id ${p.id})`;
+    const line = (p: ChannelPost) => `[${clock(p.ts)}] ${p.fromName}${p.kind === 'reply' ? ' (reply)' : p.kind === 'error' ? ' (problem)' : ''}: ${oneLine(postText(p), 500)} (post id ${p.id})`;
     return [
       channel.topic ? `Channel topic: ${channel.topic}` : '',
       root ? `This turn is in thread ${root.id}.` : '',
@@ -441,7 +462,8 @@ export class Channels {
       'To bring in another member while you work, use post_to_channel with their id in mention_agent_ids. Do not post acknowledgements.',
       '',
       'Post:',
-      post.text,
+      post.text || `(The user posted ${pictures(post.images?.length ?? 0)} with no text.)`,
+      ...(post.images?.length ? [`The post's ${post.images.length === 1 ? 'image is' : `${post.images.length} images are`} attached to this message.`] : []),
     ].join('\n');
   }
 

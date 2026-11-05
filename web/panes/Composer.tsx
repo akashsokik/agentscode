@@ -45,7 +45,7 @@ function patch(agent: Agent, change: AgentPatch) {
 }
 
 /** MonoCode's ToolButton. */
-function ToolButton({ active, disabled, label, onClick, children }: { active?: boolean; disabled?: boolean; label: string; onClick?: () => void; children: ReactNode }) {
+export function ToolButton({ active, disabled, label, onClick, children }: { active?: boolean; disabled?: boolean; label: string; onClick?: () => void; children: ReactNode }) {
   return (
     <button
       type="button"

@@ -52,6 +52,28 @@ export function attachmentUrl(agentId: string, image: Pick<ImageAttachment, 'id'
   return `/api/agents/${agentId}/attachments/${image.id}`;
 }
 
+/** Where an image attached to a channel post can be loaded from. */
+export function channelAttachmentUrl(channelId: string, image: Pick<ImageAttachment, 'id'>): string {
+  return `/api/channels/${channelId}/attachments/${image.id}`;
+}
+
+/** Upload one image's bytes; the server reads the type from them. */
+async function upload(url: string, image: Blob, name: string): Promise<ImageAttachment> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(name) },
+    body: image,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new ApiError(response.status, (data as { error?: string }).error ?? `Upload failed (${response.status}).`);
+  return data as ImageAttachment;
+}
+
+/** What a message names its images by. */
+function imageRefs(images?: ImageAttachment[]) {
+  return images?.length ? images.map(i => ({ id: i.id, name: i.name })) : undefined;
+}
+
 function rootQuery(root: Root, extra: Record<string, string> = {}): string {
   const params = new URLSearchParams({ ...('agent' in root ? { agent: root.agent } : { project: root.project }), ...extra });
   return params.toString();
@@ -65,18 +87,9 @@ export const api = {
   removeAgent: (id: string, worktree: WorktreeCleanup = 'keep') => request<void>('DELETE', `/api/agents/${id}?worktree=${worktree}`),
   entries: (id: string) => request<Entry[]>('GET', `/api/agents/${id}/entries`),
   send: (id: string, text: string, images?: ImageAttachment[]) =>
-    request<{ ok: true }>('POST', `/api/agents/${id}/messages`, { text, images: images?.length ? images.map(i => ({ id: i.id, name: i.name })) : undefined }),
+    request<{ ok: true }>('POST', `/api/agents/${id}/messages`, { text, images: imageRefs(images) }),
   /** Upload one image for the agent's next message. */
-  attach: async (id: string, image: Blob, name: string): Promise<ImageAttachment> => {
-    const response = await fetch(`/api/agents/${id}/attachments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(name) },
-      body: image,
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new ApiError(response.status, (data as { error?: string }).error ?? `Upload failed (${response.status}).`);
-    return data as ImageAttachment;
-  },
+  attach: (id: string, image: Blob, name: string) => upload(`/api/agents/${id}/attachments`, image, name),
   stop: (id: string) => request<{ ok: true }>('POST', `/api/agents/${id}/stop`),
   seen: (id: string) => request<{ ok: true }>('POST', `/api/agents/${id}/seen`),
   newSession: (id: string) => request<{ ok: true }>('POST', `/api/agents/${id}/new-session`),
@@ -91,7 +104,10 @@ export const api = {
   removeChannel: (id: string) => request<void>('DELETE', `/api/channels/${id}`),
   channelPosts: (id: string) => request<ChannelPost[]>('GET', `/api/channels/${id}/posts`),
   /** `threadId` posts into the thread under that top-level post. */
-  post: (id: string, text: string, mentions: string[], threadId?: string) => request<ChannelPost>('POST', `/api/channels/${id}/posts`, { text, mentions, threadId }),
+  post: (id: string, text: string, mentions: string[], threadId?: string, images?: ImageAttachment[]) =>
+    request<ChannelPost>('POST', `/api/channels/${id}/posts`, { text, mentions, threadId, images: imageRefs(images) }),
+  /** Upload one image for the user's next post in the channel. */
+  attachToChannel: (id: string, image: Blob, name: string) => upload(`/api/channels/${id}/attachments`, image, name),
   channelSeen: (id: string) => request<{ ok: true }>('POST', `/api/channels/${id}/seen`),
 
   addProject: (input: { path: string; name?: string; create?: boolean }) => request<Project>('POST', '/api/projects', input),

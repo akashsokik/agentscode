@@ -6,7 +6,6 @@
 import { useEffect, useRef } from 'react';
 import type { Agent, Channel, ChannelPost } from '../../shared/types.ts';
 import type { Thread } from '../threads.ts';
-import { HeaderButton } from '../ui/common.tsx';
 import { X } from '../mono/icons.tsx';
 import { ChannelComposer } from './ChannelComposer.tsx';
 import { ActivityLine, JumpToLatest, PostList, threadActivity, useFollowLatest } from './ChannelPosts.tsx';
@@ -39,18 +38,27 @@ export function ChannelThread({ channel, root, thread, members, agents, focused,
   }, [focused]);
 
   return (
-    <aside aria-label={`Thread in #${channel.name}`} className="flex min-h-0 w-full shrink-0 flex-col border-stroke @min-[44rem]:w-[min(26rem,45%)] @min-[44rem]:border-l">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-stroke pl-4 pr-1.5 font-sans">
-        <span className="shrink-0 text-[13px] font-semibold text-content">Thread</span>
-        <span className="min-w-0 truncate text-[12px] text-content/45">#{channel.name}</span>
-        <HeaderButton icon={X} label="Close thread (Esc)" className="ml-auto" onClick={onClose} />
-      </div>
+    // MonoCode's MonoSidebar: docked on the right with its MonoSidebarHeader.
+    <aside aria-label={`Thread in #${channel.name}`} className="relative flex min-h-0 w-full shrink-0 flex-col border-stroke font-sans @min-[44rem]:w-[min(26rem,45%)] @min-[44rem]:border-l">
+      <header className="flex h-10 shrink-0 items-stretch border-b border-stroke">
+        <h3 className="flex min-w-0 flex-1 items-center gap-1.5 pl-4 text-[13px] font-medium text-content">
+          <span className="shrink-0">Thread</span>
+          <span className="min-w-0 truncate font-normal text-content/45">#{channel.name}</span>
+        </h3>
+        <div className="flex shrink-0 items-center gap-0.5 px-3">
+          <button type="button" title="Close thread (Esc)" aria-label="Close thread" onClick={onClose} className="grid size-6 place-items-center rounded-md text-content/50 hover:bg-content/10 hover:text-content">
+            <X className="size-3.5" strokeWidth={1.75} />
+          </button>
+        </div>
+      </header>
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={follow.ref} onScroll={follow.onScroll} className="agent-transcript min-h-0 flex-1 overflow-y-auto pb-3">
+        <div ref={follow.ref} onScroll={follow.onScroll} className="agent-transcript min-h-0 flex-1 overflow-y-auto pb-3 pt-2">
           <PostList posts={[root]} agents={agents} inThread />
-          <div className="flex items-center gap-2 px-4 pb-1 pt-2 font-sans text-[12px] text-content/45">
-            <span className="shrink-0">{count ? `${count} ${count === 1 ? 'reply' : 'replies'}` : 'No replies yet'}</span>
-            <span className="h-px flex-1 bg-content/10" />
+          {/* MonoCode's InterjectionDivider, between the root and its replies. */}
+          <div role="separator" className="flex items-center gap-3 px-4 pb-1 pt-1">
+            <div className="h-px min-w-4 flex-1 bg-content/12" />
+            <span className="px-1.5 font-sans text-[12px] text-content/55">{count ? `${count} ${count === 1 ? 'reply' : 'replies'}` : 'No replies yet'}</span>
+            <div className="h-px min-w-4 flex-1 bg-content/12" />
           </div>
           <PostList posts={replies} agents={agents} inThread after={root} />
           <ActivityLine {...activity} />

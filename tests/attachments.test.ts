@@ -102,3 +102,53 @@ test('a message can be images alone; the engine still gets a line of text', asyn
   await h.manager.remove(ada.id);
   assert.ok(!fs.existsSync(file.path), 'removing the agent deletes its images');
 });
+
+test('a channel post can carry images: each mentioned agent gets its own copy, and they go with the channel', async () => {
+  const h = harness();
+  const project = h.manager.addProject({ path: projectDir(h.dir, 'app') });
+  const ada = await h.manager.create({ name: 'Ada', engine: 'claude', projectId: project.id });
+  const bo = await h.manager.create({ name: 'Bo', engine: 'codex', projectId: project.id });
+  const channel = h.manager.createChannel({ name: 'design', memberIds: [ada.id, bo.id] });
+  assert.equal(status(() => h.manager.postToChannel(channel.id, '  ', [ada.id])), 400);
+
+  // Images uploaded to one channel cannot be posted in another, or named by an agent's id.
+  const image = h.manager.saveChannelAttachment(channel.id, PNG, 'mock.png');
+  const other = h.manager.createChannel({ name: 'other', memberIds: [ada.id] });
+  assert.equal(status(() => h.manager.postToChannel(other.id, 'look', [], undefined, [{ id: image.id }])), 400);
+  assert.equal(status(() => h.manager.attachmentFile(ada.id, image.id)), 404);
+
+  // Images alone are a post; the prompt still has a line of text and says what came with it.
+  const post = h.manager.postToChannel(channel.id, '', [ada.id, bo.id], undefined, [{ id: image.id, name: image.name }]);
+  await settle();
+  assert.deepEqual(post.images?.map(i => i.name), ['mock.png']);
+  assert.deepEqual(h.manager.channelPosts(channel.id).find(p => p.id === post.id)?.images?.map(i => i.id), [image.id]);
+  for (const agent of [ada, bo]) {
+    const sent = h.runner(agent.id).sent[0];
+    assert.match(sent.text, /posted an image with no text/);
+    assert.match(sent.text, /image is attached to this message/);
+    assert.equal(sent.task?.summary, 'Posted an image');
+    assert.equal(sent.images?.length, 1);
+    assert.equal(sent.images?.[0].mediaType, 'image/png');
+    // The copy lives with the agent, so its transcript shows the image and the engine reads that file.
+    const own = h.manager.attachmentFile(agent.id, image.id);
+    assert.equal(sent.images?.[0].path, own.path);
+    assert.deepEqual(fs.readFileSync(own.path), PNG);
+    const entry = h.manager.entries(agent.id).find(e => e.kind === 'user');
+    assert.deepEqual(entry?.images?.map(i => i.id), [image.id]);
+  }
+
+  // Later turns see the image post in their backlog.
+  h.runner(ada.id).complete(true, 'Looks good.');
+  h.runner(bo.id).complete(true, 'Agreed.');
+  h.manager.postToChannel(channel.id, '@Ada next step', [ada.id]);
+  await settle();
+  assert.match(h.runner(ada.id).sent[1].text, /You: \[an image, no text\]/);
+
+  // Deleting the channel deletes its uploads; the agents keep their copies.
+  const stored = h.manager.channelAttachmentFile(channel.id, image.id).path;
+  h.runner(ada.id).complete(true, 'Done.');
+  await settle();
+  h.manager.removeChannel(channel.id);
+  assert.ok(!fs.existsSync(stored));
+  assert.ok(fs.existsSync(h.manager.attachmentFile(ada.id, image.id).path));
+});

@@ -100,6 +100,8 @@ export class AgentManager {
   private worktreesRoot: string;
   /** Images pasted or attached to user messages, one folder per agent. */
   private attachments: Attachments;
+  /** Images the user attaches to channel posts, one folder per channel. */
+  private channelAttachments: Attachments;
   private createRunner: (ctx: RunnerContext) => Runner;
   private models: Record<EngineKind, EngineModels> = { claude: emptyModels('claude'), codex: emptyModels('codex') };
   /** Claude reports cost cumulatively per process; remember the last figure to get each turn's share. */
@@ -112,6 +114,7 @@ export class AgentManager {
     this.engines = engines;
     this.worktreesRoot = options.worktreesRoot ?? path.join(store.dataDir, 'worktrees');
     this.attachments = new Attachments(path.join(store.dataDir, 'attachments'));
+    this.channelAttachments = new Attachments(path.join(store.dataDir, 'channel-attachments'));
     this.createRunner = options.createRunner ?? (ctx => ctx.agent().engine === 'claude' ? new ClaudeRunner(ctx) : new CodexRunner(ctx));
     this.mailbox = new Mailbox(store, {
       ready: id => this.store.agents.has(id) && !this.runners.get(id)?.busy,
@@ -126,7 +129,9 @@ export class AgentManager {
     });
     this.channels = new Channels(store, this.mailbox, {
       broadcast: event => this.hub.broadcast(event),
-      startUserTask: (agentId, text, prompt, task, channel) => this.startUserTask(agentId, text, prompt, task, channel),
+      // Each recipient gets its own copy, so its transcript shows the images and outlives the channel.
+      startUserTask: (agentId, text, prompt, task, channel, images) =>
+        this.startUserTask(agentId, text, prompt, task, channel, images.map(image => this.attachments.adopt(this.agent(agentId).id, image))),
     });
   }
 
@@ -508,9 +513,23 @@ export class AgentManager {
 
   createChannel(input: ChannelInput): Channel { return this.channels.create(input ?? {}); }
   updateChannel(id: string, input: ChannelInput): Channel { return this.channels.update(id, input ?? {}); }
-  removeChannel(id: string): void { this.channels.remove(id); }
+  removeChannel(id: string): void {
+    const channel = this.channels.get(id);
+    this.channels.remove(channel.id);
+    this.channelAttachments.remove(channel.id);
+  }
   channelPosts(id: string): ChannelPost[] { return this.channels.posts(id); }
-  postToChannel(id: string, text: unknown, mentions: unknown, threadId?: unknown): ChannelPost { return this.channels.postAsUser(id, text, mentions, threadId); }
+  postToChannel(id: string, text: unknown, mentions: unknown, threadId?: unknown, images?: unknown): ChannelPost {
+    const channel = this.channels.get(id);
+    return this.channels.postAsUser(channel.id, text, mentions, threadId, this.channelAttachments.resolve(channel.id, images));
+  }
+  /** Store an image for the user's next post in this channel; the post names it by the returned id. */
+  saveChannelAttachment(id: string, body: unknown, name?: unknown): ImageAttachment {
+    return this.channelAttachments.save(this.channels.get(id).id, body, name);
+  }
+  channelAttachmentFile(id: string, file: unknown): { path: string; mediaType: ImageAttachment['mediaType'] } {
+    return this.channelAttachments.file(this.channels.get(id).id, file);
+  }
   channelSeen(id: string): void { this.channels.seen(id); }
 
   // ---- comms tools -------------------------------------------------------

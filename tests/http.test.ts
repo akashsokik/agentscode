@@ -157,3 +157,35 @@ test('images upload as raw bytes and come back typed by their content, to their 
     server.close();
   }
 });
+
+test('channel images upload as raw bytes, post with the message, and are served from that channel only', async () => {
+  const { h, project, server, url } = await serve();
+  try {
+    const ada = await h.manager.create({ name: 'Ada', engine: 'claude', projectId: project.id });
+    const channel = h.manager.createChannel({ name: 'design', memberIds: [ada.id] });
+    const other = h.manager.createChannel({ name: 'other', memberIds: [] });
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 4, 5, 6]);
+    const created = await fetch(url(`/api/channels/${channel.id}/attachments`), {
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': 'mock.png' }, body: png,
+    });
+    assert.equal(created.status, 201);
+    const image = await created.json() as { id: string; name: string };
+
+    const served = await fetch(url(`/api/channels/${channel.id}/attachments/${image.id}`));
+    assert.equal(served.status, 200);
+    assert.equal(served.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await served.arrayBuffer()), png);
+    assert.equal((await fetch(url(`/api/channels/${other.id}/attachments/${image.id}`))).status, 404);
+    assert.equal((await fetch(url(`/api/channels/nope/attachments/${image.id}`))).status, 404);
+
+    const posted = await fetch(url(`/api/channels/${channel.id}/posts`), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '', mentions: [ada.id], images: [{ id: image.id, name: image.name }] }),
+    });
+    assert.equal(posted.status, 201);
+    const post = await posted.json() as { images?: { id: string }[] };
+    assert.deepEqual(post.images?.map(i => i.id), [image.id]);
+  } finally {
+    server.close();
+  }
+});

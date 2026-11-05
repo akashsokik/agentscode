@@ -9,8 +9,10 @@ import { attempt, useApp } from '../store.ts';
 import { settleDraft } from '../threads.ts';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { MenuLabel, MenuRow } from '../ui/common.tsx';
-import { ArrowUp } from '../mono/icons.tsx';
+import { ArrowUp, ImagePlus } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
+import { ToolButton } from './Composer.tsx';
+import { ComposerImageTray, useChannelImages } from './ComposerImages.tsx';
 
 /** Drafts by key, shared across mounts: a composer that closes and reopens picks up where it was. */
 const drafts = new Map<string, string>();
@@ -43,6 +45,8 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
   const [armed, setArmed] = useState<string | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLDivElement>(null);
+  const images = useChannelImages(channel.id, draftKey, () => field.current?.focus());
+  const hasContent = Boolean(text.trim()) || images.ready.length > 0;
   useEffect(() => { drafts.set(draftKey, text); }, [draftKey, text]);
   useEffect(() => {
     const listener = (next: string) => { setText(next); setCaret(next.length); };
@@ -104,7 +108,8 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
   const send = async () => {
     const sent = text;
     const value = sent.trim();
-    if (!value || sending) return;
+    // Images still uploading would be left behind, so Post waits for them.
+    if ((!value && !images.ready.length) || images.uploading || sending) return;
     // Starting many sessions at once costs real money; ask once, the way Agent Office does for @all.
     if (resolveMentions(value, members).length >= 3 && armed !== value) {
       setArmed(value);
@@ -112,9 +117,11 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
     }
     setArmed(null);
     setSending(true);
-    const ok = await attempt(() => api.post(channel.id, value, resolveMentions(value, members), threadId));
+    const attached = images.ready;
+    const ok = await attempt(() => api.post(channel.id, value, resolveMentions(value, members), threadId, attached));
     setSending(false);
     if (ok) {
+      images.clear();
       // This composer may have closed while the post was in flight, and another opened on the same
       // draft. Clear only what was posted from the shared draft, then update whichever one is mounted.
       const rest = settleDraft(drafts, draftKey, sent);
@@ -126,7 +133,8 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
 
   return (
     <div data-composer className="relative mx-auto w-full max-w-3xl shrink-0 p-1.5 pt-0">
-      <div ref={box} data-composer-box className="relative z-10 rounded-lg border border-content/10">
+      <div ref={box} data-composer-box className="relative z-10 rounded-lg border border-content/10 has-focus:border-content/20" {...images.dropProps}>
+        <ComposerImageTray images={images} />
         <textarea
           ref={field}
           value={text}
@@ -135,6 +143,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
           onChange={e => { setText(e.target.value); drafts.set(draftKey, e.target.value); setCaret(e.target.selectionStart); setDismissedAt(null); }}
           onSelect={trackCaret}
           onClick={trackCaret}
+          onPaste={images.onPaste}
           onKeyDown={e => {
             if (options.length) {
               if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -161,19 +170,30 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
           placeholder={threadId ? 'Reply in thread' : `Message #${channel.name}`}
           className="scrollbar-none relative min-h-16 max-h-40 w-full resize-none overflow-x-hidden whitespace-pre-wrap wrap-break-word bg-transparent px-3 pb-1.5 pt-3.5 font-sans text-sm leading-5.5 text-content outline-none placeholder:text-content/40"
         />
-        <div className="flex items-center gap-2 px-3 pb-2.5">
-          <span className={`min-w-0 flex-1 truncate font-sans text-[12px] ${confirming ? 'text-warning' : 'text-content/45'}`} title={hint}>{hint}</span>
-          <button
-            type="button"
-            title={mentioned.length ? 'Post and start' : 'Post'}
-            aria-label={mentioned.length ? 'Post and start' : 'Post'}
-            disabled={!text.trim() || sending}
-            onClick={() => void send()}
-            className="composer-send primary-action grid size-6.5 shrink-0 place-items-center rounded-md disabled:cursor-default"
-          >
-            <ArrowUp className="size-3.5" strokeWidth={2.25} />
-          </button>
+        {/* MonoCode's toolbar row, as in the agent Composer: tools on the left, send on the right. */}
+        <div className="flex items-center gap-1 px-2 pb-2.5">
+          <ToolButton label="Attach images (or paste one)" disabled={images.full} onClick={images.pick}>
+            <ImagePlus className="size-3.5" strokeWidth={1.5} />
+          </ToolButton>
+          {images.input}
+          <div className="composer-toolbar flex min-w-0 flex-1 items-center" />
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              title={mentioned.length ? 'Post and start' : 'Post'}
+              aria-label={mentioned.length ? 'Post and start' : 'Post'}
+              disabled={!hasContent || images.uploading || sending}
+              onClick={() => void send()}
+              className="composer-send primary-action grid size-6.5 place-items-center rounded-md transition-[background-color,transform] duration-150 active:scale-[0.94] disabled:cursor-default disabled:active:scale-100"
+            >
+              <ArrowUp className="size-3.5" strokeWidth={2.25} />
+            </button>
+          </div>
         </div>
+      </div>
+      {/* Under the box, where the agent Composer shows its folder: who this post starts. */}
+      <div className={`flex min-w-0 items-center gap-2.5 overflow-hidden px-[15px] pt-1.5 font-sans text-[12px] ${confirming ? 'text-warning' : 'text-content/50'}`}>
+        <span className="min-w-0 truncate" title={hint}>{hint}</span>
       </div>
       {options.length ? (
         <Popover anchor={box} side="top" align="start" width={280} maxHeight={300} onDismiss={() => setDismissedAt(query?.start ?? null)} role="listbox" aria-label="Mention" className="overflow-y-auto overscroll-contain p-1">

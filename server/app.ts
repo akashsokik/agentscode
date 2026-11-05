@@ -135,7 +135,16 @@ export function createApp(manager: AgentManager, terminals = new Terminals(id =>
     res.json(manager.channelPosts(param(req, 'id')));
   });
   app.post('/api/channels/:id/posts', (req, res) => {
-    res.status(201).json(manager.postToChannel(param(req, 'id'), req.body?.text, req.body?.mentions, req.body?.threadId));
+    res.status(201).json(manager.postToChannel(param(req, 'id'), req.body?.text, req.body?.mentions, req.body?.threadId, req.body?.images));
+  });
+  // An image pasted or attached in a channel composer, for the user's next post there.
+  app.post('/api/channels/:id/attachments', express.raw({ type: () => true, limit: '4mb' }), (req, res) => {
+    res.status(201).json(manager.saveChannelAttachment(param(req, 'id'), req.body, req.headers['x-file-name']));
+  });
+  app.get('/api/channels/:id/attachments/:file', (req, res) => {
+    const file = manager.channelAttachmentFile(param(req, 'id'), param(req, 'file'));
+    res.set({ 'Content-Type': file.mediaType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=31536000, immutable' });
+    res.sendFile(file.path);
   });
   app.post('/api/channels/:id/seen', (req, res) => {
     manager.channelSeen(param(req, 'id'));

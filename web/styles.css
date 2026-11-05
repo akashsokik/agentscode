@@ -560,6 +560,20 @@ html.theme-light .sidebar-glass {
   --composer-blur: var(--blur-sm);
 }
 
+/* MonoCode's name pill under a Mono's mascot (MonoHeader); a channel's name under its mark. */
+.mono-pill {
+  border-color: color-mix(in srgb, var(--color-content) 14%, transparent);
+  background: color-mix(in srgb, var(--color-content) 6%, transparent);
+}
+
+html.theme-light .mono-pill {
+  background: #fff;
+  border-color: rgb(0 0 0 / 0.06);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 4px 14px rgb(0 0 0 / 0.08);
+}
+
 /* The inset layout rounds the box like a multi-line user message. */
 html.layout-inset [data-composer-box] {
   --composer-radius: var(--radius-xl, 0.75rem);
@@ -1113,7 +1127,8 @@ html.theme-light .segmented-active {
  * the top, then follows the reply once it outgrows the view.
  */
 .transcript-turn-anchor {
-  min-height: var(--transcript-viewport, 0px);
+  /* Rows queued under the turn share the view with it; fit() measures them into --transcript-tail. */
+  min-height: max(0px, calc(var(--transcript-viewport, 0px) - var(--transcript-tail, 0px)));
 }
 
 /* While a sent prompt rises into place, the rest of its turn waits for it. */
