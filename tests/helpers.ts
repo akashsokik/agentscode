@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentTask, Autonomy, EngineInfo, EngineKind, ServerEvent } from '../shared/types.ts';
 import type { Runner, RunnerContext, RunnerImage } from '../server/agents/runner.ts';
+import type { DreamEngine, DreamEngineRequest } from '../server/dream.ts';
 import { AgentManager } from '../server/manager.ts';
 import { Store } from '../server/store.ts';
 
@@ -53,22 +54,40 @@ export class FakeRunner implements Runner {
   close(): void { this.closed = true; this.busy = false; }
 }
 
+/** A dream engine for tests: answers from a queue (or with no changes) and records every prompt. */
+export class FakeDreamEngine {
+  requests: DreamEngineRequest[] = [];
+  replies: (string | Error)[] = [];
+  /** Usage reported with each reply. */
+  tokens = 1200;
+  costUsd = 0.004;
+  engine: DreamEngine = async request => {
+    this.requests.push(request);
+    const reply = this.replies.shift() ?? JSON.stringify({ memory: [], soul: null, diary: 'Nothing to change.', corrections: [] });
+    if (reply instanceof Error) throw reply;
+    return { text: reply, tokens: this.tokens, costUsd: this.costUsd };
+  };
+}
+
 export interface Harness {
   dir: string;
   store: Store;
   manager: AgentManager;
   events: ServerEvent[];
   runners: Map<string, FakeRunner[]>;
+  dreams: FakeDreamEngine;
   /** The newest fake provider for an agent. */
   runner(agentId: string): FakeRunner;
 }
 
-export function harness(engines: Partial<Record<EngineKind, EngineInfo>> = {}): Harness {
+export function harness(engines: Partial<Record<EngineKind, EngineInfo>> = {}, options: { idleProcessMs?: number } = {}): Harness {
   const dir = tempDir('state');
   const store = new Store(path.join(dir, 'data'));
   store.load();
   const events: ServerEvent[] = [];
   const runners = new Map<string, FakeRunner[]>();
+  // Dreams never reach a real model in tests.
+  const dreams = new FakeDreamEngine();
   const available: EngineInfo = { available: true, path: '/usr/bin/false', version: '0.0.0' };
   const manager = new AgentManager(store, { broadcast: event => events.push(event) }, {
     claude: engines.claude ?? available,
@@ -81,10 +100,12 @@ export function harness(engines: Partial<Record<EngineKind, EngineInfo>> = {}): 
       return runner;
     },
     worktreesRoot: path.join(dir, 'worktrees'),
+    dreamEngine: dreams.engine,
+    idleProcessMs: options.idleProcessMs,
   });
   manager.init();
   return {
-    dir, store, manager, events, runners,
+    dir, store, manager, events, runners, dreams,
     runner: (agentId: string) => {
       const list = runners.get(agentId);
       if (!list?.length) throw new Error('This agent has no provider yet.');

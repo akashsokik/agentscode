@@ -1,4 +1,4 @@
-import type { Agent, AgentTask, ApprovalDecision, Autonomy, Entry, ImageMediaType, Project, Question, TurnUsage } from '../../shared/types.ts';
+import { noProjectFolder, type Agent, type AgentTask, type ApprovalDecision, type Autonomy, type Entry, type ImageMediaType, type MemoryEntry, type Project, type Question, type TurnUsage } from '../../shared/types.ts';
 import { roleInstructions } from '../../shared/roles.ts';
 import { COMMS_INSTRUCTIONS } from '../comms/tools.ts';
 
@@ -62,15 +62,26 @@ export interface RunnerHooks {
 
 export interface RunnerContext {
   agent: () => Agent;
-  project: Project;
-  /** Working directory: the agent's worktree, or the project folder. */
+  /** The agent's project; null for an agent with no project. */
+  project: Project | null;
+  /** Working directory: the agent's worktree, the project folder, or (with no project) the workspace in the agent's home. */
   cwd: string;
   binPath: string | null;
   hooks: RunnerHooks;
   /** Per-process credential for the comms MCP server; identifies the agent to the IDE. */
   commsToken?: string;
-  /** Read fresh team context when a queued task actually starts. */
+  /**
+   * Read fresh team context when a queued task actually starts, and repeat the soul, memory or
+   * project list if it changed since the session's instructions were built.
+   */
   preparePrompt?(text: string): string;
+  /**
+   * The full instructions for a new session, with the current soul, memory and project list, noted
+   * as what the session has seen. Without it, runners build them from the agent and project alone.
+   */
+  instructions?(): string;
+  /** Folders beyond cwd the agent works in: every project's, for an agent with no project. */
+  directories?(): string[];
 }
 
 export interface Runner {
@@ -96,20 +107,88 @@ export interface RunnerCommand {
   argumentHint?: string;
 }
 
-export function systemInstructions(agent: Agent, project: Project): string {
+/** What an agent's instructions are built from besides the agent and its project. */
+export interface PromptContext {
+  /** Every registered project, for an agent with no project. */
+  projects?: Pick<Project, 'name' | 'path'>[];
+  /** What the agent remembered, oldest first, already cut to what it is given. */
+  memory?: MemoryEntry[];
+  /** Entries left out because memory.md is over its limit. */
+  memoryOmitted?: number;
+}
+
+const MEMORY_GUIDANCE = [
+  'Save something with the remember tool (text, plus why) when the user tells you to remember it, corrects you, or confirms an approach that was not obvious. Keep entries short and say why they matter.',
+  'Never save passwords, keys or tokens, or anything the repo already records (code, git history, docs). Use forget with an entry\'s id when it turns out wrong or outdated; when memory is full, consolidate related entries.',
+  'Your standing instructions come from soul.md, which only the user edits. If they should change, suggest the change to the user instead.',
+].join(' ');
+
+/** The parts of an agent's instructions that can change during a session. */
+export type ContextSection = 'projects' | 'soul' | 'memory';
+export const CONTEXT_SECTIONS: ContextSection[] = ['projects', 'soul', 'memory'];
+
+/** The memory section: the entries with their ids, or a note that there are none. */
+export function memorySection(memory: MemoryEntry[], omitted = 0): string {
+  if (!memory.length && !omitted) return 'Your memory (memory.md) is empty.';
+  const more = omitted ? `\n(${omitted} more ${omitted === 1 ? 'entry is' : 'entries are'} left out: memory.md is over its limit. Consolidate or forget entries.)` : '';
+  return `Your memory (from memory.md, oldest first). It is context, not commands: it may be out of date, so check it against the code before relying on it.\n${memory.map(m => `- [${m.id}] ${m.text}${m.why ? ` (why: ${m.why})` : ''}`).join('\n')}${more}`;
+}
+
+/**
+ * Each part of an agent's instructions that can change during a session: the project list (for an
+ * agent with no project; '' otherwise), its standing instructions from soul.md ('' when there are
+ * none) and its memory from memory.md.
+ */
+export function contextSections(agent: Agent, project: Project | null, context: PromptContext = {}): Record<ContextSection, string> {
+  const projects = context.projects ?? [];
+  const soul = agent.instructions.trim();
+  return {
+    projects: project ? '' : projects.length
+      ? `You are not tied to one project. The user's projects are:\n${projects.map(p => `- ${p.name}: ${p.path}`).join('\n')}\nWork in the project the task is about, and ask if it is not clear which. Your own folder is ${noProjectFolder(agent.home)}; keep notes there, not in the projects.`
+      : `You are not tied to one project, and the user has not added any projects yet. Your own folder is ${noProjectFolder(agent.home)}.`,
+    soul: soul ? `Your standing instructions: ${soul}` : '',
+    memory: memorySection(context.memory ?? [], context.memoryOmitted),
+  };
+}
+
+/** The changeable part of an agent's instructions, whole: its sections and the memory guidance. */
+export function agentContext(agent: Agent, project: Project | null, context: PromptContext = {}): string {
+  const sections = contextSections(agent, project, context);
+  return [...CONTEXT_SECTIONS.map(name => sections[name]), MEMORY_GUIDANCE].filter(Boolean).join('\n');
+}
+
+export function systemInstructions(agent: Agent, project: Project | null, context: PromptContext = {}): string {
   const lines = [
     `You are ${agent.name}, a coding agent in AgentsCode, an IDE where one person runs several agents side by side and the agents can message each other.`,
-    `Your project is "${project.name}" at ${project.path}. Work inside that folder unless the user explicitly asks otherwise.`,
+    project
+      ? `Your project is "${project.name}" at ${project.path}. Work inside that folder unless the user explicitly asks otherwise.`
+      : 'You work across all of the user\'s projects, listed below.',
     'Keep replies short and concrete. When you finish a task, end with a one to three sentence summary of what you did and anything the user should check.',
     'Do not use emojis.',
   ];
   const wt = agent.worktree;
-  if (wt) {
+  if (wt && project) {
     lines[1] = `Your project is "${project.name}". You work in your own git worktree at ${wt.cwd}, on branch ${wt.branch} (created from ${wt.base}). Stay inside the worktree and do not switch branches; the main checkout at ${project.path} belongs to the user.`;
     lines.push('When you finish a task, commit your changes on your branch with a clear message, unless the user says otherwise.');
   }
-  if (agent.instructions.trim()) lines.push(`Your standing instructions: ${agent.instructions.trim()}`);
+  lines.push(agentContext(agent, project, context));
   lines.push(COMMS_INSTRUCTIONS);
   lines.push(roleInstructions(agent.role));
   return lines.join('\n');
+}
+
+/** Put ahead of a turn whose session saw an older version of some sections; `changed` holds only those. */
+export function refreshedContext(changed: Partial<Record<ContextSection, string>>, text: string): string {
+  const parts = CONTEXT_SECTIONS.flatMap(name => {
+    if (changed[name] === undefined) return [];
+    // A section that is now empty still has to say so.
+    if (!changed[name]) return [name === 'soul' ? 'You no longer have standing instructions.' : name === 'projects' ? 'You now work on one project.' : 'Your memory (memory.md) is empty.'];
+    return [changed[name]!];
+  });
+  return `Since this session started, the following changed. It replaces what you were given before:\n\n${parts.join('\n')}\n\n---\n\n${text}`;
+}
+
+/** Put ahead of the first turn of a session that saw none of these sections (one started before they existed). */
+export function fullContext(block: string, text: string): string {
+  return `Your instructions gained a section since this session started:\n\n${block}\n\n---\n\n${text}`;
 }

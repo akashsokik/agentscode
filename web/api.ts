@@ -15,6 +15,11 @@ import type {
   FileDiff,
   GitStatus,
   ImageAttachment,
+  AgentDreams,
+  DreamRecord,
+  DreamStatsReport,
+  MemoryEntry,
+  MemoryPatch,
   Project,
   Settings,
   Snapshot,
@@ -95,6 +100,21 @@ export const api = {
   newSession: (id: string) => request<{ ok: true }>('POST', `/api/agents/${id}/new-session`),
   /** The skills and commands the agent's engine can run, for the composer's `/` picker. */
   commands: (id: string) => request<ComposerCommand[]>('GET', `/api/agents/${id}/commands`),
+  /** What the agent remembered, oldest first. Changes also arrive as `memory` events. */
+  memory: (id: string) => request<MemoryEntry[]>('GET', `/api/agents/${id}/memory`),
+  /** Rewrite one memory entry; returns the updated entry. */
+  updateMemory: (id: string, entryId: string, patch: MemoryPatch) => request<MemoryEntry>('PATCH', `/api/agents/${id}/memory/${entryId}`, patch),
+  forgetMemory: (id: string, entryId: string) => request<void>('DELETE', `/api/agents/${id}/memory/${entryId}`),
+  /** The agent's dreams (newest first), its dreaming stats and any soul proposal waiting. */
+  dreams: (id: string) => request<AgentDreams>('GET', `/api/agents/${id}/dreams`),
+  /** Dream now. Returns once the dream has started; its record arrives as a `dream` event. 409 when busy, locked or off. */
+  dreamNow: (id: string) => request<{ ok: true }>('POST', `/api/agents/${id}/dream`),
+  /** Undo the latest dream: memory goes back to how it was before. Returns the updated record. */
+  undoDream: (id: string, dreamId: string) => request<DreamRecord>('POST', `/api/agents/${id}/dreams/${dreamId}/undo`),
+  /** Accept or reject the soul proposal waiting for the agent. */
+  soulProposal: (id: string, action: 'accept' | 'reject') => request<{ ok: true }>('POST', `/api/agents/${id}/soul-proposal`, { action }),
+  /** Dreaming stats for each agent, and for agents with dreaming on and off as groups. */
+  dreamStats: () => request<DreamStatsReport>('GET', '/api/dream-stats'),
 
   resolveApproval: (id: string, decision: ApprovalDecision) => request<{ ok: true }>('POST', `/api/approvals/${id}`, decision),
   stopConversation: (id: string) => request<Conversation>('POST', `/api/conversations/${id}/stop`),

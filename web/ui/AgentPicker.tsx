@@ -7,6 +7,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { Agent } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
+import { groupByProject, projectLabel } from '../projects.ts';
 import { useApp } from '../store.ts';
 import { EngineIcon, ENGINE_NAMES } from './EngineIcon.tsx';
 import { MenuRow } from './common.tsx';
@@ -23,17 +24,18 @@ export function AgentPicker({ value, onChange }: { value: string[]; onChange: (i
   const list = useRef<HTMLDivElement>(null);
   const selected = new Set(value);
 
-  const projectName = (id: string) => projects?.find(p => p.id === id)?.name ?? 'Unknown project';
+  const projectName = (id: string | null) => projectLabel(id, projects, 'Unknown project');
   const describe = (a: Agent) => [projectName(a.projectId), rolePreset(a.role).name, a.worktree ? `branch ${a.worktree.branch}` : ''].filter(Boolean).join(', ');
 
   const { groups, rows, total } = useMemo(() => {
     const q = query.trim().toLowerCase();
     const matches = (a: Agent) => !q || [a.name, projectName(a.projectId), rolePreset(a.role).name, ENGINE_NAMES[a.engine], a.worktree?.branch ?? '']
       .some(field => field.toLowerCase().includes(q));
-    const all = (projects ?? []).map(project => ({
-      project,
-      agents: (agents ?? []).filter(a => a.projectId === project.id && matches(a)).sort((a, b) => a.name.localeCompare(b.name)),
-    })).filter(g => g.agents.length);
+    // Agents with no project come first, under All projects.
+    const all = groupByProject((agents ?? []).filter(matches), projects ?? []).map(({ id, name, agents: inGroup }) => ({
+      project: { id, name },
+      agents: [...inGroup].sort((a, b) => a.name.localeCompare(b.name)),
+    }));
     // Names that start with the query come first, the way a mention list sorts.
     if (q) all.sort((a, b) => Number(b.agents.some(x => x.name.toLowerCase().startsWith(q))) - Number(a.agents.some(x => x.name.toLowerCase().startsWith(q))));
     let budget = SHOWN;
@@ -103,7 +105,7 @@ export function AgentPicker({ value, onChange }: { value: string[]; onChange: (i
           const ids = inProject.map(a => a.id);
           const allIn = ids.every(id => selected.has(id));
           return (
-            <div key={project.id}>
+            <div key={project.id ?? 'all-projects'}>
               <div className="flex items-center gap-2 px-2 pb-1 pt-2">
                 <span className="min-w-0 truncate text-[10px] font-medium uppercase tracking-wide text-content/40">{project.name}</span>
                 <span className="text-[11px] text-content/30">{inProject.length}</span>

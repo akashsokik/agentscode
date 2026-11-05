@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Agent, AgentTask, Conversation, Delegation, PeerMessage, Report } from '../../shared/types.ts';
+import { noProjectFolder, type Agent, type AgentTask, type Conversation, type Delegation, type PeerMessage, type Report } from '../../shared/types.ts';
 import { HttpError } from '../errors.ts';
 import type { Store } from '../store.ts';
 
@@ -50,6 +50,8 @@ export class Mailbox {
   }
 
   private visible(source: Agent, other: Agent): boolean {
+    // An agent with no project works with everyone, whatever the awareness setting.
+    if (source.projectId === null || other.projectId === null) return true;
     const { awareness } = this.store.settings;
     if (awareness === 'off') return false;
     return awareness === 'all' || other.projectId === source.projectId;
@@ -70,11 +72,13 @@ export class Mailbox {
     const source = this.agent(id);
     const share = this.store.settings.shareActivity;
     return [...this.store.agents.values()].filter(a => a.id !== id && this.visible(source, a)).map(a => {
-      const project = this.store.projects.get(a.projectId);
+      const project = a.projectId === null ? undefined : this.store.projects.get(a.projectId);
       return {
         id: a.id, name: a.name, engine: a.engine, role: a.role, status: a.status,
         project: project ? { name: project.name, path: project.path } : null,
-        workspace: a.worktree?.cwd ?? project?.path ?? null,
+        // No project: works across all of them, from the workspace in its home.
+        allProjects: a.projectId === null || undefined,
+        workspace: a.worktree?.cwd ?? project?.path ?? (a.projectId === null ? noProjectFolder(a.home) : null),
         branch: a.worktree?.branch ?? null,
         canMessage: source.autonomy !== 'readonly' && !this.stoppedAgents.has(a.id) && !this.stoppedAgents.has(id),
         currentTask: share ? a.currentTask?.summary ?? null : undefined,
@@ -87,7 +91,8 @@ export class Mailbox {
 
   /** Team context prepended to a task when it actually starts, so queued work sees fresh data. */
   preparePrompt(id: string, text: string): string {
-    if (!this.store.settings.autoTeamContext || this.store.settings.awareness === 'off') return text;
+    // With awareness off the list is empty, except for agents with no project, whom everyone sees.
+    if (!this.store.settings.autoTeamContext) return text;
     const teammates = this.teammates(id);
     if (!teammates.length) return text;
     return [

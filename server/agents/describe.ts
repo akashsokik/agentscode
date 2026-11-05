@@ -92,6 +92,10 @@ export function toolSummary(name: string, input: Input, cwd?: string): string {
       return clip(`${str(input.channel)}: ${str(input.text).replace(/\s+/g, ' ')}`, 160);
     case `mcp__${COMMS_SERVER}__read_channel`:
       return str(input.channel);
+    case `mcp__${COMMS_SERVER}__remember`:
+      return clip(`Remembered: ${str(input.text)}`, 160);
+    case `mcp__${COMMS_SERVER}__forget`:
+      return clip(`Forgot: ${str(input.text) || str(input.id)}`, 160);
     default:
       return clip(JSON.stringify(input), 160);
   }
@@ -160,6 +164,29 @@ export function approvalTitle(name: string, input: Input, cwd?: string): string 
     default:
       return `Use ${name.replace(/^mcp__/, '').replace(/__/g, ' ')}?`;
   }
+}
+
+/**
+ * A better summary once a tool's result is in. forget is called with an id, so its row only names
+ * what was forgotten when the result says.
+ */
+export function resultSummary(name: string, output: string): string | undefined {
+  if (name !== `mcp__${COMMS_SERVER}__forget`) return undefined;
+  try {
+    const text = (JSON.parse(output) as { forgot?: { text?: unknown } })?.forgot?.text;
+    return typeof text === 'string' ? clip(`Forgot: ${text}`, 160) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The summary for a teammate-comms call made by Codex, whose items carry the server, tool and arguments. */
+export function mcpSummary(server: string, tool: string, args: Input, output: string): string {
+  const name = `mcp__${server}__${tool}`;
+  if (server !== COMMS_SERVER || (tool !== 'remember' && tool !== 'forget')) return `${server}.${tool}`;
+  const summary = resultSummary(name, output) ?? toolSummary(name, args);
+  // Without the text (an item shaped differently than expected), the tool name says more.
+  return /^(Remembered|Forgot):\s*$/.test(summary) ? `${server}.${tool}` : summary;
 }
 
 /** Flatten a tool_result content payload to plain text. */

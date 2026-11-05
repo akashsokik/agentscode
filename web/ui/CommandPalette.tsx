@@ -12,6 +12,7 @@ import { closeTab, focusedAgentId, focusedChannelId, open, openToSide, setProjec
 import { rankCommands } from '../paletteMatch.ts';
 import { IS_MAC } from '../platform.ts';
 import { MOD, SHORTCUTS } from '../shortcuts.ts';
+import { projectLabel } from '../projects.ts';
 import { attempt, useApp } from '../store.ts';
 import { hideTerminal, newTerminal, showTerminal, splitFront } from '../terminal/actions.ts';
 import { setTheme, useTheme, type ThemePreference } from '../theme.ts';
@@ -78,7 +79,7 @@ function useCommands(actions: PaletteActions): Command[] {
   return useMemo(() => {
     if (!snapshot) return [];
     const commands: Command[] = [];
-    const projectName = (id: string) => snapshot.projects.find(p => p.id === id)?.name ?? '';
+    const projectName = (id: string | null) => projectLabel(id, snapshot.projects);
     const pending = (id: string) => snapshot.approvals.some(a => a.agentId === id);
 
     // Agents waiting on you first, then the most recently active.

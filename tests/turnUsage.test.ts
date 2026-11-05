@@ -14,7 +14,7 @@ const usage = (inputTokens: number, outputTokens: number, cacheReadTokens = 0, c
   ({ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens });
 
 const baseAgent: Agent = {
-  id: 'a1', name: 'Ada', engine: 'claude', projectId: 'p1', worktree: null, model: '', effort: '',
+  id: 'a1', name: 'Ada', engine: 'claude', projectId: 'p1', worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: '', effort: '',
   autonomy: 'ask', useMcp: false, role: 'dev', instructions: '', status: 'idle', activity: '',
   currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
   costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null,

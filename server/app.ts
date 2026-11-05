@@ -107,6 +107,36 @@ export function createApp(manager: AgentManager, terminals = new Terminals(id =>
     await manager.newSession(param(req, 'id'));
     res.json({ ok: true });
   });
+  // What the agent remembered (home/memory.md). Agents add entries with the remember tool; the app edits and deletes them.
+  app.get('/api/agents/:id/memory', (req, res) => {
+    res.json(manager.memory(param(req, 'id')));
+  });
+  app.patch('/api/agents/:id/memory/:entryId', (req, res) => {
+    res.json(manager.updateMemory(param(req, 'id'), param(req, 'entryId'), req.body ?? {}));
+  });
+  app.delete('/api/agents/:id/memory/:entryId', (req, res) => {
+    manager.forgetMemory(param(req, 'id'), param(req, 'entryId'));
+    res.status(204).end();
+  });
+  // Dreaming: the agent's dreams and stats, Dream now, undo, and the soul proposal.
+  app.get('/api/agents/:id/dreams', (req, res) => {
+    res.json(manager.dreams(param(req, 'id')));
+  });
+  app.post('/api/agents/:id/dream', (req, res) => {
+    // 409 comes back at once; a dream that starts reports through `dream` events.
+    manager.dreamNow(param(req, 'id')).catch(err => console.error('[dream] Dream now failed:', (err as Error).message));
+    res.status(202).json({ ok: true });
+  });
+  app.post('/api/agents/:id/dreams/:dreamId/undo', (req, res) => {
+    res.json(manager.undoDream(param(req, 'id'), param(req, 'dreamId')));
+  });
+  app.post('/api/agents/:id/soul-proposal', (req, res) => {
+    manager.decideSoul(param(req, 'id'), req.body?.action);
+    res.json({ ok: true });
+  });
+  app.get('/api/dream-stats', (_req, res) => {
+    res.json(manager.dreamStats());
+  });
   // The composer's `/` picker: the skills and commands the agent's engine can run.
   app.get('/api/agents/:id/commands', async (req, res) => {
     res.json(await manager.commands(param(req, 'id')));

@@ -4,6 +4,7 @@ import { ROLES, rolePreset } from '../../shared/roles.ts';
 import { api } from '../api.ts';
 import { AUTONOMY, effortLabel } from '../format.ts';
 import { open } from '../layout.ts';
+import { SOUL_MAX } from '../memory.ts';
 import { attempt, useApp } from '../store.ts';
 import { EngineIcon, ENGINE_NAMES as ENGINE_LABEL } from '../ui/EngineIcon.tsx';
 import { INPUT, PRIMARY, TEXTAREA } from '../ui/common.tsx';
@@ -14,15 +15,18 @@ import { submitKey } from './submitKey.ts';
 
 const NAMES = ['Ada', 'Bo', 'Cy', 'Dee', 'Eli', 'Fen', 'Gus', 'Hal', 'Ivy', 'Jun', 'Kai', 'Lux', 'Mo', 'Nia', 'Oz', 'Pia', 'Quin', 'Rae', 'Sol', 'Tam', 'Uma', 'Vic', 'Wren', 'Xan'];
 const ADD_PROJECT = '__add';
+/** The project choice for an agent with no project: it works from its own folder, across every project. */
+const NO_PROJECT = '__none';
 
-export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId?: string; onClose: () => void; onAddProject: () => void }) {
+/** `projectId` null opens with No project chosen; undefined starts from the first project. */
+export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId?: string | null; onClose: () => void; onAddProject: () => void }) {
   const snapshot = useApp(s => s.snapshot);
   const projects = snapshot?.projects ?? [];
   const engines = snapshot?.engines;
   const taken = useMemo(() => new Set((snapshot?.agents ?? []).map(a => a.name.toLowerCase())), [snapshot?.agents]);
   const [name, setName] = useState(() => NAMES.find(n => !taken.has(n.toLowerCase())) ?? '');
   const [engine, setEngine] = useState<EngineKind>(() => (engines?.claude.available || !engines?.codex.available ? 'claude' : 'codex'));
-  const [project, setProject] = useState(projectId ?? projects[0]?.id ?? '');
+  const [project, setProject] = useState(projectId === null ? NO_PROJECT : projectId ?? projects[0]?.id ?? NO_PROJECT);
   const [role, setRole] = useState<AgentRole>('dev');
   const [instructions, setInstructions] = useState(rolePreset('dev').instructions);
   const [autonomy, setAutonomy] = useState<Autonomy>(rolePreset('dev').autonomy);
@@ -36,6 +40,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
 
   const models = snapshot?.models[engine];
   const selectedProject = projects.find(p => p.id === project);
+  const noProject = project === NO_PROJECT;
   const efforts = (model ? models?.models.find(m => m.value === model)?.efforts : undefined) ?? models?.efforts ?? [];
   const engineReady = Boolean(engines?.[engine].available);
 
@@ -52,8 +57,8 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   const create = async () => {
     setBusy(true);
     const agent = await attempt(() => api.createAgent({
-      name: name.trim(), engine, projectId: project, role, instructions, autonomy, model, effort,
-      worktree, branch: branch.trim() || undefined, useMcp: engine === 'claude' && useMcp, task: task.trim() || undefined,
+      name: name.trim(), engine, projectId: noProject ? null : project, role, instructions, autonomy, model, effort,
+      worktree: !noProject && worktree, branch: (!noProject && worktree && branch.trim()) || undefined, useMcp: engine === 'claude' && useMcp, task: task.trim() || undefined,
     }));
     setBusy(false);
     if (agent) {
@@ -63,25 +68,6 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   };
 
   const onSubmitKey = submitKey(!busy && Boolean(name.trim()) && Boolean(project) && engineReady, () => void create());
-
-  if (!projects.length) {
-    return (
-      <Modal
-        title="New agent"
-        description="Agents work inside a project folder."
-        size="sm"
-        onClose={onClose}
-        footer={
-          <>
-            <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
-            <button type="button" className={PRIMARY} onClick={() => { onClose(); onAddProject(); }}>Add a project</button>
-          </>
-        }
-      >
-        <p className="px-4 pb-4 pt-3 font-sans text-[12px] leading-relaxed text-content/55">Add a folder first, then create agents inside it.</p>
-      </Modal>
-    );
-  }
 
   return (
     <Modal
@@ -105,11 +91,15 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
           <Row label="Name" description="Teammates address each other by name.">
             <input autoFocus value={name} maxLength={24} onChange={e => setName(e.target.value)} onKeyDown={onSubmitKey} className={`${INPUT} w-44`} />
           </Row>
-          <Row label="Project">
+          <Row label="Project" description={noProject ? 'Works from its own folder and can reach every project you have added.' : undefined}>
             <Select
               label="Project"
               value={project}
-              options={[...projects.map(p => ({ value: p.id, label: p.name })), { value: ADD_PROJECT, label: 'Add project…' }]}
+              options={[
+                ...projects.map(p => ({ value: p.id, label: p.name })),
+                { value: NO_PROJECT, label: 'No project (works across all projects)' },
+                { value: ADD_PROJECT, label: 'Add project…' },
+              ]}
               onChange={value => (value === ADD_PROJECT ? (onClose(), onAddProject()) : setProject(value))}
             />
           </Row>
@@ -148,11 +138,11 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
           </Row>
         </Group>
 
-        <Group title="Workspace">
-          <Row label="Own git worktree" description={selectedProject?.isGit ? 'A new branch in its own folder, so it never collides with you or other agents.' : 'Available for projects inside a git repository.'}>
+        {noProject && engine !== 'claude' ? null : <Group title="Workspace">
+          {noProject ? null : <Row label="Own git worktree" description={selectedProject?.isGit ? 'A new branch in its own folder, so it never collides with you or other agents.' : 'Available for projects inside a git repository.'}>
             <Toggle label="Own git worktree" on={worktree} disabled={!selectedProject?.isGit} onChange={setWorktree} />
-          </Row>
-          {worktree ? (
+          </Row>}
+          {worktree && !noProject ? (
             <Row label="Branch" description="Leave empty for a generated name.">
               <input value={branch} onChange={e => setBranch(e.target.value)} onKeyDown={onSubmitKey} placeholder={`agent/${name.trim().toLowerCase() || 'name'}-xxxx`} className={`${INPUT} w-52`} />
             </Row>
@@ -162,10 +152,10 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
               <Toggle label="Load my MCP servers" on={useMcp} onChange={setUseMcp} />
             </Row>
           ) : null}
-        </Group>
+        </Group>}
 
-        <Group title="Standing instructions">
-          <div className="p-3"><textarea value={instructions} onChange={e => setInstructions(e.target.value)} onKeyDown={onSubmitKey} rows={3} className={TEXTAREA} placeholder="Anything this agent should always keep in mind" /></div>
+        <Group title="Soul" description="Who this agent is and how it works. Saved as soul.md in its own folder; only you edit it.">
+          <div className="p-3"><textarea value={instructions} maxLength={SOUL_MAX} onChange={e => setInstructions(e.target.value)} onKeyDown={onSubmitKey} rows={4} className={TEXTAREA} placeholder="Anything this agent should always keep in mind" /></div>
         </Group>
 
         <Group title="First task" description="Optional. The agent starts on it right away.">

@@ -5,12 +5,13 @@ import { rolePreset } from '../../shared/roles.ts';
 import { cost, modelLabel, relativeTime } from '../format.ts';
 import { refreshGit, useGitStatus } from '../git.ts';
 import { focusedAgentId, focusedChannelId, open, openToSide, setRightPanel, setRightView, useLayout, type Layout } from '../layout.ts';
+import { ALL_PROJECTS, projectLabel } from '../projects.ts';
 import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
 import { Empty, HeaderButton, IconTab, Loading, TextButton } from '../ui/common.tsx';
-import { Bot, CheckCircle, DashboardSquare, FileDiff, GitBranch, MessageMultiple, PanelRight, RefreshCw, type IconComponent } from '../mono/icons.tsx';
+import { Bot, CheckCircle, DashboardSquare, FileDiff, Folder, GitBranch, MessageMultiple, PanelRight, RefreshCw, type IconComponent } from '../mono/icons.tsx';
 import { Segmented } from '../mono/settings.tsx';
 import { MessageStatus } from '../panes/CommsPane.tsx';
 import { useNow } from '../ui/useNow.ts';
@@ -43,9 +44,21 @@ function ChangeRow({ file, root }: { file: ChangedFile; root: Root }) {
   );
 }
 
+/** The git root for an agent's changes; an agent with no project has no one folder to diff. */
+function changesRoot(agent: Agent | undefined): Root | null {
+  return agent && agent.projectId !== null ? { agent: agent.id } : null;
+}
+
 export function ChangesView({ agent }: { agent: Agent | undefined }) {
-  const root = useMemo<Root | null>(() => (agent ? { agent: agent.id } : null), [agent?.id]);
+  const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectId]);
   const { status, error } = useGitStatus(root, agent ? `${agent.status}:${agent.turns}` : undefined);
+  if (agent?.projectId === null) {
+    return (
+      <Empty icon={Folder} title={ALL_PROJECTS}>
+        {agent.name} has no project of its own, so there is no single working tree to show changes for. Open a project agent, or a project's Changes, to see what changed there.
+      </Empty>
+    );
+  }
   if (!agent || !root) return <Empty icon={Bot} title="No agent selected">Open an agent to see the changes in its workspace.</Empty>;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -215,16 +228,16 @@ function TeamOverview() {
 /** The focused agent at a glance, after MonoCode's Mono overview: who it is, its totals, what it is on. */
 function AgentOverview({ agent }: { agent: Agent | undefined }) {
   const models = useApp(s => (agent ? s.snapshot?.models[agent.engine] : undefined));
-  const project = useApp(s => s.snapshot?.projects.find(p => p.id === agent?.projectId));
+  const projects = useApp(s => s.snapshot?.projects);
   const pending = useApp(s => Boolean(agent && s.snapshot?.approvals.some(a => a.agentId === agent.id)));
   const messages = useApp(s => (agent ? s.snapshot?.messages.filter(m => m.fromAgentId === agent.id || m.toAgentId === agent.id).length ?? 0 : 0));
-  const root = useMemo<Root | null>(() => (agent ? { agent: agent.id } : null), [agent?.id]);
+  const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectId]);
   const { status: git } = useGitStatus(root, agent ? `${agent.status}:${agent.turns}` : undefined);
   if (!agent) return <TeamOverview />;
   const setup: [string, string][] = [
     ['Model', modelLabel(agent, models)],
     ['Role', rolePreset(agent.role).name],
-    ['Project', project?.name ?? 'Removed'],
+    ['Project', projectLabel(agent.projectId, projects, 'Removed')],
     ...(agent.worktree ? [['Branch', agent.worktree.branch] as [string, string]] : []),
   ];
   return (
@@ -240,7 +253,9 @@ function AgentOverview({ agent }: { agent: Agent | undefined }) {
         <div className="grid grid-cols-2 gap-2">
           <StatCard value={agent.turns} label={agent.turns === 1 ? 'Turn' : 'Turns'} />
           <StatCard
-            value={git?.isRepo ? <><span className="text-diff-add-fg">+{git.added}</span> <span className="text-diff-del-fg">-{git.removed}</span></> : <span className="text-content/35" title="Not a git repository">No git</span>}
+            value={git?.isRepo ? <><span className="text-diff-add-fg">+{git.added}</span> <span className="text-diff-del-fg">-{git.removed}</span></>
+              : agent.projectId === null ? <span className="text-content/35" title="It works across all projects, so there is no one working tree to count">No project</span>
+              : <span className="text-content/35" title="Not a git repository">No git</span>}
             label="Lines changed"
           />
           <StatCard value={cost(agent.costUsd) || '$0'} label="Cost" />
@@ -280,7 +295,7 @@ export function RightPanel() {
   const agentId = focusedAgentId(layout);
   const agent = useApp(s => s.snapshot?.agents.find(a => a.id === agentId));
   const inFlight = useApp(s => s.snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0);
-  const root = useMemo<Root | null>(() => (agent ? { agent: agent.id } : null), [agent?.id]);
+  const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectId]);
   const { status: git } = useGitStatus(root, agent ? `${agent.status}:${agent.turns}` : undefined);
   const view = PANEL_TABS.some(t => t.view === layout.rightView) ? layout.rightView : 'overview';
   const column = useColumnWidth('panel', 320, 260, 0.4);

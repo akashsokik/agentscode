@@ -10,7 +10,7 @@ import { settle, tempDir } from './helpers.ts';
 
 function agent(id: string, overrides: Partial<Agent> = {}): Agent {
   return {
-    id, name: id.toUpperCase(), engine: 'claude', projectId: 'p1', worktree: null, model: '', effort: '',
+    id, name: id.toUpperCase(), engine: 'claude', projectId: 'p1', worktree: null, home: `/tmp/agentscode-test/agents/${id}`, dreaming: true, model: '', effort: '',
     autonomy: 'edits', useMcp: false, role: 'dev', instructions: '', status: 'idle', activity: '',
     currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
     costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null, ...overrides,

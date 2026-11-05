@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import type { Agent, Channel, Project, TreeEntry } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { api, type Root } from '../api.ts';
@@ -7,6 +7,7 @@ import { closeTab, focusedAgentId, focusedChannelId, open, openToSide, setProjec
 import { ChangesView } from '../right/RightPanel.tsx';
 import { attempt, useApp } from '../store.ts';
 import { BrandMark } from '../ui/BrandMark.tsx';
+import { DreamNowMenuRow } from '../ui/DreamNowMenuRow.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ResizeHandle, useColumnWidth, useWindowWidth } from '../ui/ResizeHandle.tsx';
 import { SHORTCUTS } from '../shortcuts.ts';
@@ -18,9 +19,11 @@ import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
+import { railAgents, railAgentStatus, type RailAgentStatus } from './agentRail.ts';
 
 export interface SidebarActions {
-  newAgent: (projectId?: string) => void;
+  /** null preselects No project; undefined starts from the current project. */
+  newAgent: (projectId?: string | null) => void;
   addProject: () => void;
   settings: () => void;
   agentSettings: (agentId: string) => void;
@@ -71,6 +74,7 @@ function AgentMenu({ agent, anchor, actions, onClose }: { agent: Agent; anchor: 
       <MenuDivider />
       {busy ? <MenuRow icon={Square} title="Stop" hint="Interrupt the current turn." onSelect={run(() => void attempt(() => api.stop(agent.id)))} /> : null}
       <MenuRow icon={RotateCcw} title="New session" hint="Clear the conversation context." disabled={busy} onSelect={run(() => void attempt(() => api.newSession(agent.id)))} />
+      <DreamNowMenuRow agent={agent} run={run} />
       <MenuRow icon={Settings} title="Agent settings" onSelect={run(() => actions.agentSettings(agent.id))} />
       <MenuDivider />
       <MenuRow icon={Trash2} danger title="Remove agent…" hint="Stops it and deletes its transcript." onSelect={run(() => actions.removeAgent(agent.id))} />
@@ -372,6 +376,55 @@ function NeedsYouDot() {
   return <span role="img" aria-label="Needs you" title="Needs you" className="size-1.5 shrink-0 rounded-full bg-warning" />;
 }
 
+/** NeedsYouDot's danger twin, for an agent whose last turn failed. */
+function FailedDot() {
+  return <span role="img" aria-label="Failed" title="Failed" className="size-1.5 shrink-0 rounded-full bg-danger" />;
+}
+
+/** Whether an approval or question from this agent waits on you. */
+function usePendingApproval(agentId: string): boolean {
+  return useApp(s => Boolean(s.snapshot?.approvals.some(a => a.agentId === agentId)));
+}
+
+/** Opens an agent with no project from the navigation column; the workspace column keeps its project. */
+function openRailAgent(agent: Agent, e: MouseEvent<HTMLElement>): void {
+  (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'agent', agentId: agent.id });
+}
+
+/** An agent's status at the end of a rail row or in a rail icon's corner; `compact` swaps the spinner for a dot. */
+function AgentRailMark({ status, compact = false }: { status: RailAgentStatus; compact?: boolean }) {
+  switch (status) {
+    case 'needs-you': return <NeedsYouDot />;
+    case 'working': return compact ? <WorkingDot /> : <TerminalSpinner className="text-content/55" />;
+    case 'failed': return <FailedDot />;
+    case 'unread': return <UnreadDot />;
+    default: return null;
+  }
+}
+
+/** An agent with no project in the navigation column: its engine and name; it works across all projects. */
+function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: boolean; actions: SidebarActions }) {
+  const status = railAgentStatus(agent, usePendingApproval(agent.id));
+  const [menu, setMenu] = useState<MenuAnchor | null>(null);
+  return (
+    <div className="group relative" onContextMenu={e => openContextMenu(e, setMenu)}>
+      <button
+        type="button"
+        onClick={e => openRailAgent(agent, e)}
+        title={`${agent.name}, works across all projects. Click to open, Cmd+click to open beside, right-click for more.`}
+        aria-current={selected ? 'page' : undefined}
+        className={cx(railRow(status !== null || Boolean(menu)), railRowState(selected || Boolean(menu)))}
+      >
+        <EngineIcon engine={agent.engine} className="size-4 shrink-0" />
+        <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', agent.unread ? 'font-semibold text-content' : 'font-medium')}>{agent.name}</span>
+      </button>
+      <RowStatus hidden={Boolean(menu)}><AgentRailMark status={status} /></RowStatus>
+      <RowMore label={`${agent.name} actions`} open={Boolean(menu)} onClick={e => toggleMenu(e, setMenu)} />
+      {menu ? <AgentMenu agent={agent} anchor={menu} actions={actions} onClose={() => setMenu(null)} /> : null}
+    </div>
+  );
+}
+
 /** A channel in the navigation column: a spinner while members work on it, a dot for unread replies. */
 function ChannelRailRow({ channel, selected, actions }: { channel: Channel; selected: boolean; actions: SidebarActions }) {
   const { working, waiting } = useChannelActivity(channel.id);
@@ -426,7 +479,7 @@ function ProjectRailRow({ project, agents, selected, actions }: { project: Proje
   );
 }
 
-/** The navigation column: New agent and Comms, channels, projects, and Settings at the foot. */
+/** The navigation column: New agent and Comms, channels, agents with no project, projects, and Settings at the foot. */
 function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: string | undefined }) {
   const layout = useLayout();
   const channels = useApp(s => s.snapshot?.channels);
@@ -437,6 +490,8 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
   const commsOpen = layout.tabs.find(t => t.id === focusedPane?.tabId)?.content.kind === 'comms';
   const channelId = focusedChannelId(layout);
   const sorted = useMemo(() => [...(channels ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [channels]);
+  const listed = useMemo(() => railAgents(agents ?? []), [agents]);
+  const agentId = focusedAgentId(layout);
   const column = useColumnWidth('nav', 200, 168, 0.3);
   return (
     <nav aria-label="AgentsCode" style={{ width: column.width }} className="sidebar-glass relative flex shrink-0 flex-col border-r border-stroke font-sans">
@@ -459,6 +514,11 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
         <RailSection title="Channels" addLabel="New channel" onAdd={actions.newChannel}>
           {sorted.map(channel => <ChannelRailRow key={channel.id} channel={channel} selected={channel.id === channelId} actions={actions} />)}
           {channels && !channels.length ? <RailEmptyRow label="New channel" onClick={actions.newChannel} /> : null}
+        </RailSection>
+        {/* Agents with no project, which work across all of them; a project's agents are in its workspace column. */}
+        <RailSection title="Agents" addLabel="New agent with no project" onAdd={() => actions.newAgent(null)}>
+          {listed.map(agent => <AgentRailRow key={agent.id} agent={agent} selected={agent.id === agentId} actions={actions} />)}
+          {agents && !listed.length ? <RailEmptyRow label="New agent" onClick={() => actions.newAgent(null)} /> : null}
         </RailSection>
         <RailSection title="Projects" addLabel="Add project" onAdd={actions.addProject}>
           {(projects ?? []).map(project => (
@@ -655,6 +715,25 @@ function ChannelRailIcon({ channel, selected, actions }: { channel: Channel; sel
   );
 }
 
+function AgentRailIcon({ agent, selected, actions }: { agent: Agent; selected: boolean; actions: SidebarActions }) {
+  const status = railAgentStatus(agent, usePendingApproval(agent.id));
+  const [menu, setMenu] = useState<MenuAnchor | null>(null);
+  return (
+    <>
+      <RailIconButton
+        label={`${agent.name}, works across all projects`}
+        active={selected || Boolean(menu)}
+        dot={<AgentRailMark status={status} compact />}
+        onClick={e => openRailAgent(agent, e)}
+        onContextMenu={e => openContextMenu(e, setMenu)}
+      >
+        <EngineIcon engine={agent.engine} className="size-4" />
+      </RailIconButton>
+      {menu ? <AgentMenu agent={agent} anchor={menu} actions={actions} onClose={() => setMenu(null)} /> : null}
+    </>
+  );
+}
+
 function ProjectRailIcon({ project, agents, selected, actions }: { project: Project; agents: Agent[]; selected: boolean; actions: SidebarActions }) {
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
   const waiting = agents.some(a => a.status === 'waiting');
@@ -691,6 +770,16 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
   const commsOpen = layout.tabs.find(t => t.id === focusedPane?.tabId)?.content.kind === 'comms';
   const channelId = focusedChannelId(layout);
   const sorted = useMemo(() => [...(channels ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [channels]);
+  const listed = useMemo(() => railAgents(agents ?? []), [agents]);
+  const agentId = focusedAgentId(layout);
+  // Channels, agents, then projects, with a divider between groups that have something in them.
+  const groups = [
+    sorted.map(channel => <ChannelRailIcon key={channel.id} channel={channel} selected={channel.id === channelId} actions={actions} />),
+    listed.map(agent => <AgentRailIcon key={agent.id} agent={agent} selected={agent.id === agentId} actions={actions} />),
+    (projects ?? []).map(project => (
+      <ProjectRailIcon key={project.id} project={project} agents={(agents ?? []).filter(a => a.projectId === project.id)} selected={project.id === projectId} actions={actions} />
+    )),
+  ].filter(group => group.length);
   return (
     <nav aria-label="AgentsCode" className="sidebar-glass relative flex w-12 shrink-0 flex-col items-center font-sans">
       {titleBarAbove ? null : <div data-window-drag className="h-10 w-full shrink-0 border-b border-stroke" />}
@@ -705,10 +794,11 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
         </RailIconButton>
       </div>
       <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto overscroll-none border-t border-stroke py-2">
-        {sorted.map(channel => <ChannelRailIcon key={channel.id} channel={channel} selected={channel.id === channelId} actions={actions} />)}
-        {sorted.length && projects?.length ? <span aria-hidden className="my-1 h-px w-5 shrink-0 bg-stroke" /> : null}
-        {(projects ?? []).map(project => (
-          <ProjectRailIcon key={project.id} project={project} agents={(agents ?? []).filter(a => a.projectId === project.id)} selected={project.id === projectId} actions={actions} />
+        {groups.map((group, index) => (
+          <Fragment key={index}>
+            {index ? <span aria-hidden className="my-1 h-px w-5 shrink-0 bg-stroke" /> : null}
+            {group}
+          </Fragment>
         ))}
       </div>
       <div className="flex shrink-0 flex-col items-center gap-0.5 pb-2 pt-1">

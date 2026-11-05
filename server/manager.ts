@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,11 +14,16 @@ import {
   type ChannelPost,
   type Conversation,
   type CreateAgentRequest,
+  type AgentDreams,
+  type DreamRecord,
+  type DreamStatsReport,
   type EngineInfo,
   type EngineKind,
   type EngineModels,
   type Entry,
   type ImageAttachment,
+  type MemoryEntry,
+  type MemoryPatch,
   type PeerMessage,
   type Project,
   type Settings,
@@ -35,13 +40,18 @@ import { dropContextWindow, mergeContextUsage, sameContextUsage } from '../share
 import { ClaudeRunner } from './agents/claude.ts';
 import { CodexRunner } from './agents/codex.ts';
 import { clip } from './agents/describe.ts';
-import type { EntryDraft, Runner, RunnerContext, RunnerHooks, RunnerImage, TurnResult } from './agents/runner.ts';
+import {
+  agentContext, CONTEXT_SECTIONS, contextSections, fullContext, memorySection, refreshedContext, systemInstructions,
+  type ContextSection, type EntryDraft, type PromptContext, type Runner, type RunnerContext, type RunnerHooks, type RunnerImage, type TurnResult,
+} from './agents/runner.ts';
+import { AgentHomes, capMemory, MEMORY_TEXT_LIMIT, MEMORY_WHY_LIMIT, SOUL_LIMIT, workspacePath } from './agentHome.ts';
 import { Attachments } from './attachments.ts';
 import { ScopedRunner, type ExecutionContext } from './agents/scoped.ts';
 import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
-import { COMMS_TOOLS, delegationInput, postInput, readChannelInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool } from './comms/tools.ts';
+import { COMMS_TOOLS, delegationInput, forgetInput, postInput, readChannelInput, rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool } from './comms/tools.ts';
 import { IDLE_PROCESS_MS } from './config.ts';
+import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { HttpError } from './errors.ts';
 import type { Broadcaster } from './hub.ts';
 import { discoverClaudeModels, discoverCodexModels, emptyModels } from './models.ts';
@@ -64,6 +74,15 @@ function canonicalDirectory(dir: string): string {
   throw new HttpError(409, `The workspace folder is missing: ${dir}.`);
 }
 
+/** Identifies one version of a section of an agent's instructions. */
+function sectionKey(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
+
+function sectionKeys(sections: Record<ContextSection, string>): Record<ContextSection, string> {
+  return Object.fromEntries(CONTEXT_SECTIONS.map(name => [name, sectionKey(sections[name])])) as Record<ContextSection, string>;
+}
+
 /** The last paragraph of a reply is the summary the agent was asked to end with. */
 function summarize(text: string): string {
   const paragraphs = text
@@ -84,6 +103,10 @@ interface PendingApproval {
 export interface ManagerOptions {
   createRunner?: (ctx: RunnerContext) => Runner;
   worktreesRoot?: string;
+  /** The model call a dream makes; tests pass a fake. Defaults to each agent's own CLI. */
+  dreamEngine?: DreamEngine;
+  /** How long an idle agent's process stays open (and when the idle dream may run). */
+  idleProcessMs?: number;
 }
 
 /** Owns agents, projects and the runners behind them; every change is persisted and broadcast. */
@@ -102,6 +125,13 @@ export class AgentManager {
   private attachments: Attachments;
   /** Images the user attaches to channel posts, one folder per channel. */
   private channelAttachments: Attachments;
+  /** Each agent's private folder: soul.md, memory.md, and the workspace of an agent with no project. */
+  private homes: AgentHomes;
+  /** The memory each agent's app view was last sent, to notice memory.md changing on disk. */
+  private memoryVersions = new Map<string, string>();
+  /** Dreaming: the gate, triggers, records, undo, soul proposals and the numbers. */
+  private dreamer: Dreamer;
+  private idleProcessMs: number;
   private createRunner: (ctx: RunnerContext) => Runner;
   private models: Record<EngineKind, EngineModels> = { claude: emptyModels('claude'), codex: emptyModels('codex') };
   /** Claude reports cost cumulatively per process; remember the last figure to get each turn's share. */
@@ -115,7 +145,26 @@ export class AgentManager {
     this.worktreesRoot = options.worktreesRoot ?? path.join(store.dataDir, 'worktrees');
     this.attachments = new Attachments(path.join(store.dataDir, 'attachments'));
     this.channelAttachments = new Attachments(path.join(store.dataDir, 'channel-attachments'));
+    this.homes = new AgentHomes(path.join(store.dataDir, 'agents'));
     this.createRunner = options.createRunner ?? (ctx => ctx.agent().engine === 'claude' ? new ClaudeRunner(ctx) : new CodexRunner(ctx));
+    this.idleProcessMs = options.idleProcessMs ?? IDLE_PROCESS_MS;
+    this.dreamer = new Dreamer({
+      homes: this.homes,
+      agent: id => this.store.agents.get(id),
+      entries: id => this.store.readEntries(id, 5000),
+      busy: id => {
+        const agent = this.store.agents.get(id);
+        return Boolean(this.runners.get(id)?.busy) || agent?.status === 'working' || agent?.status === 'waiting';
+      },
+      engine: options.dreamEngine ?? defaultDreamEngine({ claude: engines.claude.path, codex: engines.codex.path }),
+      broadcast: event => this.hub.broadcast(event),
+      note: (agentId, text) => this.addEntry(agentId, { id: randomUUID(), kind: 'system', text }),
+      memoryChanged: (agent, entries) => this.publishMemory(agent.id, entries),
+      soulChanged: (agent, soul) => {
+        agent.instructions = soul;
+        this.emitAgent(agent);
+      },
+    });
     this.mailbox = new Mailbox(store, {
       ready: id => this.store.agents.has(id) && !this.runners.get(id)?.busy,
       send: (id, text, task) => {
@@ -140,6 +189,20 @@ export class AgentManager {
     this.mailbox.recover();
     this.channels.recover();
     for (const agent of this.store.agents.values()) {
+      // Agents from before homes existed get one, with soul.md seeded from their instructions.
+      if (agent.projectId === undefined) agent.projectId = null;
+      // Kept in the home now (.prompt.json), not on the agent the app sees.
+      delete (agent as Agent & { promptKey?: string }).promptKey;
+      // Dreaming is on unless you turned it off.
+      if (typeof agent.dreaming !== 'boolean') agent.dreaming = true;
+      agent.home = this.homes.path(agent.id);
+      try {
+        this.homes.ensure(agent);
+        agent.instructions = this.homes.readSoul(agent);
+        if (agent.projectId === null) this.moveToWorkspace(agent);
+      } catch (err) {
+        console.error(`[agents] could not prepare ${agent.home}:`, (err as Error).message);
+      }
       if (agent.status === 'working' || agent.status === 'waiting') {
         this.addEntry(agent.id, { id: randomUUID(), kind: 'system', text: 'AgentsCode restarted while this turn was running. Send a message to pick it back up.' });
         agent.status = 'idle';
@@ -196,6 +259,7 @@ export class AgentManager {
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     this.mailbox.shutdown();
+    this.dreamer.abort();
     this.tokens.clear();
     for (const timer of this.idleTimers.values()) clearTimeout(timer);
     this.idleTimers.clear();
@@ -236,9 +300,16 @@ export class AgentManager {
     const engine = req.engine;
     if (engine !== 'claude' && engine !== 'codex') throw new HttpError(400, 'Pick Claude Code or Codex.');
     if (!this.engines[engine].available) throw new HttpError(400, `${engine === 'claude' ? 'Claude Code' : 'Codex'} is not installed on this machine.`);
-    const project = this.store.projects.get(req.projectId);
-    if (!project) throw new HttpError(400, 'Pick a project for this agent.');
-    if (!isDirectory(project.path)) throw new HttpError(400, `The project folder ${project.path} does not exist.`);
+    // null is an agent with no project: it works across every project, from its own home.
+    let project: Project | null = null;
+    if (req.projectId === null) {
+      if (req.worktree) throw new HttpError(400, 'An agent with no project cannot have its own worktree. Pick a project, or turn the worktree off.');
+    } else {
+      const found = this.store.projects.get(String(req.projectId ?? ''));
+      if (!found) throw new HttpError(400, 'Pick a project for this agent.');
+      if (!isDirectory(found.path)) throw new HttpError(400, `The project folder ${found.path} does not exist.`);
+      project = found;
+    }
     const name = this.agentName(req.name);
     const role = req.role ?? 'dev';
     if (!ROLES.some(r => r.id === role)) throw new HttpError(400, 'Unknown agent role.');
@@ -249,7 +320,7 @@ export class AgentManager {
 
     // Last fallible step before the agent exists, so a failure leaves nothing behind.
     let worktree: Worktree | null = null;
-    if (req.worktree) worktree = await createWorktree(project.path, name, req.branch, this.worktreesRoot);
+    if (project && req.worktree) worktree = await createWorktree(project.path, name, req.branch, this.worktreesRoot);
     try {
       this.agentName(name);
     } catch (error) {
@@ -258,18 +329,21 @@ export class AgentManager {
     }
 
     const now = Date.now();
+    const id = randomUUID();
     const agent: Agent = {
-      id: randomUUID(),
+      id,
       name,
       engine,
-      projectId: project.id,
+      projectId: project?.id ?? null,
       worktree,
+      home: this.homes.path(id),
+      dreaming: true,
       model: clip(String(req.model ?? '').trim(), 80),
       effort: validEffort(req.effort),
       autonomy,
       useMcp: engine === 'claude' && Boolean(req.useMcp),
       role,
-      instructions: String(req.instructions ?? preset.instructions).trim().slice(0, 4000),
+      instructions: String(req.instructions ?? preset.instructions).trim().slice(0, SOUL_LIMIT),
       status: 'idle',
       activity: '',
       currentTask: null,
@@ -285,14 +359,23 @@ export class AgentManager {
       lastSummary: '',
       error: null,
     };
+    try {
+      this.homes.ensure(agent);
+      if (!project) this.homes.workspace(agent);
+    } catch (error) {
+      if (worktree) await removeWorktree(worktree, true).catch(() => {});
+      throw error;
+    }
     this.store.agents.set(agent.id, agent);
     this.addEntry(agent.id, {
       id: randomUUID(),
       kind: 'system',
       sessionStart: true,
-      text: worktree
-        ? `${agent.name} works on ${project.name} in its own worktree on branch ${worktree.branch} (from ${worktree.base}) at ${worktree.cwd}.`
-        : `${agent.name} works on ${project.name} at ${project.path}.`,
+      text: !project
+        ? `${agent.name} works across all projects from ${workspacePath(agent.home)}.`
+        : worktree
+          ? `${agent.name} works on ${project.name} in its own worktree on branch ${worktree.branch} (from ${worktree.base}) at ${worktree.cwd}.`
+          : `${agent.name} works on ${project.name} at ${project.path}.`,
     });
     this.emitAgent(agent);
     if (task) {
@@ -310,12 +393,24 @@ export class AgentManager {
     const name = patch.name === undefined ? undefined : this.agentName(patch.name, id);
     if (patch.autonomy !== undefined && !AUTONOMIES.includes(patch.autonomy)) throw new HttpError(400, 'Unknown autonomy level.');
     if (patch.role !== undefined && !ROLES.some(r => r.id === patch.role)) throw new HttpError(400, 'Unknown agent role.');
+    if (patch.dreaming !== undefined && typeof patch.dreaming !== 'boolean') throw new HttpError(400, 'Dreaming is on or off: true or false.');
     const model = patch.model === undefined ? undefined : clip(String(patch.model).trim(), 80);
     const effort = patch.effort === undefined ? undefined : validEffort(patch.effort);
     const runner = this.runners.get(id);
     if (name !== undefined) agent.name = name;
-    if (patch.instructions !== undefined) agent.instructions = String(patch.instructions).trim().slice(0, 4000);
+    // soul.md is the source of truth; the agent sees the change at its next turn.
+    if (patch.instructions !== undefined) {
+      agent.instructions = this.homes.writeSoul(agent, String(patch.instructions));
+      // A soul proposal waiting for the user is now against an older soul.md.
+      this.dreamer.soulEdited(agent);
+    }
     if (patch.role !== undefined) agent.role = patch.role;
+    if (patch.dreaming !== undefined && patch.dreaming !== agent.dreaming) {
+      agent.dreaming = patch.dreaming;
+      this.dreamer.toggled(agent, patch.dreaming);
+      // Off means no dream runs: stop one that is thinking now; it writes nothing.
+      if (!patch.dreaming) this.dreamer.abort(id);
+    }
     if (patch.autonomy !== undefined && patch.autonomy !== agent.autonomy) {
       // Keep the picker in sync with the provider, and let failed changes be retried.
       await runner?.setAutonomy(patch.autonomy);
@@ -340,6 +435,7 @@ export class AgentManager {
     this.mailbox.stop(id);
     this.tokens.delete(id);
     this.cancelApprovals(id, 'The agent was removed.');
+    this.dreamer.abort(id);
     await this.runners.get(id)?.dispose();
     this.runners.delete(id);
     this.clearIdleTimer(id);
@@ -350,6 +446,8 @@ export class AgentManager {
     this.store.agents.delete(id);
     this.store.deleteTranscript(id);
     this.attachments.remove(id);
+    this.homes.remove(id);
+    this.memoryVersions.delete(id);
     this.store.save();
     this.hub.broadcast({ type: 'agentRemoved', id });
   }
@@ -437,6 +535,8 @@ export class AgentManager {
     agent.error = null;
     this.addEntry(id, { id: randomUUID(), kind: 'system', text: 'Started a fresh session. Earlier context is cleared.', sessionStart: true });
     this.emitAgent(agent);
+    // The session that just ended is worth a dream, if the gate allows one.
+    this.dream(id, 'session-end');
   }
 
   entries(id: string): Entry[] {
@@ -486,10 +586,33 @@ export class AgentManager {
     return injectSkillPrompt(text, skills);
   }
 
-  /** The folder an agent works in: its worktree, or its project. */
+  /**
+   * An agent with no project used to work from its home itself, where its edit tools could rewrite
+   * soul.md and memory.md. It works from home/workspace now. Claude Code keeps a session per working
+   * folder, so a Claude session that started anywhere else (sessionCwd; a session from before it was
+   * recorded started in the home) cannot resume: it is ended here, with a note. Whether a workspace
+   * folder already existed does not matter. Codex threads resume from any folder. Files the agent saved
+   * before stay in its home, where it can still edit them (only AgentsCode's own files are guarded).
+   */
+  private moveToWorkspace(agent: Agent): void {
+    const workspace = fs.realpathSync(this.homes.workspace(agent));
+    if (agent.engine !== 'claude' || !agent.sessionId || agent.sessionCwd === workspace) return;
+    agent.sessionId = null;
+    delete agent.sessionCwd;
+    delete agent.context;
+    delete agent.threadUsage;
+    this.addEntry(agent.id, {
+      id: randomUUID(),
+      kind: 'system',
+      sessionStart: true,
+      text: `${agent.name} now works from ${workspacePath(agent.home)}, so soul.md and memory.md are outside its working folder. The next message starts a fresh session; files saved before are still in ${agent.home}, and it can still edit them there.`,
+    });
+  }
+
+  /** The folder an agent works in: its worktree, its project, or (with no project) the workspace in its home. */
   workspaceOf(id: string): { root: string; baseCommit?: string } {
     const agent = this.agent(id);
-    const root = agent.worktree?.cwd ?? this.project(agent.projectId).path;
+    const root = agent.worktree?.cwd ?? (agent.projectId === null ? this.homes.workspace(agent) : this.project(agent.projectId).path);
     if (!isDirectory(root)) throw new HttpError(409, `The workspace folder is missing: ${root}.`);
     return { root, baseCommit: agent.worktree?.baseCommit };
   }
@@ -559,6 +682,27 @@ export class AgentManager {
       agent.lastActiveAt = Date.now();
       this.emitAgent(agent);
       return agent.currentTask;
+    }
+    // Memory is the agent's own, so plan-only agents may learn too.
+    if (tool === 'remember') {
+      const parsed = rememberInput.safeParse(args);
+      if (!parsed.success) throw new HttpError(400, `Say what to remember in 1 to ${MEMORY_TEXT_LIMIT} characters, with an optional why of up to ${MEMORY_WHY_LIMIT}.`);
+      const before = this.homes.memory(agent);
+      const { entry, added, entries } = this.homes.remember(agent, parsed.data.text, parsed.data.why);
+      if (added) {
+        this.publishMemory(agent.id, entries);
+        this.sawOwnMemory(agent, before, entries);
+      }
+      return added ? { remembered: entry } : { remembered: entry, duplicate: 'Already in memory; nothing was added.' };
+    }
+    if (tool === 'forget') {
+      const parsed = forgetInput.safeParse(args);
+      if (!parsed.success) throw new HttpError(400, 'Give the id of the memory entry to forget.');
+      const before = this.homes.memory(agent);
+      const { entry, entries } = this.homes.forget(agent, parsed.data.id);
+      this.publishMemory(agent.id, entries);
+      this.sawOwnMemory(agent, before, entries);
+      return { forgot: entry };
     }
     if (agent.autonomy === 'readonly' && (tool === 'send_message' || tool === 'delegate_task' || (tool === 'reply' && args.expects_reply === true))) {
       throw new HttpError(403, 'Plan-only agents can reply with findings, but need the user\'s approval before sending work to teammates.');
@@ -634,10 +778,19 @@ export class AgentManager {
     return runner;
   }
 
+  /** The folder an agent's sessions run in, by its real path: its worktree, its project, or (no project) the workspace in its home, never the home itself. */
+  private cwdOf(agent: Agent): string {
+    const project = agent.projectId === null ? null : this.project(agent.projectId);
+    return canonicalDirectory(agent.worktree?.cwd ?? project?.path ?? this.homes.workspace(agent));
+  }
+
   private execution(agentId: string): ExecutionContext {
     const agent = this.agent(agentId);
-    const project = this.project(agent.projectId);
-    const cwd = canonicalDirectory(agent.worktree?.cwd ?? project.path);
+    const project = agent.projectId === null ? null : this.project(agent.projectId);
+    const cwd = this.cwdOf(agent);
+    const projectPath = project ? canonicalDirectory(project.path) : null;
+    // The project as the prompt names it, read live so a rename shows.
+    const view = (): Project | null => (project && projectPath ? { ...this.project(project.id), path: projectPath } : null);
     return {
       cwd,
       context: hooks => {
@@ -645,15 +798,160 @@ export class AgentManager {
         this.tokens.set(agentId, commsToken);
         return {
           agent: () => this.agent(agentId),
-          project: { ...project, path: canonicalDirectory(project.path) },
+          project: view(),
           cwd,
           binPath: this.engines[agent.engine].path,
           commsToken,
-          preparePrompt: text => this.mailbox.preparePrompt(agentId, text),
+          // Fresh team context, and any section of the instructions that changed since the session saw it.
+          preparePrompt: text => {
+            const prepared = this.mailbox.preparePrompt(agentId, text);
+            const live = this.agent(agentId);
+            const context = this.promptContext(live);
+            const sections = contextSections(live, view(), context);
+            const keys = sectionKeys(sections);
+            const seen = this.homes.seen(live);
+            const changed = CONTEXT_SECTIONS.filter(name => seen[name] !== keys[name]);
+            if (!changed.length) return prepared;
+            this.homes.setSeen(live, keys);
+            // A session from before sections were tracked has seen none of them, nor the memory guidance.
+            if (!Object.keys(seen).length) return fullContext(agentContext(live, view(), context), prepared);
+            return refreshedContext(Object.fromEntries(changed.map(name => [name, sections[name]])), prepared);
+          },
+          instructions: () => {
+            const live = this.agent(agentId);
+            const context = this.promptContext(live);
+            this.homes.setSeen(live, sectionKeys(contextSections(live, view(), context)));
+            return systemInstructions(live, view(), context);
+          },
+          directories: () => (this.agent(agentId).projectId === null ? this.projectFolders().map(p => p.path) : []),
           hooks,
         };
       },
     };
+  }
+
+  /** Every project whose folder exists, by its real path: where an agent with no project may work. */
+  private projectFolders(): { name: string; path: string }[] {
+    return [...this.store.projects.values()].flatMap(p => {
+      try {
+        return [{ name: p.name, path: canonicalDirectory(p.path) }];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  /**
+   * What the agent's instructions are built from, read fresh: soul.md (a hand edit is mirrored into
+   * the agent here), memory.md (cut to its limit, and announced to the app if it changed on disk),
+   * and for an agent with no project, the project list.
+   */
+  private promptContext(agent: Agent): PromptContext {
+    try {
+      const soul = this.homes.readSoul(agent);
+      if (soul !== agent.instructions) {
+        agent.instructions = soul;
+        this.emitAgent(agent);
+        this.dreamer.soulEdited(agent);
+      }
+    } catch (err) {
+      console.error(`[agents] could not read ${agent.name}'s soul.md:`, (err as Error).message);
+    }
+    const { entries, omitted } = capMemory(agent.name, this.readMemory(agent));
+    return {
+      memory: entries,
+      memoryOmitted: omitted,
+      projects: agent.projectId === null ? this.projectFolders() : undefined,
+    };
+  }
+
+  /** memory.md as it is now; a change made outside the app (a hand edit) is sent to the app. */
+  private readMemory(agent: Agent): MemoryEntry[] {
+    const entries = this.homes.memory(agent);
+    const version = JSON.stringify(entries);
+    const known = this.memoryVersions.get(agent.id);
+    this.memoryVersions.set(agent.id, version);
+    if (known !== undefined && known !== version) this.hub.broadcast({ type: 'memory', agentId: agent.id, entries });
+    return entries;
+  }
+
+  /**
+   * The agent changed its own memory with remember or forget, so it already knows. If its session
+   * was up to date, mark the new memory as seen; an earlier change by the user still goes out.
+   */
+  private sawOwnMemory(agent: Agent, before: MemoryEntry[], after: MemoryEntry[]): void {
+    const seen = this.homes.seen(agent);
+    const key = (entries: MemoryEntry[]) => {
+      const { entries: kept, omitted } = capMemory(agent.name, entries);
+      return sectionKey(memorySection(kept, omitted));
+    };
+    if (seen.memory !== key(before)) return;
+    this.homes.setSeen(agent, { ...seen, memory: key(after) });
+  }
+
+  // ---- memory ------------------------------------------------------------
+
+  memory(id: string): MemoryEntry[] {
+    return this.readMemory(this.agent(id));
+  }
+
+  updateMemory(id: string, entryId: string, patch: Partial<MemoryPatch>): MemoryEntry {
+    const agent = this.agent(id);
+    const old = this.homes.memory(agent).find(e => e.id === entryId);
+    const { entry, entries } = this.homes.update(agent, entryId, patch?.text, patch?.why);
+    // Your edit of an entry a dream wrote counts against that dream.
+    if (old && (old.text !== entry.text || old.why !== entry.why)) this.dreamer.noteRevert(agent, old, 'edited');
+    this.publishMemory(agent.id, entries);
+    return entry;
+  }
+
+  forgetMemory(id: string, entryId: string): MemoryEntry {
+    const agent = this.agent(id);
+    const { entry, entries } = this.homes.forget(agent, entryId);
+    this.dreamer.noteRevert(agent, entry, 'deleted');
+    this.publishMemory(agent.id, entries);
+    return entry;
+  }
+
+  // ---- dreaming ----------------------------------------------------------
+
+  /** A trigger fired: dream in the background if the gate allows. */
+  private dream(agentId: string, reason: 'session-end' | 'idle'): void {
+    this.dreamer.maybe(agentId, reason).catch(err => console.error(`[dream] ${reason} dream failed:`, (err as Error).message));
+  }
+
+  dreams(id: string): AgentDreams {
+    const agent = this.agent(id);
+    return { dreams: this.dreamer.list(agent), stats: this.dreamer.stats(agent), proposal: this.dreamer.proposal(agent) };
+  }
+
+  /** Dream now: throws 409 when off, busy or already dreaming; otherwise resolves when the dream is done. */
+  dreamNow(id: string): Promise<DreamRecord | null> {
+    return this.dreamer.dreamNow(this.agent(id).id);
+  }
+
+  undoDream(id: string, dreamId: unknown): DreamRecord {
+    return this.dreamer.undo(this.agent(id), String(dreamId ?? ''));
+  }
+
+  decideSoul(id: string, action: unknown): void {
+    if (action !== 'accept' && action !== 'reject') throw new HttpError(400, 'Accept or reject the proposal.');
+    this.dreamer.decide(this.agent(id), action);
+  }
+
+  dreamStats(): DreamStatsReport {
+    const agents = [...this.store.agents.values()];
+    return {
+      agents: Object.fromEntries(agents.map(a => [a.id, this.dreamer.stats(a)])),
+      // Every agent, each session counted with the setting it had at the time.
+      dreamingOn: this.dreamer.groupStats(agents, 'on'),
+      dreamingOff: this.dreamer.groupStats(agents, 'off'),
+    };
+  }
+
+  private publishMemory(agentId: string, entries: MemoryEntry[]): void {
+    this.memoryVersions.set(agentId, JSON.stringify(entries));
+    this.hub.broadcast({ type: 'memory', agentId, entries });
   }
 
   private hooksFor(agentId: string): RunnerHooks {
@@ -662,6 +960,14 @@ export class AgentManager {
       session: (sessionId) => {
         const agent = live();
         if (!agent) return;
+        if (agent.sessionId !== sessionId) {
+          // Where it started: a Claude session resumes only from the same folder (see moveToWorkspace).
+          try {
+            agent.sessionCwd = this.cwdOf(agent);
+          } catch {
+            delete agent.sessionCwd;
+          }
+        }
         agent.sessionId = sessionId;
         this.emitAgent(agent);
       },
@@ -817,6 +1123,11 @@ export class AgentManager {
     agent.lastActiveAt = now;
     agent.turnStartedAt = pending > 0 ? now : null;
     agent.turns += 1;
+    try {
+      this.dreamer.turnEnded(agent);
+    } catch (err) {
+      console.error(`[dream] could not count ${agent.name}'s turn:`, (err as Error).message);
+    }
 
     if (result.stopped) {
       this.addEntry(agentId, { id: randomUUID(), kind: 'system', text: 'Stopped.' });
@@ -866,8 +1177,10 @@ export class AgentManager {
         runner.close();
         this.runners.delete(agentId);
         this.tokens.delete(agentId);
+        // The agent went quiet: a good time to dream, if the gate allows.
+        this.dream(agentId, 'idle');
       }
-    }, IDLE_PROCESS_MS);
+    }, this.idleProcessMs);
     timer.unref();
     this.idleTimers.set(agentId, timer);
   }

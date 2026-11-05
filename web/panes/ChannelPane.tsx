@@ -8,6 +8,7 @@ import type { Agent, Channel } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { api } from '../api.ts';
 import { open } from '../layout.ts';
+import { projectLabel } from '../projects.ts';
 import { attempt, loadPosts, useApp } from '../store.ts';
 import { buildThreads } from '../threads.ts';
 import { ChannelDialog } from '../dialogs/ChannelDialog.tsx';
@@ -33,7 +34,7 @@ function Members({ channel, members, onEdit }: { channel: Channel; members: Agen
   const [filter, setFilter] = useState('');
   const root = useRef<HTMLDivElement>(null);
   const projects = useApp(s => s.snapshot?.projects);
-  const projectName = (id: string) => projects?.find(p => p.id === id)?.name ?? '';
+  const projectName = (id: string | null) => projectLabel(id, projects);
   const q = filter.trim().toLowerCase();
   const listed = q ? members.filter(m => [m.name, projectName(m.projectId), rolePreset(m.role).name].some(f => f.toLowerCase().includes(q))) : members;
   return (

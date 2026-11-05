@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { Agent, Approval, Channel, ChannelPost, Conversation, Entry, PeerMessage, Project, ServerEvent, Snapshot, TerminalInfo } from '../shared/types.ts';
+import type { Agent, AgentDreams, Approval, Channel, ChannelPost, Conversation, DreamStatsReport, Entry, MemoryEntry, PeerMessage, Project, ServerEvent, Snapshot, TerminalInfo } from '../shared/types.ts';
 import { api } from './api.ts';
 
 export interface Toast {
@@ -17,10 +17,16 @@ export interface AppState {
   posts: Record<string, ChannelPost[]>;
   /** Open terminals in every project, kept live by terminals events. */
   terminals: TerminalInfo[];
+  /** What each agent remembered, oldest first, for agents whose memory has been shown; kept live by memory events. */
+  memory: Record<string, MemoryEntry[]>;
+  /** Each shown agent's dreams (newest first), its numbers and any soul change waiting for the user; kept live by dream events. */
+  dreams: Record<string, AgentDreams>;
+  /** Dreaming numbers for every agent and for the agents with dreaming on and off, once asked for. */
+  dreamStats: DreamStatsReport | null;
   toasts: Toast[];
 }
 
-let state: AppState = { connection: 'connecting', snapshot: null, entries: {}, posts: {}, terminals: [], toasts: [] };
+let state: AppState = { connection: 'connecting', snapshot: null, entries: {}, posts: {}, terminals: [], memory: {}, dreams: {}, dreamStats: null, toasts: [] };
 const listeners = new Set<() => void>();
 
 function setState(update: (current: AppState) => AppState): void {
@@ -91,6 +97,65 @@ export async function loadEntries(agentId: string, force = false): Promise<void>
   } finally {
     buffers.delete(agentId);
   }
+}
+
+// ---- memory ---------------------------------------------------------------
+
+/** Agents whose memory is being fetched; a memory event meanwhile is newer than the fetch. */
+const memoryLoads = new Map<string, { overtaken: boolean }>();
+
+export async function loadMemory(agentId: string, force = false): Promise<void> {
+  if ((!force && state.memory[agentId]) || memoryLoads.has(agentId)) return;
+  const load = { overtaken: false };
+  memoryLoads.set(agentId, load);
+  try {
+    const list = await api.memory(agentId);
+    if (!load.overtaken) setState(s => ({ ...s, memory: { ...s.memory, [agentId]: list } }));
+  } catch (error) {
+    toast((error as Error).message);
+  } finally {
+    memoryLoads.delete(agentId);
+  }
+}
+
+// ---- dreams ---------------------------------------------------------------
+
+/** Fetches in flight; one asked for again meanwhile runs once more when it lands, so the numbers end current. */
+const dreamLoads = new Map<string, { again: boolean }>();
+
+export async function loadDreams(agentId: string, force = false): Promise<void> {
+  const running = dreamLoads.get(agentId);
+  if (running) { if (force) running.again = true; return; }
+  if (!force && state.dreams[agentId]) return;
+  const load = { again: false };
+  dreamLoads.set(agentId, load);
+  try {
+    const { dreams, stats, proposal } = await api.dreams(agentId);
+    setState(s => ({ ...s, dreams: { ...s.dreams, [agentId]: { dreams, stats, proposal } } }));
+  } catch (error) {
+    toast((error as Error).message);
+  } finally {
+    dreamLoads.delete(agentId);
+  }
+  if (load.again) void loadDreams(agentId, true);
+}
+
+let teamLoad: { again: boolean } | null = null;
+
+export async function loadDreamStats(force = false): Promise<void> {
+  if (teamLoad) { if (force) teamLoad.again = true; return; }
+  if (!force && state.dreamStats) return;
+  const load = { again: false };
+  teamLoad = load;
+  try {
+    const stats = await api.dreamStats();
+    setState(s => ({ ...s, dreamStats: stats }));
+  } catch (error) {
+    toast((error as Error).message);
+  } finally {
+    teamLoad = null;
+  }
+  if (load.again) void loadDreamStats(true);
 }
 
 // ---- channel posts --------------------------------------------------------
@@ -169,6 +234,8 @@ function handle(event: ServerEvent): void {
   if (event.type === 'snapshot') {
     const known = Object.keys(state.entries);
     const channels = Object.keys(state.posts);
+    const remembered = Object.keys(state.memory);
+    const dreamed = Object.keys(state.dreams);
     setState(s => ({ ...s, snapshot: event.data }));
     // Anything may have happened while disconnected; reload the open transcripts and channels.
     for (const id of known) {
@@ -177,6 +244,13 @@ function handle(event: ServerEvent): void {
     for (const id of channels) {
       if (event.data.channels.some(c => c.id === id)) void loadPosts(id, true);
     }
+    for (const id of remembered) {
+      if (event.data.agents.some(a => a.id === id)) void loadMemory(id, true);
+    }
+    for (const id of dreamed) {
+      if (event.data.agents.some(a => a.id === id)) void loadDreams(id, true);
+    }
+    if (state.dreamStats) void loadDreamStats(true);
     return;
   }
   if (event.type === 'post') {
@@ -200,6 +274,35 @@ function handle(event: ServerEvent): void {
     setState(s => ({ ...s, entries: { ...s.entries, [entry.agentId]: upsertEntry(s.entries[entry.agentId] ?? [], entry) } }));
     return;
   }
+  if (event.type === 'dream') {
+    const { agentId, dream } = event;
+    // The record shows at once; the numbers it moved come with a fresh fetch.
+    setState(s => {
+      const current = s.dreams[agentId];
+      if (!current) return s;
+      const rest = current.dreams.filter(d => d.id !== dream.id);
+      const dreams = [dream, ...rest].sort((a, b) => b.at - a.at);
+      return { ...s, dreams: { ...s.dreams, [agentId]: { ...current, dreams } } };
+    });
+    if (state.dreams[agentId]) void loadDreams(agentId, true);
+    if (state.dreamStats) void loadDreamStats(true);
+    return;
+  }
+  if (event.type === 'soulProposal') {
+    const { agentId, proposal } = event;
+    setState(s => {
+      const current = s.dreams[agentId];
+      return current ? { ...s, dreams: { ...s.dreams, [agentId]: { ...current, proposal } } } : s;
+    });
+    return;
+  }
+  if (event.type === 'memory') {
+    // Every event carries the whole list, so it simply replaces what is here.
+    const loading = memoryLoads.get(event.agentId);
+    if (loading) loading.overtaken = true;
+    setState(s => ({ ...s, memory: { ...s.memory, [event.agentId]: event.entries } }));
+    return;
+  }
   if (event.type === 'terminals') {
     setState(s => ({ ...s, terminals: event.terminals }));
     return;
@@ -208,7 +311,11 @@ function handle(event: ServerEvent): void {
     setState(s => {
       const entries = { ...s.entries };
       delete entries[event.id];
-      return { ...s, entries };
+      const memory = { ...s.memory };
+      delete memory[event.id];
+      const dreams = { ...s.dreams };
+      delete dreams[event.id];
+      return { ...s, entries, memory, dreams };
     });
   }
   if (!state.snapshot) return;

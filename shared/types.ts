@@ -53,18 +53,33 @@ export interface Agent {
   id: string;
   name: string;
   engine: EngineKind;
-  projectId: string;
+  /** The project it works on; null for an agent with no project, which works across every registered project. */
+  projectId: string | null;
   worktree: Worktree | null;
+  /**
+   * The agent's private folder, <dataDir>/agents/<id>/: soul.md (standing instructions) and
+   * memory.md (what it learned). An agent with no project also works from here.
+   */
+  home: string;
   model: string; // '' means the CLI default
   effort: string; // reasoning effort; '' means the CLI default
   autonomy: Autonomy;
   useMcp: boolean; // Claude only: load the user's own MCP servers
   role: AgentRole;
-  instructions: string; // standing instructions appended to the system prompt
+  /** Standing instructions, mirrored from home/soul.md, which is the source of truth (up to 8000 characters). */
+  instructions: string;
+  /**
+   * Whether the agent dreams: after a session (a new session, or the idle close) it reviews what
+   * happened and updates its memory, and may propose a soul.md change. On by default; off means no
+   * dream runs, not even Dream now.
+   */
+  dreaming: boolean;
   status: AgentStatus;
   activity: string; // a few words on what it is doing right now
   currentTask: AgentTask | null;
   sessionId: string | null; // Claude session id or Codex thread id
+  /** The folder the current session started in. Claude Code keeps a session per folder, so it cannot resume from another. */
+  sessionCwd?: string;
   createdAt: number;
   lastActiveAt: number;
   turnStartedAt: number | null;
@@ -82,6 +97,161 @@ export interface Agent {
    * totals for the whole thread, so a turn's own usage is the difference from these.
    */
   threadUsage?: { thread: string; usage: TurnUsage };
+}
+
+/** What an agent with no project (it works across all of them) shows in place of a project name. */
+export const ALL_PROJECTS = 'All projects';
+
+/**
+ * Where an agent with no project works: the workspace folder inside its home, so soul.md and
+ * memory.md are outside its working folder (server/agentHome.ts workspacePath).
+ */
+export function noProjectFolder(home: string): string {
+  return `${home.replace(/\/+$/, '')}/workspace`;
+}
+
+/** One thing an agent remembered, kept in its home/memory.md. */
+export interface MemoryEntry {
+  id: string;
+  text: string;
+  /** Why it is worth remembering: the correction or confirmation behind it. */
+  why?: string;
+  createdAt: number;
+  /** The dream that wrote (or last rewrote) this entry. Your edits and deletes of these count as reverts. */
+  dreamId?: string;
+}
+
+// ---- dreaming -----------------------------------------------------------------
+
+export type DreamReason = 'session-end' | 'idle' | 'manual';
+export type DreamOpKind = 'add' | 'update' | 'merge' | 'remove';
+
+/** One memory change a dream asked for, and what came of it. */
+export interface DreamOp {
+  op: DreamOpKind;
+  /** The memory entries it changes: one for update or remove, two or more for merge, none for add. */
+  ids: string[];
+  text?: string;
+  why: string;
+  /** Digest item ids (d1, d2, ...) it cites. */
+  evidence: string[];
+  result: 'applied' | 'rejected';
+  /** Why it was rejected, or a note on how it applied. */
+  reason?: string;
+  /** The entry it wrote (add, update, merge). */
+  entryId?: string;
+}
+
+export interface DreamMetrics {
+  /** Items in the digest the dream read. */
+  digestItems: number;
+  /**
+   * User corrections in the digest, as the dream judged them: the user redirected the agent, or told
+   * it something memory already said. First-time teaching is not counted.
+   */
+  corrections: number;
+  /** Of those, the ones an existing memory entry should have prevented (it was saved before the correction). */
+  repeatCorrections: number;
+  /** Failed or stopped turns since the last dream. */
+  failedTurns: number;
+  /** Turns since the last dream. */
+  turns: number;
+  tokens?: number;
+  costUsd?: number;
+  durationMs: number;
+  /** Size of memory.md after the dream. */
+  memoryChars?: number;
+}
+
+export interface DreamRecord {
+  id: string;
+  agentId: string;
+  at: number;
+  reason: DreamReason;
+  /** nothing: the dream ran and changed nothing; rolled-back: its changes were put back by the checks. */
+  status: 'applied' | 'rolled-back' | 'nothing' | 'failed';
+  error?: string;
+  ops: DreamOp[];
+  soul?: { status: 'pending' | 'accepted' | 'rejected' | 'invalid'; why: string };
+  /** The dream's own note on the session, 3 to 6 lines. */
+  diary: string;
+  metrics: DreamMetrics;
+  undoneAt?: number;
+}
+
+/** A soul.md change a dream proposed, waiting for you to accept or reject it. */
+export interface SoulProposal {
+  text: string;
+  why: string;
+  at: number;
+  dreamId?: string;
+  /** Digest item ids it cites. */
+  evidence?: string[];
+  /** soul.md as it is now, read from the file (not the agent's copy, which lags hand edits): what the diff is against. */
+  current?: string;
+  /** soul.md changed since the proposal was made, so Accept is refused; reject it instead. */
+  stale?: boolean;
+}
+
+/**
+ * Whether dreaming helps, for one agent or a group. Ratios are null until there is something to
+ * divide by. The per-session series are counted from transcripts by code, the same way for agents
+ * with dreaming on and off, so the two groups compare; a session ends at a new session or after an
+ * hour without activity. repeatCorrectionRate needs a dream to judge corrections, so agents with
+ * dreaming off have none (compare them with the offline eval instead).
+ */
+export interface DreamStats {
+  dreams: number;
+  /** Ops applied in dreams whose changes stayed (not rolled back). */
+  opsApplied: number;
+  opsRejected: number;
+  /** Ops that applied in a dream that was then rolled back, so they did not stay. */
+  opsRolledBack: number;
+  /** Rejected ops by reason. */
+  rejectedByReason: Record<string, number>;
+  rollbacks: number;
+  /** Entries dreams wrote, in dreams that were not rolled back. */
+  dreamEntries: number;
+  /** Of those, the ones you later edited, deleted or undid within 7 days. */
+  dreamEntriesReverted: number;
+  revertRate: number | null;
+  soulAccepted: number;
+  soulRejected: number;
+  soulAcceptanceRate: number | null;
+  /** Corrections the dreams judged, and how many repeated something memory already said. */
+  corrections: number;
+  repeatCorrections: number;
+  /** repeatCorrections / corrections. Lower is better. */
+  repeatCorrectionRate: number | null;
+  /**
+   * Per session, oldest first (the last 30): user corrections and failed or stopped turns, counted by
+   * code. For an agent, or the "on" group, only sessions that began after its first dream.
+   */
+  correctionsPerSession: number[];
+  failedPerSession: number[];
+  sessions: number;
+  avgCorrectionsPerSession: number | null;
+  avgFailedPerSession: number | null;
+  /** memory.md size after each dream, oldest first. */
+  memoryChars: number[];
+  costUsd: number;
+  tokens: number;
+  durationMs: number;
+}
+
+/** GET /api/agents/:id/dreams */
+export interface AgentDreams {
+  /** Newest first, at most 100. */
+  dreams: DreamRecord[];
+  stats: DreamStats;
+  proposal: SoulProposal | null;
+}
+
+/** GET /api/dream-stats: each agent, and agents with dreaming on and off as groups to compare. */
+export interface DreamStatsReport {
+  agents: Record<string, DreamStats>;
+  dreamingOn: DreamStats;
+  dreamingOff: DreamStats;
 }
 
 /**
@@ -403,6 +573,12 @@ export type ServerEvent =
   | { type: 'snapshot'; data: Snapshot }
   | { type: 'agent'; agent: Agent }
   | { type: 'agentRemoved'; id: string }
+  /** An agent's memory changed: every entry, oldest first. */
+  | { type: 'memory'; agentId: string; entries: MemoryEntry[] }
+  /** A dream finished, or its record changed (undone, soul accepted or rejected). */
+  | { type: 'dream'; agentId: string; dream: DreamRecord }
+  /** A soul proposal is waiting, or (null) none is any more. */
+  | { type: 'soulProposal'; agentId: string; proposal: SoulProposal | null }
   | { type: 'project'; project: Project }
   | { type: 'projectRemoved'; id: string }
   | { type: 'entry'; entry: Entry }
@@ -423,7 +599,8 @@ export type ServerEvent =
 export interface CreateAgentRequest {
   name: string;
   engine: EngineKind;
-  projectId: string;
+  /** null creates an agent with no project, working across every project; it cannot have a worktree. */
+  projectId: string | null;
   model?: string;
   effort?: string;
   autonomy?: Autonomy;
@@ -441,7 +618,15 @@ export interface AgentPatch {
   model?: string;
   effort?: string;
   role?: AgentRole;
+  /** Rewrites the agent's soul.md. */
   instructions?: string;
+  dreaming?: boolean;
+}
+
+/** A change to one memory entry from the app. */
+export interface MemoryPatch {
+  text: string;
+  why?: string;
 }
 
 // ---- files and git ----------------------------------------------------------

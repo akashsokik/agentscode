@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { query } from '@anthropic-ai/claude-agent-sdk';
+import type { HookCallbackMatcher, query } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, ApprovalDecision } from '../shared/types.ts';
 import { ClaudeRunner } from '../server/agents/claude.ts';
 import type { ApprovalRequest, EntryDraft, RunnerHooks, TurnResult } from '../server/agents/runner.ts';
@@ -9,7 +9,7 @@ import { COMMS_TOOLS } from '../server/comms/tools.ts';
 import { settle } from './helpers.ts';
 
 const agent: Agent = {
-  id: 'a1', name: 'Ada', engine: 'claude', projectId: 'p1', worktree: null, model: 'sonnet', effort: '',
+  id: 'a1', name: 'Ada', engine: 'claude', projectId: 'p1', worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: 'sonnet', effort: '',
   autonomy: 'ask', useMcp: false, role: 'dev', instructions: 'Prefer small diffs.', status: 'idle', activity: '',
   currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
   costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null,
@@ -201,4 +201,91 @@ test('the Claude runner reports the main loop prompt size and the model window',
   await settle(10);
   assert.deepEqual(readings, [{ used: 43_012 }, { window: 1_000_000 }]);
   runner.close();
+});
+
+test('an agent with no project gets every project folder, and a fresh process when the list changes', async () => {
+  const starts: Options[] = [];
+  const factory = ((params: { prompt: AsyncIterable<{ message: { content: unknown } }>; options: Options }) => {
+    starts.push(params.options);
+    const input = params.prompt[Symbol.asyncIterator]();
+    async function* run() {
+      yield { type: 'system', subtype: 'init', session_id: 'session-1' };
+      for (;;) {
+        const next = await input.next();
+        if (next.done) return;
+        yield { type: 'result', subtype: 'success', is_error: false, result: 'Done.', total_cost_usd: 0 };
+      }
+    }
+    return Object.assign(run(), {
+      interrupt: async () => {}, setPermissionMode: async () => {}, setModel: async () => {},
+      applyFlagSettings: async () => {}, close: () => {},
+    });
+  }) as unknown as typeof query;
+  let folders = ['/work/web', '/work/api'];
+  const hooks: RunnerHooks = { session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, turnEnd: () => {}, approval: async () => ({ allow: true }), closed: () => {} };
+  const runner = new ClaudeRunner({
+    agent: () => ({ ...agent, projectId: null }),
+    project: null,
+    cwd: '/data/agents/a1',
+    binPath: null,
+    hooks,
+    instructions: () => 'You are not tied to one project. [built by the manager]',
+    directories: () => folders,
+  }, factory);
+
+  runner.send('First');
+  await settle(10);
+  assert.equal(starts.length, 1);
+  assert.deepEqual(starts[0].additionalDirectories, ['/work/web', '/work/api']);
+  assert.equal(starts[0].cwd, '/data/agents/a1');
+  assert.match((starts[0].systemPrompt as { append: string }).append, /built by the manager/);
+
+  // Edit tools are kept off the agent's own home files by a PreToolUse hook, which runs in every mode.
+  const guard = (starts[0].hooks as { PreToolUse: HookCallbackMatcher[] }).PreToolUse[0];
+  assert.equal(guard.matcher, 'Write|Edit|MultiEdit|NotebookEdit');
+  const ask = (file: string) => guard.hooks[0]({ hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: file }, tool_use_id: 't1', session_id: 's', transcript_path: '', cwd: '/data/agents/a1' } as never, 't1', { signal: new AbortController().signal });
+  const denied = await ask(`${agent.home}/soul.md`) as { hookSpecificOutput?: { permissionDecision?: string } };
+  assert.equal(denied.hookSpecificOutput?.permissionDecision, 'deny');
+  assert.deepEqual(await ask(`${agent.home}/workspace/notes.md`), {});
+  assert.deepEqual(await ask('/work/web/src/app.ts'), {});
+
+  runner.send('Second, same folders');
+  await settle(10);
+  assert.equal(starts.length, 1, 'the running process is reused');
+
+  folders = [...folders, '/work/docs'];
+  runner.send('Third, after a project was added');
+  await settle(10);
+  assert.equal(starts.length, 2, 'a new project needs a fresh process');
+  assert.deepEqual(starts[1].additionalDirectories, ['/work/web', '/work/api', '/work/docs']);
+  runner.close();
+});
+
+test('the edit guard is registered in every permission mode and denies soul.md in each', async () => {
+  const hooks: RunnerHooks = { session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, turnEnd: () => {}, approval: async () => ({ allow: true }), closed: () => {} };
+  const modes = { readonly: 'plan', ask: 'default', edits: 'acceptEdits', full: 'bypassPermissions' } as const;
+  for (const [autonomy, mode] of Object.entries(modes) as [Agent['autonomy'], string][]) {
+    const captured: { options?: Options; prompts: unknown[] } = { prompts: [] };
+    const runner = new ClaudeRunner({
+      agent: () => ({ ...agent, projectId: null, autonomy }),
+      project: null,
+      cwd: `${agent.home}/workspace`,
+      binPath: null,
+      hooks,
+    }, fakeQuery(captured));
+    runner.send('Go.');
+    await settle(10);
+    assert.equal(captured.options!.permissionMode, mode, autonomy);
+    const matchers = (captured.options!.hooks as { PreToolUse?: HookCallbackMatcher[] } | undefined)?.PreToolUse ?? [];
+    assert.equal(matchers.length, 1, `${autonomy}: registered`);
+    assert.equal(matchers[0].matcher, 'Write|Edit|MultiEdit|NotebookEdit');
+    const decide = async (tool: string, file: string) => {
+      const out = await matchers[0].hooks[0]({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: { file_path: file, notebook_path: file }, tool_use_id: 't', session_id: 's', transcript_path: '', cwd: `${agent.home}/workspace` } as never, 't', { signal: new AbortController().signal });
+      return (out as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput?.permissionDecision ?? 'allow';
+    };
+    for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) assert.equal(await decide(tool, `${agent.home}/soul.md`), 'deny', `${autonomy} ${tool}`);
+    assert.equal(await decide('Edit', '../memory.md'), 'deny', `${autonomy}: relative to the workspace`);
+    assert.equal(await decide('Write', `${agent.home}/workspace/notes.md`), 'allow', autonomy);
+    runner.close();
+  }
 });

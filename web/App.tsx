@@ -20,6 +20,7 @@ import { Sidebars, useNavFull, type SidebarActions } from './sidebar/Sidebar.tsx
 import { toggleTerminal } from './terminal/actions.ts';
 import { TerminalPanel } from './terminal/TerminalPanel.tsx';
 import { CommandPalette } from './ui/CommandPalette.tsx';
+import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
 import { EngineIcon } from './ui/EngineIcon.tsx';
 import { Empty, HeaderButton, PRIMARY, StatusLabel } from './ui/common.tsx';
@@ -51,7 +52,7 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
     return {
       icon: <EngineIcon engine={agent.engine} className="size-3.5 shrink-0" />,
       headline: agent.name,
-      meta: agent.currentTask?.summary || agent.lastSummary || snapshot?.projects.find(p => p.id === agent.projectId)?.name || '',
+      meta: agent.currentTask?.summary || agent.lastSummary || projectLabel(agent.projectId, snapshot?.projects),
       busy: agent.status === 'working',
       attention: agent.status === 'waiting' || pending,
     };
@@ -293,7 +294,7 @@ function Toasts() {
 }
 
 type Dialog =
-  | { kind: 'newAgent'; projectId?: string }
+  | { kind: 'newAgent'; projectId?: string | null }
   | { kind: 'addProject'; thenNewAgent?: boolean }
   | { kind: 'settings' }
   | { kind: 'agentSettings' | 'removeAgent'; agentId: string }

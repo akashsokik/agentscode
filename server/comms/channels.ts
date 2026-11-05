@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { ALL_PROJECTS, noProjectFolder } from '../../shared/types.ts';
 import type {
   Agent,
   AgentTask,
@@ -415,17 +416,20 @@ export class Channels {
   // ---- prompts -----------------------------------------------------------------
 
   private member(a: Agent, selfId: string) {
-    const project = this.store.projects.get(a.projectId);
+    const project = a.projectId === null ? undefined : this.store.projects.get(a.projectId);
     return {
       id: a.id, name: a.name, you: a.id === selfId || undefined, engine: ENGINE_NAME[a.engine], role: a.role, status: a.status,
-      project: project?.name ?? null, workspace: a.worktree?.cwd ?? project?.path ?? null, branch: a.worktree?.branch ?? null,
+      project: a.projectId === null ? ALL_PROJECTS : project?.name ?? null,
+      workspace: a.worktree?.cwd ?? project?.path ?? (a.projectId === null ? noProjectFolder(a.home) : null),
+      branch: a.worktree?.branch ?? null,
     };
   }
 
   private roster(channel: Channel, selfId: string): string[] {
     return channel.memberIds.map(id => this.store.agents.get(id)).filter((a): a is Agent => Boolean(a)).map(a => {
       const m = this.member(a, selfId);
-      return `- ${m.name}${m.you ? ' (you)' : ''}, id ${m.id}: ${m.engine}, ${m.role}, project ${m.project ?? 'unknown'} at ${m.workspace ?? 'unknown'}${m.branch ? ` on branch ${m.branch}` : ''}, ${m.status}.`;
+      const where = a.projectId === null ? 'no project (works across all projects)' : `project ${m.project ?? 'unknown'} at ${m.workspace ?? 'unknown'}`;
+      return `- ${m.name}${m.you ? ' (you)' : ''}, id ${m.id}: ${m.engine}, ${m.role}, ${where}${m.branch ? ` on branch ${m.branch}` : ''}, ${m.status}.`;
     });
   }
 

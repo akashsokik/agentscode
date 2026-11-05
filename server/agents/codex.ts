@@ -5,7 +5,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import type { Agent, AgentTask, Autonomy, ToolCall, TurnUsage } from '../../shared/types.ts';
 import { usageSince, usageTotal } from '../../shared/turnUsage.ts';
-import { clip } from './describe.ts';
+import { clip, mcpSummary, toolResultText } from './describe.ts';
 import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
 import { codexCommsConfig, COMMS_INSTRUCTIONS } from '../comms/tools.ts';
 
@@ -75,13 +75,15 @@ export function codexTurnUsage(
  * Arguments for one `codex exec` turn. The prompt itself goes over stdin ("-") so it is never parsed as a flag.
  * Images go one `--image=<file>` each, with another flag after them, so none can swallow the session id or "-".
  */
-export function codexArgs(agent: Agent, commsToken?: string, images: readonly RunnerImage[] = []): string[] {
+export function codexArgs(agent: Agent, commsToken?: string, images: readonly RunnerImage[] = [], directories: readonly string[] = []): string[] {
   const sandbox = SANDBOX[agent.autonomy];
   const options = ['--json', ...images.map(image => `--image=${image.path}`), '--skip-git-repo-check', '-c', `sandbox_mode="${sandbox}"`];
   if (commsToken) options.push('-c', codexCommsConfig(commsToken));
   // A worktree keeps its git data in the main repo's .git, which must be writable to commit.
-  if (agent.worktree && sandbox === 'workspace-write') {
-    options.push('-c', `sandbox_workspace_write.writable_roots=[${JSON.stringify(agent.worktree.gitDir)}]`);
+  // An agent with no project works from its home, so every project folder has to be writable too.
+  const writable = [...(agent.worktree ? [agent.worktree.gitDir] : []), ...directories];
+  if (writable.length && sandbox === 'workspace-write') {
+    options.push('-c', `sandbox_workspace_write.writable_roots=[${writable.map(dir => JSON.stringify(dir)).join(',')}]`);
   }
   if (agent.model) options.push('-m', agent.model);
   if (agent.effort) options.push('-c', `model_reasoning_effort="${agent.effort}"`);
@@ -190,12 +192,15 @@ export class CodexRunner implements Runner {
 
     // Codex reads the files when the turn starts; one that is gone would fail the whole turn.
     const images = (input.images ?? []).filter(image => fs.existsSync(image.path));
-    const args = codexArgs(agent, this.ctx.commsToken, images);
+    const args = codexArgs(agent, this.ctx.commsToken, images, this.ctx.directories?.() ?? []);
+    // A new thread gets the full instructions first, so preparePrompt knows the thread has seen them.
+    // A resumed thread already has them; repeat only the comms rules, whose token changed, and
+    // preparePrompt adds the soul, memory or project list if they changed since.
+    const instructions = agent.sessionId ? null : (this.ctx.instructions?.() ?? systemInstructions(agent, project));
     const text = this.ctx.preparePrompt?.(input.text) ?? input.text;
-    // A resumed thread already has the full instructions; repeat only the comms rules, whose token changed.
-    const prompt = agent.sessionId
+    const prompt = instructions === null
       ? `${this.ctx.commsToken ? `${COMMS_INSTRUCTIONS}\n\n` : ''}${text}`
-      : `${systemInstructions(agent, project)}\n\n---\n\n${text}`;
+      : `${instructions}\n\n---\n\n${text}`;
 
     const child = spawn(this.ctx.binPath, args, {
       cwd: this.ctx.cwd,
@@ -346,8 +351,12 @@ export class CodexRunner implements Runner {
         return;
       }
       case 'mcp_tool_call': {
-        const name = `${String(item.server ?? 'mcp')}.${String(item.tool ?? 'tool')}`;
-        hooks.entry({ id, kind: 'tool', text: '', tool: { name, summary: name, status: status(item.status !== 'failed') } });
+        const server = String(item.server ?? 'mcp');
+        const tool = String(item.tool ?? 'tool');
+        const name = `${server}.${tool}`;
+        const args = item.arguments && typeof item.arguments === 'object' ? item.arguments as Record<string, unknown> : {};
+        const output = toolResultText((item.result as { content?: unknown } | undefined)?.content);
+        hooks.entry({ id, kind: 'tool', text: '', tool: { name, summary: mcpSummary(server, tool, args, output), status: status(item.status !== 'failed') } });
         hooks.activity(`Using ${clip(name, 36)}`);
         return;
       }

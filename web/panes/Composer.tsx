@@ -6,7 +6,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type { ComposerCommand } from '../../shared/composer.ts';
-import type { Agent, Approval, AgentPatch, EngineModels, Project } from '../../shared/types.ts';
+import { noProjectFolder, type Agent, type Approval, type AgentPatch, type EngineModels, type Project } from '../../shared/types.ts';
 import { useAgentCommands, useAgentFiles } from '../composer/catalog.ts';
 import { CommandPicker, FileMentionPicker } from '../composer/Pickers.tsx';
 import {
@@ -318,7 +318,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
     field.current?.focus();
   };
 
-  const where = agent.worktree?.cwd ?? project?.path ?? '';
+  const where = agent.worktree?.cwd ?? project?.path ?? (agent.projectId === null ? noProjectFolder(agent.home) : '');
   return (
     <div data-composer className="relative mx-auto w-full max-w-3xl shrink-0 p-1.5 pt-0">
       {question ? <div className="px-1.5 pb-1.5"><QuestionPrompt approval={question} /></div> : null}

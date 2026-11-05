@@ -2,14 +2,17 @@ import {
   query,
   type CanUseTool,
   type EffortLevel,
+  type HookCallback,
   type PermissionMode,
   type Query,
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import fs from 'node:fs';
+import path from 'node:path';
 import type { AgentTask, Autonomy, Question, ToolCall, TurnUsage } from '../../shared/types.ts';
-import { approvalTitle, clip, toolActivity, toolDetail, toolResultText, toolSummary } from './describe.ts';
+import { reservedHomeFile } from '../agentHome.ts';
+import { approvalTitle, clip, resultSummary, toolActivity, toolDetail, toolResultText, toolSummary } from './describe.ts';
 import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
 import { commsMcpConfig, COMMS_TOOLS } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
@@ -21,6 +24,47 @@ const MODE: Record<Autonomy, PermissionMode> = {
   edits: 'acceptEdits',
   full: 'bypassPermissions',
 };
+
+/** Claude Code's file-editing tools, and the input that names the file. */
+const EDIT_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' };
+
+function realpath(file: string, depth = 0): string {
+  try {
+    return fs.realpathSync.native(file);
+  } catch { /* missing, or a dangling link */ }
+  try {
+    // A dangling symlink: writing through it creates its target, so the target is what counts.
+    if (depth < 32 && fs.lstatSync(file).isSymbolicLink()) return realpath(path.resolve(path.dirname(file), fs.readlinkSync(file)), depth + 1);
+  } catch { /* not there at all */ }
+  // A file about to be created: resolve its folder instead.
+  const dir = path.dirname(file);
+  return dir === file ? file : path.join(realpath(dir, depth + 1), path.basename(file));
+}
+
+const inside = (dir: string, file: string) => {
+  const rel = path.relative(dir, file);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+
+/**
+ * Why an edit tool may not write this file, or null. An agent's home holds files only AgentsCode and
+ * the user write (reservedHomeFile): soul.md (the user's instructions), memory.md (written only
+ * through remember and forget, with the secret filter), a soul proposal, the dream records and
+ * history/. Anything else there, such as notes saved before the agent had a workspace, and the
+ * workspace itself, stay its own. The path is resolved through symlinks and macOS's case-insensitive
+ * names. The hook runs in every permission mode, Full access included, before any auto-accept.
+ */
+export function ownFileProblem(home: string | undefined, cwd: string, toolName: string, input: Record<string, unknown>): string | null {
+  const key = EDIT_TOOLS[toolName];
+  const target = key ? input[key] : undefined;
+  if (!home || typeof target !== 'string' || !target) return null;
+  const file = realpath(path.resolve(cwd, target));
+  const homes = [...new Set([path.resolve(home), realpath(path.resolve(home))])];
+  const own = homes.some(h => inside(h, file) && reservedHomeFile(path.relative(h, file)));
+  return own
+    ? 'That file is in your AgentsCode home, which only AgentsCode and the user edit: soul.md is the user\'s standing instructions, and memory changes go through the remember and forget tools. Ask the user if soul.md should change.'
+    : null;
+}
 
 /** Async iterable the SDK pulls user messages from; stays open while the agent is at its desk. */
 class InputQueue implements AsyncIterable<SDKUserMessage> {
@@ -101,6 +145,8 @@ export class ClaudeRunner implements Runner {
   private stopping = false;
   private restartWhenIdle = false;
   private startedWithBypass = false;
+  /** The extra folders the running process was started with; they are fixed for its life. */
+  private startedDirs = '';
   private lastText = '';
   /** The model that answered the last main-loop request; its modelUsage entry has the window. */
   private lastModel = '';
@@ -122,6 +168,9 @@ export class ClaudeRunner implements Runner {
       this.queue.push({ text, task, images });
       return;
     }
+    // A project added since the process started is not one of its folders yet. Start a fresh
+    // process for this turn; the session resumes.
+    if (this.q && JSON.stringify(this.directories()) !== this.startedDirs) this.shutdown();
     if (!this.q) this.start();
     this.turnActive = true;
     this.lastText = '';
@@ -213,21 +262,30 @@ export class ClaudeRunner implements Runner {
     }
   }
 
+  private directories(): string[] {
+    return this.ctx.directories?.() ?? [];
+  }
+
   private start(): void {
     const agent = this.ctx.agent();
     const project = this.ctx.project;
     const input = new InputQueue();
+    const directories = this.directories();
+    this.startedDirs = JSON.stringify(directories);
     this.startedWithBypass = agent.autonomy === 'full';
     this.stderrTail = '';
     const q = this.query({
       prompt: input,
       options: {
         cwd: this.ctx.cwd,
+        additionalDirectories: directories.length ? directories : undefined,
         model: agent.model || undefined,
         effort: (agent.effort || undefined) as EffortLevel | undefined,
         permissionMode: MODE[agent.autonomy],
         allowDangerouslySkipPermissions: this.startedWithBypass || undefined,
         canUseTool: this.canUseTool,
+        // soul.md, memory.md and the dream records are off limits to edit tools in every mode.
+        hooks: { PreToolUse: [{ matcher: Object.keys(EDIT_TOOLS).join('|'), hooks: [this.guardOwnFiles] }] },
         // Load CLAUDE.md, settings and plugins like a normal Claude Code session...
         settingSources: ['user', 'project', 'local'],
         // ...but skip MCP servers unless asked: they can add ~200k tokens of tool definitions.
@@ -237,7 +295,7 @@ export class ClaudeRunner implements Runner {
         allowedTools: this.ctx.commsToken ? COMMS_TOOLS.map(name => `mcp__${COMMS_SERVER}__${name}`) : undefined,
         resume: agent.sessionId ?? undefined,
         pathToClaudeCodeExecutable: this.ctx.binPath ?? undefined,
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: systemInstructions(agent, project) },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: this.ctx.instructions?.() ?? systemInstructions(agent, project) },
         stderr: (data: string) => {
           this.stderrTail = (this.stderrTail + data).slice(-2000);
         },
@@ -324,11 +382,12 @@ export class ClaudeRunner implements Runner {
           const tool = this.tools.get(block.tool_use_id);
           if (!tool) continue;
           this.tools.delete(block.tool_use_id);
+          const output = toolResultText(block.content);
           hooks.entry({
             id: block.tool_use_id,
             kind: 'tool',
             text: '',
-            tool: { ...tool, status: block.is_error ? 'error' : 'ok', output: toolResultText(block.content) },
+            tool: { ...tool, summary: (!block.is_error && resultSummary(tool.name, output)) || tool.summary, status: block.is_error ? 'error' : 'ok', output },
           });
         }
         hooks.activity('Thinking');
@@ -372,6 +431,12 @@ export class ClaudeRunner implements Runner {
         return;
     }
   }
+
+  private guardOwnFiles: HookCallback = async input => {
+    if (input.hook_event_name !== 'PreToolUse') return {};
+    const problem = ownFileProblem(this.ctx.agent().home, this.ctx.cwd, input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>);
+    return problem ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: problem } } : {};
+  };
 
   private canUseTool: CanUseTool = async (toolName, input, options) => {
     const hooks = this.ctx.hooks;

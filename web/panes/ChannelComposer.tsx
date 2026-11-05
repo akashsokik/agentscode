@@ -5,6 +5,7 @@ import { rolePreset } from '../../shared/roles.ts';
 import { api } from '../api.ts';
 import { someNames } from '../format.ts';
 import { mentionQuery, resolveMentions } from '../mentions.ts';
+import { projectLabel } from '../projects.ts';
 import { attempt, useApp } from '../store.ts';
 import { settleDraft } from '../threads.ts';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
@@ -206,7 +207,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
                 ? <span className="flex items-center gap-1.5"><EngineIcon engine={option.agent.engine} className="size-3.5" />{option.name}</span>
                 : '@all'}
               hint={option.agent
-                ? [projects?.find(p => p.id === option.agent!.projectId)?.name, rolePreset(option.agent.role).name, busyLabel(option.agent)].filter(Boolean).join(', ')
+                ? [projectLabel(option.agent.projectId, projects), rolePreset(option.agent.role).name, busyLabel(option.agent)].filter(Boolean).join(', ')
                 : `Every member: ${someNames(members.map(m => m.name))}.`}
               onSelect={() => { pick(option.name); field.current?.focus(); }}
             />

@@ -8,6 +8,8 @@ import type { Entry, ToolCall } from '../shared/types.ts';
 
 /** Comms tools that send mail: the peer row already shows what they sent. */
 export const SENDING_TOOLS = /(?:^mcp__agentscode__|^agentscode\.)(send_message|reply|delegate_task|report_result)$/;
+/** Memory tools: what the agent learned or dropped reads as one line of its own, not as work. */
+export const MEMORY_TOOLS = /(?:^mcp__agentscode__|^agentscode\.)(remember|forget)$/;
 
 export type WorkKind = 'edit' | 'run' | 'agent' | 'research' | 'plan' | 'other';
 /** A group's icon: the work it did most of, or a note when it holds only messages and status. */
@@ -15,6 +17,8 @@ export type PhaseKind = WorkKind | 'note';
 
 export type TurnItem =
   | { type: 'prose'; entry: Entry }
+  | { type: 'memory'; entry: Entry }
+  | { type: 'dream'; entry: Entry }
   | { type: 'activity'; entries: Entry[] };
 
 /** The span of a turn's items that folds away once the agent has answered for it. */
@@ -27,21 +31,42 @@ export function isHiddenTool(entry: Entry): boolean {
   return entry.kind === 'tool' && SENDING_TOOLS.test(entry.tool?.name ?? '');
 }
 
+export function isMemoryTool(entry: Entry): boolean {
+  return entry.kind === 'tool' && MEMORY_TOOLS.test(entry.tool?.name ?? '');
+}
+
+/** The line a dream writes when it finishes: "Dreamed: +2 -1 ~1, soul change proposed". */
+export function isDreamLine(entry: Entry): boolean {
+  return entry.kind === 'system' && /^Dreamed:/.test(entry.text);
+}
+
+/** A memory tool call as its line reads: "Remembered: <text>", "Forgot: <text>". */
+export function memoryLine(tool: ToolCall): { verb: string; text: string } {
+  const forget = /forget$/.test(tool.name);
+  // The server's summary already leads with the verb; the line says it once, by the call's state.
+  const text = tool.summary.replace(/^(remembered|remembering|remember|forgot|forgetting|forget)\s*:\s*/i, '').trim();
+  const verb = tool.status === 'error' ? (forget ? 'Could not forget' : 'Could not remember')
+    : tool.status === 'running' ? (forget ? 'Forgetting' : 'Remembering')
+    : forget ? 'Forgot' : 'Remembered';
+  return { verb, text };
+}
+
 /** Tool calls, status lines and teammate messages: the steps of a turn's work. */
 export function isActivity(entry: Entry): boolean {
-  if (entry.kind === 'tool') return !isHiddenTool(entry);
+  if (entry.kind === 'tool') return !isHiddenTool(entry) && !isMemoryTool(entry);
+  if (isDreamLine(entry)) return false;
   return entry.kind === 'system' || entry.kind === 'peer';
 }
 
 /** A turn item's identity, stable as the group it names grows. */
 export function turnItemKey(item: TurnItem): string {
-  return item.type === 'prose' ? item.entry.id : item.entries[0].id;
+  return item.type === 'activity' ? item.entries[0].id : item.entry.id;
 }
 
 /**
  * Contiguous runs of work become activity groups; the agent's prose always stands on its own, so
- * the readable transcript never disappears into activity chrome. Prompts, results and errors are
- * not items: the turn lays those out itself.
+ * the readable transcript never disappears into activity chrome, and so does what it remembered or
+ * forgot. Prompts, results and errors are not items: the turn lays those out itself.
  */
 export function groupTurnItems(entries: Entry[]): TurnItem[] {
   const items: TurnItem[] = [];
@@ -51,7 +76,13 @@ export function groupTurnItems(entries: Entry[]): TurnItem[] {
     run = [];
   };
   for (const entry of entries) {
-    if (isActivity(entry)) {
+    if (isMemoryTool(entry)) {
+      flush();
+      items.push({ type: 'memory', entry });
+    } else if (isDreamLine(entry)) {
+      flush();
+      items.push({ type: 'dream', entry });
+    } else if (isActivity(entry)) {
       run.push(entry);
     } else if (entry.kind === 'agent' && entry.text.trim()) {
       flush();
@@ -65,15 +96,22 @@ export function groupTurnItems(entries: Entry[]): TurnItem[] {
 /**
  * The work a turn can put away: everything from the first thing the agent did up to the last group
  * it has already written past. As the turn runs, each new paragraph folds the work and commentary
- * before it, leaving the latest words and whatever the agent is doing now in view.
+ * before it, leaving the latest words and whatever the agent is doing now in view. A memory line
+ * alone is not work to put away, and one inside the fold stays in view under it (see keptInView).
  */
 export function foldableWork(items: TurnItem[]): WorkFold | undefined {
   let answered = false;
   for (let index = items.length - 1; index >= 0; index -= 1) {
-    if (items[index].type === 'prose') answered = true;
-    else if (answered) return { start: 0, end: index };
+    const type = items[index].type;
+    if (type === 'prose') answered = true;
+    else if (answered && type === 'activity') return { start: 0, end: index };
   }
   return undefined;
+}
+
+/** The items of a closed fold that stay in view under its line: what the agent remembered, forgot or dreamed. */
+export function keptInView(items: TurnItem[], fold: WorkFold | undefined): TurnItem[] {
+  return fold ? items.slice(fold.start, fold.end + 1).filter(item => item.type === 'memory' || item.type === 'dream') : [];
 }
 
 export function toolCategory(tool: ToolCall): WorkKind {

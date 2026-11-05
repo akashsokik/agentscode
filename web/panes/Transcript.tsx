@@ -13,7 +13,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { Agent, Approval, Entry, PeerMessage, ToolCall, TurnMeta } from '../../shared/types.ts';
 import { turnMetricsText } from '../../shared/turnUsage.ts';
-import { foldableWork, groupTurnItems, turnItemKey, workKind, workSummaryLine, type PhaseKind, type TurnItem } from '../activity.ts';
+import { foldableWork, groupTurnItems, isDreamLine, keptInView, memoryLine, turnItemKey, workKind, workSummaryLine, type PhaseKind, type TurnItem } from '../activity.ts';
 import { api } from '../api.ts';
 import { modelLabel } from '../format.ts';
 import { open, openToSide } from '../layout.ts';
@@ -26,7 +26,7 @@ import { Markdown } from '../ui/Markdown.tsx';
 import { MentionText } from '../ui/MentionText.tsx';
 import { reducedMotion, staggerWordFades, WORD_FADE_MS } from '../ui/wordFade.ts';
 import { ChipButton, Empty, INPUT, Loading, StatusLabel, TextButton } from '../ui/common.tsx';
-import { Bot, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, CircleDashed, Copy, File, MessageSquare, Minus, PenLine, Search, Terminal, Wrench, X } from '../mono/icons.tsx';
+import { AiIdea, Bot, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, CircleDashed, Copy, Eraser, File, MessageSquare, Minus, PenLine, Search, Sparkles, Terminal, Wrench, X } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
@@ -841,8 +841,41 @@ function ArrivingApproval({ approval }: { approval: Approval }) {
   );
 }
 
-/** One item of a turn outside its fold: prose at full size, or a group of work. */
+/**
+ * What the agent remembered or forgot, as one quiet line: "Remembered: the user wants no emojis".
+ * The text is what it saved; the agent settings list every entry, to edit or delete.
+ */
+/** What a dream did, as one quiet line like a memory line: "Dreamed: +2 -1 ~1, soul change proposed". */
+function DreamLine({ entry }: { entry: Entry }) {
+  const rest = entry.text.replace(/^Dreamed:\s*/, '');
+  return (
+    <div data-dream-line={entry.id} className="flex min-w-0 items-start gap-1.5 py-1 font-sans text-sm">
+      <Sparkles className="mt-[3px] size-3.5 shrink-0 text-content/45" strokeWidth={1.75} />
+      <span className="min-w-0 text-content/50">Dreamed{rest ? <>: <span className="text-content/80">{rest}</span></> : null}</span>
+    </div>
+  );
+}
+
+function MemoryLine({ entry }: { entry: Entry }) {
+  if (!entry.tool) return null;
+  const { verb, text } = memoryLine(entry.tool);
+  const Icon = /forget$/.test(entry.tool.name) ? Eraser : AiIdea;
+  const failed = entry.tool.status === 'error';
+  return (
+    <div data-memory-line={entry.id} className="flex min-w-0 items-start gap-1.5 py-1 font-sans text-sm">
+      <Icon className={`mt-[3px] size-3.5 shrink-0 ${failed ? 'text-danger' : 'text-content/45'}`} strokeWidth={1.75} />
+      <span className={`min-w-0 ${failed ? 'text-danger' : 'text-content/50'}`}>
+        {entry.tool.status === 'running' ? <Shimmer className="inline" duration={1.6}>{verb}</Shimmer> : verb}
+        {text ? <>: <span className={failed ? undefined : 'text-content/80'}>{text}</span></> : null}
+      </span>
+    </div>
+  );
+}
+
+/** One item of a turn outside its fold: prose at full size, a memory line, or a group of work. */
 function TurnItemView({ item, active, selfId, underLine }: { item: TurnItem; active: boolean; selfId: string; underLine: boolean }) {
+  if (item.type === 'memory') return <div className="px-4"><MemoryLine entry={item.entry} /></div>;
+  if (item.type === 'dream') return <div className="px-4"><DreamLine entry={item.entry} /></div>;
   if (item.type === 'prose') {
     return (
       <div data-chat-message={item.entry.id} data-chat-message-role="assistant" className={`min-w-0 px-4 pb-1 text-content ${underLine ? 'pt-1' : 'pt-3'}`}>
@@ -865,6 +898,8 @@ function ArrivingGroup({ item, active, selfId }: { item: Extract<TurnItem, { typ
 
 /** One item inside the fold, on its rail: a closed group, or the agent's commentary one notch quieter. */
 function FoldItemView({ item, selfId }: { item: TurnItem; selfId: string }) {
+  if (item.type === 'memory') return <MemoryLine entry={item.entry} />;
+  if (item.type === 'dream') return <DreamLine entry={item.entry} />;
   if (item.type === 'prose') return <div className="py-1"><Markdown text={item.entry.text} /></div>;
   return <ActivityPhaseGroup entries={item.entries} active={false} selfId={selfId} />;
 }
@@ -888,6 +923,8 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
   const items = useMemo(() => groupTurnItems(turn.items), [turn.items]);
   const fold = foldableWork(items);
   const rest = fold ? items.slice(fold.end + 1) : items;
+  // What it remembered stays in sight when the work around it folds away.
+  const kept = workOpen ? [] : keptInView(items, fold);
   const lastProse = items.findLast(item => item.type === 'prose');
   const settled = !live && Boolean(done || errors.length);
   const settledAt = done?.ts ?? errors.at(-1)?.ts ?? turn.items.at(-1)?.ts;
@@ -929,6 +966,11 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
           ))}
         </TurnRow>
       ) : null}
+      {kept.map(item => (
+        <div key={turnItemKey(item)} className="flow-root pb-1">
+          <TurnItemView item={item} selfId={agent.id} active={false} underLine={false} />
+        </div>
+      ))}
       {rest.map((item, index) => (
         <div key={turnItemKey(item)} className="flow-root pb-1">
           <TurnItemView
@@ -1320,6 +1362,11 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
     );
   };
   for (const section of visible) {
+    if (section.type === 'note' && isDreamLine(section.entry)) {
+      // A dream that ran between sessions sits between turns, as compact as inside one.
+      rows.push(<div key={section.entry.id} className="px-4"><DreamLine entry={section.entry} /></div>);
+      continue;
+    }
     if (section.type === 'note') {
       rows.push(
         <div key={section.entry.id} className="px-4 py-2 text-content/50">
