@@ -79,6 +79,17 @@ export interface Runner {
   close(): void;
   /** Resolves only once the underlying process/query has actually closed. */
   dispose?(): Promise<void>;
+  /**
+   * The slash commands and skills a running session can run, excluding the engine's own built-in
+   * commands; undefined when no session is running or the engine cannot say.
+   */
+  commands?(): Promise<RunnerCommand[] | undefined>;
+}
+
+export interface RunnerCommand {
+  name: string;
+  description: string;
+  argumentHint?: string;
 }
 
 export function systemInstructions(agent: Agent, project: Project): string {

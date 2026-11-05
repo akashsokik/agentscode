@@ -29,6 +29,8 @@ import {
 } from '../shared/types.ts';
 import { ROLES, rolePreset } from '../shared/roles.ts';
 import { isIdeCommand } from '../shared/commands.ts';
+import { injectSkillPrompt, skillNamesInText, type ComposerCommand } from '../shared/composer.ts';
+import { commandBody, commandsFor, type DiscoveredCommand } from './skills.ts';
 import { dropContextWindow, mergeContextUsage, sameContextUsage } from '../shared/contextUsage.ts';
 import { ClaudeRunner } from './agents/claude.ts';
 import { CodexRunner } from './agents/codex.ts';
@@ -357,7 +359,7 @@ export class AgentManager {
     if (isIdeCommand(text)) throw new HttpError(400, 'Use New session to clear the conversation.');
     const pictures = images.length === 1 ? 'an image' : `${images.length} images`;
     // The engines need some text with an image: Claude refuses an empty text block, Codex an empty prompt.
-    const prompt = text || `(The user sent ${pictures} with no text.)`;
+    const prompt = this.withSkills(id, text) || `(The user sent ${pictures} with no text.)`;
     const summary = text ? clip(text.replace(/\s+/g, ' '), 280) : `Sent ${pictures}`;
     this.startUserTask(id, text, prompt, { summary, source: 'user' }, undefined, images);
   }
@@ -435,6 +437,48 @@ export class AgentManager {
   entries(id: string): Entry[] {
     this.agent(id);
     return this.store.readEntries(id);
+  }
+
+  /**
+   * The skills and commands the composer's `/` picker offers for this agent. A running Claude
+   * session names them exactly; the files on disk fill in where each comes from, and stand in
+   * when no session is running.
+   */
+  async commands(id: string): Promise<ComposerCommand[]> {
+    const agent = this.agent(id);
+    const found = commandsFor(agent.engine, this.workspaceOf(id).root, os.homedir());
+    const live = await this.runners.get(id)?.commands().catch(() => undefined);
+    const strip = ({ path: _path, ...command }: DiscoveredCommand): ComposerCommand => command;
+    if (!live?.length) return found.map(strip);
+    const byName = new Map(found.map(command => [command.name, command]));
+    return live.map(command => {
+      const known = byName.get(command.name);
+      if (known) return { ...strip(known), description: command.description || known.description, argumentHint: command.argumentHint ?? known.argumentHint };
+      const plugin = command.name.includes(':') ? command.name.slice(0, command.name.indexOf(':')) : undefined;
+      return { ...command, scope: plugin ? 'plugin' : 'user', source: plugin ?? agent.engine };
+    });
+  }
+
+  /**
+   * Codex does not run skills itself, so a message naming one with /name carries the skill's
+   * instructions to it (MonoCode's injectSkillPrompt). Claude Code runs them as typed.
+   */
+  private withSkills(id: string, text: string): string {
+    const agent = this.agent(id);
+    if (agent.engine !== 'codex' || !text.includes('/')) return text;
+    const names = skillNamesInText(text);
+    if (!names.length) return text;
+    let catalog: DiscoveredCommand[];
+    try {
+      catalog = commandsFor(agent.engine, this.workspaceOf(id).root, os.homedir());
+    } catch {
+      return text;
+    }
+    const skills = names.flatMap(name => {
+      const skill = catalog.find(command => command.name === name);
+      return skill ? [{ name, body: commandBody(skill) }] : [];
+    });
+    return injectSkillPrompt(text, skills);
   }
 
   /** The folder an agent works in: its worktree, or its project. */

@@ -7,6 +7,7 @@ import type { Hub } from './hub.ts';
 import type { WorktreeCleanup } from '../shared/types.ts';
 import { HttpError } from './errors.ts';
 import type { AgentManager } from './manager.ts';
+import { listProjectFiles } from './fileList.ts';
 import { listDirs, normalizeDir } from './projects.ts';
 import { Terminals } from './terminals.ts';
 import { gitDiff, gitStatus, listTree, readFile } from './workspace.ts';
@@ -106,6 +107,10 @@ export function createApp(manager: AgentManager, terminals = new Terminals(id =>
     await manager.newSession(param(req, 'id'));
     res.json({ ok: true });
   });
+  // The composer's `/` picker: the skills and commands the agent's engine can run.
+  app.get('/api/agents/:id/commands', async (req, res) => {
+    res.json(await manager.commands(param(req, 'id')));
+  });
 
   app.post('/api/approvals/:id', (req, res) => {
     manager.resolveApproval(param(req, 'id'), req.body ?? {});
@@ -179,6 +184,10 @@ export function createApp(manager: AgentManager, terminals = new Terminals(id =>
   });
   app.get('/api/files/read', (req, res) => {
     res.json(readFile(rootOf(req).root, query(req, 'path')));
+  });
+  // The composer's `@` picker: every file in the workspace.
+  app.get('/api/files/list', async (req, res) => {
+    res.json(await listProjectFiles(rootOf(req).root));
   });
   app.get('/api/git/status', async (req, res) => {
     const { root, baseCommit } = rootOf(req);

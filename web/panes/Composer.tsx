@@ -394,12 +394,14 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
             images.add(files);
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.nativeEvent.isComposing) return;
+            if (pickerKey(e)) return;
+            if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               void send();
             }
           }}
-          placeholder={busy ? `Queue a message for ${agent.name}…` : `Ask ${agent.name}, or have it coordinate with a teammate…`}
+          placeholder={busy ? `Queue a message for ${agent.name}…` : `Ask ${agent.name}… @ for files, / for commands`}
           className="scrollbar-none relative min-h-16 max-h-40 w-full resize-none overflow-x-hidden whitespace-pre-wrap wrap-break-word bg-transparent px-3 pb-1.5 pt-3.5 font-sans text-sm leading-5.5 text-content outline-none placeholder:text-content/40"
         />
         <div className="flex items-center gap-1 px-2 pb-2.5">
@@ -426,7 +428,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
             {moreOpen ? (
               <Popover anchor={moreRef} side="top" align="start" width={250} onDismiss={() => setMoreOpen(false)} className="p-1.5">
                 <MenuLabel>Session</MenuLabel>
-                <MenuRow icon={RotateCcw} title="New session" hint="Clear the conversation context." disabled={busy} onSelect={() => { setMoreOpen(false); void attempt(() => api.newSession(agent.id)); }} />
+                <MenuRow icon={RotateCcw} title="New session" hint="Clear the conversation context. Or type /clear." disabled={busy} onSelect={() => { setMoreOpen(false); void attempt(() => api.newSession(agent.id)); }} />
                 <MenuRow icon={Settings} title="Agent settings" hint="Name, role and instructions." onSelect={() => { setMoreOpen(false); onSettings(); }} />
               </Popover>
             ) : null}

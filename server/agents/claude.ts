@@ -10,7 +10,7 @@ import {
 import fs from 'node:fs';
 import type { AgentTask, Autonomy, Question, ToolCall } from '../../shared/types.ts';
 import { approvalTitle, clip, toolActivity, toolDetail, toolResultText, toolSummary } from './describe.ts';
-import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
+import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
 import { commsMcpConfig, COMMS_TOOLS } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
 import { parseCommand } from '../../shared/commands.ts';
@@ -172,6 +172,15 @@ export class ClaudeRunner implements Runner {
 
   async setEffort(effort: string): Promise<void> {
     await this.q?.applyFlagSettings({ effortLevel: (effort || null) as EffortLevel | null });
+  }
+
+  /** What the running session can run, as Claude Code names it, without its own built-in commands. */
+  async commands(): Promise<RunnerCommand[] | undefined> {
+    const q = this.q;
+    if (!q) return undefined;
+    const timeout = new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 3000).unref());
+    const listed = await Promise.race([q.supportedCommands().catch(() => undefined), timeout]);
+    return listed?.filter(c => !c.builtin).map(c => ({ name: c.name, description: c.description, argumentHint: c.argumentHint || undefined }));
   }
 
   async dispose(): Promise<void> {

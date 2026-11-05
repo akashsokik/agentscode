@@ -39,7 +39,17 @@ Adapted from MonoCode markup:
   - web/ui/wordFade.ts            src/features/sessions/ui/wordFade.tsx (a stagger replaces its
                                   stream pacing, since engines here hand over whole blocks)
   - web/panes/Composer.tsx        Composer.tsx, ModelPicker's trigger, ToolButton, ComposerAction,
-                                  and its attachment row, paste and drop handling
+                                  and its attachment row, paste and drop handling, and its `/` and
+                                  `@` picker keys
+  - web/composer/Pickers.tsx      src/features/skills/ui/SkillPicker.tsx (its create-skill form left
+                                  out), src/features/sessions/ui/FileMentionPicker.tsx and
+                                  src/shared/ui/MatchText.tsx
+  - web/composer/tokens.ts        src/shared/lib/fuzzy.ts, src/features/skills/model/slashCommands.ts,
+                                  and the token and ranking parts of
+                                  src/features/files/model/fileMentions.ts and fileIndex.ts
+  - shared/composer.ts            injectSkillPrompt from src/features/skills/model/skills.ts
+  - server/skills.ts              the skill catalog of src/features/skills/model/skills.ts, read from
+                                  where Claude Code and Codex keep skills and commands
   - web/panes/ImageViews.tsx      AttachmentChip.tsx and the ImageLightbox it opens
   - web/App.tsx                   the inset layout and TitleBar tabs
   - web/assets/claude.svg, codex.svg   provider logos
