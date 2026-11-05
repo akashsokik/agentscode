@@ -1,0 +1,289 @@
+import express, { type Express, type NextFunction, type Request, type Response } from 'express';
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import { WebSocketServer } from 'ws';
+import type { Hub } from './hub.ts';
+import type { WorktreeCleanup } from '../shared/types.ts';
+import { HttpError } from './errors.ts';
+import type { AgentManager } from './manager.ts';
+import { listDirs, normalizeDir } from './projects.ts';
+import { Terminals } from './terminals.ts';
+import { gitDiff, gitStatus, listTree, readFile } from './workspace.ts';
+
+// ---- local-only guard ------------------------------------------------------
+// This server starts coding agents with access to your files, so it only answers
+// requests addressed to localhost (blocks DNS rebinding) and only accepts writes
+// and sockets from localhost pages (blocks cross-site requests).
+
+export function isLocalHost(host: string | undefined): boolean {
+  if (!host) return false;
+  const name = host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+  return name === 'localhost' || name === '127.0.0.1' || name === '::1';
+}
+
+export function isLocalOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // same-origin navigations and non-browser clients
+  try {
+    const url = new URL(origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && isLocalHost(url.host);
+  } catch {
+    return false;
+  }
+}
+
+function localOnly(req: Request, res: Response, next: NextFunction): void {
+  if (!isLocalHost(req.headers.host)) {
+    res.status(403).json({ error: 'AgentsCode only answers on localhost.' });
+    return;
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !isLocalOrigin(req.headers.origin)) {
+    res.status(403).json({ error: 'Cross-origin request refused.' });
+    return;
+  }
+  next();
+}
+
+/** The REST API. Static files and the WebSockets are attached by createServer. */
+export function createApp(manager: AgentManager, terminals = new Terminals(id => manager.project(id))): Express {
+  const app = express();
+  app.disable('x-powered-by');
+  app.use(localOnly);
+  app.use(express.json({ limit: '2mb' }));
+
+  const param = (req: Request, name: string): string => String(req.params[name]);
+  const query = (req: Request, name: string): string => (typeof req.query[name] === 'string' ? String(req.query[name]) : '');
+
+  app.get('/api/state', (_req, res) => {
+    res.json(manager.snapshot());
+  });
+
+  // Agent processes reach this through the comms MCP server; the bearer token identifies them.
+  app.post('/api/comms', async (req, res) => {
+    const auth = req.headers.authorization ?? '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    res.json(await manager.commsTool(token, req.body?.tool, req.body?.args));
+  });
+
+  app.post('/api/agents', async (req, res) => {
+    res.status(201).json(await manager.create(req.body ?? {}));
+  });
+  app.patch('/api/agents/:id', async (req, res) => {
+    res.json(await manager.update(param(req, 'id'), req.body ?? {}));
+  });
+  app.delete('/api/agents/:id', async (req, res) => {
+    const cleanup = query(req, 'worktree') || 'keep';
+    if (!['keep', 'remove', 'discard'].includes(cleanup)) throw new HttpError(400, 'Unknown worktree option.');
+    await manager.remove(param(req, 'id'), cleanup as WorktreeCleanup);
+    res.status(204).end();
+  });
+  app.get('/api/agents/:id/entries', (req, res) => {
+    res.json(manager.entries(param(req, 'id')));
+  });
+  app.post('/api/agents/:id/messages', (req, res) => {
+    manager.send(param(req, 'id'), req.body?.text, req.body?.images);
+    res.status(202).json({ ok: true });
+  });
+  // An image pasted or attached in the composer: raw bytes in, an attachment the next message can name out.
+  app.post('/api/agents/:id/attachments', express.raw({ type: () => true, limit: '4mb' }), (req, res) => {
+    res.status(201).json(manager.saveAttachment(param(req, 'id'), req.body, req.headers['x-file-name']));
+  });
+  app.get('/api/agents/:id/attachments/:file', (req, res) => {
+    const file = manager.attachmentFile(param(req, 'id'), param(req, 'file'));
+    // Stored names are never reused, so a thumbnail can be cached for good. The type comes from the bytes.
+    res.set({ 'Content-Type': file.mediaType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=31536000, immutable' });
+    res.sendFile(file.path);
+  });
+  app.post('/api/agents/:id/stop', async (req, res) => {
+    await manager.stop(param(req, 'id'));
+    res.json({ ok: true });
+  });
+  app.post('/api/agents/:id/seen', (req, res) => {
+    manager.seen(param(req, 'id'));
+    res.json({ ok: true });
+  });
+  app.post('/api/agents/:id/new-session', async (req, res) => {
+    await manager.newSession(param(req, 'id'));
+    res.json({ ok: true });
+  });
+
+  app.post('/api/approvals/:id', (req, res) => {
+    manager.resolveApproval(param(req, 'id'), req.body ?? {});
+    res.json({ ok: true });
+  });
+
+  app.post('/api/conversations/:id/stop', (req, res) => {
+    res.json(manager.stopConversation(param(req, 'id')));
+  });
+
+  app.post('/api/channels', (req, res) => {
+    res.status(201).json(manager.createChannel(req.body ?? {}));
+  });
+  app.patch('/api/channels/:id', (req, res) => {
+    res.json(manager.updateChannel(param(req, 'id'), req.body ?? {}));
+  });
+  app.delete('/api/channels/:id', (req, res) => {
+    manager.removeChannel(param(req, 'id'));
+    res.status(204).end();
+  });
+  app.get('/api/channels/:id/posts', (req, res) => {
+    res.json(manager.channelPosts(param(req, 'id')));
+  });
+  app.post('/api/channels/:id/posts', (req, res) => {
+    res.status(201).json(manager.postToChannel(param(req, 'id'), req.body?.text, req.body?.mentions, req.body?.threadId));
+  });
+  app.post('/api/channels/:id/seen', (req, res) => {
+    manager.channelSeen(param(req, 'id'));
+    res.json({ ok: true });
+  });
+
+  app.post('/api/projects', (req, res) => {
+    res.status(201).json(manager.addProject(req.body ?? {}));
+  });
+  app.patch('/api/projects/:id', (req, res) => {
+    res.json(manager.renameProject(param(req, 'id'), req.body ?? {}));
+  });
+  app.delete('/api/projects/:id', (req, res) => {
+    manager.removeProject(param(req, 'id'));
+    terminals.closeProject(param(req, 'id'));
+    res.status(204).end();
+  });
+
+  // Shells for the terminal panel, one project folder each. Their bytes go over /ws/terminal/<id>.
+  app.get('/api/terminals', (_req, res) => {
+    res.json(terminals.list());
+  });
+  app.post('/api/terminals', (req, res) => {
+    const from = typeof req.body?.from === 'string' ? req.body.from : undefined;
+    res.status(201).json(terminals.create(String(req.body?.projectId ?? ''), { cols: req.body?.cols, rows: req.body?.rows }, from));
+  });
+  // Which of these terminals run a program (not just the shell), so closing them asks first.
+  app.get('/api/terminals/busy', (req, res) => {
+    res.json(terminals.busy(query(req, 'ids').split(',').filter(Boolean).slice(0, 64)));
+  });
+  app.delete('/api/terminals/:id', (req, res) => {
+    terminals.close(param(req, 'id'));
+    res.status(204).end();
+  });
+
+  // Files and git for an agent's workspace (its worktree, or its project), or a project folder.
+  const rootOf = (req: Request): { root: string; baseCommit?: string } => {
+    const agent = query(req, 'agent');
+    if (agent) return manager.workspaceOf(agent);
+    const project = query(req, 'project');
+    if (project) return { root: manager.project(project).path };
+    throw new HttpError(400, 'Choose an agent or a project.');
+  };
+  app.get('/api/files/tree', (req, res) => {
+    res.json(listTree(rootOf(req).root, query(req, 'path')));
+  });
+  app.get('/api/files/read', (req, res) => {
+    res.json(readFile(rootOf(req).root, query(req, 'path')));
+  });
+  app.get('/api/git/status', async (req, res) => {
+    const { root, baseCommit } = rootOf(req);
+    res.json(await gitStatus(root, baseCommit));
+  });
+  app.get('/api/git/diff', async (req, res) => {
+    res.json(await gitDiff(rootOf(req).root, query(req, 'path')));
+  });
+
+  // Folder picker for adding projects.
+  app.get('/api/fs', (req, res) => {
+    try {
+      res.json(listDirs(query(req, 'path'), query(req, 'hidden') === '1'));
+    } catch (err) {
+      throw new HttpError(400, `Cannot open that folder: ${(err as Error).message}`);
+    }
+  });
+  app.post('/api/fs/mkdir', (req, res) => {
+    if (!req.body?.path) throw new HttpError(400, 'Folder path is empty.');
+    const dir = normalizeDir(String(req.body.path));
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch (err) {
+      throw new HttpError(400, `Cannot create ${dir}: ${(err as Error).message}`);
+    }
+    res.status(201).json({ path: dir });
+  });
+
+  app.post('/api/models/refresh', async (_req, res) => {
+    res.json(await manager.refreshModels());
+  });
+  app.patch('/api/settings', (req, res) => {
+    res.json(manager.updateSettings(req.body ?? {}));
+  });
+
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'Not found.' });
+  });
+
+  app.use((err: Error & { status?: number; type?: string }, _req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) return next(err);
+    const status = err instanceof HttpError ? err.status : err.type === 'entity.parse.failed' ? 400 : (err.status ?? 500);
+    if (status >= 500) console.error('[server]', err);
+    const message = err.type === 'entity.too.large' ? 'That upload is too large.' : err.message || 'Server error.';
+    res.status(status).json({ error: message });
+  });
+
+  return app;
+}
+
+/**
+ * The full server: REST API, the built web app when dist/ exists, the WebSocket that sends a
+ * snapshot on connect and live events after, and one socket per terminal. The caller decides
+ * where to listen. Closing the server ends its terminals.
+ */
+export function createServer(manager: AgentManager, hub: Hub, options: { distDir?: string; terminals?: Terminals } = {}): http.Server {
+  const terminals = options.terminals ?? new Terminals(id => manager.project(id));
+  terminals.onChange(list => hub.broadcast({ type: 'terminals', terminals: list }));
+  const app = createApp(manager, terminals);
+  const dist = options.distDir;
+  if (dist && fs.existsSync(path.join(dist, 'index.html'))) {
+    app.use(express.static(dist, { index: false }));
+    // Client-side routes all load the app shell.
+    app.use((req, res, next) => {
+      if (req.method === 'GET') res.sendFile('index.html', { root: dist });
+      else next();
+    });
+  } else {
+    app.get('/', (_req, res) => {
+      res.type('text').send('AgentsCode API is running. Run `npm run dev` for the Vite dev server, or `npm start` to build and serve the app here.');
+    });
+  }
+
+  const server = http.createServer(app);
+  const wss = new WebSocketServer({ noServer: true });
+  // A terminal socket carries keystrokes into a shell, so it gets the same localhost guard.
+  const terminalWss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });
+  server.on('upgrade', (req, socket, head) => {
+    const { pathname } = new URL(req.url ?? '/', 'http://localhost');
+    const terminalId = /^\/ws\/terminal\/([\w-]{1,64})$/.exec(pathname)?.[1];
+    if ((pathname !== '/ws' && !terminalId) || !isLocalHost(req.headers.host) || !isLocalOrigin(req.headers.origin)) {
+      socket.destroy();
+      return;
+    }
+    if (terminalId) {
+      terminalWss.handleUpgrade(req, socket, head, ws => terminals.attach(terminalId, ws));
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      hub.add(ws);
+      hub.send(ws, { type: 'snapshot', data: manager.snapshot() });
+      hub.send(ws, { type: 'terminals', terminals: terminals.list() });
+    });
+  });
+  // Keep idle sockets from being dropped by proxies and sleeping laptops.
+  const ping = setInterval(() => {
+    for (const ws of [...wss.clients, ...terminalWss.clients]) ws.ping();
+  }, 30_000);
+  ping.unref();
+  server.on('close', () => {
+    clearInterval(ping);
+    terminals.closeAll();
+    for (const ws of [...wss.clients, ...terminalWss.clients]) ws.terminate();
+    wss.close();
+    terminalWss.close();
+  });
+  return server;
+}

@@ -1,0 +1,175 @@
+import path from 'node:path';
+import { COMMS_SERVER } from '../config.ts';
+
+// Turn raw tool calls into short human text for speech bubbles, chat rows and approval cards.
+
+type Input = Record<string, unknown>;
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+export function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}...` : flat;
+}
+
+/** Show paths inside the project relative to it, so bubbles and rows stay short. */
+export function relativize(text: string, cwd?: string): string {
+  if (!cwd || cwd === '/') return text;
+  return text.split(`${cwd}/`).join('').split(cwd).join('.');
+}
+
+function base(p: unknown): string {
+  return path.basename(str(p)) || str(p);
+}
+
+function filePathOf(input: Input): string {
+  return str(input.file_path) || str(input.path) || str(input.notebook_path);
+}
+
+/** A few words for the speech bubble over the desk. */
+export function toolActivity(name: string, input: Input): string {
+  switch (name) {
+    case 'Read':
+      return `Reading ${base(filePathOf(input))}`;
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return `Editing ${base(filePathOf(input))}`;
+    case 'Write':
+      return `Writing ${base(filePathOf(input))}`;
+    case 'Bash':
+      return str(input.description) ? clip(str(input.description), 40) : `Running ${clip(str(input.command), 32)}`;
+    case 'Grep':
+      return `Searching "${clip(str(input.pattern), 24)}"`;
+    case 'Glob':
+      return `Looking for ${clip(str(input.pattern), 28)}`;
+    case 'WebFetch':
+      return 'Reading the web';
+    case 'WebSearch':
+      return `Searching the web`;
+    case 'Task':
+    case 'Agent':
+      return `Delegating: ${clip(str(input.description), 30)}`;
+    case 'TodoWrite':
+      return 'Updating the plan';
+    case 'AskUserQuestion':
+      return 'Has a question';
+    case 'ExitPlanMode':
+      return 'Plan ready';
+    default:
+      return `Using ${name.replace(/^mcp__/, '').replace(/__/g, ' ')}`;
+  }
+}
+
+/** One line for the chat transcript. */
+export function toolSummary(name: string, input: Input, cwd?: string): string {
+  switch (name) {
+    case 'Bash':
+      return clip(relativize(str(input.command), cwd), 160);
+    case 'Read':
+    case 'Edit':
+    case 'MultiEdit':
+    case 'Write':
+    case 'NotebookEdit':
+      return relativize(filePathOf(input), cwd);
+    case 'Grep':
+      return `${str(input.pattern)}${input.path ? `  in ${relativize(str(input.path), cwd)}` : ''}`;
+    case 'Glob':
+      return str(input.pattern);
+    case 'WebFetch':
+      return str(input.url);
+    case 'WebSearch':
+      return str(input.query);
+    case 'Task':
+    case 'Agent':
+      return str(input.description);
+    case 'TodoWrite': {
+      const todos = Array.isArray(input.todos) ? (input.todos as Input[]) : [];
+      const done = todos.filter((t) => t.status === 'completed').length;
+      return `${done}/${todos.length} steps done`;
+    }
+    case `mcp__${COMMS_SERVER}__post_to_channel`:
+      return clip(`${str(input.channel)}: ${str(input.text).replace(/\s+/g, ' ')}`, 160);
+    case `mcp__${COMMS_SERVER}__read_channel`:
+      return str(input.channel);
+    default:
+      return clip(JSON.stringify(input), 160);
+  }
+}
+
+function diffLines(oldText: string, newText: string): string {
+  const minus = oldText.split('\n').map((l) => `- ${l}`);
+  const plus = newText.split('\n').map((l) => `+ ${l}`);
+  return [...minus, ...plus].join('\n');
+}
+
+/** Longer body shown when a tool row or approval card is expanded. */
+export function toolDetail(name: string, input: Input, cwd?: string): string {
+  switch (name) {
+    case 'Bash':
+      return [relativize(str(input.command), cwd), str(input.description) && `# ${str(input.description)}`]
+        .filter(Boolean)
+        .join('\n');
+    case 'Edit':
+      return diffLines(str(input.old_string), str(input.new_string));
+    case 'MultiEdit': {
+      const edits = Array.isArray(input.edits) ? (input.edits as Input[]) : [];
+      return edits.map((e) => diffLines(str(e.old_string), str(e.new_string))).join('\n...\n');
+    }
+    case 'Write': {
+      const lines = str(input.content).split('\n');
+      const head = lines.slice(0, 40).join('\n');
+      return lines.length > 40 ? `${head}\n... (${lines.length - 40} more lines)` : head;
+    }
+    case 'TodoWrite': {
+      const todos = Array.isArray(input.todos) ? (input.todos as Input[]) : [];
+      const mark = (s: unknown) => (s === 'completed' ? '[x]' : s === 'in_progress' ? '[>]' : '[ ]');
+      return todos.map((t) => `${mark(t.status)} ${str(t.content)}`).join('\n');
+    }
+    case 'Task':
+    case 'Agent':
+      return str(input.prompt);
+    default:
+      return JSON.stringify(input, null, 2);
+  }
+}
+
+/** The question in the raised-hand bubble, e.g. "Run npm test?". */
+export function approvalTitle(name: string, input: Input, cwd?: string): string {
+  switch (name) {
+    case 'Bash': {
+      const command = relativize(str(input.command), cwd).trim();
+      if (command.length <= 40 || !str(input.description)) return `Run ${clip(command, 40)}?`;
+      return `${clip(str(input.description), 44)}?`;
+    }
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return `Edit ${base(filePathOf(input))}?`;
+    case 'Write':
+      return `Write ${base(filePathOf(input))}?`;
+    case 'WebFetch': {
+      try {
+        return `Fetch ${new URL(str(input.url)).host}?`;
+      } catch {
+        return 'Fetch a web page?';
+      }
+    }
+    case 'WebSearch':
+      return `Search the web for "${clip(str(input.query), 32)}"?`;
+    default:
+      return `Use ${name.replace(/^mcp__/, '').replace(/__/g, ' ')}?`;
+  }
+}
+
+/** Flatten a tool_result content payload to plain text. */
+export function toolResultText(content: unknown, max = 4000): string {
+  let text = '';
+  if (typeof content === 'string') text = content;
+  else if (Array.isArray(content)) {
+    text = content
+      .map((block: Input) => (block?.type === 'text' ? str(block.text) : block?.type === 'image' ? '[image]' : ''))
+      .join('\n');
+  }
+  return text.length > max ? `${text.slice(0, max)}\n... (${text.length - max} more characters)` : text;
+}

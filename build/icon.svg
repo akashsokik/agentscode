@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- The app's brand mark (web/ui/BrandMark.tsx) on a macOS icon tile: code brackets in the accent around a dot. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2b30" />
+      <stop offset="1" stop-color="#151517" />
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)" />
+  <rect x="101" y="101" width="822" height="822" rx="184" fill="none" stroke="#ffffff" stroke-opacity="0.09" stroke-width="2" />
+  <path d="M335 365 218 512l117 147M689 365l117 147-117 147" fill="none" stroke="#459bf7" stroke-width="76" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="512" cy="512" r="62" fill="#ececec" />
+</svg>

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Desktop app build output
+out/
+release/
+
+# Local tool state
+.playwright-mcp/
+.claude/settings.local.json

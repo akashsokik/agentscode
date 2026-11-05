@@ -1,0 +1,243 @@
+/**
+ * The AgentsCode desktop app: a window on the AgentsCode server. It starts the bundled server
+ * (compiled to out/server) in an Electron utility process and opens a window once it listens.
+ * When an AgentsCode server already answers on the port (say `npm run dev`), the window opens
+ * on that one instead, so two servers never share ~/.agentscode. Ported from Agent Office.
+ */
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import { app, BrowserWindow, dialog, Menu, shell, utilityProcess, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
+
+const PORT = Number(process.env.PORT ?? 4320);
+const ORIGIN = `http://127.0.0.1:${PORT}`;
+/** How long the server gets to stop its agents before the app quits anyway. */
+const SHUTDOWN_GRACE_MS = 8000;
+/** How long a fresh server gets to start listening before the app gives up. */
+const START_TIMEOUT_MS = 60_000;
+/** The line server/index.ts logs once it listens. */
+const READY_LINE = 'AgentsCode is open at';
+
+let server: UtilityProcess | null = null;
+let window: BrowserWindow | null = null;
+let ready = false;
+let quitting = false;
+const recentOutput: string[] = [];
+
+/** Finder starts apps with a bare PATH; agents need the user's own to find node, git, claude and codex. */
+function useLoginShellPath(): void {
+  try {
+    const output = execFileSync(process.env.SHELL || '/bin/zsh', ['-ilc', 'printf "__PATH__%s__PATH__" "$PATH"'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const found = output.match(/__PATH__(.*)__PATH__/)?.[1];
+    if (found) process.env.PATH = found;
+  } catch {
+    // keep the default PATH; server/config.ts also checks the usual install locations
+  }
+}
+
+/** True when an AgentsCode server already answers on the port. */
+async function serverAnswers(): Promise<boolean> {
+  try {
+    const res = await fetch(`${ORIGIN}/api/state`, { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return false;
+    const state = (await res.json()) as { agents?: unknown };
+    return Array.isArray(state.agents);
+  } catch {
+    return false;
+  }
+}
+
+function markReady(): void {
+  if (ready) return;
+  ready = true;
+  showWindow();
+}
+
+function startServer(): void {
+  server = utilityProcess.fork(path.join(import.meta.dirname, '..', 'server', 'index.js'), [], {
+    serviceName: 'AgentsCode Server',
+    stdio: 'pipe',
+    // The server runs agents' comms tools with this binary, as plain Node (server/config.ts).
+    env: { ...process.env, AGENTSCODE_NODE: process.execPath },
+  });
+  for (const [stream, sink] of [[server.stdout, process.stdout], [server.stderr, process.stderr]] as const) {
+    stream?.on('data', (chunk: Buffer) => {
+      sink.write(chunk);
+      const text = chunk.toString();
+      recentOutput.push(text);
+      if (recentOutput.length > 40) recentOutput.shift();
+      if (text.includes(READY_LINE)) markReady();
+    });
+  }
+  server.on('exit', onServerExit);
+  // In case the ready line is missed, ask the server itself.
+  const started = Date.now();
+  const poll = setInterval(() => {
+    if (ready || !server) return clearInterval(poll);
+    if (Date.now() - started > START_TIMEOUT_MS) {
+      clearInterval(poll);
+      dialog.showErrorBox('AgentsCode could not start', `The server did not answer on port ${PORT} within a minute.`);
+      app.exit(1);
+      return;
+    }
+    void serverAnswers().then(up => { if (up) markReady(); });
+  }, 500);
+}
+
+/**
+ * While the window shows a server this app did not start (say `npm run dev`), keep an eye on it:
+ * if it stops answering for a few seconds, start the bundled one in its place. The page
+ * reconnects on its own. A short gap, like `node --watch` restarting, is not enough.
+ */
+function watchAttachedServer(): void {
+  let misses = 0;
+  const timer = setInterval(() => {
+    if (server || quitting) return clearInterval(timer);
+    void serverAnswers().then(up => {
+      misses = up ? 0 : misses + 1;
+      if (misses >= 3 && !server && !quitting) {
+        clearInterval(timer);
+        startServer();
+      }
+    });
+  }, 2000);
+}
+
+function onServerExit(code: number): void {
+  server = null;
+  if (quitting) {
+    app.exit(0);
+    return;
+  }
+  void serverAnswers().then(up => {
+    // Another AgentsCode server took the port first (it came back while ours started): use it.
+    if (up) {
+      markReady();
+      watchAttachedServer();
+      return;
+    }
+    const tail = recentOutput.join('').trim().split('\n').slice(-8).join('\n');
+    dialog.showErrorBox(
+      ready ? 'AgentsCode stopped' : 'AgentsCode could not start',
+      `The AgentsCode server exited with code ${code}.${tail ? `\n\n${tail}` : ''}`,
+    );
+    app.exit(1);
+  });
+}
+
+/**
+ * The app menu: the standard Edit, View and Window commands. Close Window moves to Shift+Cmd+W
+ * so Cmd+W reaches the page, where it closes the current tab (web/shortcuts.ts) as in MonoCode.
+ */
+function setMenu(): void {
+  const template: MenuItemConstructorOptions[] = [
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' } as MenuItemConstructorOptions] : []),
+    { label: 'File', submenu: [{ label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' }] },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function showWindow(): void {
+  if (!ready) return;
+  if (window) {
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    return;
+  }
+  window = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 960,
+    minHeight: 600,
+    title: 'AgentsCode',
+    // The dark theme's base colour (web/styles.css), so the window never flashes white.
+    backgroundColor: '#171717',
+    // MonoCode's window: no title bar, the traffic lights inside the left column's 40px header.
+    // The page leaves room for them and drags the window by its headers (the `desktop` variant).
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 16, y: 13 } } : {}),
+    show: false,
+  });
+  window.once('ready-to-show', () => window?.show());
+  window.on('closed', () => {
+    window = null;
+  });
+  // Anything that is not AgentsCode itself opens in the user's browser.
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  window.webContents.on('will-navigate', (event) => {
+    if (new URL(event.url).origin === ORIGIN) return;
+    event.preventDefault();
+    if (/^https?:/i.test(event.url)) void shell.openExternal(event.url);
+  });
+  // Right-click: the usual edit commands in a text field, Copy on selected text. Paste runs the
+  // page's own paste handling, so an image on the clipboard attaches in the composer.
+  window.webContents.on('context-menu', (_event, params) => {
+    const flags = params.editFlags;
+    const items: MenuItemConstructorOptions[] = params.isEditable
+      ? [
+          { role: 'cut', enabled: flags.canCut },
+          { role: 'copy', enabled: flags.canCopy },
+          // Left enabled: Chromium reports no paste for a clipboard that holds only an image.
+          { role: 'paste' },
+          { type: 'separator' },
+          { role: 'selectAll', enabled: flags.canSelectAll },
+        ]
+      : params.selectionText.trim()
+        ? [{ role: 'copy' }]
+        : [];
+    if (items.length && window) Menu.buildFromTemplate(items).popup({ window });
+  });
+  void window.loadURL(ORIGIN);
+}
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', showWindow);
+  app.on('activate', showWindow);
+  app.on('window-all-closed', () => {
+    // On macOS the agents keep working with the window closed, like other Mac apps.
+    if (process.platform !== 'darwin') app.quit();
+  });
+  app.on('before-quit', (event) => {
+    if (!server) return;
+    event.preventDefault();
+    if (quitting) return;
+    quitting = true;
+    // SIGTERM runs manager.shutdown() (server/index.ts), which stops every agent before the server exits.
+    setTimeout(() => app.exit(0), SHUTDOWN_GRACE_MS).unref();
+    server.kill();
+  });
+  void app.whenReady().then(async () => {
+    setMenu();
+    if (app.isPackaged) useLoginShellPath();
+    // A packaged app gets its icon from the bundle; running from source would show Electron's.
+    else app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
+    if (await serverAnswers()) {
+      markReady();
+      watchAttachedServer();
+    } else startServer();
+  });
+}

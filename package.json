@@ -1,0 +1,78 @@
+{
+  "name": "agentscode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "productName": "AgentsCode",
+  "description": "An IDE where Claude Code and Codex agents work side by side and talk to each other.",
+  "main": "out/electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "node --watch server/index.ts",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "vite build && node server/index.ts",
+    "build:desktop": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper && vite build --outDir out/dist && tsc -p tsconfig.desktop.json",
+    "desktop": "npm run build:desktop && electron .",
+    "dist:mac": "npm run build:desktop && electron-builder --mac",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.desktop.json",
+    "test": "node --test tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "build": {
+    "appId": "com.agentscode.app",
+    "productName": "AgentsCode",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asar": false,
+    "npmRebuild": false,
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": "arm64"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.316",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "express": "^5.3.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.22.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@hugeicons/core-free-icons": "^4.4.0",
+    "@hugeicons/react": "^1.1.10",
+    "@tailwindcss/vite": "^4.3.4",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "electron": "^45.2.2",
+    "electron-builder": "^26.18.0",
+    "ghostty-web": "^0.4.0",
+    "highlight.js": "^11.12.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
+    "tailwindcss": "^4.3.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}

@@ -1,0 +1,122 @@
+import type {
+  Agent,
+  AgentPatch,
+  ApprovalDecision,
+  Channel,
+  ChannelInput,
+  ChannelPost,
+  Conversation,
+  CreateAgentRequest,
+  DirListing,
+  EngineKind,
+  EngineModels,
+  Entry,
+  FileContent,
+  FileDiff,
+  GitStatus,
+  ImageAttachment,
+  Project,
+  Settings,
+  Snapshot,
+  TerminalInfo,
+  TreeListing,
+  WorktreeCleanup,
+} from '../shared/types.ts';
+import type { ComposerCommand, ProjectFileList } from '../shared/composer.ts';
+
+/** Where files and git commands run: an agent's workspace, or a project folder. */
+export type Root = { agent: string } | { project: string };
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (response.status === 204) return undefined as T;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new ApiError(response.status, (data as { error?: string }).error ?? `Request failed (${response.status}).`);
+  return data as T;
+}
+
+/** Where an attached image can be loaded from. */
+export function attachmentUrl(agentId: string, image: Pick<ImageAttachment, 'id'>): string {
+  return `/api/agents/${agentId}/attachments/${image.id}`;
+}
+
+function rootQuery(root: Root, extra: Record<string, string> = {}): string {
+  const params = new URLSearchParams({ ...('agent' in root ? { agent: root.agent } : { project: root.project }), ...extra });
+  return params.toString();
+}
+
+export const api = {
+  state: () => request<Snapshot>('GET', '/api/state'),
+
+  createAgent: (input: CreateAgentRequest) => request<Agent>('POST', '/api/agents', input),
+  updateAgent: (id: string, patch: AgentPatch) => request<Agent>('PATCH', `/api/agents/${id}`, patch),
+  removeAgent: (id: string, worktree: WorktreeCleanup = 'keep') => request<void>('DELETE', `/api/agents/${id}?worktree=${worktree}`),
+  entries: (id: string) => request<Entry[]>('GET', `/api/agents/${id}/entries`),
+  send: (id: string, text: string, images?: ImageAttachment[]) =>
+    request<{ ok: true }>('POST', `/api/agents/${id}/messages`, { text, images: images?.length ? images.map(i => ({ id: i.id, name: i.name })) : undefined }),
+  /** Upload one image for the agent's next message. */
+  attach: async (id: string, image: Blob, name: string): Promise<ImageAttachment> => {
+    const response = await fetch(`/api/agents/${id}/attachments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(name) },
+      body: image,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new ApiError(response.status, (data as { error?: string }).error ?? `Upload failed (${response.status}).`);
+    return data as ImageAttachment;
+  },
+  stop: (id: string) => request<{ ok: true }>('POST', `/api/agents/${id}/stop`),
+  seen: (id: string) => request<{ ok: true }>('POST', `/api/agents/${id}/seen`),
+  newSession: (id: string) => request<{ ok: true }>('POST', `/api/agents/${id}/new-session`),
+  /** The skills and commands the agent's engine can run, for the composer's `/` picker. */
+  commands: (id: string) => request<ComposerCommand[]>('GET', `/api/agents/${id}/commands`),
+
+  resolveApproval: (id: string, decision: ApprovalDecision) => request<{ ok: true }>('POST', `/api/approvals/${id}`, decision),
+  stopConversation: (id: string) => request<Conversation>('POST', `/api/conversations/${id}/stop`),
+
+  createChannel: (input: ChannelInput) => request<Channel>('POST', '/api/channels', input),
+  updateChannel: (id: string, input: ChannelInput) => request<Channel>('PATCH', `/api/channels/${id}`, input),
+  removeChannel: (id: string) => request<void>('DELETE', `/api/channels/${id}`),
+  channelPosts: (id: string) => request<ChannelPost[]>('GET', `/api/channels/${id}/posts`),
+  /** `threadId` posts into the thread under that top-level post. */
+  post: (id: string, text: string, mentions: string[], threadId?: string) => request<ChannelPost>('POST', `/api/channels/${id}/posts`, { text, mentions, threadId }),
+  channelSeen: (id: string) => request<{ ok: true }>('POST', `/api/channels/${id}/seen`),
+
+  addProject: (input: { path: string; name?: string; create?: boolean }) => request<Project>('POST', '/api/projects', input),
+  renameProject: (id: string, name: string) => request<Project>('PATCH', `/api/projects/${id}`, { name }),
+  removeProject: (id: string) => request<void>('DELETE', `/api/projects/${id}`),
+
+  tree: (root: Root, path = '') => request<TreeListing>('GET', `/api/files/tree?${rootQuery(root, { path })}`),
+  readFile: (root: Root, path: string) => request<FileContent>('GET', `/api/files/read?${rootQuery(root, { path })}`),
+  /** Every file in the workspace (git's view of it when it is a repository), for the `@` picker. */
+  projectFiles: (root: Root) => request<ProjectFileList>('GET', `/api/files/list?${rootQuery(root)}`),
+  gitStatus: (root: Root) => request<GitStatus>('GET', `/api/git/status?${rootQuery(root)}`),
+  gitDiff: (root: Root, path: string) => request<FileDiff>('GET', `/api/git/diff?${rootQuery(root, { path })}`),
+
+  listDirs: (path: string, hidden = false) => request<DirListing>('GET', `/api/fs?${new URLSearchParams({ path, hidden: hidden ? '1' : '0' })}`),
+  mkdir: (path: string) => request<{ path: string }>('POST', '/api/fs/mkdir', { path }),
+
+  /**
+   * A shell in the project's folder; `cols` and `rows` start it at about its size. `from` splits
+   * that terminal: the new shell starts in the folder the other one is in now.
+   */
+  createTerminal: (projectId: string, size?: { cols: number; rows: number }, from?: string) => request<TerminalInfo>('POST', '/api/terminals', { projectId, ...size, from }),
+  /** Of these terminals, the ones running a program, with its name. */
+  terminalsBusy: (ids: string[]) => request<Record<string, string>>('GET', `/api/terminals/busy?${new URLSearchParams({ ids: ids.join(',') })}`),
+  closeTerminal: (id: string) => request<void>('DELETE', `/api/terminals/${id}`),
+
+  refreshModels: () => request<Record<EngineKind, EngineModels>>('POST', '/api/models/refresh'),
+  updateSettings: (settings: Partial<Settings>) => request<Settings>('PATCH', '/api/settings', settings),
+};
