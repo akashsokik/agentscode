@@ -499,5 +499,3 @@ export interface FileDiff {
   status: string;
   diff: string;
 }
-
-export const MAX_AGENTS = 24;

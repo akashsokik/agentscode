@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  MAX_AGENTS,
   type Agent,
   type AgentPatch,
   type AgentTask,
@@ -235,7 +234,6 @@ export class AgentManager {
     const project = this.store.projects.get(req.projectId);
     if (!project) throw new HttpError(400, 'Pick a project for this agent.');
     if (!isDirectory(project.path)) throw new HttpError(400, `The project folder ${project.path} does not exist.`);
-    if (this.store.agents.size >= MAX_AGENTS) throw new HttpError(400, `AgentsCode runs at most ${MAX_AGENTS} agents.`);
     const name = this.agentName(req.name);
     const role = req.role ?? 'dev';
     if (!ROLES.some(r => r.id === role)) throw new HttpError(400, 'Unknown agent role.');
