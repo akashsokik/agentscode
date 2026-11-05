@@ -11,7 +11,8 @@
  * rises into place at the top of the view before the rest of its turn fades in under it.
  */
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import type { Agent, Approval, Entry, PeerMessage, ToolCall } from '../../shared/types.ts';
+import type { Agent, Approval, Entry, PeerMessage, ToolCall, TurnMeta } from '../../shared/types.ts';
+import { turnMetricsText } from '../../shared/turnUsage.ts';
 import { foldableWork, groupTurnItems, turnItemKey, workKind, workSummaryLine, type PhaseKind, type TurnItem } from '../activity.ts';
 import { api } from '../api.ts';
 import { modelLabel } from '../format.ts';
@@ -710,13 +711,13 @@ function WorkFoldLine({ title, agent, live, expandable, open, onToggle }: {
   );
 }
 
-/** MonoCode's TurnMetricsBadge, showing what this turn cost. */
-function TurnMetricsBadge({ costUsd, tokens }: { costUsd?: number; tokens?: number }) {
+/** MonoCode's TurnMetricsBadge: cache hit, output speed and token counts for this turn, on hover. */
+function TurnMetricsBadge({ meta }: { meta?: TurnMeta }) {
   const root = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
-  if (!costUsd && !tokens) return null;
-  const headline = costUsd ? `Cost ${costUsd < 0.01 ? '<$0.01' : `$${costUsd.toFixed(2)}`}` : 'Turn tokens';
-  const detail = tokens ? `${new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(tokens)} tokens` : '';
+  const text = turnMetricsText(meta);
+  if (!text) return null;
+  const { headline, detail } = text;
   return (
     <div ref={root} className="relative ml-[3px] shrink-0" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocus={() => setHovered(true)} onBlur={() => setHovered(false)}>
       <span role="img" tabIndex={0} aria-label={`Turn metrics: ${[headline, detail].filter(Boolean).join('. ')}`} title="Turn metrics" className="grid rounded-md p-1 text-content/40 outline-none hover:bg-content/8 hover:text-content/70">
@@ -733,13 +734,12 @@ function TurnMetricsBadge({ costUsd, tokens }: { costUsd?: number; tokens?: numb
 }
 
 /** MonoCode's TurnDuration: what you can do with a finished turn, and when it landed. */
-function TurnDuration({ elapsedMs, labelHidden, copyText, completedAt, costUsd, tokens, agent }: {
+function TurnDuration({ elapsedMs, labelHidden, copyText, completedAt, meta, agent }: {
   elapsedMs: number | null;
   labelHidden: boolean;
   copyText?: string;
   completedAt?: number;
-  costUsd?: number;
-  tokens?: number;
+  meta?: TurnMeta;
   agent: Agent;
 }) {
   const label = formatWorkingDuration(elapsedMs, true, useModelName(agent));
@@ -748,7 +748,7 @@ function TurnDuration({ elapsedMs, labelHidden, copyText, completedAt, costUsd, 
     <div data-turn-actions aria-label={label} className="flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden px-4 pb-3 pt-1 font-sans text-sm text-content/40">
       <span className="flex shrink-0 items-center gap-1">
         {copyText ? <CopyTurnButton text={copyText} /> : <Check className="size-3.5" strokeWidth={1.75} />}
-        <TurnMetricsBadge costUsd={costUsd} tokens={tokens} />
+        <TurnMetricsBadge meta={meta} />
       </span>
       {labelHidden ? null : (
         <span className="flex min-w-0 items-center gap-2.5">
@@ -939,8 +939,7 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
           labelHidden={showFoldLine}
           copyText={lastProse?.type === 'prose' ? lastProse.entry.text : undefined}
           completedAt={settledAt}
-          costUsd={done?.meta?.costUsd ?? errors.at(-1)?.meta?.costUsd}
-          tokens={done?.meta?.tokens ?? errors.at(-1)?.meta?.tokens}
+          meta={done?.meta ?? errors.at(-1)?.meta}
         />
       ) : null}
     </div>

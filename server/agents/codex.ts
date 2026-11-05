@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
-import type { Agent, AgentTask, Autonomy, ToolCall } from '../../shared/types.ts';
+import type { Agent, AgentTask, Autonomy, ToolCall, TurnUsage } from '../../shared/types.ts';
+import { usageSince, usageTotal } from '../../shared/turnUsage.ts';
 import { clip } from './describe.ts';
 import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
 import { codexCommsConfig, COMMS_INSTRUCTIONS } from '../comms/tools.ts';
@@ -33,6 +34,44 @@ function unwrapShell(command: string): string {
 type Item = Record<string, unknown> & { id?: string; type?: string };
 
 /**
+ * The thread's running totals from a `turn.completed` event. Codex fills that event from the
+ * thread's totals, not the turn's, and keeps them across `exec resume`. Its input count includes
+ * cached input, so the cached part is taken out to match TurnUsage.
+ */
+export function codexTotals(usage: Record<string, unknown> | undefined): TurnUsage {
+  const count = (key: string) => {
+    const value = usage?.[key];
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+  };
+  const cacheReadTokens = count('cached_input_tokens');
+  return {
+    inputTokens: Math.max(0, count('input_tokens') - cacheReadTokens),
+    outputTokens: count('output_tokens'),
+    cacheReadTokens,
+    cacheWriteTokens: count('cache_write_input_tokens'),
+  };
+}
+
+/**
+ * One turn's usage from the thread's totals after it. A thread this turn started spent nothing
+ * before it; a resumed one is measured from the totals kept after its last turn. A resumed
+ * thread with no kept totals, or none of its own id, gives no figure rather than a wrong one.
+ * Totals that shrank mean Codex started counting again, so they are this turn's alone.
+ */
+export function codexTurnUsage(
+  totals: TurnUsage,
+  thread: string | null,
+  fresh: boolean,
+  previous: Agent['threadUsage'],
+): { usage?: TurnUsage; threadUsage?: { thread: string; usage: TurnUsage } } {
+  if (!thread) return fresh ? { usage: totals } : {};
+  const threadUsage = { thread, usage: totals };
+  if (fresh) return { usage: totals, threadUsage };
+  if (previous?.thread !== thread) return { threadUsage };
+  return { usage: usageSince(totals, previous.usage) ?? totals, threadUsage };
+}
+
+/**
  * Arguments for one `codex exec` turn. The prompt itself goes over stdin ("-") so it is never parsed as a flag.
  * Images go one `--image=<file>` each, with another flag after them, so none can swallow the session id or "-".
  */
@@ -60,7 +99,11 @@ export class CodexRunner implements Runner {
   private queue: RunnerInput[] = [];
   private stopping = false;
   private turnEnded = false;
-  private completedTokens: number | null = null;
+  /** The thread's totals from `turn.completed`; null until the turn reports completion. */
+  private completedTotals: TurnUsage | null = null;
+  /** The thread this turn runs in, and whether the turn started it. */
+  private thread: string | null = null;
+  private freshThread = false;
   private turnKey = '';
   private lastMessage = '';
   private lastError = '';
@@ -129,7 +172,9 @@ export class CodexRunner implements Runner {
     const agent = this.ctx.agent();
     const project = this.ctx.project;
     this.turnEnded = false;
-    this.completedTokens = null;
+    this.completedTotals = null;
+    this.thread = agent.sessionId;
+    this.freshThread = !agent.sessionId;
     this.stopping = false;
     this.turnKey = randomUUID().slice(0, 8);
     this.lastMessage = '';
@@ -178,8 +223,9 @@ export class CodexRunner implements Runner {
       // A terminal JSON event precedes CLI teardown. Settle only after exit so a
       // late failure or Stop cannot deliver a task or launch validation early.
       if (this.stopping) this.finish({ ok: false, stopped: true, summary: '' });
-      else if (code === 0 && this.completedTokens !== null && !this.lastError) {
-        this.finish({ ok: true, summary: this.lastMessage, tokens: this.completedTokens });
+      else if (code === 0 && this.completedTotals !== null && !this.lastError) {
+        const { usage, threadUsage } = codexTurnUsage(this.completedTotals, this.thread, this.freshThread, this.ctx.agent().threadUsage);
+        this.finish({ ok: true, summary: this.lastMessage, tokens: usage && usageTotal(usage), usage, threadUsage });
       } else {
         const detail = this.lastError || this.relevantStderr() || (signal ? `codex exited with signal ${signal}`
           : code === 0 ? 'Codex exited without reporting turn completion.' : `codex exited with code ${code}`);
@@ -215,7 +261,10 @@ export class CodexRunner implements Runner {
     const hooks = this.ctx.hooks;
     switch (event.type) {
       case 'thread.started':
-        if (typeof event.thread_id === 'string') hooks.session(event.thread_id);
+        if (typeof event.thread_id === 'string') {
+          this.thread = event.thread_id;
+          hooks.session(event.thread_id);
+        }
         return;
       case 'item.started':
       case 'item.updated':
@@ -223,8 +272,7 @@ export class CodexRunner implements Runner {
         this.handleItem((event.item ?? {}) as Item, event.type === 'item.completed');
         return;
       case 'turn.completed': {
-        const usage = (event.usage ?? {}) as Record<string, number>;
-        this.completedTokens ??= (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0);
+        this.completedTotals ??= codexTotals(event.usage as Record<string, unknown> | undefined);
         return;
       }
       case 'turn.failed': {

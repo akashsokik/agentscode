@@ -1,4 +1,4 @@
-import type { Agent, AgentTask, ApprovalDecision, Autonomy, Entry, ImageMediaType, Project, Question } from '../../shared/types.ts';
+import type { Agent, AgentTask, ApprovalDecision, Autonomy, Entry, ImageMediaType, Project, Question, TurnUsage } from '../../shared/types.ts';
 import { roleInstructions } from '../../shared/roles.ts';
 import { COMMS_INSTRUCTIONS } from '../comms/tools.ts';
 
@@ -9,6 +9,10 @@ export interface TurnResult {
   error?: string;
   costUsd?: number;
   tokens?: number;
+  /** What this turn alone spent, when the engine said. */
+  usage?: TurnUsage;
+  /** Codex: the thread's new running totals, kept on the agent to work out the next turn's usage. */
+  threadUsage?: { thread: string; usage: TurnUsage };
   /** User messages still queued behind this turn; the agent keeps working when > 0. */
   pending?: number;
 }

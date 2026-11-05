@@ -77,6 +77,11 @@ export interface Agent {
   error: string | null;
   /** How full the model's context window is, from the last request. Absent until the engine reports it. */
   context?: ContextUsage;
+  /**
+   * Codex only: the thread's running token totals as of its last finished turn. Codex reports
+   * totals for the whole thread, so a turn's own usage is the difference from these.
+   */
+  threadUsage?: { thread: string; usage: TurnUsage };
 }
 
 /**
@@ -88,6 +93,27 @@ export interface ContextUsage {
   used: number;
   /** The active model's context window, once the engine has reported it. */
   window?: number;
+}
+
+/**
+ * The tokens one turn spent (MonoCode's TurnMetrics). Unlike ContextUsage this is a total for
+ * the turn, summed over its requests. `inputTokens` is fresh prompt input only, without cache
+ * reads or writes, for both engines. Helpers are in shared/turnUsage.ts.
+ */
+export interface TurnUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+/** What a finished turn cost, on its done or error entry and on its channel reply. */
+export interface TurnMeta {
+  costUsd?: number;
+  durationMs?: number;
+  tokens?: number;
+  /** Absent on turns from before it was recorded, and when the engine did not say. */
+  usage?: TurnUsage;
 }
 
 export interface Project {
@@ -195,7 +221,7 @@ export interface ChannelPost {
   inReplyTo?: string;
   /** The top-level post this thread belongs to; absent on top-level posts. */
   threadId?: string;
-  meta?: { costUsd?: number; durationMs?: number; tokens?: number };
+  meta?: TurnMeta;
 }
 
 export interface ChannelInput {
@@ -237,7 +263,7 @@ export interface Entry {
   tool?: ToolCall;
   peer?: PeerMessage;
   turn?: TurnMarker;
-  meta?: { costUsd?: number; durationMs?: number; tokens?: number };
+  meta?: TurnMeta;
   /** The channel a user prompt was posted in. */
   channel?: { id: string; postId: string };
   /** Marks a user-started fresh session. */

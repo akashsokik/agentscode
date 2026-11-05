@@ -24,6 +24,7 @@ import {
   type Project,
   type Settings,
   type Snapshot,
+  type TurnMeta,
   type Worktree,
   type WorktreeCleanup,
 } from '../shared/types.ts';
@@ -426,6 +427,7 @@ export class AgentManager {
     this.runners.delete(id);
     agent.sessionId = null;
     delete agent.context;
+    delete agent.threadUsage;
     agent.currentTask = null;
     agent.status = 'idle';
     agent.activity = '';
@@ -730,6 +732,7 @@ export class AgentManager {
         if (error && agent.sessionId && /no conversation found|session.*not found/i.test(error)) {
           agent.sessionId = null;
           delete agent.context;
+          delete agent.threadUsage;
           this.addEntry(agentId, { id: randomUUID(), kind: 'system', text: 'The previous session could not be resumed, so the next message starts a fresh one.' });
         }
         this.emitAgent(agent);
@@ -782,11 +785,13 @@ export class AgentManager {
       agent.costUsd += turnCost;
     }
     if (result.tokens) agent.tokens += result.tokens;
+    if (result.threadUsage) agent.threadUsage = result.threadUsage;
     const pending = result.pending ?? 0;
-    const meta = {
+    const meta: TurnMeta = {
       durationMs,
       costUsd: turnCost,
       tokens: result.tokens,
+      usage: result.usage,
     };
     // Before the mailbox settles the message, so a reply to the asker joins its conversation.
     this.channels.turnEnded(agentId, task, result, meta);
@@ -817,6 +822,7 @@ export class AgentManager {
       if (/no conversation found|session.*not found/i.test(error)) {
         agent.sessionId = null;
         delete agent.context;
+        delete agent.threadUsage;
       }
       this.addEntry(agentId, { id: randomUUID(), kind: 'error', text: error, meta });
       agent.error = clip(error, 300);

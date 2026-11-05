@@ -8,7 +8,7 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import fs from 'node:fs';
-import type { AgentTask, Autonomy, Question, ToolCall } from '../../shared/types.ts';
+import type { AgentTask, Autonomy, Question, ToolCall, TurnUsage } from '../../shared/types.ts';
 import { approvalTitle, clip, toolActivity, toolDetail, toolResultText, toolSummary } from './describe.ts';
 import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
 import { commsMcpConfig, COMMS_TOOLS } from '../comms/tools.ts';
@@ -354,6 +354,7 @@ export class ClaudeRunner implements Runner {
           summary: summary || this.lastText,
           error,
           costUsd: message.total_cost_usd,
+          usage: claudeTurnUsage(message.usage),
           pending,
         });
         this.lastText = '';
@@ -449,6 +450,21 @@ type PromptUsage = { input_tokens?: number | null; cache_creation_input_tokens?:
 export function promptTokens(usage: PromptUsage | null | undefined): number {
   if (!usage) return 0;
   return (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
+}
+
+/**
+ * What a turn spent, from its result's usage: the main loop's requests in this turn only (the
+ * SDK sums them per turn and leaves subagents out). Undefined when the result carries none.
+ */
+export function claudeTurnUsage(usage: (PromptUsage & { output_tokens?: number | null }) | null | undefined): TurnUsage | undefined {
+  if (!usage) return undefined;
+  const turn: TurnUsage = {
+    inputTokens: usage.input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+  };
+  return Object.values(turn).some(n => n > 0) ? turn : undefined;
 }
 
 type ModelWindow = { inputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number; contextWindow?: number };
