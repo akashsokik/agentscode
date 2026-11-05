@@ -5,6 +5,7 @@
   "type": "module",
   "productName": "AgentsCode",
   "description": "An IDE where Claude Code and Codex agents work side by side and talk to each other.",
+  "license": "MIT",
   "main": "out/electron/main.js",
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
