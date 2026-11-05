@@ -10,7 +10,7 @@ import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
 import { Empty, HeaderButton, IconTab, Loading, TextButton } from '../ui/common.tsx';
-import { Bot, CheckCircle, DashboardSquare, FileDiff, GitBranch, MessageMultiple, PanelRightToggle, RefreshCw, type IconComponent } from '../mono/icons.tsx';
+import { Bot, CheckCircle, DashboardSquare, FileDiff, GitBranch, MessageMultiple, PanelRight, RefreshCw, type IconComponent } from '../mono/icons.tsx';
 import { Segmented } from '../mono/settings.tsx';
 import { MessageStatus } from '../panes/CommsPane.tsx';
 import { useNow } from '../ui/useNow.ts';
@@ -303,7 +303,7 @@ export function RightPanel() {
           ))}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 px-1.5">
-          <HeaderButton icon={PanelRightToggle} label="Hide panel" onClick={() => setRightPanel(false)} />
+          <HeaderButton icon={PanelRight} label="Hide panel" onClick={() => setRightPanel(false)} />
         </div>
       </div>
       {view === 'overview' ? <AgentOverview agent={agent} /> : view === 'changes' ? <ChangesView agent={agent} /> : <CommsFeed agent={agent} />}

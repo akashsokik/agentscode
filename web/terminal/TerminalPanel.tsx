@@ -11,7 +11,7 @@ import { IS_MAC } from '../platform.ts';
 import { SHORTCUTS } from '../shortcuts.ts';
 import { useApp } from '../store.ts';
 import { cx, Empty, HeaderButton, PRIMARY } from '../ui/common.tsx';
-import { ChevronDown, Maximize2, Minimize2, Plus, SplitColumns, SplitRows, Terminal as TerminalIcon, X } from '../mono/icons.tsx';
+import { Maximize2, Minimize2, PanelBottom, Plus, SplitColumns, SplitRows, Terminal as TerminalIcon, X } from '../mono/icons.tsx';
 import { Modal } from '../mono/Modal.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import {
@@ -343,7 +343,7 @@ export function TerminalPanel() {
               onClick={() => toggleZoom(front)}
             />
           ) : null}
-          <HeaderButton icon={ChevronDown} label="Hide terminal" title={`Hide terminal (${SHORTCUTS.terminal})`} onClick={hideTerminal} />
+          <HeaderButton icon={PanelBottom} label="Hide terminal" title={`Hide terminal (${SHORTCUTS.terminal})`} onClick={hideTerminal} />
         </div>
       </header>
       <div ref={body} className="relative min-h-0 flex-1 overflow-hidden">

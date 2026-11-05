@@ -12,7 +12,7 @@ import { ResizeHandle, useColumnWidth, useWindowWidth } from '../ui/ResizeHandle
 import { SHORTCUTS } from '../shortcuts.ts';
 import { showTerminal } from '../terminal/actions.ts';
 import { cx, Empty, HeaderButton, Loading, MenuDivider, MenuLabel, MenuRow, StatusLabel } from '../ui/common.tsx';
-import { ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, SplitRight, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
+import { ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, SplitColumns, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
@@ -66,7 +66,7 @@ function AgentMenu({ agent, anchor, actions, onClose }: { agent: Agent; anchor: 
   return (
     <SidebarMenu anchor={anchor} onClose={onClose}>
       <MenuLabel>{agent.name}</MenuLabel>
-      <MenuRow icon={SplitRight} title="Open to the side" onSelect={run(() => openToSide({ kind: 'agent', agentId: agent.id }))} />
+      <MenuRow icon={SplitColumns} title="Open to the side" onSelect={run(() => openToSide({ kind: 'agent', agentId: agent.id }))} />
       {tab ? <MenuRow icon={X} title="Close tab" hint="The agent and its history stay." onSelect={run(() => closeTab(tab.id))} /> : null}
       <MenuDivider />
       {busy ? <MenuRow icon={Square} title="Stop" hint="Interrupt the current turn." onSelect={run(() => void attempt(() => api.stop(agent.id)))} /> : null}
@@ -105,7 +105,7 @@ function ChannelMenu({ channel, anchor, actions, onClose }: { channel: Channel; 
   return (
     <SidebarMenu anchor={anchor} onClose={onClose}>
       <MenuLabel>#{channel.name}</MenuLabel>
-      <MenuRow icon={SplitRight} title="Open to the side" onSelect={run(() => openToSide({ kind: 'channel', channelId: channel.id }))} />
+      <MenuRow icon={SplitColumns} title="Open to the side" onSelect={run(() => openToSide({ kind: 'channel', channelId: channel.id }))} />
       {tab ? <MenuRow icon={X} title="Close tab" hint="The channel and its posts stay." onSelect={run(() => closeTab(tab.id))} /> : null}
       <MenuDivider />
       <MenuRow icon={Settings} title="Channel settings" hint="Name, topic and members." onSelect={run(() => actions.channelSettings(channel.id))} />

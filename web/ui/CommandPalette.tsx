@@ -17,7 +17,7 @@ import { hideTerminal, newTerminal, showTerminal, splitFront } from '../terminal
 import { setTheme, useTheme, type ThemePreference } from '../theme.ts';
 import { cx } from './common.tsx';
 import { EngineIcon } from './EngineIcon.tsx';
-import { Check, Folder, FolderPlus, FolderTree, GitCompare, MessageMultiple, MessageSquarePlus, Palette, PanelLeft, PanelRight, Plus, RotateCcw, Search, Settings, SlidersHorizontal, SplitColumns, SplitRows, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
+import { Check, Folder, FolderPlus, FolderTree, GitCompare, MessageMultiple, MessageSquarePlus, Palette, PanelBottom, PanelLeft, PanelRight, Plus, RotateCcw, Search, Settings, SlidersHorizontal, SplitColumns, SplitRows, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Modal } from '../mono/Modal.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 
@@ -142,7 +142,7 @@ function useCommands(actions: PaletteActions): Command[] {
     action({ id: 'panel', title: layout.rightPanel ? 'Hide panel' : 'Show panel', keywords: 'toggle right overview', icon: PanelRight, shortcut: SHORTCUTS.panel, priority: 1, run: () => setRightPanel(!layout.rightPanel) });
     const terminalProject = snapshot.projects.find(p => p.id === (layout.projectId ?? snapshot.projects[0]?.id)) ?? snapshot.projects[0];
     if (terminalProject) {
-      action({ id: 'terminal', title: layout.terminal ? 'Hide terminal' : 'Show terminal', keywords: `toggle shell console panel ${terminalProject.name}`, hint: layout.terminal ? undefined : terminalProject.name, icon: Terminal, shortcut: SHORTCUTS.terminal, priority: 1, run: () => (layout.terminal ? hideTerminal() : showTerminal(terminalProject.id)) });
+      action({ id: 'terminal', title: layout.terminal ? 'Hide terminal' : 'Show terminal', keywords: `toggle shell console panel ${terminalProject.name}`, hint: layout.terminal ? undefined : terminalProject.name, icon: PanelBottom, shortcut: SHORTCUTS.terminal, priority: 1, run: () => (layout.terminal ? hideTerminal() : showTerminal(terminalProject.id)) });
       action({ id: 'new-terminal', title: 'New terminal', keywords: `shell console ${terminalProject.name}`, hint: terminalProject.name, icon: Terminal, priority: 1, run: () => void newTerminal(terminalProject.id) });
       if (layout.terminal) {
         const inTerminal = IS_MAC ? 'In a terminal: ' : '';

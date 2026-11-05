@@ -10,8 +10,8 @@ import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
 import ArrowShrink02Icon from "@hugeicons/core-free-icons/ArrowShrink02Icon";
 import EraserIcon from "@hugeicons/core-free-icons/EraserIcon";
 import ClipboardPasteIcon from "@hugeicons/core-free-icons/ClipboardPasteIcon";
-import LayoutTwoRowIcon from "@hugeicons/core-free-icons/LayoutTwoRowIcon";
-import LayoutTwoColumnIcon from "@hugeicons/core-free-icons/LayoutTwoColumnIcon";
+import Layout2RowIcon from "@hugeicons/core-free-icons/Layout2RowIcon";
+import Layout2ColumnIcon from "@hugeicons/core-free-icons/Layout2ColumnIcon";
 import AppWindowIcon from "@hugeicons/core-free-icons/AppWindowIcon";
 import Archive02Icon from "@hugeicons/core-free-icons/Archive02Icon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
@@ -68,11 +68,10 @@ import ImageAdd01Icon from "@hugeicons/core-free-icons/ImageAdd01Icon";
 import InboxIcon from "@hugeicons/core-free-icons/InboxIcon";
 import NotificationOff01Icon from "@hugeicons/core-free-icons/NotificationOff01Icon";
 import KeyboardIcon from "@hugeicons/core-free-icons/KeyboardIcon";
+import LayoutAlignBottomIcon from "@hugeicons/core-free-icons/LayoutAlignBottomIcon";
 import LayoutAlignLeftIcon from "@hugeicons/core-free-icons/LayoutAlignLeftIcon";
 import LayoutAlignRightIcon from "@hugeicons/core-free-icons/LayoutAlignRightIcon";
-import LayoutBottomIcon from "@hugeicons/core-free-icons/LayoutBottomIcon";
-import LayoutTopIcon from "@hugeicons/core-free-icons/LayoutTopIcon";
-import InsertColumnIcon from "@hugeicons/core-free-icons/InsertColumnIcon";
+import LayoutAlignTopIcon from "@hugeicons/core-free-icons/LayoutAlignTopIcon";
 import LeftToRightListBulletIcon from "@hugeicons/core-free-icons/LeftToRightListBulletIcon";
 import ListEndIcon from "@hugeicons/core-free-icons/ListEndIcon";
 import LinkSquare02Icon from "@hugeicons/core-free-icons/LinkSquare02Icon";
@@ -100,7 +99,6 @@ import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
 import Share02Icon from "@hugeicons/core-free-icons/Share02Icon";
 import ShieldAlertIcon from "@hugeicons/core-free-icons/ShieldAlertIcon";
-import SidebarRight01Icon from "@hugeicons/core-free-icons/SidebarRight01Icon";
 import SourceCodeIcon from "@hugeicons/core-free-icons/SourceCodeIcon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
 import SquareIcon from "@hugeicons/core-free-icons/SquareIcon";
@@ -250,17 +248,15 @@ export const Minus = wrap(MinusSignIcon, "Minus");
 export const MoreHorizontal = wrap(MoreHorizontalIcon, "MoreHorizontal");
 export const Palette = wrap(PaintBoardIcon, "Palette");
 export const Pause = wrap(PauseIcon, "Pause");
-export const PanelBottom = wrap(LayoutBottomIcon, "PanelBottom");
-export const PanelLeft = wrap(LayoutAlignRightIcon, "PanelLeft");
-export const PanelRight = wrap(SidebarRight01Icon, "PanelRight");
-/** `PanelLeft` mirrored, for panels docked on the right. */
-export const PanelRightToggle = wrap(LayoutAlignLeftIcon, "PanelRightToggle");
-export const PanelTop = wrap(LayoutTopIcon, "PanelTop");
-/** A pane added beside: a box with a + on its right, unlike the panel toggles' plain boxes. */
-export const SplitRight = wrap(InsertColumnIcon, "SplitRight");
-// Terminal panel (AgentsCode): split right and down, paste, clear, unzoom.
-export const SplitColumns = wrap(LayoutTwoColumnIcon, "SplitColumns");
-export const SplitRows = wrap(LayoutTwoRowIcon, "SplitRows");
+/** Show/hide a docked panel: one box with a short bar on the side the panel docks to. */
+export const PanelBottom = wrap(LayoutAlignBottomIcon, "PanelBottom");
+export const PanelLeft = wrap(LayoutAlignLeftIcon, "PanelLeft");
+export const PanelRight = wrap(LayoutAlignRightIcon, "PanelRight");
+export const PanelTop = wrap(LayoutAlignTopIcon, "PanelTop");
+/** Split a view: a box halved side by side (right) or stacked (down). Used for panes and terminals alike. */
+export const SplitColumns = wrap(Layout2ColumnIcon, "SplitColumns");
+export const SplitRows = wrap(Layout2RowIcon, "SplitRows");
+// Terminal panel (AgentsCode): paste, clear, unzoom.
 export const ClipboardPaste = wrap(ClipboardPasteIcon, "ClipboardPaste");
 export const Eraser = wrap(EraserIcon, "Eraser");
 export const Minimize2 = wrap(ArrowShrink02Icon, "Minimize2");
