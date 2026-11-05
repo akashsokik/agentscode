@@ -34,6 +34,11 @@ Adapted from MonoCode markup:
   - web/styles.css                theme tokens and component styles from src/styles/index.css
   - web/panes/Transcript.tsx      the turn layout, rows and motion of AgentTranscript.tsx (phase
                                   groups, step arrival queue, prompt rise)
+  - web/transcriptScroll.ts       the follow rules of AgentTranscript.tsx (followsAfterScroll,
+                                  scrollClampedToBottom, its wheel, key, pointer and touch handlers)
+                                  and cases from AgentTranscriptScroll.test.ts
+  - shared/turnUsage.ts          the hover text of TurnMetricsBadge in AgentTranscript.tsx (its
+                                  TurnMetrics type is TurnUsage in shared/types.ts)
   - web/activity.ts               turn items, fold and work summaries from
                                   src/features/sessions/model/transcriptActivity.ts
   - web/ui/wordFade.ts            src/features/sessions/ui/wordFade.tsx (a stagger replaces its

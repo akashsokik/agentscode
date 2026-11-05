@@ -19,6 +19,8 @@ import { modelLabel } from '../format.ts';
 import { open, openToSide } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { groupTurns, type Turn } from '../turns.ts';
+import { isAnchoring, openingAnchor, rememberedView, rememberView, type Opening } from '../transcriptView.ts';
+import { distanceFromEnd, Follower, scrollsUp, WHEEL_HOLD_MS } from '../transcriptScroll.ts';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
 import { MentionText } from '../ui/MentionText.tsx';
@@ -134,7 +136,17 @@ export function CopyTurnButton({ text, label = 'Copy response' }: { text: string
  * MonoCode's UserMessageBlock, chat layout: your message as a bubble on the right, a pill while
  * it fits on one line and rounded once it wraps. Copy and the time show under it on hover.
  */
-export function UserMessageBlock({ entry, caption }: { entry: Pick<Entry, 'id' | 'agentId' | 'text' | 'ts' | 'images'>; caption?: ReactNode }) {
+export function UserMessageBlock({ entry, media, caption, actions, footer, className = 'pb-5 pt-1.5' }: {
+  entry: Pick<Entry, 'id' | 'agentId' | 'text' | 'ts' | 'images'>;
+  /** Shown above the bubble in place of the entry's own images (a channel post's uploads). */
+  media?: ReactNode;
+  caption?: ReactNode;
+  /** More buttons in the hover row, after Copy (a channel post's Reply in thread). */
+  actions?: ReactNode;
+  /** Under the message and its caption, above the hover row (a channel post's deliveries and thread). */
+  footer?: ReactNode;
+  className?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const [singleLine, setSingleLine] = useState(true);
@@ -153,9 +165,9 @@ export function UserMessageBlock({ entry, caption }: { entry: Pick<Entry, 'id' |
     return () => observer.disconnect();
   }, [entry.text, expanded]);
   return (
-    <div data-prompt-anchor={entry.id} className="user-message-row group/usermsg flex flex-col items-end overflow-visible pb-5 pl-14 pr-4 pt-1.5">
+    <div data-prompt-anchor={entry.id} className={`user-message-row group/usermsg flex flex-col items-end overflow-visible pl-14 pr-4 ${className}`}>
       <div className="user-message-hover-zone flex w-fit min-w-0 max-w-full flex-col items-end overflow-visible">
-        {entry.images?.length ? <MessageImages agentId={entry.agentId} images={entry.images} /> : null}
+        {media ?? (entry.images?.length ? <MessageImages agentId={entry.agentId} images={entry.images} /> : null)}
         {/* A message can be images alone; then there is no bubble. */}
         {entry.text ? (
           <div data-chat-message={entry.id} data-chat-message-role="user" className={`user-message-bubble relative w-fit min-w-0 max-w-[min(100%,36rem)] bg-content/10 px-3 py-2 font-sans text-content transition-[background-color] duration-200 ${singleLine && !overflows ? 'rounded-full' : 'rounded-xl'}`}>
@@ -170,8 +182,10 @@ export function UserMessageBlock({ entry, caption }: { entry: Pick<Entry, 'id' |
         {caption ? (
           <div className="flex max-w-full items-center gap-2 px-3 pt-1 font-sans text-xs text-content/50"><span role="status">{caption}</span></div>
         ) : null}
+        {footer}
         <div className="user-message-actions flex items-center gap-1 px-3 pt-1">
           {entry.text ? <CopyTurnButton text={entry.text} label="Copy message" /> : null}
+          {actions}
           <time dateTime={new Date(entry.ts).toISOString()} title={new Date(entry.ts).toLocaleString()} className="ml-1 font-sans text-xs text-content/40">
             {formatClockTime(entry.ts)}
           </time>
@@ -961,11 +975,23 @@ const PROMPT_RISE_FROM = 0.3;
 const PROMPT_NUDGE_PX = 14;
 /** How long a disclosure you clicked keeps its place while what it opens or closes settles. */
 const TOGGLE_HOLD_MS = 450;
-/** Within this of the end, the transcript follows new output. */
-const NEAR_BOTTOM_PX = 80;
+/** Scrolled up to within this of the top, earlier turns load above (MonoCode's loadEarlierOnScroll). */
+const LOAD_EARLIER_PX = 160;
 
-function isNearBottom(el: HTMLElement): boolean {
-  return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+/**
+ * Whether a scroller between the event's target and the transcript can still move that way, as
+ * the live work window or a wide code block can. Then the gesture is its, and following goes on.
+ */
+function innerScrollerTakes(scroller: HTMLElement, target: EventTarget | null, deltaY: number): boolean {
+  let node = target instanceof Element ? target : null;
+  while (node && node !== scroller) {
+    if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight + 1) {
+      const room = deltaY < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight - 1;
+      if (room && /auto|scroll|overlay/.test(getComputedStyle(node).overflowY)) return true;
+    }
+    node = node.parentElement;
+  }
+  return false;
 }
 
 function riseIntoPlace(scroller: HTMLElement, id: string): (() => void) | undefined {
@@ -999,10 +1025,13 @@ function riseIntoPlace(scroller: HTMLElement, id: string): (() => void) | undefi
 export function Transcript({ agent, entries, approvals }: { agent: Agent; entries: Entry[] | undefined; approvals: Approval[] }) {
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  const pinned = useRef(true);
-  const [showAll, setShowAll] = useState(false);
+  /** How this agent's transcript stood when its tab last went to the back; see transcriptView.ts. */
+  const [remembered] = useState(() => rememberedView(agent.id));
+  /** Whether the view follows new output; your own scroll up stops it. See transcriptScroll.ts. */
+  const [follower] = useState(() => new Follower(remembered?.pinned ?? true));
+  const [showAll, setShowAll] = useState(remembered?.showAll ?? false);
   /** Folds the user opened or closed; the rest stay closed. */
-  const [toggled, setToggled] = useState<Map<string, boolean>>(() => new Map());
+  const [toggled, setToggled] = useState<Map<string, boolean>>(() => remembered?.toggled ?? new Map());
   const busy = agent.status === 'working' || agent.status === 'waiting';
 
   // Everything on screen when the transcript opens is history; only what lands after it animates.
@@ -1022,11 +1051,15 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
   const ownLatest = useMemo(() => entries?.findLast(e => e.kind === 'user' && !e.channel)?.id, [entries]);
   /**
    * As in MonoCode, once you send here the turn answering you fills the view, so your prompt sits at
-   * the top and the reply grows under it. A transcript opened mid-turn starts that way too.
+   * the top and the reply grows under it. A transcript opened mid-turn starts that way too, and one
+   * you come back to from another tab keeps it.
    */
-  const opened = useRef<{ id?: string; busy: boolean } | null>(null);
-  if (opened.current === null && entries !== undefined) opened.current = { id: ownLatest, busy };
-  const anchoring = opened.current !== null && (opened.current.busy || ownLatest !== opened.current.id);
+  const opened = useRef<Opening | null>(null);
+  if (opened.current === null && entries !== undefined) opened.current = openingAnchor(remembered, ownLatest, busy);
+  const anchoring = opened.current !== null && isAnchoring(opened.current, ownLatest);
+  useLayoutEffect(() => {
+    if (opened.current !== null) rememberView(agent.id, { promptId: ownLatest, anchored: anchoring, showAll, toggled });
+  });
 
   const { sections, queued } = useMemo(() => groupTurns(entries ?? [], agent.id), [entries, agent.id]);
   const { visible, hidden } = useMemo(() => {
@@ -1064,39 +1097,146 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
     if (hold && performance.now() < hold.until && hold.el.isConnected) {
       const delta = hold.el.getBoundingClientRect().top - hold.top;
       if (Math.abs(delta) >= 1) el.scrollTop += delta;
-      pinned.current = isNearBottom(el);
+      if (distanceFromEnd(el) <= 1) follower.resume();
+      else follower.release();
+      follower.track(el);
       return;
     }
     held.current = null;
-    if (pinned.current) el.scrollTop = el.scrollHeight;
+    follower.follow(el, performance.now());
+  }, [follower]);
+
+  /*
+   * The anchored turn is as tall as the view, less the padding, so its prompt rests where the first
+   * message would. Rows under it (a teammate's message queued behind the running turn) share that
+   * height, so they do not push the prompt off the top.
+   */
+  const fit = useCallback(() => {
+    const el = scroller.current;
+    const inner = content.current;
+    if (!el || !inner) return;
+    const style = getComputedStyle(inner);
+    const padTop = parseFloat(style.paddingTop) || 0;
+    const padBottom = parseFloat(style.paddingBottom) || 0;
+    const viewport = `${Math.max(0, el.clientHeight - padTop - padBottom)}px`;
+    if (el.style.getPropertyValue('--transcript-viewport') !== viewport) el.style.setProperty('--transcript-viewport', viewport);
+    const anchor = inner.querySelector<HTMLElement>(':scope > .transcript-turn-anchor');
+    if (!anchor) return;
+    const below = inner.getBoundingClientRect().bottom - padBottom - anchor.getBoundingClientRect().bottom;
+    const tail = `${Math.max(0, Math.round(below))}px`;
+    if (anchor.style.getPropertyValue('--transcript-tail') !== tail) anchor.style.setProperty('--transcript-tail', tail);
   }, []);
 
-  useLayoutEffect(follow);
+  useLayoutEffect(() => {
+    fit();
+    follow();
+  });
 
   const empty = entries?.length === 0 && !busy && !queued.length && !inline.length;
   useLayoutEffect(() => {
     const el = scroller.current;
     const inner = content.current;
     if (!el || !inner) return;
-    // The anchored turn is as tall as the view, less the padding, so the prompt rests where the first message would.
-    const sync = () => {
-      const style = getComputedStyle(inner);
-      const pad = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-      el.style.setProperty('--transcript-viewport', `${Math.max(0, el.clientHeight - pad)}px`);
-    };
-    sync();
-    const observer = new ResizeObserver(records => {
-      if (records.some(record => record.target === el)) sync();
+    const observer = new ResizeObserver(() => {
+      fit();
       follow();
     });
     observer.observe(el);
     observer.observe(inner);
     return () => observer.disconnect();
-  }, [empty, follow]);
+  }, [empty, fit, follow]);
+
+  /** A gesture whose direction is not known yet holds following briefly; then it is followed again unless it went up. */
+  const holdTimer = useRef<number | undefined>(undefined);
+  const holdFollowing = (el: HTMLElement) => {
+    follower.hold(el, performance.now());
+    window.clearTimeout(holdTimer.current);
+    holdTimer.current = window.setTimeout(() => {
+      if (!el.isConnected) return;
+      follower.holdEnded(el);
+      follow();
+    }, WHEEL_HOLD_MS);
+  };
+  useEffect(() => () => window.clearTimeout(holdTimer.current), []);
+
+  // A scrollbar drag can end anywhere on the page.
+  useEffect(() => {
+    const up = () => {
+      const el = scroller.current;
+      if (el?.isConnected) follower.pointerUp(el);
+    };
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
+    return () => {
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', up);
+    };
+  }, [follower]);
+
+  /*
+   * Earlier turns load above as you scroll up near the top, keeping the view on what you were
+   * reading, as MonoCode pages its history; "Show earlier turns" does the same on a click.
+   */
+  const prepend = useRef<{ el: Element; top: number } | null>(null);
+  const showEarlier = () => {
+    const el = scroller.current;
+    const inner = content.current;
+    if (!el || !inner || showAll || prepend.current) return;
+    const viewTop = el.getBoundingClientRect().top;
+    // The button row goes away with the reveal, so the first turn under it holds the place instead.
+    const row = [...inner.children].find(child => !child.hasAttribute('data-earlier') && child.getBoundingClientRect().bottom > viewTop);
+    prepend.current = row ? { el: row, top: row.getBoundingClientRect().top } : null;
+    setShowAll(true);
+  };
+  useLayoutEffect(() => {
+    const mark = prepend.current;
+    prepend.current = null;
+    const el = scroller.current;
+    if (!mark || !el || !mark.el.isConnected) return;
+    const delta = mark.el.getBoundingClientRect().top - mark.top;
+    if (Math.abs(delta) >= 1) el.scrollTop += delta;
+    follower.track(el);
+  }, [showAll, follower]);
+  /** The offset at the last scroll event, to tell which way the reader went. */
+  const lastTop = useRef(0);
+  /** Where a touch was, to tell a pull down (scrolling up) from a push up. */
+  const touchY = useRef<number | undefined>(undefined);
+
+  /*
+   * Back from another tab, the view returns to where you left it: at the end if you were following
+   * it, else as far above the end as you were (the turn may have grown meanwhile). Runs after the
+   * effect above sizes the anchored turn, so the offset is not clamped against a shorter page.
+   */
+  const restoreFrom = useRef(remembered && !remembered.pinned ? remembered.fromBottom : null);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (restoreFrom.current === null || !el || entries === undefined) return;
+    const from = restoreFrom.current;
+    restoreFrom.current = null;
+    // A prompt you sent while the tab was away brings you to its turn, as sending always does.
+    if (ownLatest !== remembered?.promptId) {
+      follower.pin(el);
+      return;
+    }
+    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - from);
+    follower.track(el);
+  });
+
+  const recordScroll = useCallback((el: HTMLElement) => {
+    rememberView(agent.id, { pinned: follower.following, fromBottom: distanceFromEnd(el) });
+  }, [agent.id, follower]);
+  // Content can grow under a reader scrolled up without a scroll event, so take the final offset as the tab goes.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    return () => {
+      if (el.isConnected && el.clientHeight > 0) recordScroll(el);
+    };
+  }, [empty, recordScroll]);
 
   const jump = (smooth: boolean) => {
     const el = scroller.current;
-    pinned.current = true;
+    follower.resume();
     held.current = null;
     setMissed(false);
     el?.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
@@ -1111,10 +1251,9 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
     if (!previous.ready || !ownLatest || ownLatest === previous.id) return;
     const el = scroller.current;
     if (!el) return;
-    pinned.current = true;
     held.current = null;
     setMissed(false);
-    el.scrollTop = el.scrollHeight;
+    follower.pin(el);
     return riseIntoPlace(el, ownLatest);
     // Runs per message sent, not per entry.
   }, [ownLatest, entries === undefined]);
@@ -1126,7 +1265,7 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
       loaded.current = true;
       return;
     }
-    if (!pinned.current) setMissed(true);
+    if (!follower.following) setMissed(true);
   }, [entries]);
 
   // A new agent: say what will land here instead of leaving the pane blank.
@@ -1143,12 +1282,14 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
    * turn that answers it: turns are keyed by their prompt, and a prompt not started yet already
    * renders as the turn it will open. Moving between two lists would remount it mid-rise.
    */
-  const lastKey = queued.length ? queued.at(-1)!.id : (() => {
-    const last = visible.findLast(s => s.type === 'turn');
-    return last?.type === 'turn' ? last.turn.prompt?.id : undefined;
-  })();
-  // A prompt queued behind a running turn does not take the view from it.
-  const anchorKey = anchoring && ownLatest && lastKey === ownLatest && !(queued.length && busy) ? ownLatest : undefined;
+  const lastTurn = visible.findLast(s => s.type === 'turn');
+  /*
+   * The turn that fills the view is the latest one, when you started it here: the running one, or
+   * while the agent is idle, your prompt about to start. A message queued behind a running turn,
+   * yours or a teammate's, does not take the view from it; it sits under it (see fit()).
+   */
+  const anchorPrompt = (busy ? undefined : queued.at(-1)) ?? (lastTurn?.type === 'turn' ? lastTurn.turn.prompt : undefined);
+  const anchorKey = anchoring && anchorPrompt?.kind === 'user' && !anchorPrompt.channel ? anchorPrompt.id : undefined;
   const rows: ReactNode[] = [];
   const keys = new Set<string>();
   let previousDay = '';
@@ -1206,9 +1347,41 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
         onScroll={() => {
           const el = scroller.current;
           if (!el) return;
-          if (held.current && performance.now() < held.current.until) return;
-          pinned.current = isNearBottom(el);
-          if (pinned.current) setMissed(false);
+          const up = el.scrollTop < lastTop.current;
+          lastTop.current = el.scrollTop;
+          // A disclosure you clicked settles the following itself; see follow().
+          if (held.current && performance.now() < held.current.until) follower.track(el);
+          else if (follower.scrolled(el)) setMissed(false);
+          if (up && el.scrollTop <= LOAD_EARLIER_PX && !follower.following && hidden > 0) showEarlier();
+          recordScroll(el);
+        }}
+        onWheel={(event) => {
+          const el = scroller.current;
+          if (!el || innerScrollerTakes(el, event.target, event.deltaY)) return;
+          if (event.deltaY === 0) holdFollowing(el);
+          else follower.wheel(el, event.deltaY, performance.now());
+          // A page that fits the view never scrolls, so the wheel itself asks for earlier turns.
+          if (event.deltaY < 0 && el.scrollTop <= LOAD_EARLIER_PX && hidden > 0) showEarlier();
+        }}
+        onPointerDown={(event) => follower.pointerDown(event.target === event.currentTarget, event.pointerType === 'touch')}
+        onKeyDown={(event) => {
+          const el = scroller.current;
+          const target = event.target as HTMLElement;
+          if (!el || event.defaultPrevented || target.isContentEditable || target.closest('input, textarea, select')) return;
+          if (scrollsUp(event.key, event.shiftKey) && !innerScrollerTakes(el, target, -1)) follower.release();
+        }}
+        onTouchStart={(event) => {
+          touchY.current = event.touches[0]?.clientY;
+          if (scroller.current) holdFollowing(scroller.current);
+        }}
+        onTouchMove={(event) => {
+          const el = scroller.current;
+          const next = event.touches[0]?.clientY;
+          const previous = touchY.current;
+          touchY.current = next;
+          // A finger moving down pulls the page up.
+          if (!el || next === undefined || previous === undefined || next <= previous) return;
+          if (!innerScrollerTakes(el, event.target, previous - next)) follower.release();
         }}
         onClickCapture={(event) => {
           // A disclosure keeps its place while it opens or closes; see follow().
@@ -1221,8 +1394,8 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
           <div ref={content} className="mx-auto w-full max-w-3xl pb-4 pt-2">
             {entries === undefined ? <Loading /> : null}
             {hidden > 0 ? (
-              <div className="flex justify-center py-2">
-                <TextButton onClick={() => setShowAll(true)}>
+              <div data-earlier className="flex justify-center py-2">
+                <TextButton onClick={showEarlier}>
                   Show {hidden} earlier {hidden === 1 ? 'turn' : 'turns'}
                 </TextButton>
               </div>
