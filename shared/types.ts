@@ -527,6 +527,8 @@ export interface ModelProvider {
   id: string;
   name: string;
   configured: boolean;
+  /** Set up, but its model list could not be fetched: why, in a few words. */
+  problem?: string;
 }
 
 export interface EngineModels {

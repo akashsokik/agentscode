@@ -57,8 +57,14 @@ export function modelLabel(agent: Pick<Agent, 'model'>, models: EngineModels | u
 
 /** The engine's providers that are not set up yet (OrcaCode), as a hint under its model picker. */
 export function notSetUp(models: EngineModels | undefined): string | undefined {
-  const missing = (models?.providers ?? []).filter(p => !p.configured).map(p => p.name);
-  return missing.length ? `Not set up: ${missing.join(', ')}. Add them in orcacode with /provider, then Refresh models in Settings.` : undefined;
+  const providers = models?.providers ?? [];
+  const missing = providers.filter(p => !p.configured).map(p => p.name);
+  const failing = providers.filter(p => p.configured && p.problem).map(p => `${p.name} (${p.problem})`);
+  const parts = [
+    missing.length ? `Not set up: ${missing.join(', ')}.` : '',
+    failing.length ? `No models from ${failing.join(', ')}.` : '',
+  ].filter(Boolean);
+  return parts.length ? `${parts.join(' ')} Fix them in orcacode with /provider, then Refresh models in Settings.` : undefined;
 }
 
 export function effortLabel(effort: string, fallback: string | null | undefined): string {

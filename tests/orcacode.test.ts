@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import type { Agent, Entry } from '../shared/types.ts';
 import { COMMS_SERVER } from '../server/config.ts';
-import { discoverOrcacodeModels, orcacodeContextWindow, parseOrcacodeModelList, parseOrcacodeModels, parseOrcacodeProviders } from '../server/models.ts';
+import { discoverOrcacodeModels, listingProblem, orcacodeContextWindow, parseOrcacodeModelList, parseOrcacodeModels, parseOrcacodeProviders } from '../server/models.ts';
 import { filterOptions } from '../web/mono/filter.ts';
 import { discoverCommands } from '../server/skills.ts';
 import type { ApprovalRequest, RunnerHooks, TurnResult } from '../server/agents/runner.ts';
@@ -324,7 +324,9 @@ test('discovery lists every set-up provider\'s models, skips one that fails, and
   assert.equal(found.discovered, true);
   assert.deepEqual(found.models.map(m => [m.value, m.group]), [['openrouter::anthropic/claude-opus-5.5', 'OpenRouter']]);
   assert.equal(found.defaultLabel, 'OpenRouter · anthropic/claude-opus-5.5');
-  assert.deepEqual(found.providers?.map(p => [p.id, p.configured]), [['openrouter', true], ['local', true], ['anthropic', false]]);
+  assert.deepEqual(found.providers?.map(p => [p.id, p.configured, p.problem]), [['openrouter', true, undefined], ['local', true, 'not reachable'], ['anthropic', false, undefined]]);
+  assert.equal(listingProblem('error: authentication failed: HTTP 401: invalid x-api-key'), 'key rejected');
+  assert.equal(listingProblem('weird'), 'could not list models');
   assert.equal(orcacodeContextWindow('anthropic/claude-opus-5.5', 'openrouter'), 1_000_000);
 });
 

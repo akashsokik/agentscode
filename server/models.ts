@@ -173,10 +173,21 @@ export function parseOrcacodeModels(text: string): { id: string; window?: number
 // OrcaCode passes --effort to the provider; a model that does not list its levels gets these.
 const ORCACODE_EFFORTS = ['low', 'medium', 'high'];
 
-function run(binPath: string, args: string[]): Promise<string | null> {
+function runWithError(binPath: string, args: string[]): Promise<{ stdout: string | null; stderr: string }> {
   return new Promise((resolve) => {
-    execFile(binPath, args, { timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => resolve(err ? null : stdout));
+    execFile(binPath, args, { timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => resolve({ stdout: err ? null : stdout, stderr: String(stderr ?? '') }));
   });
+}
+
+async function run(binPath: string, args: string[]): Promise<string | null> {
+  return (await runWithError(binPath, args)).stdout;
+}
+
+/** A few words on why a provider's model list failed; never the error text itself, which can quote a key. */
+export function listingProblem(stderr: string): string {
+  if (/\b401\b|\b403\b|unauthori[sz]ed|authentication|api key|x-api-key/i.test(stderr)) return 'key rejected';
+  if (/connection refused|connect error|dns|timed out|timeout/i.test(stderr)) return 'not reachable';
+  return 'could not list models';
 }
 
 function parseJson(text: string | null): Record<string, unknown> | null {
@@ -236,10 +247,12 @@ export async function discoverOrcacodeModels(binPath: string | null): Promise<En
   // orcacode 0.11+: every provider, and each set-up one's catalog. None of this sends a prompt.
   const listed = parseOrcacodeProviders(await run(binPath, ['--list-providers', '--json']));
   if (listed) {
-    const catalogs = await Promise.all(listed.providers.filter(p => p.configured).map(async (provider) => ({
-      provider,
-      catalog: parseOrcacodeModelList(await run(binPath, ['--provider', provider.id, '--list-models', '--json']), provider),
-    })));
+    const catalogs = await Promise.all(listed.providers.filter(p => p.configured).map(async (provider) => {
+      const { stdout, stderr } = await runWithError(binPath, ['--provider', provider.id, '--list-models', '--json']);
+      const catalog = parseOrcacodeModelList(stdout, provider);
+      return { provider, catalog, problem: catalog ? undefined : listingProblem(stderr) };
+    }));
+    const problems = new Map(catalogs.flatMap(c => (c.problem ? [[c.provider.id, c.problem] as const] : [])));
     const models: ModelOption[] = [];
     for (const { catalog } of catalogs) {
       if (!catalog) continue;
@@ -253,7 +266,7 @@ export async function discoverOrcacodeModels(binPath: string | null): Promise<En
       models,
       efforts: models.length ? unionEfforts(models) : [],
       discovered: models.length > 0,
-      providers: listed.providers.map(({ id, name, configured }) => ({ id, name, configured })),
+      providers: listed.providers.map(({ id, name, configured }) => ({ id, name, configured, ...(problems.has(id) ? { problem: problems.get(id) } : {}) })),
     };
   }
   // orcacode 0.10: the saved provider's catalog only, as `id  272k ctx` lines.
