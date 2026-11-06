@@ -11,6 +11,7 @@ import {
   normalizeTool, ORCACODE_COMMS_NOTE, ORCACODE_MAX_STEPS, orcacodeArgs, orcacodeMcpConfig, OrcacodeRunner, orcacodeUsage,
 } from '../server/agents/orcacode.ts';
 import { harness, projectDir, tempDir } from './helpers.ts';
+import { engineProblem, ORCACODE_MIN_VERSION, versionBelow } from '../shared/engines.ts';
 
 const base: Agent = {
   id: 'a1', name: 'Ada', engine: 'orcacode', projectId: 'p1', worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: '', effort: '',
@@ -216,9 +217,41 @@ test('the manager creates OrcaCode agents and names the engine in errors', async
   const project = h.manager.addProject({ path: projectDir(h.dir, 'app') });
   await assert.rejects(h.manager.create({ name: 'Orc', engine: 'orcacode', projectId: project.id }), /OrcaCode is not installed/);
   await assert.rejects(h.manager.create({ name: 'Orc', engine: 'nope' as Agent['engine'], projectId: project.id }), /Pick Claude Code, Codex or OrcaCode/);
-  const ok = harness();
+  const old = harness({ orcacode: { available: true, path: '/bin/orcacode', version: '0.9.0' } });
+  const oldProject = old.manager.addProject({ path: projectDir(old.dir, 'app') });
+  await assert.rejects(old.manager.create({ name: 'Orc', engine: 'orcacode', projectId: oldProject.id }), /0\.10\.0 or newer is needed \(found 0\.9\.0\)/);
+  const ok = harness({ orcacode: { available: true, path: '/bin/orcacode', version: '0.10.0' } });
   const app = ok.manager.addProject({ path: projectDir(ok.dir, 'app') });
   const orc = await ok.manager.create({ name: 'Orc', engine: 'orcacode', projectId: app.id });
   assert.equal(orc.engine, 'orcacode');
   assert.equal(orc.useMcp, false);
+  // Its file tools stay inside the folder it runs in, so it needs a project.
+  await assert.rejects(ok.manager.create({ name: 'Roam', engine: 'orcacode', projectId: null }), /OrcaCode agents need a project/);
+});
+
+test('engine versions compare numerically and only OrcaCode has a minimum', () => {
+  assert.equal(versionBelow('0.9.0', '0.10.0'), true);
+  assert.equal(versionBelow('0.10.0', '0.10.0'), false);
+  assert.equal(versionBelow('1.0.0', '0.10.0'), false);
+  assert.equal(versionBelow('garbage', '0.10.0'), false);
+  assert.equal(engineProblem('codex', { available: true, path: '/x', version: '0.0.1' }, true), null);
+  assert.equal(engineProblem('orcacode', { available: true, path: '/x', version: ORCACODE_MIN_VERSION }, false), null);
+  assert.match(engineProblem('orcacode', { available: false, path: null, version: null }, false) ?? '', /not installed/);
+});
+
+test('an orcacode too old for the headless flags fails with an update hint, not its help text', async () => {
+  const dir = tempDir('orca-old');
+  const bin = path.join(dir, 'orcacode');
+  fs.writeFileSync(bin, `#!/bin/sh\necho "unknown flag: --prompt-file" >&2\necho "" >&2\necho "orcacode — terminal host for Orca Harness" >&2\nfor i in 1 2 3 4 5 6; do echo "  --option$i  some help line" >&2; done\nexit 1\n`, { mode: 0o755 });
+  const results: TurnResult[] = [];
+  const runner = new OrcacodeRunner({
+    agent: () => ({ ...base }),
+    project: { id: 'p1', name: 'App', path: dir, createdAt: 0, exists: true, isGit: false },
+    cwd: dir, binPath: bin,
+    hooks: { session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, closed: () => {}, turnEnd: r => { results.push(r); }, approval: async () => ({ allow: false }) },
+  });
+  runner.send('Hi');
+  for (let i = 0; i < 300 && runner.busy; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(results[0].ok, false);
+  assert.match(results[0].error ?? '', /does not know --prompt-file.*orcacode update/);
 });

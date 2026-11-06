@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ENGINES, type AgentRole, type Autonomy, type EngineKind } from '../../shared/types.ts';
 import { ROLES, rolePreset } from '../../shared/roles.ts';
+import { engineProblem } from '../../shared/engines.ts';
 import { api } from '../api.ts';
 import { AUTONOMY, effortLabel } from '../format.ts';
 import { open } from '../layout.ts';
@@ -42,7 +43,8 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   const selectedProject = projects.find(p => p.id === project);
   const noProject = project === NO_PROJECT;
   const efforts = (model ? models?.models.find(m => m.value === model)?.efforts : undefined) ?? models?.efforts ?? [];
-  const engineReady = Boolean(engines?.[engine].available);
+  const problem = engineProblem(engine, engines?.[engine], noProject);
+  const engineReady = !problem;
 
   useEffect(() => { setModel(''); setEffort(''); }, [engine]);
   useEffect(() => { if (!selectedProject?.isGit) setWorktree(false); }, [selectedProject?.isGit]);
@@ -78,7 +80,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
       onClose={onClose}
       footer={
         <>
-          {!engineReady ? <span className="mr-auto font-sans text-[12px] text-warning">{ENGINE_LABEL[engine]} is not installed on this machine.</span> : null}
+          {problem ? <span className="mr-auto font-sans text-[12px] text-warning">{problem}</span> : null}
           <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
           <button type="button" className={PRIMARY} disabled={busy || !name.trim() || !project || !engineReady} onClick={() => void create()}>
             {busy ? 'Creating…' : 'Create agent'}
@@ -103,7 +105,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
               onChange={value => (value === ADD_PROJECT ? (onClose(), onAddProject()) : setProject(value))}
             />
           </Row>
-          <Row label="Engine" description={engineReady ? `${engines?.[engine].path} (v${engines?.[engine].version})` : 'Not installed on this machine.'}>
+          <Row label="Engine" description={engines?.[engine].available ? `${engines[engine].path} (v${engines[engine].version})` : 'Not installed on this machine.'}>
             <span className="flex items-center gap-2">
               <EngineIcon engine={engine} className="size-4" />
               <Segmented label="Engine" value={engine} onChange={setEngine} options={ENGINES.map(kind => ({ value: kind, label: ENGINE_LABEL[kind] }))} />

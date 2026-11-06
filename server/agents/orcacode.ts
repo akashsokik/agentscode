@@ -11,6 +11,7 @@ import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, 
 import { commsMcpConfig, COMMS_INSTRUCTIONS } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
 import { orcacodeContextWindow } from '../models.ts';
+import { ORCACODE_MIN_VERSION } from '../../shared/engines.ts';
 
 type Input = Record<string, unknown>;
 type Event = Record<string, unknown> & { type?: string };
@@ -39,6 +40,9 @@ export const ORCACODE_COMMS_NOTE = `In OrcaCode, MCP tools are selected before u
 const AUTH_PATTERN = /\b401\b|unauthori[sz]ed|api key|not (signed|logged) in|login|refresh token/i;
 
 function friendlyError(message: string): string {
+  // An orcacode older than the headless contract rejects the flags and prints its whole --help.
+  const flag = message.match(/unknown flag: (--?[\w-]+)/);
+  if (flag) return `This OrcaCode does not know ${flag[1]}. AgentsCode needs OrcaCode ${ORCACODE_MIN_VERSION} or newer: run \`orcacode update\`, then restart AgentsCode.`;
   if (AUTH_PATTERN.test(message)) {
     return `OrcaCode could not authenticate with its model provider. Run \`orcacode\` in a terminal and check /provider or /settings, then send the message again. (${clip(message, 200)})`;
   }
@@ -140,6 +144,7 @@ export class OrcacodeRunner implements Runner {
   private lastMessage = '';
   private lastError = '';
   private stderrTail = '';
+  private stderrHead = '';
 
   constructor(ctx: RunnerContext) {
     this.ctx = ctx;
@@ -219,6 +224,7 @@ export class OrcacodeRunner implements Runner {
     this.lastMessage = '';
     this.lastError = '';
     this.stderrTail = '';
+    this.stderrHead = '';
     hooks.turnStart(input.task);
 
     if (!this.ctx.binPath) {
@@ -262,6 +268,7 @@ export class OrcacodeRunner implements Runner {
       if (this.child === child) this.handleLine(line, child);
     });
     child.stderr?.on('data', (chunk: Buffer) => {
+      if (this.stderrHead.length < 600) this.stderrHead = (this.stderrHead + chunk.toString()).slice(0, 600);
       this.stderrTail = (this.stderrTail + chunk.toString()).slice(-3000);
     });
     child.on('error', (err) => {
@@ -282,7 +289,7 @@ export class OrcacodeRunner implements Runner {
         } else {
           const detail = status === 'max_steps'
             ? `OrcaCode stopped after ${ORCACODE_MAX_STEPS} model steps without finishing. Send a message to let it continue.`
-            : this.lastError || this.relevantStderr() || (signal ? `orcacode exited with signal ${signal}`
+            : this.lastError || this.stderrHead.match(/(?:error: )?unknown flag: \S+/)?.[0] || this.relevantStderr() || (signal ? `orcacode exited with signal ${signal}`
               : code === 0 ? 'OrcaCode exited without reporting a result.' : `orcacode exited with code ${code}`);
           this.finish({ ok: false, summary: this.lastMessage, error: friendlyError(detail), ...spent });
         }

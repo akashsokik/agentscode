@@ -35,6 +35,7 @@ import {
   type WorktreeCleanup,
 } from '../shared/types.ts';
 import { ROLES, rolePreset } from '../shared/roles.ts';
+import { engineProblem } from '../shared/engines.ts';
 import { isIdeCommand } from '../shared/commands.ts';
 import { injectSkillPrompt, skillNamesInText, type ComposerCommand } from '../shared/composer.ts';
 import { commandBody, commandsFor, type DiscoveredCommand } from './skills.ts';
@@ -312,7 +313,8 @@ export class AgentManager {
   async create(req: CreateAgentRequest): Promise<Agent> {
     const engine = req.engine;
     if (!ENGINES.includes(engine)) throw new HttpError(400, 'Pick Claude Code, Codex or OrcaCode.');
-    if (!this.engines[engine].available) throw new HttpError(400, `${ENGINE_LABELS[engine]} is not installed on this machine.`);
+    const problem = engineProblem(engine, this.engines[engine], req.projectId === null);
+    if (problem) throw new HttpError(400, problem);
     // null is an agent with no project: it works across every project, from its own home.
     let project: Project | null = null;
     if (req.projectId === null) {
