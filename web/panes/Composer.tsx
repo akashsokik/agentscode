@@ -4,7 +4,7 @@
  * AccessPicker and ComposerAction, and the workspace bar under the box. As in MonoCode, `/` opens
  * the commands and skills picker and `@` the project files picker, right above the box.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type { ComposerCommand } from '../../shared/composer.ts';
 import { noProjectFolder, type Agent, type Approval, type AgentPatch, type EngineModels, type Project } from '../../shared/types.ts';
 import { useAgentCommands, useAgentFiles } from '../composer/catalog.ts';
@@ -24,7 +24,8 @@ import {
   type Token,
 } from '../composer/tokens.ts';
 import { api } from '../api.ts';
-import { effortLabel, modelLabel, shortPath } from '../format.ts';
+import { effortLabel, modelLabel, notSetUp, shortPath } from '../format.ts';
+import { filterOptions } from '../mono/settings.tsx';
 import { attempt, useApp } from '../store.ts';
 import { EngineIcon, ENGINE_NAMES } from '../ui/EngineIcon.tsx';
 import { MenuLabel, MenuRow } from '../ui/common.tsx';
@@ -82,7 +83,15 @@ function ComposerAction({ busy, hasValue, onSend, onStop }: { busy: boolean; has
 function ModelPicker({ agent, models }: { agent: Agent; models: EngineModels | undefined }) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState('');
+  const [query, setQuery] = useState('');
   const root = useRef<HTMLDivElement>(null);
+  const all = models?.models ?? [];
+  const searchable = all.length > 12;
+  const shown = searchable ? filterOptions(all, query) : all;
+  const hint = notSetUp(models);
+  const search = useRef<HTMLInputElement>(null);
+  // The popover takes focus as it opens; the search box takes it back.
+  useEffect(() => { if (open && searchable) requestAnimationFrame(() => search.current?.focus()); }, [open, searchable]);
   const model = models?.models.find(m => m.value === agent.model);
   const efforts = model?.efforts.length ? model.efforts : models?.efforts ?? [];
   const effort = agent.effort || models?.defaultEffort || '';
@@ -95,7 +104,7 @@ function ModelPicker({ agent, models }: { agent: Agent; models: EngineModels | u
         aria-expanded={open}
         aria-haspopup="menu"
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => setOpen(v => !v)}
+        onClick={() => { setOpen(v => !v); setQuery(''); }}
         className={`flex h-6.5 shrink-0 items-center gap-1 rounded-md px-1.5 transition-colors duration-150 ${open ? 'bg-selection-hover text-content' : 'bg-selection text-content hover:bg-selection-hover'}`}
       >
         <EngineIcon engine={agent.engine} className="size-4 shrink-0" />
@@ -106,10 +115,20 @@ function ModelPicker({ agent, models }: { agent: Agent; models: EngineModels | u
       {open ? (
         <Popover anchor={root} side="top" width={300} maxHeight={460} autoFocus onDismiss={() => setOpen(false)} role="listbox" aria-label="Model" tabIndex={-1} className="overflow-y-auto overscroll-contain p-1">
           <MenuLabel>{ENGINE_NAMES[agent.engine]} models</MenuLabel>
-          <MenuRow title="Default" hint={models?.discovered ? models.defaultLabel : 'Whatever the CLI is configured for.'} selected={!agent.model} onSelect={() => { void patch(agent, { model: '' }); setOpen(false); }} />
-          {(models?.models ?? []).map(m => (
-            <MenuRow key={m.value} title={m.label} hint={m.description} selected={agent.model === m.value} onSelect={() => { void patch(agent, { model: m.value }); setOpen(false); }} />
+          {searchable ? (
+            <div className="px-1 pb-1">
+              <input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${all.length} models`} aria-label="Search models" className="w-full rounded-md border border-content/15 bg-transparent px-2 py-1 text-[12px] text-content outline-none placeholder:text-content/35" />
+            </div>
+          ) : null}
+          {query.trim() ? null : <MenuRow title="Default" hint={models?.discovered ? models.defaultLabel : 'Whatever the CLI is configured for.'} selected={!agent.model} onSelect={() => { void patch(agent, { model: '' }); setOpen(false); }} />}
+          {shown.map((m, index) => (
+            <Fragment key={m.value}>
+              {m.group && m.group !== shown[index - 1]?.group ? <MenuLabel>{m.group}</MenuLabel> : null}
+              <MenuRow title={m.label} hint={m.description} selected={agent.model === m.value} onSelect={() => { void patch(agent, { model: m.value }); setOpen(false); }} />
+            </Fragment>
           ))}
+          {searchable && query.trim() && !shown.length ? <p className="px-2 py-1.5 text-[11px] text-content/50">No matching model</p> : null}
+          {hint ? <p className="px-2 py-1.5 text-[11px] leading-4 text-content/50">{hint}</p> : null}
           {!models?.discovered ? <p className="px-2 py-1.5 text-[11px] leading-4 text-content/50">Asking the CLI for its models…</p> : null}
           <form className="px-1 pb-1 pt-1.5" onSubmit={(e) => { e.preventDefault(); if (custom.trim()) { void patch(agent, { model: custom.trim() }); setOpen(false); } }}>
             <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Custom model id" className="w-full rounded-md border border-content/15 bg-transparent px-2 py-1 text-[12px] text-content outline-none placeholder:text-content/35" />

@@ -3,7 +3,7 @@ import { ENGINES, type AgentRole, type Autonomy, type EngineKind } from '../../s
 import { ROLES, rolePreset } from '../../shared/roles.ts';
 import { engineProblem } from '../../shared/engines.ts';
 import { api } from '../api.ts';
-import { AUTONOMY, effortLabel } from '../format.ts';
+import { AUTONOMY, effortLabel, notSetUp } from '../format.ts';
 import { open } from '../layout.ts';
 import { SOUL_MAX } from '../memory.ts';
 import { attempt, useApp } from '../store.ts';
@@ -114,11 +114,12 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
         </Group>
 
         <Group title="Model and access">
-          <Row label="Model">
+          <Row label="Model" description={notSetUp(models)}>
             <Select
               label="Model"
               value={model}
-              options={[{ value: '', label: `Default${models?.discovered ? ` (${models.defaultLabel})` : ''}` }, ...(models?.models ?? []).map(m => ({ value: m.value, label: m.label }))]}
+              searchable={(models?.models.length ?? 0) > 12}
+              options={[{ value: '', label: `Default${models?.discovered ? ` (${models.defaultLabel})` : ''}` }, ...(models?.models ?? []).map(m => ({ value: m.value, label: m.label, group: m.group }))]}
               onChange={setModel}
             />
           </Row>

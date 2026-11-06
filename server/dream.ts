@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type {
   Agent, DreamMetrics, DreamOp, DreamOpKind, DreamReason, DreamRecord, DreamStats, EngineKind, Entry, MemoryEntry, ServerEvent, SoulProposal,
 } from '../shared/types.ts';
+import { splitOrcacodeModel } from '../shared/engines.ts';
 import { AgentHomes, looksSecret, MEMORY_LIMIT, renderMemory, SOUL_LIMIT } from './agentHome.ts';
 import { HttpError } from './errors.ts';
 
@@ -1300,7 +1301,8 @@ export function orcacodeDreamEngine(binPath: string | null): DreamEngine {
   return ({ agent, prompt, cwd, signal }) => new Promise((resolve, reject) => {
     refuseUnderTest();
     if (!binPath) return reject(new Error('The OrcaCode CLI was not found on this machine.'));
-    const args = ['-p', '-', '--json', '--read-only', '--no-session', '--effort', 'low', ...(agent.model ? ['--model', agent.model] : [])];
+    const { provider, model } = splitOrcacodeModel(agent.model);
+    const args = ['-p', '-', '--json', '--read-only', '--no-session', '--effort', 'low', ...(provider ? ['--provider', provider] : []), ...(model ? ['--model', model] : [])];
     const child = spawn(binPath, args, { cwd, env: { ...process.env, NO_COLOR: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
     const kill = () => child.kill('SIGTERM');
     signal.addEventListener('abort', kill, { once: true });

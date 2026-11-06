@@ -13,6 +13,9 @@ import {
 } from "react";
 import { Check, ChevronDown } from "./icons.tsx";
 import { Popover } from "./Popover.tsx";
+import { filterOptions } from "./filter.ts";
+
+export { filterOptions };
 
 export function Toggle({
   label,
@@ -49,43 +52,66 @@ export function Toggle({
 }
 
 /** Theme-aware dropdown for a Settings row: a trigger button opening a Popover listbox. */
+export type SelectOption = {
+  value: string;
+  label: string;
+  icon?: ReactNode;
+  /** Options with a group are listed under its heading, in the order the groups first appear. */
+  group?: string;
+  disabled?: boolean;
+};
+
 export function Select({
   label,
   value,
   options,
   onChange,
   onOpen,
+  searchable = false,
 }: {
   label: string;
   value: string;
-  options: { value: string; label: string; icon?: ReactNode }[];
+  options: SelectOption[];
   onChange: (value: string) => void;
   onOpen?: () => void;
+  /** A search box over the list, for long ones such as OrcaCode's models. */
+  searchable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const shown = searchable ? filterOptions(options, query) : options;
   const [active, setActive] = useState(() =>
     Math.max(
       0,
-      options.findIndex((option) => option.value === value),
+      shown.findIndex((option) => option.value === value),
     ),
   );
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const search = useRef<HTMLInputElement>(null);
   const activeOption = useRef<HTMLButtonElement>(null);
   const listId = useId();
   const selected = options.find((option) => option.value === value);
   const activeId =
-    options[active] != null ? `${listId}-opt-${active}` : undefined;
+    shown[active] != null ? `${listId}-opt-${active}` : undefined;
 
   useEffect(() => {
     if (!open) return;
+    setQuery("");
     setActive(
       Math.max(
         0,
         options.findIndex((option) => option.value === value),
       ),
     );
-  }, [open, value, options]);
+    // The popover takes focus as it opens; the search box takes it back.
+    if (searchable) requestAnimationFrame(() => search.current?.focus());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (open && searchable) setActive(0);
+  }, [query, open, searchable]);
 
   useEffect(() => {
     if (open) onOpen?.();
@@ -104,9 +130,10 @@ export function Select({
   };
 
   const onMenuKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const typing = e.target instanceof HTMLInputElement;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActive((i) => Math.min(options.length - 1, i + 1));
+      setActive((i) => Math.min(shown.length - 1, i + 1));
       return;
     }
     if (e.key === "ArrowUp") {
@@ -114,27 +141,27 @@ export function Select({
       setActive((i) => Math.max(0, i - 1));
       return;
     }
-    if (e.key === "Home") {
+    if (e.key === "Home" && !typing) {
       e.preventDefault();
       setActive(0);
       return;
     }
-    if (e.key === "End") {
+    if (e.key === "End" && !typing) {
       e.preventDefault();
-      setActive(options.length - 1);
+      setActive(shown.length - 1);
       return;
     }
     if (e.key === "Tab") {
-      const option = options[active];
-      if (option && option.value !== value) onChange(option.value);
+      const option = shown[active];
+      if (option && !option.disabled && option.value !== value) onChange(option.value);
       setOpen(false);
       trigger.current?.focus();
       return;
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      const option = options[active];
-      if (option) pick(option.value);
+      const option = shown[active];
+      if (option && !option.disabled) pick(option.value);
     }
   };
 
@@ -169,8 +196,8 @@ export function Select({
           anchor={root}
           side="bottom"
           align="end"
-          width={280}
-          maxHeight={320}
+          width={searchable ? 320 : 280}
+          maxHeight={searchable ? 400 : 320}
           autoFocus
           onDismiss={(reason) => {
             setOpen(false);
@@ -183,37 +210,59 @@ export function Select({
           onKeyDown={onMenuKey}
           className="overflow-y-auto overscroll-contain p-1"
         >
-          {options.map((option, index) => {
+          {searchable ? (
+            <div className="sticky top-0 z-10 px-1 pb-1 pt-0.5 backdrop-blur-md">
+              <input
+                ref={search}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`Search ${options.length} ${label.toLowerCase()}s`}
+                aria-label={`Search ${label.toLowerCase()}`}
+                className="w-full rounded-md border border-content/15 bg-transparent px-2 py-1 text-[12px] text-content outline-none placeholder:text-content/35"
+              />
+            </div>
+          ) : null}
+          {searchable && !shown.length ? (
+            <p className="px-2 py-1.5 text-[12px] text-content/50">No match</p>
+          ) : null}
+          {shown.map((option, index) => {
             const isSelected = option.value === value;
             const highlighted = index === active;
+            const heading = option.group && option.group !== shown[index - 1]?.group ? option.group : null;
             return (
-              <button
-                key={option.value}
-                ref={highlighted ? activeOption : undefined}
-                type="button"
-                id={`${listId}-opt-${index}`}
-                role="option"
-                tabIndex={-1}
-                aria-selected={isSelected}
-                onMouseDown={(e) => e.preventDefault()}
-                onMouseEnter={() => setActive(index)}
-                onClick={() => pick(option.value)}
-                className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] ${
-                  highlighted || isSelected
-                    ? "bg-selection text-content"
-                    : "text-content hover:bg-content/5"
-                }`}
-              >
-                {option.icon ? (
-                  <span className="grid size-4 shrink-0 place-items-center">
-                    {option.icon}
-                  </span>
+              <div key={option.value}>
+                {heading ? (
+                  <p className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-content/40">{heading}</p>
                 ) : null}
-                <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                {isSelected ? (
-                  <Check className="size-3.5 shrink-0" strokeWidth={2.25} />
-                ) : null}
-              </button>
+                <button
+                  ref={highlighted ? activeOption : undefined}
+                  type="button"
+                  id={`${listId}-opt-${index}`}
+                  role="option"
+                  tabIndex={-1}
+                  aria-selected={isSelected}
+                  aria-disabled={option.disabled || undefined}
+                  disabled={option.disabled}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setActive(index)}
+                  onClick={() => pick(option.value)}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] disabled:cursor-not-allowed disabled:opacity-40 ${
+                    highlighted || isSelected
+                      ? "bg-selection text-content"
+                      : "text-content hover:bg-content/5"
+                  }`}
+                >
+                  {option.icon ? (
+                    <span className="grid size-4 shrink-0 place-items-center">
+                      {option.icon}
+                    </span>
+                  ) : null}
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                  {isSelected ? (
+                    <Check className="size-3.5 shrink-0" strokeWidth={2.25} />
+                  ) : null}
+                </button>
+              </div>
             );
           })}
         </Popover>

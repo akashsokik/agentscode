@@ -4,14 +4,15 @@ import path from 'node:path';
 import test from 'node:test';
 import type { Agent, Entry } from '../shared/types.ts';
 import { COMMS_SERVER } from '../server/config.ts';
-import { parseOrcacodeModels } from '../server/models.ts';
+import { discoverOrcacodeModels, orcacodeContextWindow, parseOrcacodeModelList, parseOrcacodeModels, parseOrcacodeProviders } from '../server/models.ts';
+import { filterOptions } from '../web/mono/filter.ts';
 import { discoverCommands } from '../server/skills.ts';
 import type { ApprovalRequest, RunnerHooks, TurnResult } from '../server/agents/runner.ts';
 import {
   normalizeTool, ORCACODE_COMMS_NOTE, ORCACODE_MAX_STEPS, orcacodeArgs, orcacodeMcpConfig, OrcacodeRunner, orcacodeUsage,
 } from '../server/agents/orcacode.ts';
 import { harness, projectDir, tempDir } from './helpers.ts';
-import { engineProblem, ORCACODE_MIN_VERSION, versionBelow } from '../shared/engines.ts';
+import { engineProblem, ORCACODE_MIN_VERSION, orcacodeModelValue, splitOrcacodeModel, versionBelow } from '../shared/engines.ts';
 
 const base: Agent = {
   id: 'a1', name: 'Ada', engine: 'orcacode', projectId: 'p1', worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: '', effort: '',
@@ -254,4 +255,93 @@ test('an orcacode too old for the headless flags fails with an update hint, not 
   for (let i = 0; i < 300 && runner.busy; i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(results[0].ok, false);
   assert.match(results[0].error ?? '', /does not know --prompt-file.*orcacode update/);
+});
+
+test('an OrcaCode model value carries its provider; ids keep their slashes and colons', () => {
+  assert.equal(orcacodeModelValue('openrouter', 'meta-llama/llama-4:free'), 'openrouter::meta-llama/llama-4:free');
+  assert.deepEqual(splitOrcacodeModel('openrouter::meta-llama/llama-4:free'), { provider: 'openrouter', model: 'meta-llama/llama-4:free' });
+  assert.deepEqual(splitOrcacodeModel('gemma4:e2b-mlx'), { provider: null, model: 'gemma4:e2b-mlx' });
+  assert.deepEqual(splitOrcacodeModel(''), { provider: null, model: '' });
+  const args = orcacodeArgs({ ...base, model: 'openrouter::meta-llama/llama-4:free' }, files);
+  assert.equal(args[args.indexOf('--provider') + 1], 'openrouter');
+  assert.equal(args[args.indexOf('--model') + 1], 'meta-llama/llama-4:free');
+  assert.ok(!orcacodeArgs({ ...base, model: 'gpt-6-sol' }, files).includes('--provider'));
+});
+
+test('OrcaCode provider and model JSON become grouped picker options', () => {
+  const listed = parseOrcacodeProviders(JSON.stringify({ active: 'openai-codex', providers: [
+    { label: 'openai-codex', name: 'OpenAI Codex', auth: 'oauth', configured: true, model: 'gpt-6-sol' },
+    { label: 'vercel', name: 'Vercel AI Gateway', auth: 'api_key', configured: false, model: null },
+    { name: 'no label' },
+  ] }));
+  assert.deepEqual(listed, { active: 'openai-codex', providers: [
+    { id: 'openai-codex', name: 'OpenAI Codex', configured: true, model: 'gpt-6-sol' },
+    { id: 'vercel', name: 'Vercel AI Gateway', configured: false, model: null },
+  ] });
+  assert.equal(parseOrcacodeProviders('not json'), null);
+  assert.equal(parseOrcacodeProviders(null), null);
+  const catalog = parseOrcacodeModelList(JSON.stringify({ provider: 'openrouter', models: [
+    { id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5', contextWindow: 1_000_000, efforts: ['low', 'high'] },
+    { id: 'x/y', name: null, contextWindow: null, efforts: null },
+  ] }), { id: 'openrouter', name: 'OpenRouter', configured: true });
+  assert.deepEqual(catalog?.options.map(o => [o.value, o.label, o.group, o.efforts]), [
+    ['openrouter::anthropic/claude-opus-5.5', 'Claude Opus 5.5', 'OpenRouter', ['low', 'high']],
+    ['openrouter::x/y', 'x/y', 'OpenRouter', ['low', 'medium', 'high']],
+  ]);
+  assert.deepEqual(catalog?.windows, [['openrouter::anthropic/claude-opus-5.5', 1_000_000]]);
+});
+
+/** A stand-in orcacode for discovery: 0.11 answers --list-providers and per-provider JSON lists; 0.10 only text. */
+function discoveryBin(dir: string, modern: boolean): string {
+  const bin = path.join(dir, `orcacode-${modern ? '11' : '10'}`);
+  fs.writeFileSync(bin, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const modern = ${modern};
+if (args.includes('--list-providers')) {
+  if (!modern) { console.error('unknown flag: --list-providers'); process.exit(1); }
+  console.log(JSON.stringify({ active: 'openrouter', providers: [
+    { label: 'openrouter', name: 'OpenRouter', auth: 'api_key', configured: true, model: 'anthropic/claude-opus-5.5' },
+    { label: 'local', name: 'Local', auth: 'none', configured: true, model: null },
+    { label: 'anthropic', name: 'Anthropic', auth: 'api_key', configured: false, model: null },
+  ] }));
+  process.exit(0);
+}
+if (args.includes('--list-models')) {
+  const provider = args.includes('--provider') ? args[args.indexOf('--provider') + 1] : null;
+  if (!args.includes('--json')) { console.log('gpt-6-sol  272k ctx'); process.exit(0); }
+  if (provider === 'local') { console.error('connection refused'); process.exit(1); }
+  console.log(JSON.stringify({ provider, models: [{ id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5', contextWindow: 1000000, efforts: null }] }));
+  process.exit(0);
+}
+process.exit(2);
+`, { mode: 0o755 });
+  return bin;
+}
+
+test('discovery lists every set-up provider\'s models, skips one that fails, and names the rest', async () => {
+  const dir = tempDir('orca-discover');
+  const found = await discoverOrcacodeModels(discoveryBin(dir, true));
+  assert.equal(found.discovered, true);
+  assert.deepEqual(found.models.map(m => [m.value, m.group]), [['openrouter::anthropic/claude-opus-5.5', 'OpenRouter']]);
+  assert.equal(found.defaultLabel, 'OpenRouter · anthropic/claude-opus-5.5');
+  assert.deepEqual(found.providers?.map(p => [p.id, p.configured]), [['openrouter', true], ['local', true], ['anthropic', false]]);
+  assert.equal(orcacodeContextWindow('anthropic/claude-opus-5.5', 'openrouter'), 1_000_000);
+});
+
+test('discovery falls back to the 0.10 text list when OrcaCode cannot list providers', async () => {
+  const dir = tempDir('orca-discover-old');
+  const found = await discoverOrcacodeModels(discoveryBin(dir, false));
+  assert.deepEqual(found.models.map(m => [m.value, m.group]), [['gpt-6-sol', undefined]]);
+  assert.equal(found.providers, undefined);
+});
+
+test('the model search matches every word against name, id and provider', () => {
+  const options = [
+    { value: 'openrouter::anthropic/claude-opus-5.5', label: 'Claude Opus 5.5', group: 'OpenRouter' },
+    { value: 'openai-codex::gpt-6-sol', label: 'gpt-6-sol', group: 'OpenAI Codex' },
+  ];
+  assert.deepEqual(filterOptions(options, 'opus router').map(o => o.label), ['Claude Opus 5.5']);
+  assert.deepEqual(filterOptions(options, 'CODEX').map(o => o.label), ['gpt-6-sol']);
+  assert.equal(filterOptions(options, '  ').length, 2);
+  assert.equal(filterOptions(options, 'nothing').length, 0);
 });

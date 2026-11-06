@@ -113,6 +113,9 @@ export interface ManagerOptions {
   idleProcessMs?: number;
 }
 
+/** Longest model id kept; OrcaCode's `provider::vendor/model:variant` ids run long. */
+const MODEL_MAX = 200;
+
 /** The runner for an agent's engine. */
 function createEngineRunner(ctx: RunnerContext): Runner {
   const engine = ctx.agent().engine;
@@ -353,7 +356,7 @@ export class AgentManager {
       worktree,
       home: this.homes.path(id),
       dreaming: true,
-      model: clip(String(req.model ?? '').trim(), 80),
+      model: clip(String(req.model ?? '').trim(), MODEL_MAX),
       effort: validEffort(req.effort),
       autonomy,
       useMcp: engine === 'claude' && Boolean(req.useMcp),
@@ -409,7 +412,7 @@ export class AgentManager {
     if (patch.autonomy !== undefined && !AUTONOMIES.includes(patch.autonomy)) throw new HttpError(400, 'Unknown autonomy level.');
     if (patch.role !== undefined && !ROLES.some(r => r.id === patch.role)) throw new HttpError(400, 'Unknown agent role.');
     if (patch.dreaming !== undefined && typeof patch.dreaming !== 'boolean') throw new HttpError(400, 'Dreaming is on or off: true or false.');
-    const model = patch.model === undefined ? undefined : clip(String(patch.model).trim(), 80);
+    const model = patch.model === undefined ? undefined : clip(String(patch.model).trim(), MODEL_MAX);
     const effort = patch.effort === undefined ? undefined : validEffort(patch.effort);
     const runner = this.runners.get(id);
     if (name !== undefined) agent.name = name;

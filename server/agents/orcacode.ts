@@ -11,7 +11,7 @@ import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, 
 import { commsMcpConfig, COMMS_INSTRUCTIONS } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
 import { orcacodeContextWindow } from '../models.ts';
-import { ORCACODE_MIN_VERSION } from '../../shared/engines.ts';
+import { ORCACODE_MIN_VERSION, splitOrcacodeModel } from '../../shared/engines.ts';
 
 type Input = Record<string, unknown>;
 type Event = Record<string, unknown> & { type?: string };
@@ -54,7 +54,10 @@ export function orcacodeArgs(agent: Agent, files: { prompt: string; mcp?: string
   const args = ['--json', '--prompt-file', files.prompt, '--max-steps', String(ORCACODE_MAX_STEPS), ...MODE_FLAGS[agent.autonomy]];
   if (files.mcp) args.push('--mcp-config', files.mcp);
   for (const image of images) args.push('--image', image.path);
-  if (agent.model) args.push('--model', agent.model);
+  // `provider::model` picks both; a bare id keeps OrcaCode's saved provider.
+  const { provider, model } = splitOrcacodeModel(agent.model);
+  if (provider) args.push('--provider', provider);
+  if (model) args.push('--model', model);
   if (agent.effort) args.push('--effort', agent.effort);
   if (agent.sessionId) args.push('--resume', agent.sessionId);
   return args;
@@ -325,7 +328,7 @@ export class OrcacodeRunner implements Runner {
     switch (event.type) {
       case 'metadata': {
         if (typeof event.sessionId === 'string' && event.sessionId) hooks.session(event.sessionId);
-        const window = orcacodeContextWindow(str(event.model));
+        const window = orcacodeContextWindow(str(event.model), str(event.provider) || null);
         if (window) hooks.context?.({ window });
         return;
       }

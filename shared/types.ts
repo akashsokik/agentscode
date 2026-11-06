@@ -518,6 +518,15 @@ export interface ModelOption {
   label: string;
   description: string;
   efforts: string[]; // supported reasoning efforts, empty if unknown
+  /** Where the model comes from, for engines with several providers (OrcaCode); pickers group by it. */
+  group?: string;
+}
+
+/** One of an engine's model providers (OrcaCode): set up means it has a key, a login or needs none. */
+export interface ModelProvider {
+  id: string;
+  name: string;
+  configured: boolean;
 }
 
 export interface EngineModels {
@@ -527,6 +536,8 @@ export interface EngineModels {
   models: ModelOption[];
   efforts: string[]; // every effort any model supports
   discovered: boolean; // false while loading or if the CLI could not be asked
+  /** Every provider the engine knows, set up or not (OrcaCode only). */
+  providers?: ModelProvider[];
 }
 
 export interface EngineInfo {

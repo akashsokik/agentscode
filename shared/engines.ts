@@ -26,3 +26,19 @@ export function engineProblem(engine: EngineKind, info: EngineInfo | undefined, 
   if (noProject) return 'OrcaCode agents need a project: its file tools only work inside the folder it runs in.';
   return null;
 }
+
+/**
+ * An OrcaCode agent's model is stored as `<provider>::<model>` so one string picks both; a bare id
+ * (or an empty one) leaves the provider to OrcaCode's saved choice. Model ids may contain `/` and `:`.
+ */
+export const ORCACODE_MODEL_SEP = '::';
+
+export function orcacodeModelValue(provider: string, model: string): string {
+  return `${provider}${ORCACODE_MODEL_SEP}${model}`;
+}
+
+export function splitOrcacodeModel(value: string): { provider: string | null; model: string } {
+  const at = value.indexOf(ORCACODE_MODEL_SEP);
+  if (at <= 0) return { provider: null, model: value };
+  return { provider: value.slice(0, at), model: value.slice(at + ORCACODE_MODEL_SEP.length) };
+}
