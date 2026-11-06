@@ -11,7 +11,7 @@ import { EngineIcon, ENGINE_NAMES as ENGINE_LABEL } from '../ui/EngineIcon.tsx';
 import { INPUT, PRIMARY, TEXTAREA } from '../ui/common.tsx';
 import { Modal } from '../mono/Modal.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
-import { Group, Row, Segmented, Select, Toggle } from '../mono/settings.tsx';
+import { Group, Row, Select, Toggle } from '../mono/settings.tsx';
 import { submitKey } from './submitKey.ts';
 
 const NAMES = ['Ada', 'Bo', 'Cy', 'Dee', 'Eli', 'Fen', 'Gus', 'Hal', 'Ivy', 'Jun', 'Kai', 'Lux', 'Mo', 'Nia', 'Oz', 'Pia', 'Quin', 'Rae', 'Sol', 'Tam', 'Uma', 'Vic', 'Wren', 'Xan'];
@@ -106,10 +106,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
             />
           </Row>
           <Row label="Engine" description={engines?.[engine].available ? `${engines[engine].path} (v${engines[engine].version})` : 'Not installed on this machine.'}>
-            <span className="flex items-center gap-2">
-              <EngineIcon engine={engine} className="size-4" />
-              <Segmented label="Engine" value={engine} onChange={setEngine} options={ENGINES.map(kind => ({ value: kind, label: ENGINE_LABEL[kind] }))} />
-            </span>
+            <Select label="Engine" value={engine} onChange={value => setEngine(value as EngineKind)} options={ENGINES.map(kind => ({ value: kind, icon: <EngineIcon engine={kind} className="size-4" />, label: engines?.[kind].available ? ENGINE_LABEL[kind] : `${ENGINE_LABEL[kind]} (not installed)` }))} />
           </Row>
           <Row label="Role" description={role === 'lead' ? 'Leads can delegate tasks and track reports.' : undefined}>
             <Select label="Role" value={role} options={ROLES.map(r => ({ value: r.id, label: r.name }))} onChange={pickRole} />
