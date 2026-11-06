@@ -144,3 +144,56 @@ export async function discoverCodexModels(binPath: string | null): Promise<Engin
     discovered: models.length > 0,
   };
 }
+
+/** OrcaCode's config folder, where it keeps the provider and the last model per provider. */
+function orcacodeConfigDir(): string {
+  if (process.env.ORCA_CONFIG_DIR?.trim()) return process.env.ORCA_CONFIG_DIR;
+  if (process.env.XDG_CONFIG_HOME?.trim()) return path.join(process.env.XDG_CONFIG_HOME, 'orcacode');
+  return path.join(os.homedir(), '.config', 'orcacode');
+}
+
+/** Context windows from the last catalog, by model id; the runner reports them to the meter. */
+const orcacodeWindows = new Map<string, number>();
+
+export function orcacodeContextWindow(model: string): number | undefined {
+  return orcacodeWindows.get(model);
+}
+
+/** `gpt-6-sol  272k ctx` lines from `orcacode --list-models`; the size is optional. */
+export function parseOrcacodeModels(text: string): { id: string; window?: number }[] {
+  return text.split('\n').flatMap((line) => {
+    const match = line.trim().match(/^(\S+)(?:\s+(\d+(?:\.\d+)?)([km])?\s+ctx)?\s*$/i);
+    if (!match) return [];
+    const size = match[2] ? Number(match[2]) * (match[3]?.toLowerCase() === 'm' ? 1_000_000 : match[3] ? 1000 : 1) : undefined;
+    return [{ id: match[1], window: size }];
+  });
+}
+
+// OrcaCode passes --effort to the provider; it does not list levels per model.
+const ORCACODE_EFFORTS = ['low', 'medium', 'high'];
+
+export async function discoverOrcacodeModels(binPath: string | null): Promise<EngineModels> {
+  if (!binPath) return emptyModels('orcacode');
+  // Asks the configured provider's catalog; no prompt is sent.
+  const listed = await new Promise<string>((resolve) => {
+    execFile(binPath, ['--list-models'], { timeout: 30_000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(err ? '' : stdout));
+  });
+  const catalog = parseOrcacodeModels(listed);
+  for (const entry of catalog) if (entry.window) orcacodeWindows.set(entry.id, entry.window);
+  const models: ModelOption[] = catalog.map((m) => ({
+    value: m.id,
+    label: m.id,
+    description: m.window ? `${Math.round(m.window / 1000)}k context` : '',
+    efforts: ORCACODE_EFFORTS,
+  }));
+  const config = readJson(path.join(orcacodeConfigDir(), 'config.json'));
+  const provider = typeof config?.provider === 'string' ? config.provider : null;
+  const saved = provider && config?.models && typeof config.models === 'object' ? (config.models as Record<string, unknown>)[provider] : null;
+  return {
+    defaultLabel: typeof saved === 'string' ? saved : 'OrcaCode default',
+    defaultEffort: null,
+    models,
+    efforts: models.length ? ORCACODE_EFFORTS : [],
+    discovered: models.length > 0,
+  };
+}

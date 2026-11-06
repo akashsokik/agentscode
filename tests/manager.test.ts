@@ -167,7 +167,7 @@ test('a restart settles running agents and unfinished mail', async () => {
   const { AgentManager } = await import('../server/manager.ts');
   const store = new Store(h.store.dataDir);
   store.load();
-  const restarted = new AgentManager(store, { broadcast: () => {} }, { claude: { available: true, path: null, version: null }, codex: { available: true, path: null, version: null } });
+  const restarted = new AgentManager(store, { broadcast: () => {} }, { claude: { available: true, path: null, version: null }, codex: { available: true, path: null, version: null }, orcacode: { available: true, path: null, version: null } });
   restarted.init();
   assert.equal(store.agents.get(h.ada.id)?.status, 'idle');
   assert.ok(store.messages.every(m => m.status === 'failed'));

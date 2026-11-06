@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AgentRole, Autonomy, EngineKind } from '../../shared/types.ts';
+import { ENGINES, type AgentRole, type Autonomy, type EngineKind } from '../../shared/types.ts';
 import { ROLES, rolePreset } from '../../shared/roles.ts';
 import { api } from '../api.ts';
 import { AUTONOMY, effortLabel } from '../format.ts';
@@ -25,7 +25,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   const engines = snapshot?.engines;
   const taken = useMemo(() => new Set((snapshot?.agents ?? []).map(a => a.name.toLowerCase())), [snapshot?.agents]);
   const [name, setName] = useState(() => NAMES.find(n => !taken.has(n.toLowerCase())) ?? '');
-  const [engine, setEngine] = useState<EngineKind>(() => (engines?.claude.available || !engines?.codex.available ? 'claude' : 'codex'));
+  const [engine, setEngine] = useState<EngineKind>(() => ENGINES.find(kind => engines?.[kind].available) ?? 'claude');
   const [project, setProject] = useState(projectId === null ? NO_PROJECT : projectId ?? projects[0]?.id ?? NO_PROJECT);
   const [role, setRole] = useState<AgentRole>('dev');
   const [instructions, setInstructions] = useState(rolePreset('dev').instructions);
@@ -72,7 +72,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   return (
     <Modal
       title="New agent"
-      description="A Claude Code or Codex session that can message its teammates."
+      description="A Claude Code, Codex or OrcaCode session that can message its teammates."
       size="md"
       fitViewport
       onClose={onClose}
@@ -106,7 +106,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
           <Row label="Engine" description={engineReady ? `${engines?.[engine].path} (v${engines?.[engine].version})` : 'Not installed on this machine.'}>
             <span className="flex items-center gap-2">
               <EngineIcon engine={engine} className="size-4" />
-              <Segmented label="Engine" value={engine} onChange={setEngine} options={[{ value: 'claude', label: 'Claude Code' }, { value: 'codex', label: 'Codex' }]} />
+              <Segmented label="Engine" value={engine} onChange={setEngine} options={ENGINES.map(kind => ({ value: kind, label: ENGINE_LABEL[kind] }))} />
             </span>
           </Row>
           <Row label="Role" description={role === 'lead' ? 'Leads can delegate tasks and track reports.' : undefined}>

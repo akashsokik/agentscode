@@ -269,7 +269,7 @@ test('a restart fails deliveries that were in flight, and keeps the history', as
   const { AgentManager } = await import('../server/manager.ts');
   const store = new Store(h.store.dataDir);
   store.load();
-  const restarted = new AgentManager(store, { broadcast: () => {} }, { claude: { available: true, path: null, version: null }, codex: { available: true, path: null, version: null } });
+  const restarted = new AgentManager(store, { broadcast: () => {} }, { claude: { available: true, path: null, version: null }, codex: { available: true, path: null, version: null }, orcacode: { available: true, path: null, version: null } });
   restarted.init();
   const after = restarted.channelPosts(h.channel.id).find(p => p.id === post.id)!;
   assert.equal(after.to[0].status, 'failed');
@@ -453,7 +453,7 @@ test('recover backfills legacy reply chains to their root and persists the migra
   const { AgentManager } = await import('../server/manager.ts');
   const store = new Store(h.store.dataDir);
   store.load();
-  const restarted = new AgentManager(store, { broadcast: () => {} }, { claude: { available: true, path: null, version: null }, codex: { available: true, path: null, version: null } });
+  const restarted = new AgentManager(store, { broadcast: () => {} }, { claude: { available: true, path: null, version: null }, codex: { available: true, path: null, version: null }, orcacode: { available: true, path: null, version: null } });
   t.after(() => restarted.shutdown());
   restarted.init();
   assert.equal(restarted.channelPosts(h.channel.id).find(p => p.id === legacy.id)?.threadId, root.id);

@@ -6,7 +6,7 @@ import readline from 'node:readline';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type {
-  Agent, DreamMetrics, DreamOp, DreamOpKind, DreamReason, DreamRecord, DreamStats, Entry, MemoryEntry, ServerEvent, SoulProposal,
+  Agent, DreamMetrics, DreamOp, DreamOpKind, DreamReason, DreamRecord, DreamStats, EngineKind, Entry, MemoryEntry, ServerEvent, SoulProposal,
 } from '../shared/types.ts';
 import { AgentHomes, looksSecret, MEMORY_LIMIT, renderMemory, SOUL_LIMIT } from './agentHome.ts';
 import { HttpError } from './errors.ts';
@@ -1295,9 +1295,49 @@ export function codexDreamEngine(binPath: string | null): DreamEngine {
   });
 }
 
+/** OrcaCode, one headless run: read-only, low effort, not recorded as a session. */
+export function orcacodeDreamEngine(binPath: string | null): DreamEngine {
+  return ({ agent, prompt, cwd, signal }) => new Promise((resolve, reject) => {
+    refuseUnderTest();
+    if (!binPath) return reject(new Error('The OrcaCode CLI was not found on this machine.'));
+    const args = ['-p', '-', '--json', '--read-only', '--no-session', '--effort', 'low', ...(agent.model ? ['--model', agent.model] : [])];
+    const child = spawn(binPath, args, { cwd, env: { ...process.env, NO_COLOR: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const kill = () => child.kill('SIGTERM');
+    signal.addEventListener('abort', kill, { once: true });
+    let text = '';
+    let tokens: number | undefined;
+    let costUsd: number | undefined;
+    let stderr = '';
+    readline.createInterface({ input: child.stdout! }).on('line', line => {
+      try {
+        const event = JSON.parse(line) as { type?: string; message?: string; status?: string; usage?: Record<string, number> };
+        if ((event.type === 'result' || event.type === 'assistant') && event.message?.trim()) text = event.message;
+        if (event.type === 'summary' && event.usage) {
+          const u = event.usage;
+          tokens = (u.inputTokens ?? 0) + (u.outputTokens ?? 0) + (u.cacheReadTokens ?? 0) + (u.cacheCreateTokens ?? 0) || undefined;
+          costUsd = typeof u.cost === 'number' ? u.cost : undefined;
+        }
+      } catch { /* not an event */ }
+    });
+    child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-2000); });
+    child.on('error', reject);
+    child.on('close', code => {
+      signal.removeEventListener('abort', kill);
+      if (signal.aborted) return reject(new Error('The dream took too long and was stopped.'));
+      if (code !== 0 || !text) return reject(new Error(clip(stderr || `orcacode exited with code ${code}`, 300)));
+      resolve({ text, tokens, costUsd });
+    });
+    child.stdin?.on('error', () => {});
+    child.stdin?.end(prompt);
+  });
+}
+
 /** The engine for an agent: its own CLI. */
-export function defaultDreamEngine(paths: { claude: string | null; codex: string | null }): DreamEngine {
-  const claude = claudeDreamEngine(paths.claude);
-  const codex = codexDreamEngine(paths.codex);
-  return request => (request.agent.engine === 'claude' ? claude(request) : codex(request));
+export function defaultDreamEngine(paths: Record<EngineKind, string | null>): DreamEngine {
+  const engines: Record<EngineKind, DreamEngine> = {
+    claude: claudeDreamEngine(paths.claude),
+    codex: codexDreamEngine(paths.codex),
+    orcacode: orcacodeDreamEngine(paths.orcacode),
+  };
+  return request => engines[request.agent.engine](request);
 }

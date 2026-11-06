@@ -2,7 +2,9 @@
 // Keep this file to erasable syntax only (no enums, namespaces or parameter
 // properties) so Node can run it with plain type stripping.
 
-export type EngineKind = 'claude' | 'codex';
+export type EngineKind = 'claude' | 'codex' | 'orcacode';
+export const ENGINES: EngineKind[] = ['claude', 'codex', 'orcacode'];
+export const ENGINE_LABELS: Record<EngineKind, string> = { claude: 'Claude Code', codex: 'Codex', orcacode: 'OrcaCode' };
 
 /** What an agent is for. Only a lead may delegate structured tasks to teammates. */
 export type AgentRole = 'dev' | 'lead' | 'reviewer' | 'tester' | 'planner' | 'scout' | 'custom';

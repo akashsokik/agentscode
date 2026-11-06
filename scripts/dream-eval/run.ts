@@ -20,7 +20,7 @@ const USAGE = `Usage: node scripts/dream-eval/run.ts [options]
   --samples N         Runs of each scenario and arm (default: 1)
   --max-cost USD      Stop at the first turn past this spend (default: 5)
   --seed N            Seed for the run order (default: random; printed)
-  --engine claude     claude or codex (default: claude)
+  --engine claude     claude, codex or orcacode (default: claude)
   --model <id>        Model for the agent (default: the CLI default)
   --turn-timeout <s>  Give up on a turn after this many seconds (default: 900)
   --dry               Scripted fake engine and dream model: free, checks the plumbing and the arms
@@ -63,7 +63,7 @@ if (values.list) {
 }
 
 const engine = values.engine;
-if (engine !== 'claude' && engine !== 'codex') usage(`Unknown engine "${engine}".`);
+if (engine !== 'claude' && engine !== 'codex' && engine !== 'orcacode') usage(`Unknown engine "${engine}".`);
 const number = (name: string, raw: string, min: number) => {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < min) usage(`--${name} takes a number of at least ${min}.`);

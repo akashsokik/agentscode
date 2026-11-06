@@ -5,11 +5,11 @@ import { AgentManager } from './manager.ts';
 import { Store } from './store.ts';
 import { Terminals } from './terminals.ts';
 
-const [claude, codex] = await Promise.all([detectEngine('claude'), detectEngine('codex')]);
+const [claude, codex, orcacode] = await Promise.all([detectEngine('claude'), detectEngine('codex'), detectEngine('orcacode')]);
 const store = new Store();
 store.load();
 const hub = new Hub();
-const manager = new AgentManager(store, hub, { claude, codex });
+const manager = new AgentManager(store, hub, { claude, codex, orcacode });
 manager.init();
 void manager.refreshModels(); // fills in the model pickers a few seconds after start
 
@@ -28,6 +28,7 @@ server.listen(PORT, HOST, () => {
   const engines = [
     `Claude Code ${claude.available ? `v${claude.version}` : 'not found'}`,
     `Codex ${codex.available ? `v${codex.version}` : 'not found'}`,
+    `OrcaCode ${orcacode.available ? `v${orcacode.version}` : 'not found'}`,
   ].join(', ');
   console.log(`AgentsCode is open at http://localhost:${PORT}  (${engines})`);
 });

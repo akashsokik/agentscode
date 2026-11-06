@@ -17,6 +17,8 @@ import {
   type AgentDreams,
   type DreamRecord,
   type DreamStatsReport,
+  ENGINE_LABELS,
+  ENGINES,
   type EngineInfo,
   type EngineKind,
   type EngineModels,
@@ -39,6 +41,7 @@ import { commandBody, commandsFor, type DiscoveredCommand } from './skills.ts';
 import { dropContextWindow, mergeContextUsage, sameContextUsage } from '../shared/contextUsage.ts';
 import { ClaudeRunner } from './agents/claude.ts';
 import { CodexRunner } from './agents/codex.ts';
+import { OrcacodeRunner } from './agents/orcacode.ts';
 import { clip } from './agents/describe.ts';
 import {
   agentContext, CONTEXT_SECTIONS, contextSections, fullContext, memorySection, refreshedContext, systemInstructions,
@@ -54,7 +57,7 @@ import { IDLE_PROCESS_MS } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { HttpError } from './errors.ts';
 import type { Broadcaster } from './hub.ts';
-import { discoverClaudeModels, discoverCodexModels, emptyModels } from './models.ts';
+import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, emptyModels } from './models.ts';
 import { isDirectory, isInsideGitRepo, normalizeDir } from './projects.ts';
 import type { Store } from './store.ts';
 import { createWorktree, removeWorktree } from './worktrees.ts';
@@ -109,6 +112,14 @@ export interface ManagerOptions {
   idleProcessMs?: number;
 }
 
+/** The runner for an agent's engine. */
+function createEngineRunner(ctx: RunnerContext): Runner {
+  const engine = ctx.agent().engine;
+  if (engine === 'claude') return new ClaudeRunner(ctx);
+  if (engine === 'orcacode') return new OrcacodeRunner(ctx);
+  return new CodexRunner(ctx);
+}
+
 /** Owns agents, projects and the runners behind them; every change is persisted and broadcast. */
 export class AgentManager {
   private store: Store;
@@ -133,7 +144,7 @@ export class AgentManager {
   private dreamer: Dreamer;
   private idleProcessMs: number;
   private createRunner: (ctx: RunnerContext) => Runner;
-  private models: Record<EngineKind, EngineModels> = { claude: emptyModels('claude'), codex: emptyModels('codex') };
+  private models: Record<EngineKind, EngineModels> = { claude: emptyModels('claude'), codex: emptyModels('codex'), orcacode: emptyModels('orcacode') };
   /** Claude reports cost cumulatively per process; remember the last figure to get each turn's share. */
   private processCost = new Map<string, number>();
   private shuttingDown = false;
@@ -146,7 +157,7 @@ export class AgentManager {
     this.attachments = new Attachments(path.join(store.dataDir, 'attachments'));
     this.channelAttachments = new Attachments(path.join(store.dataDir, 'channel-attachments'));
     this.homes = new AgentHomes(path.join(store.dataDir, 'agents'));
-    this.createRunner = options.createRunner ?? (ctx => ctx.agent().engine === 'claude' ? new ClaudeRunner(ctx) : new CodexRunner(ctx));
+    this.createRunner = options.createRunner ?? (ctx => createEngineRunner(ctx));
     this.idleProcessMs = options.idleProcessMs ?? IDLE_PROCESS_MS;
     this.dreamer = new Dreamer({
       homes: this.homes,
@@ -156,7 +167,7 @@ export class AgentManager {
         const agent = this.store.agents.get(id);
         return Boolean(this.runners.get(id)?.busy) || agent?.status === 'working' || agent?.status === 'waiting';
       },
-      engine: options.dreamEngine ?? defaultDreamEngine({ claude: engines.claude.path, codex: engines.codex.path }),
+      engine: options.dreamEngine ?? defaultDreamEngine({ claude: engines.claude.path, codex: engines.codex.path, orcacode: engines.orcacode.path }),
       broadcast: event => this.hub.broadcast(event),
       note: (agentId, text) => this.addEntry(agentId, { id: randomUUID(), kind: 'system', text }),
       memoryChanged: (agent, entries) => this.publishMemory(agent.id, entries),
@@ -245,14 +256,16 @@ export class AgentManager {
     const discover = async (engine: EngineKind) => {
       if (!this.engines[engine].available) return;
       try {
-        const found = engine === 'claude' ? await discoverClaudeModels(this.engines.claude.path) : await discoverCodexModels(this.engines.codex.path);
+        const found = engine === 'claude' ? await discoverClaudeModels(this.engines.claude.path)
+          : engine === 'orcacode' ? await discoverOrcacodeModels(this.engines.orcacode.path)
+          : await discoverCodexModels(this.engines.codex.path);
         this.models = { ...this.models, [engine]: found };
         this.hub.broadcast({ type: 'models', models: this.models });
       } catch (err) {
         console.error(`[models] could not list ${engine} models:`, (err as Error).message);
       }
     };
-    await Promise.all([discover('claude'), discover('codex')]);
+    await Promise.all(ENGINES.map(discover));
     return this.models;
   }
 
@@ -298,8 +311,8 @@ export class AgentManager {
 
   async create(req: CreateAgentRequest): Promise<Agent> {
     const engine = req.engine;
-    if (engine !== 'claude' && engine !== 'codex') throw new HttpError(400, 'Pick Claude Code or Codex.');
-    if (!this.engines[engine].available) throw new HttpError(400, `${engine === 'claude' ? 'Claude Code' : 'Codex'} is not installed on this machine.`);
+    if (!ENGINES.includes(engine)) throw new HttpError(400, 'Pick Claude Code, Codex or OrcaCode.');
+    if (!this.engines[engine].available) throw new HttpError(400, `${ENGINE_LABELS[engine]} is not installed on this machine.`);
     // null is an agent with no project: it works across every project, from its own home.
     let project: Project | null = null;
     if (req.projectId === null) {
@@ -565,12 +578,12 @@ export class AgentManager {
   }
 
   /**
-   * Codex does not run skills itself, so a message naming one with /name carries the skill's
-   * instructions to it (MonoCode's injectSkillPrompt). Claude Code runs them as typed.
+   * Codex does not run skills itself, and OrcaCode only knows $name, so a message naming one with
+   * /name carries the skill's instructions to it (MonoCode's injectSkillPrompt). Claude Code runs them as typed.
    */
   private withSkills(id: string, text: string): string {
     const agent = this.agent(id);
-    if (agent.engine !== 'codex' || !text.includes('/')) return text;
+    if (agent.engine === 'claude' || !text.includes('/')) return text;
     const names = skillNamesInText(text);
     if (!names.length) return text;
     let catalog: DiscoveredCommand[];
@@ -591,12 +604,13 @@ export class AgentManager {
    * soul.md and memory.md. It works from home/workspace now. Claude Code keeps a session per working
    * folder, so a Claude session that started anywhere else (sessionCwd; a session from before it was
    * recorded started in the home) cannot resume: it is ended here, with a note. Whether a workspace
-   * folder already existed does not matter. Codex threads resume from any folder. Files the agent saved
+   * folder already existed does not matter. Codex threads resume from any folder; an OrcaCode session
+   * resumes in the folder it recorded, so it is ended like Claude's. Files the agent saved
    * before stay in its home, where it can still edit them (only AgentsCode's own files are guarded).
    */
   private moveToWorkspace(agent: Agent): void {
     const workspace = fs.realpathSync(this.homes.workspace(agent));
-    if (agent.engine !== 'claude' || !agent.sessionId || agent.sessionCwd === workspace) return;
+    if (agent.engine === 'codex' || !agent.sessionId || agent.sessionCwd === workspace) return;
     agent.sessionId = null;
     delete agent.sessionCwd;
     delete agent.context;

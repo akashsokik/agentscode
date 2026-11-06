@@ -21,7 +21,7 @@ node scripts/dream-eval/run.ts --list
 | `--samples N` | runs of each scenario and arm (default 1) |
 | `--max-cost USD` | stop at the first check where spend is past this (default 5); see Budget |
 | `--seed N` | seed for the run order (default random, printed) |
-| `--engine claude\|codex`, `--model <id>` | the agent's engine and model |
+| `--engine claude\|codex\|orcacode`, `--model <id>` | the agent's engine and model |
 | `--turn-timeout <s>` | give up on a turn after this long (default 900) |
 | `--dry` | scripted engine and dream model: free |
 | `--claude-auto-memory` | leave Claude Code's own memory on (see Isolation) |

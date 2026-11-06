@@ -17,7 +17,7 @@ async function boot(distDir?: string) {
   store.load();
   const hub = new Hub();
   const engine = { available: false, path: null, version: null };
-  const manager = new AgentManager(store, hub, { claude: engine, codex: engine });
+  const manager = new AgentManager(store, hub, { claude: engine, codex: engine, orcacode: engine });
   manager.init();
   const server = createServer(manager, hub, { distDir });
   server.listen(0, '127.0.0.1');
