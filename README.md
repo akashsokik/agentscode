@@ -7,7 +7,7 @@
 **An IDE where Claude Code, Codex and OrcaCode agents work side by side and talk to each other.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3b82f6)](LICENSE)
-[![macOS app](https://img.shields.io/badge/desktop-macOS-111111?logo=apple&logoColor=white)](#desktop-app-macos)
+[![Desktop app](https://img.shields.io/badge/desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-111111)](#download)
 [![Electron](https://img.shields.io/badge/Electron-45-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2023.6-5FA04E?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
@@ -79,6 +79,35 @@ validations through built-in messaging tools, and every exchange is visible in *
   - **Codex**: `codex` (run `codex login` if it reports a login problem)
   - **OrcaCode**: `orcacode` 0.10.0 or newer, with a provider set up (run `orcacode` and use `/provider`)
 
+### Download
+
+Get the app for your platform from [orcapods.ai/agentscode](https://orcapods.ai/agentscode) or the
+[latest release](https://github.com/akashsokik/agentscode/releases/latest):
+
+| Platform | File |
+| :-- | :-- |
+| macOS, Apple silicon | [AgentsCode-mac-arm64.dmg](https://github.com/akashsokik/agentscode/releases/latest/download/AgentsCode-mac-arm64.dmg) |
+| macOS, Intel | [AgentsCode-mac-x64.dmg](https://github.com/akashsokik/agentscode/releases/latest/download/AgentsCode-mac-x64.dmg) |
+| Windows x64 | [AgentsCode-win-x64.exe](https://github.com/akashsokik/agentscode/releases/latest/download/AgentsCode-win-x64.exe) |
+| Linux x64 | [AgentsCode-linux-x86_64.AppImage](https://github.com/akashsokik/agentscode/releases/latest/download/AgentsCode-linux-x86_64.AppImage) |
+
+The app updates itself: it checks for a new release at launch and every few hours, downloads it in
+the background, and installs it when you restart. **Check for Updates** is in the app menu on macOS
+and the Help menu on Windows and Linux.
+
+- The app bundles Electron, so it needs no Node install. It still needs the `claude`, `codex` and
+  `orcacode` CLIs you use, which it finds through your login shell's PATH.
+- It starts the server in the background and opens a window on it. If an AgentsCode server already
+  answers on port 4320 (for example `npm run dev`), the window opens on that one instead, so two
+  servers never share `~/.agentscode`.
+- Quitting the app stops its agents. Closing the window keeps them working.
+- **macOS:** until releases are signed with a Developer ID, the first launch shows "Apple could not
+  verify AgentsCode". Open **System Settings > Privacy & Security** and choose **Open Anyway**. An
+  unsigned Mac build tells you about a new version and opens its download instead of installing it.
+- **Windows:** the installer is not code-signed yet, so SmartScreen may ask you to confirm
+  (**More info > Run anyway**).
+- **Linux:** make the AppImage executable (`chmod +x AgentsCode-linux-x86_64.AppImage`) and run it.
+
 ### Run from source
 
 ```bash
@@ -95,21 +124,12 @@ npm run dev        # API on :4320, Vite on http://localhost:5174
 AgentsCode uses port 4320 and keeps its data in `~/.agentscode`, so it can run next to Agent Office.
 Override with `PORT=...` and `AGENTSCODE_HOME=...`.
 
-### Desktop app (macOS)
+To build the desktop app locally:
 
 ```bash
-npm run dist:mac   # builds release/AgentsCode-0.1.0-arm64.dmg
-npm run desktop    # or build and open it straight from the source tree
+npm run desktop    # build and open it straight from the source tree
+npm run dist:mac   # release/AgentsCode-mac-<arch>.dmg and .zip (also dist:win, dist:linux on those platforms)
 ```
-
-The app bundles Electron, so it needs no Node install. It still needs the `claude` and `codex` CLIs,
-which it finds through your login shell's PATH.
-
-- It starts the server in the background and opens a window on it.
-- If an AgentsCode server already answers on port 4320 (for example `npm run dev`), the window opens
-  on that one instead, so two servers never share `~/.agentscode`.
-- Quitting the app stops its agents. Closing the window keeps them working.
-- The build is not code-signed. The first time, right-click the app and choose **Open**.
 
 ## Using it
 
@@ -335,6 +355,30 @@ tests/               node --test suites with fake providers
 ```
 
 </details>
+
+### Releasing
+
+Releases are cut from a tag. The version in `package.json` is the version the app reports and
+compares against the update feed.
+
+```bash
+npm run release:notes   -- 0.2.0   # draft docs/releases/0.2.0.md from the commits since the last tag; edit it
+npm run release:prepare -- 0.2.0   # set the version, commit with the notes
+git push origin main
+npm run release:tag     -- 0.2.0   # tag v0.2.0 and push it
+```
+
+The tag starts [`.github/workflows/release.yml`](.github/workflows/release.yml). It typechecks and
+tests, builds macOS arm64 and x64, Windows x64 and Linux x64 on their own runners, and publishes one
+GitHub Release with the notes file as its body. The release carries the installers, the update feeds
+the installed apps read (`latest-mac.yml`, `latest.yml`, `latest-linux.yml`), blockmaps for
+differential updates, and `SHA256SUMS`. A version with a suffix (`0.2.0-beta.1`) is published as a
+prerelease. Only apps already on a prerelease are offered prereleases.
+
+**macOS signing.** Mac auto-update can only install in place when the app is signed with a Developer
+ID. Add these repository secrets and the workflow signs and notarizes the app: `MAC_CSC_LINK` (the
+Developer ID Application certificate as a base64 `.p12`), `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`. Without them the Mac app is ad-hoc signed.
 
 ## Acknowledgements
 

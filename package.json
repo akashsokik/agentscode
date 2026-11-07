@@ -4,8 +4,14 @@
   "private": true,
   "type": "module",
   "productName": "AgentsCode",
-  "description": "An IDE where Claude Code and Codex agents work side by side and talk to each other.",
+  "description": "An IDE where Claude Code, Codex and OrcaCode agents work side by side and talk to each other.",
   "license": "MIT",
+  "author": "AgentsCode",
+  "homepage": "https://orcapods.ai/agentscode",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/akashsokik/agentscode.git"
+  },
   "main": "out/electron/main.js",
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
@@ -13,11 +19,16 @@
     "dev:web": "vite",
     "build": "vite build",
     "start": "vite build && node server/index.ts",
-    "build:desktop": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper && vite build --outDir out/dist && tsc -p tsconfig.desktop.json",
+    "build:desktop": "node scripts/prepare-pty.mjs && vite build --outDir out/dist && tsc -p tsconfig.desktop.json",
     "desktop": "npm run build:desktop && electron .",
-    "dist:mac": "npm run build:desktop && electron-builder --mac",
+    "dist:mac": "npm run build:desktop && electron-builder --mac --publish never",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.desktop.json",
-    "test": "node --test tests/*.test.ts"
+    "test": "node --test tests/*.test.ts",
+    "dist:win": "npm run build:desktop && electron-builder --win --x64 --publish never",
+    "dist:linux": "npm run build:desktop && electron-builder --linux --x64 --publish never",
+    "release:notes": "node scripts/release.mjs notes",
+    "release:prepare": "node scripts/release.mjs prepare",
+    "release:tag": "node scripts/release.mjs tag"
   },
   "engines": {
     "node": ">=23.6"
@@ -25,6 +36,7 @@
   "build": {
     "appId": "com.agentscode.app",
     "productName": "AgentsCode",
+    "artifactName": "${productName}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -34,12 +46,51 @@
     ],
     "asar": false,
     "npmRebuild": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "akashsokik",
+        "repo": "agentscode",
+        "releaseType": "release"
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {
+      "title": "${productName} ${version}"
+    },
+    "win": {
+      "icon": "build/icon.png",
       "target": [
         {
-          "target": "dmg",
-          "arch": "arm64"
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Development",
+      "synopsis": "Claude Code, Codex and OrcaCode agents side by side",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
         }
       ]
     }
@@ -47,6 +98,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.316",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "electron-updater": "^6.8.11",
     "express": "^5.3.0",
     "node-pty": "^1.1.0",
     "ws": "^8.22.1",
