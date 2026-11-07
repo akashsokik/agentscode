@@ -1,16 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- AgentsCode: Orca's mark (orcapods.ai: a 2x2 grid with the top-left and bottom-right cells lit,
-       in the same 9:2 cell-to-gap proportions) with its two empty cells filled by two agents, warm
-       and cool. The sidebar mark (web/ui/BrandMark.tsx) and the favicon (index.html) draw the same grid. -->
+       in the same 9:2 cell-to-gap proportions), monochrome, with its two empty cells filled in dim
+       so the whole grid shows. The sidebar mark (web/ui/BrandMark.tsx) and the favicon (index.html)
+       draw the same grid. -->
   <defs>
-    <linearGradient id="warm" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffc09a" />
-      <stop offset="1" stop-color="#e2744a" />
-    </linearGradient>
-    <linearGradient id="cool" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#a8d4ff" />
-      <stop offset="1" stop-color="#3a86f4" />
-    </linearGradient>
     <filter id="drop" x="-10%" y="-10%" width="120%" height="125%">
       <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.35" />
     </filter>
@@ -18,7 +11,7 @@
   <rect x="100" y="100" width="824" height="824" rx="185" fill="#0a0a0a" filter="url(#drop)" />
   <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="3" />
   <rect x="254" y="254" width="232" height="232" fill="#f5f5f5" />
-  <rect x="538" y="254" width="232" height="232" fill="url(#warm)" />
-  <rect x="254" y="538" width="232" height="232" fill="url(#cool)" />
+  <rect x="538" y="254" width="232" height="232" fill="#f5f5f5" fill-opacity="0.28" />
+  <rect x="254" y="538" width="232" height="232" fill="#f5f5f5" fill-opacity="0.28" />
   <rect x="538" y="538" width="232" height="232" fill="#f5f5f5" />
 </svg>
