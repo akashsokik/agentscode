@@ -82,7 +82,8 @@ export interface Harness {
 
 export function harness(engines: Partial<Record<EngineKind, EngineInfo>> = {}, options: { idleProcessMs?: number } = {}): Harness {
   const dir = tempDir('state');
-  const store = new Store(path.join(dir, 'data'));
+  // Named like the real ~/.agentscode: a dot folder, which Express refuses to serve files from unless told.
+  const store = new Store(path.join(dir, '.agentscode'));
   store.load();
   const events: ServerEvent[] = [];
   const runners = new Map<string, FakeRunner[]>();

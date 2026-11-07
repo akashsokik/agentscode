@@ -738,11 +738,12 @@ html.theme-light .segmented-active {
   }
 }
 /*
- * The connector: a line dropping out of the chevron and curving into the first
- * thing the fold holds, so opened work reads as hanging off that line rather
- * than running on from the answer below it. Same geometry as the phase rail —
- * 23px is the chevron's own centre (16px of row padding plus half a 14px
- * icon), and the curve is a quarter circle tangent to both.
+ * The connector: a line dropping out of the turn's tile and curving into the
+ * first thing the fold holds, so opened work reads as hanging off that line
+ * rather than running on from the answer below it. Same geometry as the phase
+ * rail (MonoCode's tile_rail): 26.5px puts the 1px line on the 22px tile's
+ * centre past 16px of row padding, its children start 30px in, where the
+ * line's title does, and the curve is a quarter circle tangent to both.
  */
 .zen-fold-drop,
 .zen-fold-rail {
@@ -758,8 +759,8 @@ html.theme-light .segmented-active {
 .zen-fold-drop::after {
   content: "";
   position: absolute;
-  left: 23px;
-  top: 22px;
+  left: 26.5px;
+  top: 23px;
   bottom: -4px;
   width: 1px;
   background: var(--zen-rail);
@@ -769,7 +770,7 @@ html.theme-light .segmented-active {
 .zen-fold-rail::before {
   content: "";
   position: absolute;
-  left: 23px;
+  left: 26.5px;
   top: 0;
   bottom: 0;
   width: 1px;
@@ -786,13 +787,204 @@ html.theme-light .segmented-active {
 .zen-fold-rail::after {
   content: "";
   position: absolute;
-  left: 23px;
+  left: 26.5px;
   top: 6px;
   width: 8px;
   height: 8px;
   border-left: 1px solid var(--zen-rail);
   border-bottom: 1px solid var(--zen-rail);
   border-bottom-left-radius: 8px;
+}
+
+/* An open phase's line out of its tile, down to its first step's spine. */
+.zen-phase-drop {
+  position: relative;
+}
+
+.zen-phase-drop::after {
+  content: "";
+  position: absolute;
+  left: 10.5px;
+  top: 23px;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(
+    in srgb,
+    var(--color-content) 14%,
+    var(--color-background-base)
+  );
+}
+
+/*
+ * MonoCode's activity tile (tab_tile.rs): a 22x18 raised face a touch wider
+ * than tall, a top-to-bottom fill, a sheen brighter at the top, a 1px rim and
+ * a hairline lift under it. Coloured faces carry a white mark; the neutral
+ * one is a grey in the theme's ink, under the theme's ink.
+ */
+.activity-tile {
+  --tile-top: #3a3a3c;
+  --tile-bottom: #1c1c1e;
+  --tile-sheen: rgb(255 255 255 / 0.16);
+  --tile-rim: rgb(255 255 255 / 0.14);
+  --tile-lift: rgb(0 0 0 / 0.3);
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  width: 22px;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 5px;
+  color: #fff;
+  background:
+    linear-gradient(180deg, var(--tile-sheen), transparent),
+    linear-gradient(180deg, var(--tile-top), var(--tile-bottom));
+  box-shadow:
+    inset 0 0 0 1px var(--tile-rim),
+    0 1px 0 var(--tile-lift);
+}
+
+html.theme-light .activity-tile {
+  --tile-lift: rgb(0 0 0 / 0.1);
+}
+
+.activity-tile[data-face="edit"] {
+  --tile-top: #f6b44b;
+  --tile-bottom: #e08a12;
+}
+
+.activity-tile[data-face="research"] {
+  --tile-top: #6aaeff;
+  --tile-bottom: #2f6fe4;
+}
+
+.activity-tile[data-face="agent"] {
+  --tile-top: #a98bf5;
+  --tile-bottom: #7246e0;
+}
+
+.activity-tile[data-face="claude"] {
+  --tile-top: #e3876a;
+  --tile-bottom: #d06a49;
+}
+
+.activity-tile[data-face="codex"] {
+  --tile-top: #7a8cff;
+  --tile-bottom: #4048ff;
+}
+
+.activity-tile[data-face="neutral"] {
+  --tile-top: color-mix(in srgb, var(--color-content) 29%, #000);
+  --tile-bottom: color-mix(in srgb, var(--color-content) 21%, #000);
+  --tile-sheen: rgb(255 255 255 / 0.05);
+  --tile-rim: color-mix(in srgb, var(--color-content) 10%, transparent);
+}
+
+html.theme-light .activity-tile[data-face="neutral"] {
+  --tile-top: #fff;
+  --tile-bottom: color-mix(in srgb, var(--color-content) 7%, #fff);
+  --tile-sheen: rgb(255 255 255 / 0.35);
+  color: rgb(0 0 0 / 0.85);
+}
+
+/*
+ * The mark and the chevron share a lane the width of the tile. Pointing at a
+ * fold pushes the mark out to the right as the chevron slides in from the
+ * left (phase_tile.rs); an open fold keeps the chevron, turned down.
+ */
+.activity-tile-mark,
+.activity-tile-chevron {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.activity-tile-chevron {
+  transform: translateX(-100%);
+}
+
+.activity-tile-chevron > svg {
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.activity-tile[data-open] .activity-tile-chevron > svg {
+  transform: rotate(90deg);
+}
+
+.activity-tile[data-open] .activity-tile-mark,
+.tile-host:is(:hover, :focus-visible) .activity-tile[data-folds] .activity-tile-mark {
+  transform: translateX(100%);
+}
+
+.activity-tile[data-open] .activity-tile-chevron,
+.tile-host:is(:hover, :focus-visible) .activity-tile[data-folds] .activity-tile-chevron {
+  transform: none;
+}
+
+/*
+ * MonoCode's dot spinner (session_mark.rs): a 3x3 grid, one colour per row,
+ * a wave crossing it on the diagonal every 1.2s. Each dot's brightness peaks
+ * as the wave passes, less so off the diagonal.
+ */
+@property --tile-wave {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@keyframes tile-spinner-wave {
+  0%,
+  100% {
+    --tile-wave: 0;
+  }
+  20% {
+    --tile-wave: 0.02;
+  }
+  30% {
+    --tile-wave: 0.23;
+  }
+  40% {
+    --tile-wave: 0.7;
+  }
+  50% {
+    --tile-wave: 1;
+  }
+  60% {
+    --tile-wave: 0.7;
+  }
+  70% {
+    --tile-wave: 0.23;
+  }
+  80% {
+    --tile-wave: 0.02;
+  }
+}
+
+.tile-spinner {
+  display: grid;
+  grid-template-columns: repeat(3, 4px);
+  grid-template-rows: repeat(3, 4px);
+  place-items: center;
+}
+
+.tile-spinner > span {
+  width: 2.5px;
+  height: 2.5px;
+  border-radius: 9999px;
+  background: #6f84a3;
+  opacity: calc(0.07 + var(--peak) * var(--tile-wave));
+  animation: tile-spinner-wave 1200ms linear infinite;
+  /* Each step along the diagonal lags the one before by 0.9 rad. */
+  animation-delay: calc(var(--k) * 171.9ms - 1200ms);
+}
+
+.tile-spinner > span[data-row="1"] {
+  background: #e8b583;
+}
+
+.tile-spinner > span[data-row="2"] {
+  background: #e47fa6;
 }
 
 .zen-fold-item[data-fold-state="closed"] {
@@ -957,7 +1149,7 @@ html.theme-light .segmented-active {
  */
 .zen-phase-step {
   position: relative;
-  padding-left: 20px;
+  padding-left: 30px;
   /* Opaque, not translucent: where the curve leaves the spine the two
      overlap, and a translucent rail would light up there. */
   --zen-rail: color-mix(
@@ -971,7 +1163,7 @@ html.theme-light .segmented-active {
 .zen-phase-step::after {
   content: "";
   position: absolute;
-  left: 6px;
+  left: 10.5px;
 }
 
 /* A height, not top/bottom, so the spine can grow down past a step when the
@@ -1173,8 +1365,16 @@ html.theme-light .segmented-active {
 
   .zen-phase-step[data-live]::before,
   .zen-phase-body,
+  .activity-tile-mark,
+  .activity-tile-chevron,
+  .activity-tile-chevron > svg,
   [data-turn-actions] {
     transition: none;
+  }
+
+  .tile-spinner > span {
+    animation: none;
+    opacity: calc(0.25 + var(--peak) * 0.5);
   }
 
   /* No fade means no animationend to settle on, so an arriving step drops
@@ -1556,4 +1756,184 @@ html.layout-inset.theme-light .dialog-scrim {
 
 .hljs-addition {
   color: var(--color-diff-add-fg);
+}
+
+/*
+ * The Max and Ultra rows in the model picker's effort submenu: tiles ripple out from the middle
+ * while the row is highlighted. From MonoCode's src/features/sessions/ui/ModelPicker.css (MIT).
+ */
+.codex-effort-option {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.codex-effort-option > .codex-effort-tiles {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  grid-template-columns: repeat(32, minmax(0, 1fr));
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 160ms var(--motion-ease-out);
+  /* Feather all four sides so the tiles dissolve into the row instead of
+     stopping hard at its edge; intersecting the two fades rounds the corners. */
+  -webkit-mask-image:
+    linear-gradient(
+      to right,
+      transparent,
+      #000 28px,
+      #000 calc(100% - 28px),
+      transparent
+    ),
+    linear-gradient(to bottom, transparent, #000 35%, #000 65%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent,
+      #000 28px,
+      #000 calc(100% - 28px),
+      transparent
+    ),
+    linear-gradient(to bottom, transparent, #000 35%, #000 65%, transparent);
+  mask-composite: intersect;
+}
+
+.codex-effort-option::after {
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+  opacity: 0;
+}
+
+.codex-effort-option > :not(.codex-effort-tiles) {
+  position: relative;
+  z-index: 1;
+}
+
+.codex-effort-option[data-effort-tone="ultra"] {
+  --codex-effort-color: #a855f7;
+}
+
+.codex-effort-option[data-effort-tone="max"] {
+  --codex-effort-color: #f4b942;
+}
+
+.codex-effort-tile {
+  box-sizing: border-box;
+  background-color: transparent;
+  box-shadow: inset -1px -1px 0
+    color-mix(in srgb, var(--codex-effort-color) 32%, transparent);
+}
+
+.codex-effort-option:is(:hover, :focus-visible, .bg-selection)
+  > .codex-effort-tiles {
+  animation: codex-effort-tiles-clear 5000ms linear 1 both;
+}
+
+.codex-effort-option:is(:hover, :focus-visible, .bg-selection)
+  .codex-effort-tile--filled {
+  animation: codex-effort-tile-fill 1400ms ease-out 3 both;
+  animation-delay: calc(var(--tile-distance) * 420ms);
+  will-change: background-color;
+}
+
+.codex-effort-option:is(:hover, :focus-visible, .bg-selection)::after {
+  animation: codex-effort-edge-ripple 5000ms ease-in-out 1 both;
+  will-change: box-shadow, opacity;
+}
+
+@keyframes codex-effort-tiles-clear {
+  0%,
+  92% {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  100% {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+@keyframes codex-effort-tile-fill {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+
+  26% {
+    background-color: var(--codex-effort-color);
+  }
+
+  52% {
+    background-color: color-mix(
+      in srgb,
+      var(--codex-effort-color) 18%,
+      transparent
+    );
+  }
+}
+
+@keyframes codex-effort-edge-ripple {
+  0%,
+  12%,
+  26%,
+  40%,
+  54%,
+  68%,
+  82% {
+    opacity: 0.3;
+    box-shadow: inset 0 0 4px 0 transparent;
+  }
+
+  19%,
+  47%,
+  75% {
+    opacity: 0.85;
+    box-shadow: inset 0 0 12px 1px
+      color-mix(in srgb, var(--codex-effort-color) 55%, transparent);
+  }
+
+  100% {
+    opacity: 0;
+    box-shadow: inset 0 0 4px 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .codex-effort-option > .codex-effort-tiles {
+    transition: none;
+  }
+
+  .codex-effort-option:is(:hover, :focus-visible, .bg-selection)
+    > .codex-effort-tiles {
+    animation: none;
+    opacity: 0.72;
+    visibility: visible;
+  }
+
+  .codex-effort-option:is(:hover, :focus-visible, .bg-selection)::after {
+    animation: none;
+    opacity: 0.42;
+    box-shadow: none;
+    will-change: auto;
+  }
+
+  .codex-effort-option:is(:hover, :focus-visible, .bg-selection)
+    .codex-effort-tile--filled {
+    animation: none;
+    background-color: var(--codex-effort-color);
+    will-change: auto;
+  }
 }

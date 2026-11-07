@@ -223,6 +223,11 @@ export class AgentManager {
     }
   }
 
+  /** Which engine CLIs are installed, and where. */
+  engineInfo(): Record<EngineKind, EngineInfo> {
+    return this.engines;
+  }
+
   snapshot(): Snapshot {
     this.refreshProjects();
     return {

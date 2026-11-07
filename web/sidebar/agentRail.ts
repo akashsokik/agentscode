@@ -15,6 +15,15 @@ export function railAgents<A extends Pick<Agent, 'name' | 'projectId' | 'created
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }) || a.createdAt - b.createdAt);
 }
 
+/**
+ * Whether the workspace column (Agents, Files, Changes) shows for the selected project: only when
+ * the project has agents of its own, since agents with no project are listed in the navigation
+ * column. With no project at all it shows the Add project prompt, until any agent exists.
+ */
+export function showsWorkspace(agents: readonly Pick<Agent, 'projectId'>[], projectId: string | undefined): boolean {
+  return projectId ? agents.some(agent => agent.projectId === projectId) : !agents.length;
+}
+
 /** What a rail row shows at its end, in the order AgentCard's StatusMark checks them. */
 export type RailAgentStatus = 'needs-you' | 'working' | 'failed' | 'unread' | null;
 

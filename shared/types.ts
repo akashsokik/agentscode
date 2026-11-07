@@ -533,6 +533,31 @@ export interface EngineInfo {
   version: string | null;
 }
 
+/** One subscription limit window of an engine's account: its 5-hour limit, say, or its weekly one. */
+export interface UsageWindow {
+  usedPercent: number;
+  /** The window's length: 300 for five hours, 10080 for a week. */
+  minutes: number;
+  /** When it resets, epoch ms. */
+  resetsAt?: number;
+  /**
+   * The model this limit counts alone, as the service names it ("Opus", "Fable",
+   * "GPT-5.3-Codex-Spark"); unset for a limit every model counts against.
+   */
+  model?: string;
+}
+
+/** An engine's subscription usage, as the footer shows it. Read from the CLI's own login; no credentials leave the server. */
+export interface EngineUsage {
+  windows: UsageWindow[];
+  /** When the windows were read, epoch ms. */
+  updatedAt?: number;
+  /** Why the latest read failed. Windows still listed are from the read before it. */
+  error?: string;
+  /** Signed out, or the account has no subscription usage: nothing to show until that changes. */
+  unavailable?: boolean;
+}
+
 export interface Snapshot {
   agents: Agent[];
   projects: Project[];

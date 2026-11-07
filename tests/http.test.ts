@@ -140,6 +140,7 @@ test('images upload as raw bytes and come back typed by their content, to their 
     assert.equal(served.status, 200);
     assert.equal(served.headers.get('content-type'), 'image/png');
     assert.equal(served.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(served.headers.get('cache-control') ?? '', /immutable/);
     assert.deepEqual(Buffer.from(await served.arrayBuffer()), png);
     assert.equal((await fetch(url(`/api/agents/${bo.id}/attachments/${image.id}`))).status, 404);
 

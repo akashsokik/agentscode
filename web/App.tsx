@@ -23,6 +23,7 @@ import { CommandPalette } from './ui/CommandPalette.tsx';
 import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
 import { EngineIcon } from './ui/EngineIcon.tsx';
+import { UsageFooter } from './ui/UsageFooter.tsx';
 import { Empty, HeaderButton, PRIMARY, StatusLabel } from './ui/common.tsx';
 import { AlertCircle, AppWindow, CheckCircle, File, FileDiff, MessageMultiple, PanelLeft, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
 import { LAYER } from './mono/layers.ts';
@@ -201,7 +202,10 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
   );
 }
 
-/** MonoCode's footer under the main column: the connection, who is busy, the terminal and Comms. */
+/**
+ * MonoCode's footer under the main column: each engine's subscription usage (or the connection,
+ * while it is down), who is busy, the terminal and Comms.
+ */
 function StatusFooter() {
   const connection = useApp(s => s.connection);
   const terminalOpen = Boolean(useLayout().terminal);
@@ -210,11 +214,19 @@ function StatusFooter() {
   const waiting = agents?.filter(a => a.status === 'waiting').length ?? 0;
   return (
     <footer className="flex h-7 shrink-0 items-center gap-3 overflow-x-auto border-t border-stroke px-3 font-sans text-[11px] text-content/55">
-      <span role="status" className="flex shrink-0 items-center">
-        <StatusLabel tone={connection === 'open' ? 'success' : 'warning'} quiet={connection === 'open'}>
-          {connection === 'open' ? 'Connected' : connection === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
-        </StatusLabel>
-      </span>
+      {connection === 'open' ? (
+        <UsageFooter
+          fallback={(
+            <span role="status" className="flex shrink-0 items-center">
+              <StatusLabel tone="success" quiet>Connected</StatusLabel>
+            </span>
+          )}
+        />
+      ) : (
+        <span role="status" className="flex shrink-0 items-center">
+          <StatusLabel tone="warning">{connection === 'connecting' ? 'Connecting…' : 'Reconnecting…'}</StatusLabel>
+        </span>
+      )}
       {working ? <span className="flex shrink-0 items-center gap-1 text-content/45"><TerminalSpinner className="text-content/45" />{working} working</span> : null}
       {waiting ? <span className="shrink-0 text-warning">{waiting} {waiting === 1 ? 'needs' : 'need'} you</span> : null}
       <div className="ml-auto flex shrink-0 items-center gap-2">

@@ -19,7 +19,7 @@ import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
-import { railAgents, railAgentStatus, type RailAgentStatus } from './agentRail.ts';
+import { railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
 
 export interface SidebarActions {
   /** null preselects No project; undefined starts from the current project. */
@@ -450,6 +450,15 @@ function ChannelRailRow({ channel, selected, actions }: { channel: Channel; sele
   );
 }
 
+/**
+ * Selects a project: its agents fill the workspace column. A project with no agents has no
+ * workspace column, so selecting it offers to add its first agent instead.
+ */
+function selectProject(project: Project, agentCount: number, actions: SidebarActions): void {
+  setProject(project.id);
+  if (!agentCount && project.exists) actions.newAgent(project.id);
+}
+
 /** A project in the navigation column: selecting it fills the workspace column with its agents. */
 function ProjectRailRow({ project, agents, selected, actions }: { project: Project; agents: Agent[]; selected: boolean; actions: SidebarActions }) {
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
@@ -460,7 +469,7 @@ function ProjectRailRow({ project, agents, selected, actions }: { project: Proje
     <div className="group relative" onContextMenu={e => openContextMenu(e, setMenu)}>
       <button
         type="button"
-        onClick={() => setProject(project.id)}
+        onClick={() => selectProject(project, agents.length, actions)}
         title={project.path}
         aria-current={selected ? 'true' : undefined}
         className={cx(railRow(!project.exists || waiting || working || Boolean(menu)), railRowState(selected || Boolean(menu)))}
@@ -573,7 +582,7 @@ const WORKSPACE_VIEWS: { value: Layout['sidebarView']; label: string }[] = [
 
 /**
  * The workspace column: the selected project's agents, files and changes, as MonoCode's sessions
- * column. Its header lines up with whatever stands beside it: the 40px tab strip, or, when the
+ * column. Sidebars leaves it out for a project with no agents (see showsWorkspace). Its header lines up with whatever stands beside it: the 40px tab strip, or, when the
  * strip spans the window above (`titleBarAbove`), the panes' 36px headers.
  */
 function WorkspaceColumn({ actions, project, titleBarAbove }: { actions: SidebarActions; project: Project | undefined; titleBarAbove: boolean }) {
@@ -745,7 +754,7 @@ function ProjectRailIcon({ project, agents, selected, actions }: { project: Proj
         label={project.name}
         active={selected || Boolean(menu)}
         dot={waiting ? <NeedsYouDot /> : working ? <WorkingDot /> : null}
-        onClick={() => setProject(project.id)}
+        onClick={() => selectProject(project, agents.length, actions)}
         onContextMenu={e => openContextMenu(e, setMenu)}
       >
         <Icon className="size-4" strokeWidth={1.75} />
@@ -817,19 +826,21 @@ export function useNavFull(): boolean {
 
 /**
  * MonoCode's Classic sidebar: the navigation column, then the workspace column for the
- * selected project. Opening an agent from elsewhere (a tab, a channel) brings its project in.
- * `titleBarAbove`: the tab strip spans the window over both (the desktop app, folded).
+ * selected project when it has agents of its own. Opening an agent from elsewhere (a tab, a
+ * channel) brings its project in. `titleBarAbove`: the tab strip spans the window over both
+ * (the desktop app, folded).
  */
 export function Sidebars({ actions, titleBarAbove }: { actions: SidebarActions; titleBarAbove: boolean }) {
   const layout = useLayout();
   const projects = useApp(s => s.snapshot?.projects);
+  const agents = useApp(s => s.snapshot?.agents);
   // App brings the focused agent's project in (setProject), for this column and the terminal.
   const project = projects?.find(p => p.id === layout.projectId) ?? projects?.[0];
   const full = useNavFull();
   return (
     <div className="flex h-full shrink-0">
       {full ? <NavRail actions={actions} projectId={project?.id} /> : <CompactRail actions={actions} projectId={project?.id} titleBarAbove={titleBarAbove} />}
-      <WorkspaceColumn actions={actions} project={project} titleBarAbove={titleBarAbove} />
+      {showsWorkspace(agents ?? [], project?.id) ? <WorkspaceColumn actions={actions} project={project} titleBarAbove={titleBarAbove} /> : null}
     </div>
   );
 }

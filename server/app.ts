@@ -10,6 +10,7 @@ import type { AgentManager } from './manager.ts';
 import { listProjectFiles } from './fileList.ts';
 import { listDirs, normalizeDir } from './projects.ts';
 import { Terminals } from './terminals.ts';
+import { UsageTracker } from './usage.ts';
 import { gitDiff, gitStatus, listTree, readFile } from './workspace.ts';
 
 // ---- local-only guard ------------------------------------------------------
@@ -45,8 +46,26 @@ function localOnly(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
+/**
+ * Sends an image the server stored itself. The data folder is ~/.agentscode, and Express refuses
+ * any path with a dot folder in it unless told; the path is built from a checked attachment id
+ * (server/attachments.ts), never from the request, so allowing it is safe. Stored names are never
+ * reused, so the image can be cached for good, and the type comes from the bytes. The headers go
+ * out with the file only: an error must not be cached for a year or labelled as an image.
+ */
+function sendStoredImage(res: Response, file: { path: string; mediaType: string }): void {
+  res.sendFile(file.path, {
+    dotfiles: 'allow',
+    headers: { 'Content-Type': file.mediaType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=31536000, immutable' },
+  });
+}
+
 /** The REST API. Static files and the WebSockets are attached by createServer. */
-export function createApp(manager: AgentManager, terminals = new Terminals(id => manager.project(id))): Express {
+export function createApp(
+  manager: AgentManager,
+  terminals = new Terminals(id => manager.project(id)),
+  usage = new UsageTracker(() => manager.engineInfo()),
+): Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(localOnly);
@@ -90,10 +109,7 @@ export function createApp(manager: AgentManager, terminals = new Terminals(id =>
     res.status(201).json(manager.saveAttachment(param(req, 'id'), req.body, req.headers['x-file-name']));
   });
   app.get('/api/agents/:id/attachments/:file', (req, res) => {
-    const file = manager.attachmentFile(param(req, 'id'), param(req, 'file'));
-    // Stored names are never reused, so a thumbnail can be cached for good. The type comes from the bytes.
-    res.set({ 'Content-Type': file.mediaType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=31536000, immutable' });
-    res.sendFile(file.path);
+    sendStoredImage(res, manager.attachmentFile(param(req, 'id'), param(req, 'file')));
   });
   app.post('/api/agents/:id/stop', async (req, res) => {
     await manager.stop(param(req, 'id'));
@@ -172,9 +188,7 @@ export function createApp(manager: AgentManager, terminals = new Terminals(id =>
     res.status(201).json(manager.saveChannelAttachment(param(req, 'id'), req.body, req.headers['x-file-name']));
   });
   app.get('/api/channels/:id/attachments/:file', (req, res) => {
-    const file = manager.channelAttachmentFile(param(req, 'id'), param(req, 'file'));
-    res.set({ 'Content-Type': file.mediaType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=31536000, immutable' });
-    res.sendFile(file.path);
+    sendStoredImage(res, manager.channelAttachmentFile(param(req, 'id'), param(req, 'file')));
   });
   app.post('/api/channels/:id/seen', (req, res) => {
     manager.channelSeen(param(req, 'id'));
@@ -257,6 +271,19 @@ export function createApp(manager: AgentManager, terminals = new Terminals(id =>
 
   app.post('/api/models/refresh', async (_req, res) => {
     res.json(await manager.refreshModels());
+  });
+
+  // Subscription usage for the footer: windows and errors only, never the credentials it was read with.
+  const usageEngine = (req: Request): Parameters<UsageTracker['usage']>[0] => {
+    const engine = param(req, 'engine');
+    if (!usage.has(engine)) throw new HttpError(404, 'No usage for that engine.');
+    return engine;
+  };
+  app.get('/api/usage/:engine', async (req, res) => {
+    res.json(await usage.usage(usageEngine(req)));
+  });
+  app.post('/api/usage/:engine/refresh', async (req, res) => {
+    res.json(await usage.usage(usageEngine(req), true));
   });
   app.patch('/api/settings', (req, res) => {
     res.json(manager.updateSettings(req.body ?? {}));

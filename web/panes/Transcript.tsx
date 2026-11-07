@@ -13,11 +13,12 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { Agent, Approval, Entry, PeerMessage, ToolCall, TurnMeta } from '../../shared/types.ts';
 import { turnMetricsText } from '../../shared/turnUsage.ts';
-import { foldableWork, groupTurnItems, isDreamLine, keptInView, memoryLine, turnItemKey, workKind, workSummaryLine, type PhaseKind, type TurnItem } from '../activity.ts';
+import { foldableWork, groupTurnItems, isDreamLine, keptInView, memoryLine, turnItemKey, workKind, workSummaryLine, type TurnItem } from '../activity.ts';
 import { api } from '../api.ts';
 import { modelLabel } from '../format.ts';
 import { open, openToSide } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
+import { presentTool } from '../toolPresentation.ts';
 import { groupTurns, type Turn } from '../turns.ts';
 import { isAnchoring, openingAnchor, rememberedView, rememberView, type Opening } from '../transcriptView.ts';
 import { distanceFromEnd, Follower, scrollsUp, WHEEL_HOLD_MS } from '../transcriptScroll.ts';
@@ -26,7 +27,8 @@ import { Markdown } from '../ui/Markdown.tsx';
 import { MentionText } from '../ui/MentionText.tsx';
 import { reducedMotion, staggerWordFades, WORD_FADE_MS } from '../ui/wordFade.ts';
 import { ChipButton, Empty, INPUT, Loading, StatusLabel, TextButton } from '../ui/common.tsx';
-import { AiIdea, Bot, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, CircleDashed, Copy, Eraser, File, MessageSquare, Minus, PenLine, Search, Sparkles, Terminal, Wrench, X } from '../mono/icons.tsx';
+import { AiIdea, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, CircleDashed, Copy, Eraser, File, Folder, MessageSquare, Search, Sparkles, X } from '../mono/icons.tsx';
+import { PhaseTile, ProviderTile } from '../mono/ActivityTile.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
@@ -316,79 +318,112 @@ function ActivityPeerRow({ message, selfId }: { message: PeerMessage; selfId: st
   );
 }
 
-/** The action and target MonoCode's ToolCallSummary shows for a tool call. */
-function toolDisplay(tool: ToolCall): { action: string; target: string; file: boolean; diff: boolean } {
-  const name = tool.name;
-  const target = tool.summary;
-  const single = Boolean(target) && !target.includes(', ');
-  switch (name) {
-    case 'Read': return { action: 'Read', target, file: single, diff: false };
-    case 'Edit':
-    case 'MultiEdit':
-    case 'NotebookEdit': return { action: 'Edit', target, file: single, diff: true };
-    case 'Write': return { action: 'Write', target, file: single, diff: true };
-    case 'Bash':
-    case 'Shell': return { action: 'Run', target, file: false, diff: false };
-    case 'Grep': return { action: 'Search', target, file: false, diff: false };
-    case 'Glob': return { action: 'Find', target, file: false, diff: false };
-    case 'WebFetch': return { action: 'Fetch', target, file: false, diff: false };
-    case 'WebSearch': return { action: 'Search the web', target, file: false, diff: false };
-    case 'Task':
-    case 'Agent': return { action: 'Agent', target, file: false, diff: false };
-    case 'TodoWrite':
-    case 'Plan': return { action: 'Plan', target, file: false, diff: false };
-    default: {
-      const channelTool = name.match(/(?:^mcp__agentscode__|^agentscode\.)(post_to_channel|read_channel|list_channels)$/)?.[1];
-      if (channelTool) {
-        const action = channelTool === 'post_to_channel' ? 'Posted' : channelTool === 'read_channel' ? 'Read channel' : 'Listed channels';
-        return { action, target: target === name || target.startsWith('{') ? '' : target, file: false, diff: false };
-      }
-      const mcp = name.match(/^mcp__([^_]+(?:_[^_]+)*)__(.+)$/) ?? name.match(/^([^.]+)\.(.+)$/);
-      if (mcp) return { action: mcp[1] === 'agentscode' ? 'Comms' : mcp[1], target: mcp[2].replace(/_/g, ' '), file: false, diff: false };
-      return { action: name, target: target === name ? '' : target, file: false, diff: false };
-    }
-  }
+/** MonoCode's pill: a search pattern or one step of a chained command, 24px tall. */
+function Pill({ children, title, onOpen, className = '' }: { children: ReactNode; title?: string; onOpen?: () => void; className?: string }) {
+  const base = `flex h-6 min-w-0 max-w-[200px] shrink items-center gap-1 rounded-md bg-content/6 font-mono text-[12px] ${className}`;
+  if (!onOpen) return <span title={title} className={base}>{children}</span>;
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title ? `Open ${title}` : undefined}
+      className={`${base} cursor-pointer text-left hover:text-[var(--link-color)]`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpen();
+      }}
+    >
+      {children}
+    </button>
+  );
 }
 
-/** MonoCode's ToolCallSummary (chip variant, as used in the work trail). */
-function ToolCallSummary({ tool, failed, agentId }: { tool: ToolCall; failed: boolean; agentId: string }) {
-  const { action, target, file, diff } = toolDisplay(tool);
-  const actionTone = failed ? 'text-danger' : 'text-content/50';
-  const targetTone = failed ? 'text-danger' : 'text-content/70';
-  if (!target) {
-    return <span className={`min-w-0 flex-1 truncate font-sans text-sm ${actionTone}`} title={tool.name}>{action}</span>;
-  }
+/** What did not fit: "+3", outlined so it reads as a count, not one more step. */
+function MorePill({ rest, failed, what }: { rest: string[]; failed: boolean; what: string }) {
+  const list = rest.join(', ');
   return (
-    <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[13px]">
-      <span className={`shrink-0 font-sans text-sm ${actionTone}`}>{action}</span>
-      {file ? (
-        <button
-          type="button"
-          className={`-my-0.5 flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded bg-content/6 px-1 py-0.5 text-left hover:bg-content/10 hover:text-[var(--link-color)] ${targetTone}`}
-          title={target}
-          onClick={(event) => {
-            event.stopPropagation();
-            open({ kind: diff ? 'diff' : 'file', root: { agent: agentId }, path: target });
-          }}
-        >
-          <File className="size-3.5 shrink-0" strokeWidth={1.75} />
-          <span className="min-w-0 truncate">{target}</span>
-        </button>
-      ) : (
-        <span className={`flex min-w-0 flex-1 items-center gap-1.5 pl-1 ${targetTone}`} title={target}>
-          <span className="min-w-0 truncate">{target}</span>
-        </span>
-      )}
+    <span title={list} aria-label={`${rest.length} more ${what}: ${list}`} className={`flex h-6 shrink-0 items-center rounded-md border border-content/12 px-1.5 font-mono text-[12px] ${failed ? 'text-danger' : 'text-content/50'}`}>
+      +{rest.length}
     </span>
   );
 }
 
-/** MonoCode's ActivityToolRow with ToolCall's expandable output. */
-function ActivityToolRow({ entry, live, agentId }: { entry: Entry; live: boolean; agentId: string }) {
+/** Actions whose target is code: a command, a URL or a query. */
+const MONO_TARGETS = new Set(['Run', 'Fetch', 'Search the web']);
+
+/**
+ * MonoCode's ToolCallSummary (tools.rs): the verb, then what it acted on. A command shows bare in
+ * mono, or as a chip per step when it chains several; a search shows its patterns as pills; a file
+ * is a chip that opens it.
+ */
+function ToolCallSummary({ tool, failed, agentId }: { tool: ToolCall; failed: boolean; agentId: string }) {
+  const shown = presentTool(tool);
+  const actionTone = failed ? 'text-danger' : 'text-content/50';
+  const targetTone = failed ? 'text-danger' : 'text-content/70';
+  const openFile = (path: string, diff = false) => open({ kind: diff ? 'diff' : 'file', root: { agent: agentId }, path });
+  let body: ReactNode = null;
+  if (shown.chips) {
+    const rest = shown.chips.slice(3).map(chip => chip.label);
+    body = (
+      <>
+        {shown.description ? <span title={shown.description} className="min-w-16 shrink truncate font-sans text-sm">{shown.description}</span> : null}
+        {shown.chips.slice(0, 3).map((chip, index) => (
+          <Pill key={index} title={chip.path ?? chip.label} onOpen={chip.path ? () => openFile(chip.path!) : undefined} className="px-1.5">
+            {chip.action === 'Read' ? <File className="size-3.5 shrink-0" strokeWidth={1.75} />
+              : chip.action === 'List' ? <Folder className="size-3.5 shrink-0" strokeWidth={1.75} />
+              : chip.action === 'Find' ? <Search className="size-3 shrink-0 text-content/45" strokeWidth={2} />
+              : null}
+            <span className="min-w-0 truncate">{chip.label}</span>
+          </Pill>
+        ))}
+        {rest.length ? <MorePill rest={rest} failed={failed} what="steps" /> : null}
+      </>
+    );
+  } else if (shown.patterns?.length) {
+    const rest = shown.patterns.slice(2);
+    body = (
+      <>
+        {shown.patterns.slice(0, 2).map((pattern, index) => (
+          <Pill key={index} title={pattern} className="px-2"><span className="min-w-0 truncate">{pattern}</span></Pill>
+        ))}
+        {rest.length ? <MorePill rest={rest} failed={failed} what="patterns" /> : null}
+      </>
+    );
+  } else if (shown.file) {
+    const { path, diff, folder } = shown.file;
+    body = (
+      <button
+        type="button"
+        title={path}
+        aria-label={`Open ${path}`}
+        className="-my-0.5 flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded bg-content/6 px-1 py-0.5 text-left font-mono text-[12px] hover:text-[var(--link-color)]"
+        onClick={(event) => {
+          event.stopPropagation();
+          openFile(path, diff);
+        }}
+      >
+        {folder ? <Folder className="size-3.5 shrink-0" strokeWidth={1.75} /> : <File className="size-3.5 shrink-0" strokeWidth={1.75} />}
+        <span className="min-w-0 truncate">{shown.target}</span>
+      </button>
+    );
+  } else if (shown.target) {
+    body = <span title={shown.target} className={`min-w-0 truncate ${MONO_TARGETS.has(shown.action) ? 'font-mono text-[12px]' : 'font-sans text-sm'}`}>{shown.target}</span>;
+  }
+  // A plain command needs no verb: the command says what it ran.
+  const label = shown.action === 'Run' && body ? null : shown.action;
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-1.5 font-sans text-sm" title={body ? undefined : tool.name}>
+      {label ? <span className={`shrink-0 ${actionTone}`}>{label}</span> : null}
+      {body ? <span className={`flex min-w-0 items-center gap-1.5 ${targetTone}`}>{body}</span> : null}
+    </span>
+  );
+}
+
+/** MonoCode's ActivityToolRow with ToolCall's expandable output. Rows are bare; only a failure is marked. */
+function ActivityToolRow({ entry, agentId }: { entry: Entry; agentId: string }) {
   const [open, setOpen] = useState(false);
   const tool = entry.tool!;
   const failed = tool.status === 'error';
-  const running = tool.status === 'running';
   const detail = [tool.detail, tool.output].filter(Boolean).join('\n\n').trim();
   const expandable = Boolean(detail) && detail !== tool.summary;
   return (
@@ -396,9 +431,8 @@ function ActivityToolRow({ entry, live, agentId }: { entry: Entry; live: boolean
       <div
         aria-label={`Tool call: ${tool.name} ${tool.summary}`}
         onClick={expandable ? () => setOpen(v => !v) : undefined}
-        className={`group flex min-w-0 items-center gap-1.5 py-1 ${expandable ? 'cursor-pointer' : ''}`}
+        className={`group flex min-h-7 min-w-0 items-center gap-1.5 py-1 ${expandable ? 'cursor-pointer' : ''}`}
       >
-        {running ? <CircleDashed className={`size-3.5 shrink-0 text-content/40 ${live ? 'zen-tool-spin' : ''}`} strokeWidth={1.75} /> : null}
         <ToolCallSummary tool={tool} failed={failed} agentId={agentId} />
         {failed ? <X className="size-3.5 shrink-0 text-danger" strokeWidth={2} /> : null}
         {/* The row toggles on click; this is the keyboard way in, since the row holds the file chip's own button. */}
@@ -408,9 +442,9 @@ function ActivityToolRow({ entry, live, agentId }: { entry: Entry; live: boolean
             aria-expanded={open}
             aria-label={open ? 'Hide the output' : 'Show the output'}
             onClick={(event) => { event.stopPropagation(); setOpen(v => !v); }}
-            className="-m-0.5 grid shrink-0 place-items-center rounded p-0.5 outline-none hover:bg-content/8"
+            className="grid shrink-0 place-items-center rounded p-1 outline-none hover:bg-content/8"
           >
-            <ChevronRight className={`size-3.5 transition-transform ${failed ? 'text-danger/60' : 'text-content/35'} ${open ? 'rotate-90' : ''}`} strokeWidth={1.75} />
+            <ChevronRight className={`size-3.5 transition-transform ${failed ? 'text-danger/60' : 'text-content/40'} ${open ? 'rotate-90' : ''}`} strokeWidth={1.75} />
           </button>
         ) : null}
       </div>
@@ -431,8 +465,8 @@ function ActivityStatusRow({ text }: { text: string }) {
 }
 
 /** One step of a turn's work: a tool call, a teammate message or a status line. */
-function WorkRow({ entry, live, selfId }: { entry: Entry; live: boolean; selfId: string }) {
-  if (entry.kind === 'tool') return <ActivityToolRow entry={entry} live={live} agentId={selfId} />;
+function WorkRow({ entry, selfId }: { entry: Entry; selfId: string }) {
+  if (entry.kind === 'tool') return <ActivityToolRow entry={entry} agentId={selfId} />;
   if (entry.kind === 'peer' && entry.peer) return <ActivityPeerRow message={entry.peer} selfId={selfId} />;
   return <ActivityStatusRow text={entry.text} />;
 }
@@ -461,17 +495,6 @@ function ProseBlock({ entry }: { entry: Entry }) {
       <Markdown text={entry.text} words={reveal} />
     </div>
   );
-}
-
-/** MonoCode's ActivityPhaseIcon: the kind of work a group did most of. */
-function ActivityPhaseIcon({ kind, className = '' }: { kind: PhaseKind; className?: string }) {
-  const props = { className: `size-3.5 shrink-0 text-content/45 ${className}`, strokeWidth: 1.75 };
-  if (kind === 'edit') return <PenLine {...props} />;
-  if (kind === 'research') return <Search {...props} />;
-  if (kind === 'run') return <Terminal {...props} />;
-  if (kind === 'agent') return <Bot {...props} />;
-  if (kind === 'other' || kind === 'plan') return <Wrench {...props} />;
-  return <Minus {...props} />;
 }
 
 /*
@@ -587,9 +610,11 @@ function useLivePhaseScroll(el: HTMLDivElement | null, enabled: boolean, steps: 
 }
 
 /**
- * MonoCode's ActivityPhaseGroup: a run of work under one line saying what it adds up to, its steps
- * on a rail. The group the agent is in stays open as a short window pinned to the newest step; the
- * moment the agent moves on it folds back to its line. A click overrides either way.
+ * MonoCode's ActivityPhaseGroup: a run of work under one line saying what it adds up to, led by a
+ * tile coloured by that work, its steps on a rail dropping from the tile. The group the agent is in
+ * stays open as a short window pinned to the newest step, its tile spinning; the moment the agent
+ * moves on it folds back to its line. A click overrides either way. Even one tool call gets its
+ * line ("Ran a command"), as in MonoCode, so a run of chips never floats without its verb.
  */
 function ActivityPhaseGroup({ entries, active, selfId }: { entries: Entry[]; active: boolean; selfId: string }) {
   const [override, setOverride] = useState<boolean | null>(null);
@@ -601,13 +626,13 @@ function ActivityPhaseGroup({ entries, active, selfId }: { entries: Entry[]; act
   const title = workSummaryLine(entries, active);
   const kind = workKind(entries);
 
-  // A lone step is not a group: a line repeating the one row under it says nothing twice.
-  if (entries.length === 1) {
+  // A lone message or status line is its own summary; a line over it would say it twice.
+  if (entries.length === 1 && entries[0].kind !== 'tool') {
     return (
-      <div className="flex min-w-0 items-start gap-1.5">
-        <ActivityPhaseIcon kind={kind} className="mt-[7px]" />
+      <div className="flex min-w-0 items-start gap-2">
+        <span className="mt-[5px]"><PhaseTile kind={kind} folds={false} /></span>
         <div className="min-w-0 flex-1">
-          <WorkRow entry={entries[0]} live={active} selfId={selfId} />
+          <WorkRow entry={entries[0]} selfId={selfId} />
         </div>
       </div>
     );
@@ -625,13 +650,10 @@ function ActivityPhaseGroup({ entries, active, selfId }: { entries: Entry[]; act
         aria-expanded={open}
         aria-label={open ? `Hide the steps for ${title}` : `Show the steps for ${title}`}
         onClick={() => setOverride(!open)}
-        className="group flex w-full min-w-0 items-center gap-1.5 py-1 text-left"
+        className={`tile-host group flex w-full min-w-0 items-center gap-2 py-1 text-left${open ? ' zen-phase-drop' : ''}`}
       >
-        {/* The two icons share one box, so the swap is instant rather than a cross-fade. */}
-        <span className="relative flex size-3.5 shrink-0 items-center justify-center">
-          <ActivityPhaseIcon kind={kind} className="group-hover:opacity-0" />
-          <ChevronRight className={`absolute size-3.5 text-content/45 opacity-0 transition-transform duration-200 group-hover:opacity-100 ${open ? 'rotate-90' : ''}`} strokeWidth={1.75} />
-        </span>
+        {/* A running phase keeps its spinner unless pointed at; a settled open one keeps the chevron. */}
+        <PhaseTile kind={kind} open={open && !active} spinning={active && !reducedMotion()} />
         {label}
       </button>
       <div className="zen-phase-body" data-open={open}>
@@ -640,7 +662,7 @@ function ActivityPhaseGroup({ entries, active, selfId }: { entries: Entry[]; act
             <div className="flex min-w-0 flex-col">
               {entries.map(entry => (
                 <PhaseStep key={entry.id} live={active} turn={active && arriving(entry.id) ? turnFor(entry.id) : undefined}>
-                  <WorkRow entry={entry} live={active} selfId={selfId} />
+                  <WorkRow entry={entry} selfId={selfId} />
                 </PhaseStep>
               ))}
             </div>
@@ -690,7 +712,7 @@ function LiveFoldTitle({ startedAt, paused, waitingLabel, who }: { startedAt?: n
   return <Shimmer className="min-w-0 truncate font-sans text-sm" duration={1}>{text}</Shimmer>;
 }
 
-/** MonoCode's WorkFoldLine: the agent's mark and the clock, with the work folded behind it. */
+/** MonoCode's WorkFoldLine: the provider's tile and the clock, with the work folded behind it. */
 function WorkFoldLine({ title, agent, live, expandable, open, onToggle }: {
   title: ReactNode;
   agent: Agent;
@@ -699,22 +721,12 @@ function WorkFoldLine({ title, agent, live, expandable, open, onToggle }: {
   open: boolean;
   onToggle: () => void;
 }) {
-  const icon = (
-    <span className="relative flex size-3.5 shrink-0 items-center justify-center">
-      {open ? (
-        <ChevronRight className="size-3.5 rotate-90 text-content/45" strokeWidth={1.75} />
-      ) : (
-        <>
-          <EngineIcon engine={agent.engine} className={`size-3.5 shrink-0 ${expandable ? 'group-hover:opacity-0' : ''}`} />
-          {expandable ? <ChevronRight className="absolute size-3.5 text-content/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100" strokeWidth={1.75} /> : null}
-        </>
-      )}
-    </span>
-  );
+  // Only a fold that opens shows the chevron; a line over work that has not folded keeps the mark.
+  const icon = <ProviderTile engine={agent.engine} folds={expandable} open={open} />;
   const label = live ? title : (
     <span className="min-w-0 flex-1 truncate font-sans text-sm text-content/50 transition-colors duration-200 group-hover:text-content/80">{title}</span>
   );
-  const row = `flex w-full min-w-0 items-center gap-1.5 px-4 py-1 text-left${open ? ' zen-fold-drop' : ''}`;
+  const row = `tile-host flex w-full min-w-0 items-center gap-2 px-4 py-1 text-left${open ? ' zen-fold-drop' : ''}`;
   if (!expandable) {
     return <div className={`group ${row}`} role={live ? 'status' : undefined} aria-live={live ? 'polite' : undefined}>{icon}{label}</div>;
   }
@@ -957,7 +969,7 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
           {() => items.slice(fold.start, fold.end + 1).map((item, offset, folded) => (
             <div
               key={turnItemKey(item)}
-              className={`flow-root pb-1 pl-5 last:pb-0 zen-fold-rail${offset === folded.length - 1 ? ' zen-fold-tail' : ''}${item.type === 'prose' ? ' zen-fold-prose' : ''}`}
+              className={`flow-root pb-1 pl-[30px] last:pb-0 zen-fold-rail${offset === folded.length - 1 ? ' zen-fold-tail' : ''}${item.type === 'prose' ? ' zen-fold-prose' : ''}`}
             >
               <div className="pl-4 pr-4">
                 <FoldItemView item={item} selfId={agent.id} />

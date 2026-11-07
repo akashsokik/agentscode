@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Agent } from '../shared/types.ts';
-import { ALL_PROJECTS, railAgents, railAgentStatus } from '../web/sidebar/agentRail.ts';
+import { ALL_PROJECTS, railAgents, railAgentStatus, showsWorkspace } from '../web/sidebar/agentRail.ts';
 
 let made = 0;
 const agent = (fields: Partial<Agent> & Pick<Agent, 'id' | 'name'>): Agent => ({ projectId: null, status: 'idle', unread: false, createdAt: ++made, ...fields }) as Agent;
@@ -45,4 +45,21 @@ test('row status follows the agent card: needs you, then working, failed, unread
   assert.equal(railAgentStatus({ status: 'error', unread: true }, false), 'failed');
   assert.equal(railAgentStatus({ status: 'done', unread: true }, false), 'unread');
   assert.equal(railAgentStatus({ status: 'idle', unread: false }, false), null);
+});
+
+test('the workspace column shows only for a project with agents of its own', () => {
+  const agents = [
+    agent({ id: 'ada', name: 'Ada', projectId: 'p1' }),
+    agent({ id: 'nova', name: 'Nova' }),
+  ];
+  assert.equal(showsWorkspace(agents, 'p1'), true);
+  // Only agents with no project: they are in the navigation column, so p2 has nothing to show.
+  assert.equal(showsWorkspace(agents, 'p2'), false);
+  assert.equal(showsWorkspace([agent({ id: 'nova', name: 'Nova' })], 'p1'), false);
+  assert.equal(showsWorkspace([], 'p1'), false);
+});
+
+test('with no project, the column shows the Add project prompt until any agent exists', () => {
+  assert.equal(showsWorkspace([], undefined), true);
+  assert.equal(showsWorkspace([agent({ id: 'nova', name: 'Nova' })], undefined), false);
 });

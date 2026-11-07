@@ -10,6 +10,7 @@ import type {
   DirListing,
   EngineKind,
   EngineModels,
+  EngineUsage,
   Entry,
   FileContent,
   FileDiff,
@@ -154,5 +155,7 @@ export const api = {
   closeTerminal: (id: string) => request<void>('DELETE', `/api/terminals/${id}`),
 
   refreshModels: () => request<Record<EngineKind, EngineModels>>('POST', '/api/models/refresh'),
+  usage: (engine: EngineKind) => request<EngineUsage>('GET', `/api/usage/${engine}`),
+  refreshUsage: (engine: EngineKind) => request<EngineUsage>('POST', `/api/usage/${engine}/refresh`),
   updateSettings: (settings: Partial<Settings>) => request<Settings>('PATCH', '/api/settings', settings),
 };

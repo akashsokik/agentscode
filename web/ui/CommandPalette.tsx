@@ -8,11 +8,12 @@ import type { Agent } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { api } from '../api.ts';
 import { shortPath } from '../format.ts';
-import { closeTab, focusedAgentId, focusedChannelId, open, openToSide, setProject, setRightPanel, setSidebar, setSidebarView, useLayout } from '../layout.ts';
+import { closeTab, currentProjectId, focusedAgentId, focusedChannelId, open, openToSide, setProject, setRightPanel, setSidebar, setSidebarView, useLayout } from '../layout.ts';
 import { rankCommands } from '../paletteMatch.ts';
 import { IS_MAC } from '../platform.ts';
 import { MOD, SHORTCUTS } from '../shortcuts.ts';
 import { projectLabel } from '../projects.ts';
+import { showsWorkspace } from '../sidebar/agentRail.ts';
 import { attempt, useApp } from '../store.ts';
 import { hideTerminal, newTerminal, showTerminal, splitFront } from '../terminal/actions.ts';
 import { setTheme, useTheme, type ThemePreference } from '../theme.ts';
@@ -151,8 +152,11 @@ function useCommands(actions: PaletteActions): Command[] {
         action({ id: 'split-terminal-down', title: 'Split terminal down', keywords: 'shell pane below stacked', hint: IS_MAC ? `${inTerminal}⇧⌘D` : undefined, icon: SplitRows, priority: 1, run: () => splitFront('down') });
       }
     }
-    action({ id: 'view-files', title: 'Show files', keywords: 'sidebar tree browse', icon: FolderTree, priority: 1, run: () => setSidebarView('files') });
-    action({ id: 'view-changes', title: 'Show changes', keywords: 'sidebar git diff', icon: GitCompare, priority: 1, run: () => setSidebarView('changes') });
+    // Files and changes live in the workspace column, which a project with no agents does not have.
+    if (showsWorkspace(snapshot.agents, currentProjectId(layout, snapshot.projects.map(p => p.id)))) {
+      action({ id: 'view-files', title: 'Show files', keywords: 'sidebar tree browse', icon: FolderTree, priority: 1, run: () => setSidebarView('files') });
+      action({ id: 'view-changes', title: 'Show changes', keywords: 'sidebar git diff', icon: GitCompare, priority: 1, run: () => setSidebarView('changes') });
+    }
     action({ id: 'settings', title: 'Settings', keywords: 'preferences options', icon: Settings, shortcut: SHORTCUTS.settings, priority: 1, run: actions.settings });
 
     for (const project of snapshot.projects) {
@@ -165,7 +169,8 @@ function useCommands(actions: PaletteActions): Command[] {
         icon: icon(Folder),
         checked: project.id === (layout.projectId ?? snapshot.projects[0]?.id),
         priority: 1,
-        run: () => { setProject(project.id); setSidebar(true); },
+        // A project with no agents has no workspace column to show, so offer its first agent instead.
+        run: () => { setProject(project.id); setSidebar(true); if (project.exists && !showsWorkspace(snapshot.agents, project.id)) actions.newAgent(project.id); },
       });
     }
 
