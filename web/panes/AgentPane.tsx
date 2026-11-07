@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.ts';
 import { ALL_PROJECTS } from '../projects.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
-import { AgentSettingsDialog } from '../dialogs/AgentSettingsDialog.tsx';
+import { AgentSettingsDialog, type AgentSettingsSection } from '../dialogs/AgentSettingsDialog.tsx';
 import { SoulProposalNotice } from '../dialogs/Dreaming.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
@@ -20,7 +20,7 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
   const allApprovals = useApp(s => s.snapshot?.approvals);
   const approvals = useMemo(() => (allApprovals ?? []).filter(a => a.agentId === agentId), [allApprovals, agentId]);
   const question = approvals.find(a => a.type === 'question');
-  const [settings, setSettings] = useState(false);
+  const [settings, setSettings] = useState<AgentSettingsSection | null>(null);
 
   useEffect(() => {
     void loadEntries(agentId);
@@ -48,13 +48,13 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
           <AgentStatus agent={agent} pending={approvals.length > 0} className="min-w-0 font-normal" />
         </span>
       }
-      actions={<HeaderButton icon={Settings} label="Agent settings" onClick={() => setSettings(true)} />}
+      actions={<HeaderButton icon={Settings} label="Agent settings" onClick={() => setSettings('general')} />}
     >
       <Transcript agent={agent} entries={entries} approvals={approvals} />
       {/* A soul change a dream proposed waits here until you accept or reject it in the settings. */}
-      <SoulProposalNotice agent={agent} onReview={() => setSettings(true)} />
-      <Composer agent={agent} project={project} question={question} onSettings={() => setSettings(true)} />
-      {settings ? <AgentSettingsDialog agent={agent} onClose={() => setSettings(false)} /> : null}
+      <SoulProposalNotice agent={agent} onReview={() => setSettings('soul')} />
+      <Composer agent={agent} project={project} question={question} onSettings={() => setSettings('general')} />
+      {settings ? <AgentSettingsDialog agent={agent} section={settings} onClose={() => setSettings(null)} /> : null}
     </PaneFrame>
   );
 }
