@@ -140,8 +140,13 @@ test('images upload as raw bytes and come back typed by their content, to their 
     assert.equal(served.status, 200);
     assert.equal(served.headers.get('content-type'), 'image/png');
     assert.equal(served.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(served.headers.get('cache-control') ?? '', /immutable/);
     assert.deepEqual(Buffer.from(await served.arrayBuffer()), png);
     assert.equal((await fetch(url(`/api/agents/${bo.id}/attachments/${image.id}`))).status, 404);
+    // A miss must not be cached for a year or labelled as an image: that is what left screenshots broken for good.
+    const missing = await fetch(url(`/api/agents/${bo.id}/attachments/${image.id}`));
+    assert.doesNotMatch(missing.headers.get('cache-control') ?? '', /immutable/);
+    assert.doesNotMatch(missing.headers.get('content-type') ?? '', /^image\//);
 
     const svg = await upload(ada.id, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'));
     assert.equal(svg.status, 415);
