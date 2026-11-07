@@ -1,6 +1,6 @@
 /**
  * The app's mark at 16px: Orca's 2x2 grid (top-left and bottom-right cells lit), monochrome, with
- * its two empty cells filled in dim. The app icon (build/icon.svg) and the favicon in index.html
+ * its two empty cells filled in dim. The app icon (build/icon.svg) and the favicon (public/favicon.svg)
  * draw the same grid.
  */
 export function BrandMark() {

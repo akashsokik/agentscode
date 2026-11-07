@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- AgentsCode: Orca's mark (orcapods.ai: a 2x2 grid with the top-left and bottom-right cells lit,
        in the same 9:2 cell-to-gap proportions), monochrome, with its two empty cells filled in dim
-       so the whole grid shows. The sidebar mark (web/ui/BrandMark.tsx) and the favicon (index.html)
+       so the whole grid shows. The sidebar mark (web/ui/BrandMark.tsx) and the favicon (public/favicon.svg)
        draw the same grid. -->
   <defs>
     <filter id="drop" x="-10%" y="-10%" width="120%" height="125%">
