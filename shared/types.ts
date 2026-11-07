@@ -65,6 +65,8 @@ export interface Agent {
   home: string;
   model: string; // '' means the CLI default
   effort: string; // reasoning effort; '' means the CLI default
+  /** A service tier the model offers (Codex `priority`, Claude `fast`); '' or absent is Standard. */
+  serviceTier?: string;
   autonomy: Autonomy;
   useMcp: boolean; // Claude only: load the user's own MCP servers
   role: AgentRole;
@@ -520,6 +522,15 @@ export interface ModelOption {
   efforts: string[]; // supported reasoning efforts, empty if unknown
   /** Where the model comes from, for engines with several providers (OrcaCode); pickers group by it. */
   group?: string;
+  /** Faster (or cheaper) tiers the model offers beyond Standard. */
+  serviceTiers?: ServiceTier[];
+}
+
+export interface ServiceTier {
+  /** What the engine is sent: Codex's catalog id (`priority`), or `fast` for Claude's fast mode. */
+  id: string;
+  name: string;
+  description?: string;
 }
 
 /** One of an engine's model providers (OrcaCode): set up means it has a key, a login or needs none. */
@@ -632,6 +643,8 @@ export interface AgentPatch {
   autonomy?: Autonomy;
   model?: string;
   effort?: string;
+  /** '' is Standard. */
+  serviceTier?: string;
   role?: AgentRole;
   /** Rewrites the agent's soul.md. */
   instructions?: string;

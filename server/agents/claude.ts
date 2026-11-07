@@ -223,6 +223,11 @@ export class ClaudeRunner implements Runner {
     await this.q?.applyFlagSettings({ effortLevel: (effort || null) as EffortLevel | null });
   }
 
+  /** Claude's one tier is fast mode; it switches the running session. */
+  async setServiceTier(tier: string): Promise<void> {
+    await this.q?.applyFlagSettings({ fastMode: tier === 'fast' });
+  }
+
   /** What the running session can run, as Claude Code names it, without its own built-in commands. */
   async commands(): Promise<RunnerCommand[] | undefined> {
     const q = this.q;
@@ -281,6 +286,7 @@ export class ClaudeRunner implements Runner {
         additionalDirectories: directories.length ? directories : undefined,
         model: agent.model || undefined,
         effort: (agent.effort || undefined) as EffortLevel | undefined,
+        settings: agent.serviceTier === 'fast' ? { fastMode: true } : undefined,
         permissionMode: MODE[agent.autonomy],
         allowDangerouslySkipPermissions: this.startedWithBypass || undefined,
         canUseTool: this.canUseTool,

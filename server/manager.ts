@@ -35,7 +35,7 @@ import {
   type WorktreeCleanup,
 } from '../shared/types.ts';
 import { ROLES, rolePreset } from '../shared/roles.ts';
-import { engineProblem } from '../shared/engines.ts';
+import { engineProblem, serviceTiers } from '../shared/engines.ts';
 import { isIdeCommand } from '../shared/commands.ts';
 import { injectSkillPrompt, skillNamesInText, type ComposerCommand } from '../shared/composer.ts';
 import { commandBody, commandsFor, type DiscoveredCommand } from './skills.ts';
@@ -414,6 +414,14 @@ export class AgentManager {
     if (patch.dreaming !== undefined && typeof patch.dreaming !== 'boolean') throw new HttpError(400, 'Dreaming is on or off: true or false.');
     const model = patch.model === undefined ? undefined : clip(String(patch.model).trim(), MODEL_MAX);
     const effort = patch.effort === undefined ? undefined : validEffort(patch.effort);
+    const tier = patch.serviceTier === undefined ? undefined : String(patch.serviceTier).trim().slice(0, 40);
+    // A tier is kept only while the agent's model offers it, so a model switch never sends one it
+    // lacks. Before the model list has loaded, nothing is known, so nothing is dropped or refused.
+    const catalog = this.models[agent.engine];
+    const offered = catalog.discovered ? serviceTiers({ model: model ?? agent.model }, catalog) : null;
+    if (tier && offered && !offered.some(t => t.id === tier)) throw new HttpError(400, `${(model ?? agent.model) || 'This model'} has no "${tier}" service tier.`);
+    const nextTier = tier ?? agent.serviceTier ?? '';
+    const keptTier = !nextTier || !offered || offered.some(t => t.id === nextTier) ? nextTier : '';
     const runner = this.runners.get(id);
     if (name !== undefined) agent.name = name;
     // soul.md is the source of truth; the agent sees the change at its next turn.
@@ -443,6 +451,11 @@ export class AgentManager {
     if (effort !== undefined && effort !== agent.effort) {
       agent.effort = effort;
       await runner?.setEffort(effort).catch(() => {});
+    }
+    if (keptTier !== (agent.serviceTier ?? '')) {
+      if (keptTier) agent.serviceTier = keptTier;
+      else delete agent.serviceTier;
+      await runner?.setServiceTier?.(keptTier).catch(() => {});
     }
     this.emitAgent(agent);
     return agent;

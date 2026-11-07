@@ -1,4 +1,4 @@
-import { ENGINE_LABELS, type EngineInfo, type EngineKind } from './types.ts';
+import { ENGINE_LABELS, type Agent, type EngineInfo, type EngineKind, type EngineModels, type ModelOption, type ServiceTier } from './types.ts';
 
 /** The first OrcaCode with the headless contract the runner uses (--prompt-file, --mcp-config, sessionId, stdio approvals). */
 export const ORCACODE_MIN_VERSION = '0.10.0';
@@ -41,4 +41,19 @@ export function splitOrcacodeModel(value: string): { provider: string | null; mo
   const at = value.indexOf(ORCACODE_MODEL_SEP);
   if (at <= 0) return { provider: null, model: value };
   return { provider: value.slice(0, at), model: value.slice(at + ORCACODE_MODEL_SEP.length) };
+}
+
+/**
+ * The model an agent runs: its own pick, or for Default the listed model the CLI default names
+ * (by label), when there is one.
+ */
+export function currentModel(agent: Pick<Agent, 'model'>, models: EngineModels | undefined): ModelOption | undefined {
+  const listed = models?.models ?? [];
+  if (agent.model) return listed.find(m => m.value === agent.model);
+  return listed.find(m => m.label === models?.defaultLabel || m.value === models?.defaultLabel);
+}
+
+/** The service tiers the agent's model offers beyond Standard; none when the model is unknown. */
+export function serviceTiers(agent: Pick<Agent, 'model'>, models: EngineModels | undefined): ServiceTier[] {
+  return currentModel(agent, models)?.serviceTiers ?? [];
 }

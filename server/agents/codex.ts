@@ -87,6 +87,8 @@ export function codexArgs(agent: Agent, commsToken?: string, images: readonly Ru
   }
   if (agent.model) options.push('-m', agent.model);
   if (agent.effort) options.push('-c', `model_reasoning_effort="${agent.effort}"`);
+  // The catalog's tier id (`priority` is Fast); Standard sends nothing and keeps the user's config.
+  if (agent.serviceTier) options.push('-c', `service_tier=${JSON.stringify(agent.serviceTier)}`);
   return agent.sessionId ? ['exec', 'resume', ...options, agent.sessionId, '-'] : ['exec', ...options, '-'];
 }
 

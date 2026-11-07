@@ -1,6 +1,7 @@
 import type { Agent, Autonomy, EngineModels, PeerMessage } from '../shared/types.ts';
 import { RUNTIME_MODE_HINT, RUNTIME_MODE_LABEL } from './mono/AccessPicker.tsx';
 import { splitOrcacodeModel } from '../shared/engines.ts';
+import { effortName } from './composer/modelMenu.ts';
 
 export function relativeTime(ts: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - ts) / 1000));
@@ -69,9 +70,7 @@ export function notSetUp(models: EngineModels | undefined): string | undefined {
 
 export function effortLabel(effort: string, fallback: string | null | undefined): string {
   const value = effort || fallback || '';
-  if (!value) return 'Effort';
-  if (value === 'xhigh') return 'Extra high';
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  return value ? effortName(value) : 'Effort';
 }
 
 export const STATUS_LABEL: Record<PeerMessage['status'], string> = {

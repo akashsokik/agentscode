@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import type { Agent, Entry } from '../shared/types.ts';
+import type { Agent, EngineModels, Entry } from '../shared/types.ts';
+import { codexArgs } from '../server/agents/codex.ts';
 import { COMMS_SERVER } from '../server/config.ts';
-import { discoverOrcacodeModels, listingProblem, orcacodeContextWindow, parseOrcacodeModelList, parseOrcacodeModels, parseOrcacodeProviders } from '../server/models.ts';
+import { codexTiers, discoverOrcacodeModels, listingProblem, orcacodeContextWindow, parseOrcacodeModelList, parseOrcacodeModels, parseOrcacodeProviders } from '../server/models.ts';
 import { filterOptions } from '../web/mono/filter.ts';
 import { discoverCommands } from '../server/skills.ts';
 import type { ApprovalRequest, RunnerHooks, TurnResult } from '../server/agents/runner.ts';
@@ -346,4 +347,35 @@ test('the model search matches every word against name, id and provider', () => 
   assert.deepEqual(filterOptions(options, 'CODEX').map(o => o.label), ['gpt-6-sol']);
   assert.equal(filterOptions(options, '  ').length, 2);
   assert.equal(filterOptions(options, 'nothing').length, 0);
+});
+
+test('Codex tiers come from its catalog and go to codex exec as service_tier', () => {
+  assert.deepEqual(codexTiers({ slug: 'gpt-6-sol', service_tiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed' }] }), { serviceTiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed' }] });
+  assert.deepEqual(codexTiers({ slug: 'm', service_tiers: [{ id: 'default', name: 'Standard' }] }), {});
+  assert.deepEqual(codexTiers({ slug: 'm' }), {});
+  const codexAgent: Agent = { ...base, engine: 'codex' };
+  assert.ok(codexArgs({ ...codexAgent, serviceTier: 'priority' }).includes('service_tier="priority"'));
+  assert.ok(!codexArgs(codexAgent).some(a => a.startsWith('service_tier')));
+});
+
+test('the manager keeps a service tier only while the model offers it', async () => {
+  const h = harness();
+  const project = h.manager.addProject({ path: projectDir(h.dir, 'app') });
+  const agent = await h.manager.create({ name: 'Cy', engine: 'codex', projectId: project.id, model: 'gpt-6-sol' });
+  (h.manager as unknown as { models: Record<string, EngineModels> }).models.codex = {
+    defaultLabel: 'gpt-6-sol', defaultEffort: null, efforts: [], discovered: true,
+    models: [
+      { value: 'gpt-6-sol', label: 'gpt-6-sol', description: '', efforts: [], serviceTiers: [{ id: 'priority', name: 'Fast' }] },
+      { value: 'gpt-6-luna', label: 'gpt-6-luna', description: '', efforts: [] },
+    ],
+  };
+  const fast = await h.manager.update(agent.id, { serviceTier: 'priority' });
+  assert.equal(fast.serviceTier, 'priority');
+  await assert.rejects(h.manager.update(agent.id, { serviceTier: 'flex' }), /no "flex" service tier/);
+  // Switching to a model without tiers drops it, so the next turn is not sent one it lacks.
+  const switched = await h.manager.update(agent.id, { model: 'gpt-6-luna' });
+  assert.equal(switched.serviceTier, undefined);
+  const back = await h.manager.update(agent.id, { model: 'gpt-6-sol', serviceTier: 'priority' });
+  assert.equal(back.serviceTier, 'priority');
+  assert.equal((await h.manager.update(agent.id, { serviceTier: '' })).serviceTier, undefined);
 });

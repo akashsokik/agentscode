@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { EngineKind, EngineModels, ModelOption, ModelProvider } from '../shared/types.ts';
+import type { EngineKind, EngineModels, ModelOption, ModelProvider, ServiceTier } from '../shared/types.ts';
 import { orcacodeModelValue } from '../shared/engines.ts';
 
 // Ask each CLI which models it offers. Neither call sends a prompt, so neither costs tokens.
@@ -14,6 +14,9 @@ const CLAUDE_FALLBACK: ModelOption[] = [
   { value: 'haiku', label: 'Haiku', description: 'Latest Haiku', efforts: [] },
   { value: 'fable', label: 'Fable', description: 'Latest Fable', efforts: [] },
 ];
+
+/** Claude Code's fast mode, offered as a service tier on the models that support it. */
+export const CLAUDE_FAST: ServiceTier = { id: 'fast', name: 'Fast', description: 'Faster output at a higher price' };
 
 export function emptyModels(kind: EngineKind): EngineModels {
   return {
@@ -61,7 +64,13 @@ export async function discoverClaudeModels(binPath: string | null): Promise<Engi
     const defaultRow = list.find((m) => m.value === 'default');
     const models: ModelOption[] = list
       .filter((m) => m.value !== 'default')
-      .map((m) => ({ value: m.value, label: m.displayName, description: m.description, efforts: m.supportedEffortLevels ?? [] }));
+      .map((m) => ({
+        value: m.value,
+        label: m.displayName,
+        description: m.description,
+        efforts: m.supportedEffortLevels ?? [],
+        ...(m.supportsFastMode ? { serviceTiers: [CLAUDE_FAST] } : {}),
+      }));
     // A model pinned in ~/.claude/settings.json overrides the account default.
     const settings = readJson(path.join(os.homedir(), '.claude', 'settings.json'));
     const pinned = typeof settings?.model === 'string' ? settings.model : null;
@@ -80,13 +89,14 @@ export async function discoverClaudeModels(binPath: string | null): Promise<Engi
   }
 }
 
-interface CodexModel {
+export interface CodexModel {
   slug?: string;
   display_name?: string;
   description?: string;
   visibility?: string;
   priority?: number;
   supported_reasoning_levels?: { effort?: string }[];
+  service_tiers?: { id?: string; name?: string; description?: string }[];
 }
 
 function codexHome(): string {
@@ -124,6 +134,12 @@ function codexConfigValue(key: string): string | null {
   }
 }
 
+/** The tiers a Codex model offers beyond Standard, from its catalog entry (`priority` is Fast). */
+export function codexTiers(model: CodexModel): { serviceTiers?: ServiceTier[] } {
+  const tiers = (model.service_tiers ?? []).flatMap((t) => (t.id && t.id !== 'default' ? [{ id: t.id, name: t.name || t.id, ...(t.description ? { description: t.description } : {}) }] : []));
+  return tiers.length ? { serviceTiers: tiers } : {};
+}
+
 export async function discoverCodexModels(binPath: string | null): Promise<EngineModels> {
   if (!binPath) return emptyModels('codex');
   const catalog = await codexCatalog(binPath);
@@ -135,6 +151,7 @@ export async function discoverCodexModels(binPath: string | null): Promise<Engin
       label: m.display_name ?? m.slug!,
       description: m.description ?? '',
       efforts: (m.supported_reasoning_levels ?? []).map((l) => l.effort ?? '').filter(Boolean),
+      ...codexTiers(m),
     }));
   const configured = codexConfigValue('model');
   return {

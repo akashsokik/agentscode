@@ -91,6 +91,8 @@ export interface Runner {
   setAutonomy(autonomy: Autonomy): Promise<void>;
   setModel(model: string): Promise<void>;
   setEffort(effort: string): Promise<void>;
+  /** '' is Standard. Engines without tiers ignore it. */
+  setServiceTier?(tier: string): Promise<void>;
   close(): void;
   /** Resolves only once the underlying process/query has actually closed. */
   dispose?(): Promise<void>;

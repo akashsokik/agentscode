@@ -4,10 +4,11 @@
  * AccessPicker and ComposerAction, and the workspace bar under the box. As in MonoCode, `/` opens
  * the commands and skills picker and `@` the project files picker, right above the box.
  */
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type { ComposerCommand } from '../../shared/composer.ts';
-import { noProjectFolder, type Agent, type Approval, type AgentPatch, type EngineModels, type Project } from '../../shared/types.ts';
+import { noProjectFolder, type Agent, type Approval, type AgentPatch, type Project } from '../../shared/types.ts';
 import { useAgentCommands, useAgentFiles } from '../composer/catalog.ts';
+import { ModelPicker } from '../composer/ModelPicker.tsx';
 import { CommandPicker, FileMentionPicker } from '../composer/Pickers.tsx';
 import {
   BUILTIN_COMMANDS,
@@ -24,14 +25,12 @@ import {
   type Token,
 } from '../composer/tokens.ts';
 import { api } from '../api.ts';
-import { effortLabel, modelLabel, notSetUp, shortPath } from '../format.ts';
-import { filterOptions } from '../mono/settings.tsx';
+import { shortPath } from '../format.ts';
 import { attempt, useApp } from '../store.ts';
-import { EngineIcon, ENGINE_NAMES } from '../ui/EngineIcon.tsx';
 import { MenuLabel, MenuRow } from '../ui/common.tsx';
 import { AccessPicker } from '../mono/AccessPicker.tsx';
 import { ContextMeter } from '../mono/ContextMeter.tsx';
-import { ArrowUp, ChevronDown, Folder, GitBranch, ImagePlus, MoreHorizontal, RotateCcw, Settings, Square } from '../mono/icons.tsx';
+import { ArrowUp, Folder, GitBranch, ImagePlus, MoreHorizontal, RotateCcw, Settings, Square } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { QuestionForm } from '../mono/QuestionForm.tsx';
 import { questionsFromUnknown, selectedAnswerLabels, type UserQuestionReply } from '../mono/userQuestion.ts';
@@ -76,76 +75,6 @@ function ComposerAction({ busy, hasValue, onSend, onStop }: { busy: boolean; has
     <button type="button" title={busy ? 'Queue message' : 'Send'} aria-label={busy ? 'Queue message' : 'Send'} disabled={!hasValue} onClick={onSend} className="composer-send primary-action grid size-6.5 place-items-center rounded-md transition-[background-color,transform] duration-150 active:scale-[0.94] disabled:cursor-default disabled:active:scale-100">
       <ArrowUp className="size-3.5" strokeWidth={2.25} />
     </button>
-  );
-}
-
-/** The ModelPicker trigger pill, with model and effort choices in its popover. */
-function ModelPicker({ agent, models }: { agent: Agent; models: EngineModels | undefined }) {
-  const [open, setOpen] = useState(false);
-  const [custom, setCustom] = useState('');
-  const [query, setQuery] = useState('');
-  const root = useRef<HTMLDivElement>(null);
-  const all = models?.models ?? [];
-  const searchable = all.length > 12;
-  const shown = searchable ? filterOptions(all, query) : all;
-  const hint = notSetUp(models);
-  const search = useRef<HTMLInputElement>(null);
-  // The popover takes focus as it opens; the search box takes it back.
-  useEffect(() => { if (open && searchable) requestAnimationFrame(() => search.current?.focus()); }, [open, searchable]);
-  const model = models?.models.find(m => m.value === agent.model);
-  const efforts = model?.efforts.length ? model.efforts : models?.efforts ?? [];
-  const effort = agent.effort || models?.defaultEffort || '';
-  return (
-    <div ref={root} className="relative">
-      <button
-        type="button"
-        data-model-picker-trigger
-        title={`${ENGINE_NAMES[agent.engine]} · ${modelLabel(agent, models)}`}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => { setOpen(v => !v); setQuery(''); }}
-        className={`flex h-6.5 shrink-0 items-center gap-1 rounded-md px-1.5 transition-colors duration-150 ${open ? 'bg-selection-hover text-content' : 'bg-selection text-content hover:bg-selection-hover'}`}
-      >
-        <EngineIcon engine={agent.engine} className="size-4 shrink-0" />
-        <span className="whitespace-nowrap text-[11px]">{modelLabel(agent, models)}</span>
-        {effort && efforts.length ? <span className="shrink-0 text-[11px] text-content/50">{effortLabel(effort, null)}</span> : null}
-        <ChevronDown className={`size-3 shrink-0 text-content/50 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} strokeWidth={1.75} />
-      </button>
-      {open ? (
-        <Popover anchor={root} side="top" width={300} maxHeight={460} autoFocus onDismiss={() => setOpen(false)} role="listbox" aria-label="Model" tabIndex={-1} className="overflow-y-auto overscroll-contain p-1">
-          <MenuLabel>{ENGINE_NAMES[agent.engine]} models</MenuLabel>
-          {searchable ? (
-            <div className="px-1 pb-1">
-              <input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${all.length} models`} aria-label="Search models" className="w-full rounded-md border border-content/15 bg-transparent px-2 py-1 text-[12px] text-content outline-none placeholder:text-content/35" />
-            </div>
-          ) : null}
-          {query.trim() ? null : <MenuRow title="Default" hint={models?.discovered ? models.defaultLabel : 'Whatever the CLI is configured for.'} selected={!agent.model} onSelect={() => { void patch(agent, { model: '' }); setOpen(false); }} />}
-          {shown.map((m, index) => (
-            <Fragment key={m.value}>
-              {m.group && m.group !== shown[index - 1]?.group ? <MenuLabel>{m.group}</MenuLabel> : null}
-              <MenuRow title={m.label} hint={m.description} selected={agent.model === m.value} onSelect={() => { void patch(agent, { model: m.value }); setOpen(false); }} />
-            </Fragment>
-          ))}
-          {searchable && query.trim() && !shown.length ? <p className="px-2 py-1.5 text-[11px] text-content/50">No matching model</p> : null}
-          {hint ? <p className="px-2 py-1.5 text-[11px] leading-4 text-content/50">{hint}</p> : null}
-          {!models?.discovered ? <p className="px-2 py-1.5 text-[11px] leading-4 text-content/50">Asking the CLI for its models…</p> : null}
-          <form className="px-1 pb-1 pt-1.5" onSubmit={(e) => { e.preventDefault(); if (custom.trim()) { void patch(agent, { model: custom.trim() }); setOpen(false); } }}>
-            <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Custom model id" className="w-full rounded-md border border-content/15 bg-transparent px-2 py-1 text-[12px] text-content outline-none placeholder:text-content/35" />
-          </form>
-          {efforts.length ? (
-            <>
-              <MenuLabel>Reasoning effort</MenuLabel>
-              <MenuRow title="Default" hint={models?.defaultEffort ? `CLI default: ${models.defaultEffort}` : undefined} selected={!agent.effort} onSelect={() => { void patch(agent, { effort: '' }); setOpen(false); }} />
-              {efforts.map(value => (
-                <MenuRow key={value} title={effortLabel(value, null)} selected={agent.effort === value} onSelect={() => { void patch(agent, { effort: value }); setOpen(false); }} />
-              ))}
-            </>
-          ) : null}
-          <p className="px-2 py-1.5 text-[11px] leading-4 text-content/50">{agent.engine === 'claude' ? 'Switches immediately.' : 'Applies from the next turn.'}</p>
-        </Popover>
-      ) : null}
-    </div>
   );
 }
 
@@ -454,7 +383,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
           </div>
           <div className="composer-toolbar flex min-w-0 flex-1 items-center">
             <div className="flex shrink-0 items-center gap-1">
-              <ModelPicker agent={agent} models={models} />
+              <ModelPicker agent={agent} models={models} onChange={(change) => void patch(agent, change)} onClose={() => field.current?.focus()} />
               <AccessPicker value={agent.autonomy} busy={busy} onChange={(autonomy) => void patch(agent, { autonomy })} onClose={() => field.current?.focus()} />
             </div>
           </div>
