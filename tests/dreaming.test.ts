@@ -832,7 +832,7 @@ test('the dream function stands alone for the offline eval, and stops without wr
 
 test('npm test never calls a real model: the real engines refuse under the test runner', async () => {
   assert.ok(process.env.NODE_TEST_CONTEXT, 'node --test marks its children');
-  const engine = defaultDreamEngine({ claude: '/usr/bin/false', codex: '/usr/bin/false' });
+  const engine = defaultDreamEngine({ claude: '/usr/bin/false', codex: '/usr/bin/false', orcacode: '/usr/bin/false' });
   for (const kind of ['claude', 'codex'] as const) {
     await assert.rejects(
       engine({ agent: { engine: kind, model: '' } as Agent, prompt: 'x', cwd: '/tmp', signal: new AbortController().signal }),

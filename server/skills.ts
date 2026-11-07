@@ -10,6 +10,7 @@ import type { EngineKind } from '../shared/types.ts';
  * - Claude Code: skills in .claude/skills/<name>/SKILL.md and commands in .claude/commands/**.md, in
  *   the workspace and in the home folder, plus those of every enabled plugin as <plugin>:<name>.
  * - Codex: skills in .codex/skills and .agents/skills, in the workspace and in the home folder.
+ * - OrcaCode: skills in its own roots (.orca/skills, skills, .claude, .agents, .codex) and in its config folder.
  *
  * Claude Code's own built-in commands are left out; many of them only work in its terminal UI.
  */
@@ -180,6 +181,14 @@ export function discoverCommands(engine: EngineKind, cwd: string, home: string):
         ...skillsIn(path.join(plugin.dir, 'skills'), { scope: 'plugin', source: plugin.name }, `${plugin.name}:`),
         ...commandsIn(path.join(plugin.dir, 'commands'), { scope: 'plugin', source: plugin.name }, `${plugin.name}:`),
       ]),
+    ]);
+  }
+  if (engine === 'orcacode') {
+    const project: Origin = { scope: 'project', source: 'orcacode' };
+    const user: Origin = { scope: 'user', source: 'orcacode' };
+    return unique([
+      ...['.orca/skills', 'skills', '.claude/skills', '.agents/skills', '.codex/skills'].flatMap(rel => skillsIn(path.join(cwd, rel), project)),
+      ...['.config/orcacode/skills', '.claude/skills', '.agents/skills', '.codex/skills'].flatMap(rel => skillsIn(path.join(home, rel), user)),
     ]);
   }
   return unique([

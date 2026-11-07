@@ -23,7 +23,7 @@ async function boot() {
   store.load();
   const hub = new Hub();
   const engine = { available: false, path: null, version: null };
-  const manager = new AgentManager(store, hub, { claude: engine, codex: engine });
+  const manager = new AgentManager(store, hub, { claude: engine, codex: engine, orcacode: engine });
   manager.init();
   const terminals = new Terminals(id => manager.project(id));
   const server = createServer(manager, hub, { terminals });

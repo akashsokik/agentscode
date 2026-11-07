@@ -1,5 +1,6 @@
 import type { Agent, Autonomy, EngineModels, PeerMessage } from '../shared/types.ts';
 import { RUNTIME_MODE_HINT, RUNTIME_MODE_LABEL } from './mono/AccessPicker.tsx';
+import { splitOrcacodeModel } from '../shared/engines.ts';
 import { effortName } from './composer/modelMenu.ts';
 
 export function relativeTime(ts: number, now = Date.now()): string {
@@ -52,7 +53,19 @@ export function autonomyLabel(value: Autonomy): string {
 
 export function modelLabel(agent: Pick<Agent, 'model'>, models: EngineModels | undefined): string {
   if (!agent.model) return models?.discovered ? models.defaultLabel : 'Default';
-  return models?.models.find(m => m.value === agent.model)?.label ?? agent.model;
+  return models?.models.find(m => m.value === agent.model)?.label ?? splitOrcacodeModel(agent.model).model;
+}
+
+/** The engine's providers that are not set up yet (OrcaCode), as a hint under its model picker. */
+export function notSetUp(models: EngineModels | undefined): string | undefined {
+  const providers = models?.providers ?? [];
+  const missing = providers.filter(p => !p.configured).map(p => p.name);
+  const failing = providers.filter(p => p.configured && p.problem).map(p => `${p.name} (${p.problem})`);
+  const parts = [
+    missing.length ? `Not set up: ${missing.join(', ')}.` : '',
+    failing.length ? `No models from ${failing.join(', ')}.` : '',
+  ].filter(Boolean);
+  return parts.length ? `${parts.join(' ')} Fix them in orcacode with /provider, then Refresh models in Settings.` : undefined;
 }
 
 export function effortLabel(effort: string, fallback: string | null | undefined): string {

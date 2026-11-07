@@ -4,14 +4,14 @@
 
 # AgentsCode
 
-**An IDE where Claude Code and Codex agents work side by side and talk to each other.**
+**An IDE where Claude Code, Codex and OrcaCode agents work side by side and talk to each other.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3b82f6)](LICENSE)
 [![macOS app](https://img.shields.io/badge/desktop-macOS-111111?logo=apple&logoColor=white)](#desktop-app-macos)
 [![Electron](https://img.shields.io/badge/Electron-45-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2023.6-5FA04E?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![Engines](https://img.shields.io/badge/engines-Claude%20Code%20%C2%B7%20Codex-d97757)](#engines)
+[![Engines](https://img.shields.io/badge/engines-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OrcaCode-d97757)](#engines)
 
 [Highlights](#highlights) ·
 [Install](#install) ·
@@ -27,7 +27,7 @@
 
 <br />
 
-Each agent in AgentsCode is a real **Claude Code** or **Codex** session, working in one of your local
+Each agent in AgentsCode is a real **Claude Code**, **Codex** or **OrcaCode** session, working in one of your local
 projects. You give agents work in their own tabs. Agents hand each other requests, reviews and
 validations through built-in messaging tools, and every exchange is visible in **Comms**.
 **Channels** put you in a room with agents from several projects at once.
@@ -36,6 +36,7 @@ validations through built-in messaging tools, and every exchange is visible in *
 
 - **Real agents, not wrappers.** Claude agents run on the Claude Agent SDK with your own `claude` login,
   CLAUDE.md, settings and plugins. Codex agents run `codex exec` and resume the same thread.
+  OrcaCode agents run headless `orcacode --json` and resume the same session.
 - **Agents that talk to each other.** Every agent gets an `agentscode` MCP server: it can message a
   teammate, reply, delegate a task with acceptance criteria and report back with evidence.
 - **Comms.** Every agent-to-agent conversation in one place: filter and search the list, see what is
@@ -76,6 +77,7 @@ validations through built-in messaging tools, and every exchange is visible in *
 - The CLIs you want to use, on your PATH and signed in:
   - **Claude Code**: `claude` (uses your existing login)
   - **Codex**: `codex` (run `codex login` if it reports a login problem)
+  - **OrcaCode**: `orcacode` 0.10.0 or newer, with a provider set up (run `orcacode` and use `/provider`)
 
 ### Run from source
 
@@ -206,6 +208,8 @@ flowchart LR
     server -->|"one process per turn"| codex["Codex agents<br/>codex exec --json"]
     claude <-->|"agentscode MCP tools"| mail[("Mailbox<br/>and channels")]
     codex <-->|"agentscode MCP tools"| mail
+    server -->|"one process per turn"| orca["OrcaCode agents<br/>orcacode --json"]
+    orca <-->|"agentscode MCP tools"| mail
     mail -->|"queued, one peer message at a time"| server
 ```
 
@@ -256,16 +260,18 @@ shared, whether each task starts with a team snapshot, and the message budget.
 
 ### Autonomy
 
-| Level | Claude Code | Codex |
-| --- | --- | --- |
-| Plan only | Plan mode; you approve the plan before edits | Read-only sandbox |
-| Supervised | Asks before every edit and command | Workspace-write sandbox |
-| Auto-accept edits | Edits freely, asks before commands | Workspace-write sandbox |
-| Full access | No approvals | No sandbox |
+| Level | Claude Code | Codex | OrcaCode |
+| --- | --- | --- | --- |
+| Plan only | Plan mode; you approve the plan before edits | Read-only sandbox | `--read-only`; asks before every shell command |
+| Supervised | Asks before every edit and command | Workspace-write sandbox | Asks before every gated tool |
+| Auto-accept edits | Edits freely, asks before commands | Workspace-write sandbox | `--auto`: OrcaCode's reviewer admits edits and judges risky actions |
+| Full access | No approvals | No sandbox | `--yolo`: no approvals |
 
 Claude agents raise permission requests and plans inline in their transcript, with Allow and Deny
 (Deny takes an optional note). Questions open above the composer. Codex runs non-interactively
 (`codex exec --json`, resumed per thread), so its sandbox is the safety net.
+OrcaCode has no OS sandbox: its modes are tool gates. Its approvals come to AgentsCode over stdin
+(`--approvals stdio`) and show inline like Claude's.
 
 ### Engines
 
@@ -274,6 +280,9 @@ Claude agents raise permission requests and plans inline in their transcript, wi
   load your CLAUDE.md, settings and plugins. Your own MCP servers are off unless you enable them per
   agent.
 - **Codex** agents run one `codex exec` process per turn and resume the same thread for follow-ups.
+- **OrcaCode** agents run one headless `orcacode --json` process per turn and pass `--resume` with
+  the session id from the turn's metadata. The prompt and the per-agent `agentscode` MCP server go in
+  a private temporary folder (`--prompt-file`, `--mcp-config`), so your OrcaCode config is never edited.
 - Model lists come from the CLIs themselves, so no tokens are spent. Change model, effort or autonomy
   from the composer chips at any time.
 

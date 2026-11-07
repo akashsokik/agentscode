@@ -2,7 +2,9 @@
 // Keep this file to erasable syntax only (no enums, namespaces or parameter
 // properties) so Node can run it with plain type stripping.
 
-export type EngineKind = 'claude' | 'codex';
+export type EngineKind = 'claude' | 'codex' | 'orcacode';
+export const ENGINES: EngineKind[] = ['claude', 'codex', 'orcacode'];
+export const ENGINE_LABELS: Record<EngineKind, string> = { claude: 'Claude Code', codex: 'Codex', orcacode: 'OrcaCode' };
 
 /** What an agent is for. Only a lead may delegate structured tasks to teammates. */
 export type AgentRole = 'dev' | 'lead' | 'reviewer' | 'tester' | 'planner' | 'scout' | 'custom';
@@ -63,6 +65,8 @@ export interface Agent {
   home: string;
   model: string; // '' means the CLI default
   effort: string; // reasoning effort; '' means the CLI default
+  /** A service tier the model offers (Codex `priority`, Claude `fast`); '' or absent is Standard. */
+  serviceTier?: string;
   autonomy: Autonomy;
   useMcp: boolean; // Claude only: load the user's own MCP servers
   role: AgentRole;
@@ -516,6 +520,26 @@ export interface ModelOption {
   label: string;
   description: string;
   efforts: string[]; // supported reasoning efforts, empty if unknown
+  /** Where the model comes from, for engines with several providers (OrcaCode); pickers group by it. */
+  group?: string;
+  /** Faster (or cheaper) tiers the model offers beyond Standard. */
+  serviceTiers?: ServiceTier[];
+}
+
+export interface ServiceTier {
+  /** What the engine is sent: Codex's catalog id (`priority`), or `fast` for Claude's fast mode. */
+  id: string;
+  name: string;
+  description?: string;
+}
+
+/** One of an engine's model providers (OrcaCode): set up means it has a key, a login or needs none. */
+export interface ModelProvider {
+  id: string;
+  name: string;
+  configured: boolean;
+  /** Set up, but its model list could not be fetched: why, in a few words. */
+  problem?: string;
 }
 
 export interface EngineModels {
@@ -525,6 +549,8 @@ export interface EngineModels {
   models: ModelOption[];
   efforts: string[]; // every effort any model supports
   discovered: boolean; // false while loading or if the CLI could not be asked
+  /** Every provider the engine knows, set up or not (OrcaCode only). */
+  providers?: ModelProvider[];
 }
 
 export interface EngineInfo {
@@ -642,6 +668,8 @@ export interface AgentPatch {
   autonomy?: Autonomy;
   model?: string;
   effort?: string;
+  /** '' is Standard. */
+  serviceTier?: string;
   role?: AgentRole;
   /** Rewrites the agent's soul.md. */
   instructions?: string;

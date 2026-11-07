@@ -160,8 +160,8 @@ export async function runArm(scenario: Scenario, arm: Arm, sample: number, opts:
     },
   };
   const engines: Record<EngineKind, EngineInfo> = opts.dry
-    ? { claude: FAKE_ENGINE, codex: FAKE_ENGINE }
-    : { claude: await detectEngine('claude'), codex: await detectEngine('codex') };
+    ? { claude: FAKE_ENGINE, codex: FAKE_ENGINE, orcacode: FAKE_ENGINE }
+    : { claude: await detectEngine('claude'), codex: await detectEngine('codex'), orcacode: await detectEngine('orcacode') };
   const options: ManagerOptions = {
     worktreesRoot: path.join(data, 'worktrees'),
     // No idle-close dreams: the only dream is the session-end one.

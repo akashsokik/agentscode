@@ -157,7 +157,7 @@ test('agents from before homes existed get one on load, seeded from their instru
   const store = new Store(dataDir);
   store.load();
   const available = { available: true, path: '/usr/bin/false', version: '0' };
-  const manager = new AgentManager(store, { broadcast: () => {} }, { claude: available, codex: available });
+  const manager = new AgentManager(store, { broadcast: () => {} }, { claude: available, codex: available, orcacode: available });
   manager.init();
   const agent = store.agents.get('a1')!;
   assert.equal(agent.home, path.join(dataDir, 'agents', 'a1'));
@@ -183,7 +183,7 @@ test('a no-project agent from before the workspace moves into it once; a Claude 
   const store = new Store(dataDir);
   store.load();
   const available = { available: true, path: '/usr/bin/false', version: '0' };
-  new AgentManager(store, { broadcast: () => {} }, { claude: available, codex: available }).init();
+  new AgentManager(store, { broadcast: () => {} }, { claude: available, codex: available, orcacode: available }).init();
   const fen = store.agents.get('c1')!;
   assert.equal(fen.sessionId, null, 'Claude keeps a session per folder, so it cannot resume from the new one, even though a workspace folder was already there');
   const note = store.readEntries('c1').at(-1)!;
@@ -196,7 +196,7 @@ test('a no-project agent from before the workspace moves into it once; a Claude 
   // A session that started in the workspace (the session hook records where) survives a restart.
   fen.sessionId = 'next-session';
   fen.sessionCwd = fs.realpathSync(path.join(fen.home, 'workspace'));
-  new AgentManager(store, { broadcast: () => {} }, { claude: available, codex: available }).init();
+  new AgentManager(store, { broadcast: () => {} }, { claude: available, codex: available, orcacode: available }).init();
   assert.equal(store.agents.get('c1')!.sessionId, 'next-session');
   assert.equal(store.readEntries('c1').filter(e => /now works from/.test(e.text)).length, 1, 'one note');
 });

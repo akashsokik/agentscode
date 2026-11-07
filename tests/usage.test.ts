@@ -92,6 +92,7 @@ test('a signed-out Codex reads as unavailable; a missing one too', async () => {
 const engines = () => ({
   claude: { available: true, path: '/usr/bin/false', version: '1' },
   codex: { available: false, path: null, version: null },
+  orcacode: { available: false, path: null, version: null },
 });
 
 test('the tracker reads lazily, keeps a read, and joins one in flight', async () => {

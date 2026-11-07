@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Settings } from '../../shared/types.ts';
+import { ENGINE_LABELS, ENGINES, type Settings } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { attempt, useApp } from '../store.ts';
 import { setTheme, useTheme, type ThemePreference } from '../theme.ts';
@@ -66,10 +66,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </SecondaryButton>
           }
         >
-          {(['claude', 'codex'] as const).map(kind => (
+          {ENGINES.map(kind => (
             <Row
               key={kind}
-              label={<span className="flex items-center gap-2"><EngineIcon engine={kind} className="size-4" />{kind === 'claude' ? 'Claude Code' : 'Codex'}</span>}
+              label={<span className="flex items-center gap-2"><EngineIcon engine={kind} className="size-4" />{ENGINE_LABELS[kind]}</span>}
               description={engines?.[kind].available ? `v${engines[kind].version} at ${engines[kind].path}` : 'Not found on PATH.'}
             >
               <span className="text-[12px] text-content/45">{models?.[kind].discovered ? `${models[kind].models.length} models` : ''}</span>

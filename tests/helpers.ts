@@ -93,6 +93,7 @@ export function harness(engines: Partial<Record<EngineKind, EngineInfo>> = {}, o
   const manager = new AgentManager(store, { broadcast: event => events.push(event) }, {
     claude: engines.claude ?? available,
     codex: engines.codex ?? available,
+    orcacode: engines.orcacode ?? available,
   }, {
     createRunner: ctx => {
       const runner = new FakeRunner(ctx);

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ALL_PROJECTS, noProjectFolder } from '../../shared/types.ts';
+import { ALL_PROJECTS, ENGINE_LABELS, noProjectFolder } from '../../shared/types.ts';
 import type {
   Agent,
   AgentTask,
@@ -32,7 +32,6 @@ type Meta = ChannelPost['meta'];
 
 const MAX_REPLY = 8000;
 const BACKLOG = 20;
-const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex' } as const;
 
 /** Replies go to the channel whole (they are markdown), trimmed only when very long. */
 function channelReply(text: string): string {
@@ -418,7 +417,7 @@ export class Channels {
   private member(a: Agent, selfId: string) {
     const project = a.projectId === null ? undefined : this.store.projects.get(a.projectId);
     return {
-      id: a.id, name: a.name, you: a.id === selfId || undefined, engine: ENGINE_NAME[a.engine], role: a.role, status: a.status,
+      id: a.id, name: a.name, you: a.id === selfId || undefined, engine: ENGINE_LABELS[a.engine], role: a.role, status: a.status,
       project: a.projectId === null ? ALL_PROJECTS : project?.name ?? null,
       workspace: a.worktree?.cwd ?? project?.path ?? (a.projectId === null ? noProjectFolder(a.home) : null),
       branch: a.worktree?.branch ?? null,

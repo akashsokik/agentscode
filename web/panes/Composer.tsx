@@ -127,7 +127,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
   const leading = slash ? isLeading(text, slash) : false;
   // Claude Code runs a command only when it starts the message; Codex gets the skill's
   // instructions wherever it is named (server/manager.ts).
-  const slashOpen = Boolean(slash) && (leading || agent.engine === 'codex');
+  const slashOpen = Boolean(slash) && (leading || agent.engine !== 'claude');
   const mentionOpen = Boolean(mention) && !slashOpen;
   const agentCommands = useAgentCommands(agent.id, slashOpen);
   const agentFiles = useAgentFiles(agent.id, mentionOpen);

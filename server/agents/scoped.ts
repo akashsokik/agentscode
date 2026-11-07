@@ -188,6 +188,7 @@ export class ScopedRunner implements Runner {
   }
   async setModel(value: string): Promise<void> { await this.child?.setModel(value); }
   async setEffort(value: string): Promise<void> { await this.child?.setEffort(value); }
+  async setServiceTier(value: string): Promise<void> { await this.child?.setServiceTier?.(value); }
   async commands(): Promise<RunnerCommand[] | undefined> { return this.child?.commands?.(); }
   close(): void { this.closed = true; void this.interrupt(); }
   async dispose(): Promise<void> { this.closed = true; await this.interrupt(); }

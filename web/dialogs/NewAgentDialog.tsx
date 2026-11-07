@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AgentRole, Autonomy, EngineKind } from '../../shared/types.ts';
+import { ENGINES, type AgentRole, type Autonomy, type EngineKind } from '../../shared/types.ts';
 import { ROLES, rolePreset } from '../../shared/roles.ts';
+import { engineProblem } from '../../shared/engines.ts';
 import { api } from '../api.ts';
-import { AUTONOMY, effortLabel } from '../format.ts';
+import { AUTONOMY, effortLabel, notSetUp } from '../format.ts';
 import { open } from '../layout.ts';
 import { SOUL_MAX } from '../memory.ts';
 import { attempt, useApp } from '../store.ts';
@@ -10,7 +11,7 @@ import { EngineIcon, ENGINE_NAMES as ENGINE_LABEL } from '../ui/EngineIcon.tsx';
 import { INPUT, PRIMARY, TEXTAREA } from '../ui/common.tsx';
 import { Modal } from '../mono/Modal.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
-import { Group, Row, Segmented, Select, Toggle } from '../mono/settings.tsx';
+import { Group, Row, Select, Toggle } from '../mono/settings.tsx';
 import { submitKey } from './submitKey.ts';
 
 const NAMES = ['Ada', 'Bo', 'Cy', 'Dee', 'Eli', 'Fen', 'Gus', 'Hal', 'Ivy', 'Jun', 'Kai', 'Lux', 'Mo', 'Nia', 'Oz', 'Pia', 'Quin', 'Rae', 'Sol', 'Tam', 'Uma', 'Vic', 'Wren', 'Xan'];
@@ -25,7 +26,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   const engines = snapshot?.engines;
   const taken = useMemo(() => new Set((snapshot?.agents ?? []).map(a => a.name.toLowerCase())), [snapshot?.agents]);
   const [name, setName] = useState(() => NAMES.find(n => !taken.has(n.toLowerCase())) ?? '');
-  const [engine, setEngine] = useState<EngineKind>(() => (engines?.claude.available || !engines?.codex.available ? 'claude' : 'codex'));
+  const [engine, setEngine] = useState<EngineKind>(() => ENGINES.find(kind => engines?.[kind].available) ?? 'claude');
   const [project, setProject] = useState(projectId === null ? NO_PROJECT : projectId ?? projects[0]?.id ?? NO_PROJECT);
   const [role, setRole] = useState<AgentRole>('dev');
   const [instructions, setInstructions] = useState(rolePreset('dev').instructions);
@@ -42,7 +43,8 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   const selectedProject = projects.find(p => p.id === project);
   const noProject = project === NO_PROJECT;
   const efforts = (model ? models?.models.find(m => m.value === model)?.efforts : undefined) ?? models?.efforts ?? [];
-  const engineReady = Boolean(engines?.[engine].available);
+  const problem = engineProblem(engine, engines?.[engine], noProject);
+  const engineReady = !problem;
 
   useEffect(() => { setModel(''); setEffort(''); }, [engine]);
   useEffect(() => { if (!selectedProject?.isGit) setWorktree(false); }, [selectedProject?.isGit]);
@@ -72,13 +74,13 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   return (
     <Modal
       title="New agent"
-      description="A Claude Code or Codex session that can message its teammates."
+      description="A Claude Code, Codex or OrcaCode session that can message its teammates."
       size="md"
       fitViewport
       onClose={onClose}
       footer={
         <>
-          {!engineReady ? <span className="mr-auto font-sans text-[12px] text-warning">{ENGINE_LABEL[engine]} is not installed on this machine.</span> : null}
+          {problem ? <span className="mr-auto font-sans text-[12px] text-warning">{problem}</span> : null}
           <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
           <button type="button" className={PRIMARY} disabled={busy || !name.trim() || !project || !engineReady} onClick={() => void create()}>
             {busy ? 'Creating…' : 'Create agent'}
@@ -103,11 +105,8 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
               onChange={value => (value === ADD_PROJECT ? (onClose(), onAddProject()) : setProject(value))}
             />
           </Row>
-          <Row label="Engine" description={engineReady ? `${engines?.[engine].path} (v${engines?.[engine].version})` : 'Not installed on this machine.'}>
-            <span className="flex items-center gap-2">
-              <EngineIcon engine={engine} className="size-4" />
-              <Segmented label="Engine" value={engine} onChange={setEngine} options={[{ value: 'claude', label: 'Claude Code' }, { value: 'codex', label: 'Codex' }]} />
-            </span>
+          <Row label="Engine" description={engines?.[engine].available ? `${engines[engine].path} (v${engines[engine].version})` : 'Not installed on this machine.'}>
+            <Select label="Engine" value={engine} onChange={value => setEngine(value as EngineKind)} options={ENGINES.map(kind => ({ value: kind, icon: <EngineIcon engine={kind} className="size-4" />, label: engines?.[kind].available ? ENGINE_LABEL[kind] : `${ENGINE_LABEL[kind]} (not installed)` }))} />
           </Row>
           <Row label="Role" description={role === 'lead' ? 'Leads can delegate tasks and track reports.' : undefined}>
             <Select label="Role" value={role} options={ROLES.map(r => ({ value: r.id, label: r.name }))} onChange={pickRole} />
@@ -115,11 +114,12 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
         </Group>
 
         <Group title="Model and access">
-          <Row label="Model">
+          <Row label="Model" description={notSetUp(models)}>
             <Select
               label="Model"
               value={model}
-              options={[{ value: '', label: `Default${models?.discovered ? ` (${models.defaultLabel})` : ''}` }, ...(models?.models ?? []).map(m => ({ value: m.value, label: m.label }))]}
+              searchable={(models?.models.length ?? 0) > 12}
+              options={[{ value: '', label: `Default${models?.discovered ? ` (${models.defaultLabel})` : ''}` }, ...(models?.models ?? []).map(m => ({ value: m.value, label: m.label, group: m.group }))]}
               onChange={setModel}
             />
           </Row>
