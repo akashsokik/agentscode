@@ -7,6 +7,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, Menu, shell, utilityProcess, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
+import { checkForUpdates, startUpdater } from './updater.ts';
 
 const PORT = Number(process.env.PORT ?? 4320);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -22,6 +23,8 @@ let window: BrowserWindow | null = null;
 let ready = false;
 let quitting = false;
 const recentOutput: string[] = [];
+/** Resolves whoever waits in stopServer() once the bundled server has exited. */
+const serverStopped: Array<() => void> = [];
 
 /** Finder starts apps with a bare PATH; agents need the user's own to find node, git, claude and codex. */
 function useLoginShellPath(): void {
@@ -106,10 +109,30 @@ function watchAttachedServer(): void {
   }, 2000);
 }
 
+/**
+ * Stops the bundled server, which stops every agent first (SIGTERM runs manager.shutdown() in
+ * server/index.ts). Resolves once it has exited, or after the grace period.
+ */
+function stopServer(): Promise<void> {
+  if (!server) return Promise.resolve();
+  quitting = true;
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      server = null;
+      resolve();
+    }, SHUTDOWN_GRACE_MS);
+    serverStopped.push(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+    server?.kill();
+  });
+}
+
 function onServerExit(code: number): void {
   server = null;
   if (quitting) {
-    app.exit(0);
+    for (const done of serverStopped.splice(0)) done();
     return;
   }
   void serverAnswers().then(up => {
@@ -134,7 +157,25 @@ function onServerExit(code: number): void {
  */
 function setMenu(): void {
   const template: MenuItemConstructorOptions[] = [
-    ...(process.platform === 'darwin' ? [{ role: 'appMenu' } as MenuItemConstructorOptions] : []),
+    ...(process.platform === 'darwin'
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: 'about' },
+              { label: 'Check for Updates…', click: () => void checkForUpdates(true) },
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' },
+            ],
+          } as MenuItemConstructorOptions,
+        ]
+      : []),
     { label: 'File', submenu: [{ label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' }] },
     { role: 'editMenu' },
     {
@@ -152,6 +193,16 @@ function setMenu(): void {
       ],
     },
     { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
+    {
+      role: 'help',
+      submenu: [
+        ...(process.platform === 'darwin'
+          ? []
+          : [{ label: 'Check for Updates…', click: () => void checkForUpdates(true) }, { type: 'separator' } as MenuItemConstructorOptions]),
+        { label: `Release Notes (v${app.getVersion()})`, click: () => void shell.openExternal(`https://github.com/akashsokik/agentscode/releases/tag/v${app.getVersion()}`) },
+        { label: 'All Releases', click: () => void shell.openExternal('https://github.com/akashsokik/agentscode/releases') },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -225,10 +276,9 @@ if (!app.requestSingleInstanceLock()) {
     if (!server) return;
     event.preventDefault();
     if (quitting) return;
-    quitting = true;
-    // SIGTERM runs manager.shutdown() (server/index.ts), which stops every agent before the server exits.
-    setTimeout(() => app.exit(0), SHUTDOWN_GRACE_MS).unref();
-    server.kill();
+    // Stop the agents, then quit again. The second quit goes through normally (no server left), so
+    // the quit events fire and a downloaded update installs on the way out.
+    void stopServer().then(() => app.quit());
   });
   void app.whenReady().then(async () => {
     setMenu();
@@ -239,5 +289,6 @@ if (!app.requestSingleInstanceLock()) {
       markReady();
       watchAttachedServer();
     } else startServer();
+    void startUpdater({ window: () => window, stopServer });
   });
 }

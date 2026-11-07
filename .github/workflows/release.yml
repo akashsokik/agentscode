@@ -1,0 +1,265 @@
+name: release
+
+# Release pipeline for the AgentsCode desktop app. Pushing a tag v<version> (scripts/release.mjs
+# tag does this) checks the source, builds the app on each platform's own runner, and publishes
+# one GitHub Release. Re-run for an existing tag with workflow_dispatch and the tag name: the
+# publish step replaces the release's assets.
+#
+# Asset names carry no version, so https://github.com/akashsokik/agentscode/releases/latest/download/<name>
+# always points at the newest release. The site's download buttons depend on these names:
+#   AgentsCode-mac-arm64.dmg / .zip        macos-15        (arm64)
+#   AgentsCode-mac-x64.dmg / .zip          macos-15-intel  (x64)
+#   AgentsCode-win-x64.exe                 windows-latest  (NSIS installer)
+#   AgentsCode-linux-x86_64.AppImage       ubuntu-latest
+# plus the update feeds the installed apps read (latest-mac.yml, latest.yml, latest-linux.yml),
+# the .blockmap files for differential updates, and SHA256SUMS.
+#
+# Each platform builds natively because two parts of the app are platform specific: the Claude
+# Agent SDK's bundled binary (an optional dependency per platform and arch, chosen by npm ci) and
+# node-pty's native module (prebuilt for macOS and Windows, compiled on Linux).
+#
+# macOS signing is optional. With the secrets MAC_CSC_LINK (base64 .p12 of a Developer ID
+# Application certificate), MAC_CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and
+# APPLE_TEAM_ID set, the app is signed and notarized, and Mac auto-update installs in place.
+# Without them the app is ad-hoc signed: it opens after "Open Anyway" in System Settings, and the
+# app offers new versions as a download instead of installing them (electron/updater.ts).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v* tag to rebuild and republish"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  tag:
+    name: resolve tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      # The tag names the version (v0.2.0 releases 0.2.0) and has to agree with package.json,
+      # which is the version the app reports and compares against the update feed.
+      - name: resolve tag and version
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$INPUT_TAG" ]]; then
+            tag="$INPUT_TAG"
+          elif [[ "$REF_TYPE" == "tag" ]]; then
+            tag="$REF_NAME"
+          else
+            echo "no tag: push a v* tag or dispatch with the tag input" >&2
+            exit 1
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "tag '$tag' is not of the form vX.Y.Z" >&2
+            exit 1
+          fi
+          version="${tag#v}"
+          package_version="$(node -p "require('./package.json').version")"
+          if [[ "$package_version" != "$version" ]]; then
+            echo "tag version $version does not match package.json version $package_version" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "releasing AgentsCode $version from tag $tag"
+
+  check:
+    name: typecheck and test
+    needs: tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+      - name: node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  build:
+    name: build ${{ matrix.name }}
+    needs: [tag, check]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mac-arm64
+            os: macos-15
+            platform: darwin
+            arch: arm64
+            builder: --mac dmg zip --arm64
+          - name: mac-x64
+            os: macos-15-intel
+            platform: darwin
+            arch: x64
+            builder: --mac dmg zip --x64
+          - name: win-x64
+            os: windows-latest
+            platform: win32
+            arch: x64
+            builder: --win nsis --x64
+          - name: linux-x64
+            os: ubuntu-latest
+            platform: linux
+            arch: x64
+            builder: --linux AppImage --x64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+
+      - name: node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # npm ci on the target's own runner installs that platform's Claude Agent SDK binary and,
+      # on Linux, compiles node-pty (N-API, so the same build loads in Electron).
+      - name: install
+        run: npm ci
+
+      - name: build app
+        run: npm run build:desktop
+
+      - name: package
+        env:
+          BUILDER_ARGS: ${{ matrix.builder }}
+          PLATFORM: ${{ matrix.platform }}
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ "$PLATFORM" == "darwin" ]]; then
+            if [[ -n "$MAC_CSC_LINK" ]]; then
+              export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
+              echo "signing with the Developer ID certificate; notarizing when the APPLE_* secrets are set"
+            else
+              # No certificate: ad-hoc sign, so Gatekeeper offers Open Anyway instead of calling the app damaged.
+              unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+              extra=(-c.mac.identity=- -c.mac.hardenedRuntime=false)
+              echo "::notice::MAC_CSC_LINK is not set; the macOS app is ad-hoc signed and will not auto-install updates"
+            fi
+          fi
+          # macOS runners run bash 3.2, where "${extra[@]}" on an empty array fails under set -u.
+          # shellcheck disable=SC2086
+          npx electron-builder $BUILDER_ARGS --publish never ${extra[@]+"${extra[@]}"}
+          ls -la release
+
+      - name: verify package
+        run: node scripts/release/verify-package.mjs ${{ matrix.platform }} ${{ matrix.arch }}
+
+      - name: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            release/AgentsCode-*
+            release/latest*.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish ${{ needs.tag.outputs.tag }}
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+
+      - name: download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+
+      # Each mac job wrote a latest-mac.yml for its own arch; the installed apps need one with both.
+      - name: assemble assets
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          node scripts/release/merge-mac-yml.mjs artifacts/mac-arm64/latest-mac.yml artifacts/mac-x64/latest-mac.yml > upload/latest-mac.yml
+          cp artifacts/win-x64/latest.yml upload/latest.yml
+          cp artifacts/linux-x64/latest-linux.yml upload/latest-linux.yml
+          cp artifacts/*/AgentsCode-* upload/
+          cd upload
+          LC_ALL=C sha256sum AgentsCode-* | LC_ALL=C sort -k 2 > SHA256SUMS
+          for f in AgentsCode-mac-arm64.dmg AgentsCode-mac-arm64.zip AgentsCode-mac-x64.dmg AgentsCode-mac-x64.zip \
+                   AgentsCode-win-x64.exe AgentsCode-linux-x86_64.AppImage; do
+            [[ -f "$f" ]] || { echo "missing $f" >&2; exit 1; }
+          done
+          cat latest-mac.yml
+          ls -la
+
+      - name: github release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+          VERSION: ${{ needs.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          notes="docs/releases/${VERSION}.md"
+          args=(--title "AgentsCode v${VERSION}")
+          if [[ -f "$notes" ]]; then
+            args+=(--notes-file "$notes")
+          else
+            echo "::warning::$notes is missing; using generated release notes"
+            args+=(--generate-notes)
+          fi
+          if [[ "$VERSION" == *-* ]]; then args+=(--prerelease); else args+=(--latest); fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists; replacing its assets"
+            gh release upload "$TAG" upload/* --clobber
+            if [[ -f "$notes" ]]; then gh release edit "$TAG" --notes-file "$notes"; fi
+          else
+            gh release create "$TAG" "${args[@]}" --verify-tag upload/*
+          fi
