@@ -7,13 +7,15 @@ import { closeTab, focusedAgentId, focusedChannelId, open, openToSide, setProjec
 import { ChangesView } from '../right/RightPanel.tsx';
 import { attempt, useApp } from '../store.ts';
 import { BrandMark } from '../ui/BrandMark.tsx';
+import { SidebarUpdateFooter, useDesktopUpdate } from './SidebarUpdate.tsx';
+import { isUpdateActionable, updateLabel } from '../../shared/updates.ts';
 import { DreamNowMenuRow } from '../ui/DreamNowMenuRow.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ResizeHandle, useColumnWidth, useWindowWidth } from '../ui/ResizeHandle.tsx';
 import { SHORTCUTS } from '../shortcuts.ts';
 import { showTerminal } from '../terminal/actions.ts';
 import { cx, Empty, HeaderButton, Loading, MenuDivider, MenuLabel, MenuRow, StatusLabel } from '../ui/common.tsx';
-import { ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, SplitColumns, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
+import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, SplitColumns, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
@@ -536,6 +538,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
           {projects && !projects.length ? <RailEmptyRow label="Add project" onClick={actions.addProject} /> : null}
         </RailSection>
       </div>
+      <SidebarUpdateFooter />
       <div className="flex shrink-0 flex-col gap-px p-2">
         <RailAction icon={Settings} label="Settings" hint={SHORTCUTS.settings} onClick={actions.settings} />
       </div>
@@ -775,6 +778,7 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
   const projects = useApp(s => s.snapshot?.projects);
   const agents = useApp(s => s.snapshot?.agents);
   const inFlight = useApp(s => s.snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0);
+  const update = useDesktopUpdate();
   const focusedPane = layout.panes.find(p => p.id === layout.focused);
   const commsOpen = layout.tabs.find(t => t.id === focusedPane?.tabId)?.content.kind === 'comms';
   const channelId = focusedChannelId(layout);
@@ -811,6 +815,15 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
         ))}
       </div>
       <div className="flex shrink-0 flex-col items-center gap-0.5 pb-2 pt-1">
+        {update && isUpdateActionable(update) ? (
+          <RailIconButton
+            label={`${updateLabel(update)} (you have v${update.currentVersion})`}
+            dot={<span className="size-1.5 rounded-full bg-accent" />}
+            onClick={() => void window.agentscodeDesktop?.updates?.install()}
+          >
+            <ArrowDownCircle className="size-4 text-accent" strokeWidth={1.75} />
+          </RailIconButton>
+        ) : null}
         <RailIconButton label={`Settings (${SHORTCUTS.settings})`} onClick={actions.settings}><Settings className="size-4" strokeWidth={1.75} /></RailIconButton>
       </div>
     </nav>

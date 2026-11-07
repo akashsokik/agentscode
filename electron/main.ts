@@ -6,8 +6,8 @@
  */
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, Menu, shell, utilityProcess, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
-import { checkForUpdates, startUpdater } from './updater.ts';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
+import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSnapshot } from './updater.ts';
 
 const PORT = Number(process.env.PORT ?? 4320);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -227,6 +227,8 @@ function showWindow(): void {
     // The page leaves room for them and drags the window by its headers (the `desktop` variant).
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 16, y: 13 } } : {}),
     show: false,
+    // window.agentscodeDesktop, for the sidebar's update row (electron/preload.cts).
+    webPreferences: { preload: path.join(import.meta.dirname, 'preload.cjs') },
   });
   window.once('ready-to-show', () => window?.show());
   window.on('closed', () => {
@@ -263,6 +265,22 @@ function showWindow(): void {
   void window.loadURL(ORIGIN);
 }
 
+/** Only the AgentsCode page itself may use the desktop bridge. */
+function fromApp(event: IpcMainInvokeEvent): boolean {
+  try {
+    return new URL(event.senderFrame?.url ?? '').origin === ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+/** The bridge behind window.agentscodeDesktop.updates (electron/preload.cts). */
+function serveUpdates(): void {
+  ipcMain.handle('updates:get', event => (fromApp(event) ? updateSnapshot() : null));
+  ipcMain.handle('updates:install', event => (fromApp(event) ? installUpdate() : undefined));
+  onUpdateChange(snapshot => window?.webContents.send('updates:changed', snapshot));
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -282,6 +300,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   void app.whenReady().then(async () => {
     setMenu();
+    serveUpdates();
     if (app.isPackaged) useLoginShellPath();
     // A packaged app gets its icon from the bundle; running from source would show Electron's.
     else app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));

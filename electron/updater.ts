@@ -2,15 +2,20 @@
  * Updates for the packaged app, from the GitHub Releases of akashsokik/agentscode (the `publish`
  * entry in package.json, which electron-builder writes into the app as app-update.yml).
  *
- * Windows (NSIS) and Linux (AppImage) download an update in the background and install it on
- * restart. macOS can only swap the app in place when the running app carries a Developer ID
- * signature (Squirrel.Mac checks it), so an unsigned Mac build offers the download page instead.
+ * The app checks at launch and every few hours, without a word unless it finds something. A found
+ * update shows in the sidebar as MonoCode's "Update to X" row (web/sidebar/SidebarUpdate.tsx),
+ * which reads this module's snapshot through the preload bridge (electron/preload.cts). Clicking it
+ * downloads the update with its progress in the row, then restarts into it.
+ *
+ * macOS can only swap the app in place when the running app carries a Developer ID signature
+ * (Squirrel.Mac checks it), so on an unsigned Mac build the row offers the download page instead.
  * Errors are logged and never shown, except to someone who chose Check for Updates.
  */
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { app, dialog, shell, type BrowserWindow } from 'electron';
 import electronUpdater, { type UpdateInfo } from 'electron-updater';
+import type { UpdateSnapshot } from '../shared/updates.ts';
 
 const { autoUpdater } = electronUpdater;
 
@@ -29,11 +34,26 @@ type Options = {
 
 let options: Options | null = null;
 /** True when this app can install an update itself; false for an unsigned Mac build. */
-let canInstall = true;
-/** Set while a Check for Updates the user chose is running, so an update it finds is offered again. */
-let manualCheck = false;
-let downloaded: UpdateInfo | null = null;
-let prompted: string | null = null;
+let canInstall = false;
+let available: UpdateInfo | null = null;
+let snapshot: UpdateSnapshot = { phase: 'idle', currentVersion: app.getVersion(), canInstall: false };
+const listeners = new Set<(next: UpdateSnapshot) => void>();
+
+function setSnapshot(next: Partial<UpdateSnapshot>): void {
+  snapshot = { ...snapshot, ...next, currentVersion: app.getVersion(), canInstall };
+  for (const listener of listeners) listener(snapshot);
+}
+
+/** The current update state, for the page. */
+export function updateSnapshot(): UpdateSnapshot {
+  return snapshot;
+}
+
+/** Calls back with every new update state; returns the unsubscribe function. */
+export function onUpdateChange(listener: (next: UpdateSnapshot) => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
 
 /** True when the running .app is signed with a Developer ID, which Squirrel.Mac needs. */
 function hasDeveloperIdSignature(): Promise<boolean> {
@@ -55,9 +75,8 @@ function releasePage(version: string): string {
   return `${RELEASES_URL}/tag/v${version}`;
 }
 
+/** The unsigned Mac build's way to update: it cannot replace itself, so it explains how. */
 async function offerDownload(info: UpdateInfo): Promise<void> {
-  if (prompted === info.version && !manualCheck) return;
-  prompted = info.version;
   const response = await showMessage({
     type: 'info',
     buttons: ['Download', 'Later'],
@@ -69,56 +88,62 @@ async function offerDownload(info: UpdateInfo): Promise<void> {
   if (response === 0) void shell.openExternal(releasePage(info.version));
 }
 
-async function offerRestart(info: UpdateInfo, force = false): Promise<void> {
-  if (prompted === info.version && !force) return;
-  prompted = info.version;
-  const response = await showMessage({
-    type: 'info',
-    buttons: ['Restart Now', 'Later', 'Release Notes'],
-    defaultId: 0,
-    cancelId: 1,
-    message: `AgentsCode ${info.version} is ready to install`,
-    detail: 'Restart to update. Running agents stop first and pick up where they left off. If you choose Later, the update installs the next time you quit.',
-  });
-  if (response === 2) {
-    void shell.openExternal(releasePage(info.version));
+/**
+ * Installs the available update, from the sidebar row or the menu: downloads it (progress in the
+ * row), stops the agents and restarts into it. An unsigned Mac build explains how to update instead.
+ */
+export async function installUpdate(): Promise<void> {
+  if (!options || !available) return;
+  if (!canInstall) {
+    await offerDownload(available);
     return;
   }
-  if (response === 0) await restartAndInstall();
+  if (snapshot.phase === 'downloading' || snapshot.phase === 'ready') return;
+  try {
+    setSnapshot({ phase: 'downloading', progress: 0, error: undefined });
+    await autoUpdater.downloadUpdate();
+    setSnapshot({ phase: 'ready', progress: 100 });
+    await options.stopServer();
+    // With the server stopped, the app's before-quit handler lets the quit through.
+    autoUpdater.quitAndInstall(false, true);
+  } catch (error) {
+    console.error('[updater] install failed:', error);
+    // Back to "Update to X", so another click tries again.
+    setSnapshot({ phase: 'available', progress: undefined, error: error instanceof Error ? error.message : String(error) });
+    await showMessage({
+      type: 'warning',
+      message: `AgentsCode could not update to ${available.version}`,
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
-async function restartAndInstall(): Promise<void> {
-  if (!options) return;
-  await options.stopServer();
-  // With the server stopped, the app's before-quit handler lets the quit through.
-  autoUpdater.quitAndInstall(false, true);
-}
-
-/** Looks for a new release. `manual` shows the outcome, including "up to date" and errors. */
+/** Looks for a new release. `manual` (Check for Updates) reports the outcome in a dialog. */
 export async function checkForUpdates(manual = false): Promise<void> {
   if (!options) {
     if (manual) await showMessage({ type: 'info', message: 'Updates are only available in the installed app.' });
     return;
   }
-  if (downloaded) {
-    if (manual) await offerRestart(downloaded, true);
+  if (snapshot.phase === 'downloading' || snapshot.phase === 'ready') return;
+  if (available && manual) {
+    await offerInstall(available);
     return;
   }
-  manualCheck = manual;
+  setSnapshot({ phase: 'checking' });
   try {
     const result = await autoUpdater.checkForUpdates();
-    if (!manual) return;
-    if (!result?.isUpdateAvailable) {
-      await showMessage({ type: 'info', message: 'AgentsCode is up to date', detail: `You have version ${app.getVersion()}.` });
-    } else if (canInstall) {
-      await showMessage({
-        type: 'info',
-        message: `Downloading AgentsCode ${result.updateInfo.version}`,
-        detail: 'You will be asked to restart when it is ready.',
-      });
+    if (result?.isUpdateAvailable) {
+      available = result.updateInfo;
+      setSnapshot({ phase: 'available', availableVersion: result.updateInfo.version, error: undefined });
+      if (manual) await offerInstall(result.updateInfo);
+      return;
     }
+    setSnapshot({ phase: 'current', availableVersion: undefined, error: undefined });
+    if (manual) await showMessage({ type: 'info', message: 'AgentsCode is up to date', detail: `You have version ${app.getVersion()}.` });
   } catch (error) {
     console.error('[updater] check failed:', error);
+    // Keep an update already found; otherwise there is nothing to show in the sidebar.
+    setSnapshot({ phase: available ? 'available' : 'error', error: error instanceof Error ? error.message : String(error) });
     if (manual) {
       await showMessage({
         type: 'warning',
@@ -126,9 +151,25 @@ export async function checkForUpdates(manual = false): Promise<void> {
         detail: error instanceof Error ? error.message : String(error),
       });
     }
-  } finally {
-    manualCheck = false;
   }
+}
+
+/** Check for Updates found one: offer it now, the same as the sidebar row. */
+async function offerInstall(info: UpdateInfo): Promise<void> {
+  if (!canInstall) {
+    await offerDownload(info);
+    return;
+  }
+  const response = await showMessage({
+    type: 'info',
+    buttons: ['Update Now', 'Later', 'Release Notes'],
+    defaultId: 0,
+    cancelId: 1,
+    message: `AgentsCode ${info.version} is available`,
+    detail: `You have ${app.getVersion()}. Updating downloads it, stops running agents and restarts; they pick up where they left off. You can also update later from the sidebar.`,
+  });
+  if (response === 2) void shell.openExternal(releasePage(info.version));
+  if (response === 0) await installUpdate();
 }
 
 /** Starts update checks: once shortly after launch, then every few hours. Packaged builds only. */
@@ -140,24 +181,20 @@ export async function startUpdater(opts: Options): Promise<void> {
   canInstall = process.platform !== 'darwin' || (await hasDeveloperIdSignature());
 
   autoUpdater.logger = console;
-  autoUpdater.autoDownload = canInstall;
-  autoUpdater.autoInstallOnAppQuit = canInstall;
+  // MonoCode's flow: a found update waits for a click, which downloads it and restarts.
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = app.getVersion().includes('-');
 
-  autoUpdater.on('update-available', info => {
-    console.log(`[updater] ${info.version} is available`);
-    if (!canInstall) void offerDownload(info);
-  });
-  autoUpdater.on('update-downloaded', info => {
-    downloaded = info;
-    console.log(`[updater] ${info.version} downloaded`);
-    void offerRestart(info);
+  autoUpdater.on('download-progress', progress => {
+    setSnapshot({ phase: 'downloading', progress: Math.floor(progress.percent) });
   });
   autoUpdater.on('error', error => {
     // Before the first release exists GitHub answers 404 for latest*.yml; that is not worth a dialog.
     console.error('[updater]', error?.message ?? error);
   });
 
+  setSnapshot({});
   setTimeout(() => void checkForUpdates(false), FIRST_CHECK_DELAY_MS).unref();
   setInterval(() => void checkForUpdates(false), CHECK_INTERVAL_MS).unref();
 }
