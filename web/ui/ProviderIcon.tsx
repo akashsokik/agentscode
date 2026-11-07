@@ -7,7 +7,8 @@ import codexLogo from '../assets/codex.svg';
 import { MonoMark } from './EngineIcon.tsx';
 
 /**
- * OrcaCode's model providers. Marks are from Simple Icons (CC0; trademarks of their owners), drawn
+ * OrcaCode's model providers. Marks are from Simple Icons (CC0) and, for OpenRouter, its own site; all
+ * are trademarks of their owners, drawn
  * in the text color. OpenAI Codex uses the Codex logo; a provider with no mark gets its initial.
  */
 const MARKS: Record<string, string> = {
