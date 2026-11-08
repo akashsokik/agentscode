@@ -7,6 +7,7 @@ import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import type { Agent } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { api } from '../api.ts';
+import { openBrowser } from '../browser.ts';
 import { shortPath } from '../format.ts';
 import { closeTab, currentProjectId, focusedAgentId, focusedChannelId, open, openToSide, setProject, setRightPanel, setSidebar, setSidebarView, useLayout } from '../layout.ts';
 import { rankCommands } from '../paletteMatch.ts';
@@ -19,7 +20,7 @@ import { hideTerminal, newTerminal, showTerminal, splitFront } from '../terminal
 import { setTheme, useTheme, type ThemePreference } from '../theme.ts';
 import { cx } from './common.tsx';
 import { EngineIcon } from './EngineIcon.tsx';
-import { Check, Folder, FolderPlus, FolderTree, GitCompare, MessageMultiple, MessageSquarePlus, Palette, PanelBottom, PanelLeft, PanelRight, Plus, RotateCcw, Search, Settings, SlidersHorizontal, SplitColumns, SplitRows, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
+import { Check, Globe, Folder, FolderPlus, FolderTree, GitCompare, MessageMultiple, MessageSquarePlus, Palette, PanelBottom, PanelLeft, PanelRight, Plus, RotateCcw, Search, Settings, SlidersHorizontal, SplitColumns, SplitRows, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Modal } from '../mono/Modal.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 
@@ -142,6 +143,7 @@ function useCommands(actions: PaletteActions): Command[] {
     if (pane?.tabId) action({ id: 'close-tab', title: 'Close tab', icon: X, shortcut: SHORTCUTS.closeTab, priority: 1, run: () => closeTab(pane.tabId!) });
     action({ id: 'sidebar', title: layout.sidebar ? 'Hide sidebar' : 'Show sidebar', keywords: 'toggle navigation', icon: PanelLeft, shortcut: SHORTCUTS.sidebar, priority: 1, run: () => setSidebar(!layout.sidebar) });
     action({ id: 'panel', title: layout.rightPanel ? 'Hide panel' : 'Show panel', keywords: 'toggle right overview', icon: PanelRight, shortcut: SHORTCUTS.panel, priority: 1, run: () => setRightPanel(!layout.rightPanel) });
+    action({ id: 'browser', title: 'New browser tab', keywords: 'web preview localhost url page open site', icon: Globe, shortcut: SHORTCUTS.browser, priority: 1, run: side => openBrowser('', side) });
     const terminalProject = snapshot.projects.find(p => p.id === (layout.projectId ?? snapshot.projects[0]?.id)) ?? snapshot.projects[0];
     if (terminalProject) {
       action({ id: 'terminal', title: layout.terminal ? 'Hide terminal' : 'Show terminal', keywords: `toggle shell console panel ${terminalProject.name}`, hint: layout.terminal ? undefined : terminalProject.name, icon: PanelBottom, shortcut: SHORTCUTS.terminal, priority: 1, run: () => (layout.terminal ? hideTerminal() : showTerminal(terminalProject.id)) });

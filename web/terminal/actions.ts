@@ -60,6 +60,23 @@ export function useTerminalTitles(): Record<string, string> {
   return useSyncExternalStore(subscribe, () => titles);
 }
 
+/** localhost URLs each terminal has printed (a dev server's "Local: http://localhost:5173/"), newest last. */
+let previews: Record<string, string[]> = {};
+const MAX_PREVIEWS = 3;
+
+export function notePreviewUrls(id: string, urls: string[]): void {
+  if (!urls.length) return;
+  const before = previews[id] ?? [];
+  const next = [...before.filter(u => !urls.includes(u)), ...urls].slice(-MAX_PREVIEWS);
+  if (next.length === before.length && next.every((u, i) => u === before[i])) return;
+  previews = { ...previews, [id]: next };
+  notify();
+}
+
+export function useTerminalPreviews(): Record<string, string[]> {
+  return useSyncExternalStore(subscribe, () => previews);
+}
+
 export function usePlacing(): ReadonlySet<string> | null {
   return useSyncExternalStore(subscribe, () => placing);
 }
