@@ -47,6 +47,8 @@ export interface RunnerHooks {
   session(id: string): void;
   entry(entry: EntryDraft): void;
   activity(text: string): void;
+  /** Paths a tool call pointed at, absolute, so the manager can tell which codebase the agent is in. */
+  touched?(paths: string[]): void;
   turnStart(task?: AgentTask): void;
   turnEnd(result: TurnResult): void;
   ready?(): void;

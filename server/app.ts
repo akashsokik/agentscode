@@ -111,6 +111,22 @@ export function createApp(
   app.get('/api/agents/:id/attachments/:file', (req, res) => {
     sendStoredImage(res, manager.attachmentFile(param(req, 'id'), param(req, 'file')));
   });
+  app.get('/api/agents/:id/walkthroughs', (req, res) => {
+    res.json(manager.walkthroughs(param(req, 'id')));
+  });
+  app.get('/api/agents/:id/walkthroughs/:wid', (req, res) => {
+    res.json(manager.walkthrough(param(req, 'id'), param(req, 'wid')));
+  });
+  app.get('/api/agents/:id/walkthroughs/:wid/markdown', (req, res) => {
+    res.type('text/markdown').send(manager.walkthroughMarkdown(param(req, 'id'), param(req, 'wid')));
+  });
+  app.get('/api/agents/:id/walkthroughs/:wid/images/:file', (req, res) => {
+    sendStoredImage(res, manager.walkthroughImage(param(req, 'id'), param(req, 'wid'), param(req, 'file')));
+  });
+  app.delete('/api/agents/:id/walkthroughs/:wid', (req, res) => {
+    manager.deleteWalkthrough(param(req, 'id'), param(req, 'wid'));
+    res.status(204).end();
+  });
   app.post('/api/agents/:id/stop', async (req, res) => {
     await manager.stop(param(req, 'id'));
     res.json({ ok: true });

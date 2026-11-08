@@ -1,11 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import type { Agent, ChangedFile } from '../../shared/types.ts';
+import type { Agent, ChangedFile, GitStatus } from '../../shared/types.ts';
+import { AgentOverview } from './AgentOverview.tsx';
 import type { Root } from '../api.ts';
 import { rolePreset } from '../../shared/roles.ts';
-import { cost, modelLabel, relativeTime } from '../format.ts';
+import { cost, relativeTime } from '../format.ts';
 import { refreshGit, useGitStatus } from '../git.ts';
 import { focusedAgentId, focusedChannelId, open, openToSide, setRightPanel, setRightView, useLayout, type Layout } from '../layout.ts';
-import { ALL_PROJECTS, projectLabel } from '../projects.ts';
+import { ALL_PROJECTS } from '../projects.ts';
 import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
@@ -225,62 +226,9 @@ function TeamOverview() {
   );
 }
 
-/** The focused agent at a glance, after MonoCode's Mono overview: who it is, its totals, what it is on. */
-function AgentOverview({ agent }: { agent: Agent | undefined }) {
-  const models = useApp(s => (agent ? s.snapshot?.models[agent.engine] : undefined));
-  const projects = useApp(s => s.snapshot?.projects);
-  const pending = useApp(s => Boolean(agent && s.snapshot?.approvals.some(a => a.agentId === agent.id)));
-  const messages = useApp(s => (agent ? s.snapshot?.messages.filter(m => m.fromAgentId === agent.id || m.toAgentId === agent.id).length ?? 0 : 0));
-  const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectId]);
-  const { status: git } = useGitStatus(root, agent ? `${agent.status}:${agent.turns}` : undefined);
-  if (!agent) return <TeamOverview />;
-  const setup: [string, string][] = [
-    ['Model', modelLabel(agent, models)],
-    ['Role', rolePreset(agent.role).name],
-    ['Project', projectLabel(agent.projectId, projects, 'Removed')],
-    ...(agent.worktree ? [['Branch', agent.worktree.branch] as [string, string]] : []),
-  ];
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto pb-6 font-sans">
-      <div className="flex items-center gap-3.5 px-4 pt-5">
-        <EngineIcon engine={agent.engine} className="size-10" />
-        <div className="min-w-0">
-          <p className="truncate text-[15px] font-semibold leading-6 text-content">{agent.name}</p>
-          <AgentStatus agent={agent} pending={pending} className="max-w-full text-[13px]" />
-        </div>
-      </div>
-      <OverviewSection title="So far">
-        <div className="grid grid-cols-2 gap-2">
-          <StatCard value={agent.turns} label={agent.turns === 1 ? 'Turn' : 'Turns'} />
-          <StatCard
-            value={git?.isRepo ? <><span className="text-diff-add-fg">+{git.added}</span> <span className="text-diff-del-fg">-{git.removed}</span></>
-              : agent.projectId === null ? <span className="text-content/35" title="It works across all projects, so there is no one working tree to count">No project</span>
-              : <span className="text-content/35" title="Not a git repository">No git</span>}
-            label="Lines changed"
-          />
-          <StatCard value={cost(agent.costUsd) || '$0'} label="Cost" />
-          <StatCard value={messages} label={messages === 1 ? 'Message' : 'Messages'} />
-        </div>
-      </OverviewSection>
-      <OverviewSection title="Working on">
-        <p className={`text-[13px] leading-relaxed ${agent.currentTask ? 'text-content/75' : 'text-content/45'}`}>{agent.currentTask?.summary || 'Nothing right now.'}</p>
-        {agent.queued ? <p className="mt-1 text-[12px] text-content/45">{agent.queued} more waiting behind it</p> : null}
-      </OverviewSection>
-      <OverviewSection title="Last result">
-        <p className="line-clamp-6 text-[13px] leading-relaxed text-content/45">{agent.lastSummary || 'Nothing yet.'}</p>
-      </OverviewSection>
-      <OverviewSection title="Setup">
-        <dl className="flex flex-col gap-1.5 text-[12px]">
-          {setup.map(([label, value]) => (
-            <div key={label} className="flex min-w-0 items-center gap-3">
-              <dt className="w-16 shrink-0 text-content/45">{label}</dt>
-              <dd className="min-w-0 truncate text-content/80">{value}</dd>
-            </div>
-          ))}
-        </dl>
-      </OverviewSection>
-    </div>
-  );
+/** The Overview tab: the focused agent, or the team when no agent has focus. */
+function OverviewView({ agent, git }: { agent: Agent | undefined; git: GitStatus | null }) {
+  return agent ? <AgentOverview key={agent.id} agent={agent} git={git} /> : <TeamOverview />;
 }
 
 const PANEL_TABS: { view: Layout['rightView']; label: string; icon: IconComponent }[] = [
@@ -321,7 +269,7 @@ export function RightPanel() {
           <HeaderButton icon={PanelRight} label="Hide panel" onClick={() => setRightPanel(false)} />
         </div>
       </div>
-      {view === 'overview' ? <AgentOverview agent={agent} /> : view === 'changes' ? <ChangesView agent={agent} /> : <CommsFeed agent={agent} />}
+      {view === 'overview' ? <OverviewView agent={agent} git={git} /> : view === 'changes' ? <ChangesView agent={agent} /> : <CommsFeed agent={agent} />}
       <ResizeHandle column={column} edge="left" label="Resize panel" />
     </aside>
   );

@@ -7,6 +7,7 @@ import readline from 'node:readline';
 import type { Agent, AgentTask, Autonomy, TurnUsage } from '../../shared/types.ts';
 import { usageTotal } from '../../shared/turnUsage.ts';
 import { approvalTitle, clip, toolActivity, toolDetail, toolSummary } from './describe.ts';
+import { toolPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, type RunnerInput, type TurnResult } from './runner.ts';
 import { commsMcpConfig, COMMS_INSTRUCTIONS } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
@@ -349,6 +350,7 @@ export class OrcacodeRunner implements Runner {
         this.calls.set(id, tool);
         this.toolEntry(id, tool, 'running');
         hooks.activity(clip(toolActivity(tool.name, tool.input), 44));
+        hooks.touched?.(toolPaths(tool.name, tool.input, this.ctx.cwd, os.homedir()));
         return;
       }
       case 'tool_result': {

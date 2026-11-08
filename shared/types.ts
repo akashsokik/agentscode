@@ -101,6 +101,22 @@ export interface Agent {
    * totals for the whole thread, so a turn's own usage is the difference from these.
    */
   threadUsage?: { thread: string; usage: TurnUsage };
+  /**
+   * The codebase the agent last worked in, read from its tool calls: a project's folder or a
+   * worktree of one, and the branch checked out there (null outside git). Absent until known.
+   */
+  workingIn?: WorkingIn;
+}
+
+export interface WorkingIn {
+  /** The project the folder belongs to. */
+  projectId: string;
+  /** The project's checkout or the worktree the agent touched. */
+  root: string;
+  /** The branch checked out there, a short commit when detached, or null when not a git repository. */
+  branch: string | null;
+  /** When the agent last touched it. */
+  at: number;
 }
 
 /** What an agent with no project (it works across all of them) shows in place of a project name. */
@@ -738,4 +754,56 @@ export interface FileDiff {
   path: string;
   status: string;
   diff: string;
+}
+
+// ---- walkthroughs ---------------------------------------------------------------
+
+export type WalkthroughStepKind = 'note' | 'code' | 'diff' | 'command' | 'image' | 'diagram';
+
+/** Where a step's file can be opened again: an agent's workspace or a project folder (the web's Root). */
+export type WalkthroughRoot = { agent: string } | { project: string };
+
+/**
+ * One stop on a walkthrough. Code and diff steps keep what the file looked like when the walkthrough
+ * was made, so the tour still reads after later edits; the viewer compares it with the file today.
+ */
+export interface WalkthroughStep {
+  kind: WalkthroughStepKind;
+  title: string;
+  /** Markdown: what to notice here and why. */
+  body: string;
+  /** code and diff: the file, relative to `root`. */
+  path?: string;
+  root?: WalkthroughRoot | null;
+  startLine?: number;
+  endLine?: number;
+  /** code: the lines as they were; diff: the diff as it was. */
+  excerpt?: string;
+  /** command: what ran and what it printed, as the agent reported them. */
+  command?: string;
+  output?: string;
+  /** diagram: Mermaid source (flowchart, sequenceDiagram, architecture-beta, classDiagram, erDiagram, ...). */
+  source?: string;
+  /** image: a file in the walkthrough's folder. */
+  image?: { file: string; mediaType: ImageMediaType };
+}
+
+/** A walkthrough as lists show it. */
+export interface WalkthroughSummary {
+  id: string;
+  agentId: string;
+  agentName: string;
+  title: string;
+  summary: string;
+  stepCount: number;
+  createdAt: number;
+  /** The project and branch it covers, and the commit checked out when it was made. */
+  projectId: string | null;
+  branch: string | null;
+  commit: string | null;
+}
+
+/** A narrated tour of work an agent did, made when the user asks. Kept in the agent's folder. */
+export interface Walkthrough extends WalkthroughSummary {
+  steps: WalkthroughStep[];
 }

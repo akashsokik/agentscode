@@ -1671,6 +1671,12 @@ html.layout-inset.theme-light .dialog-scrim {
   border-top: 1px solid color-mix(in srgb, var(--color-content) 5%, transparent);
 }
 
+/* OpenUI blocks bring their own layout and type (Tailwind, in a layer). The prose rules above are
+   unlayered and would win over it, so inside a block they step back to the layered styles. */
+.agent-markdown [data-openui] :is(h1, h2, h3, h4, h5, h6, p, ul, ol, li, table, thead, tbody, tr, th, td, pre, code, strong, em, a, blockquote, hr) {
+  all: revert-layer;
+}
+
 /* Prose inside a turn's work is process, not result: one notch quieter. */
 .zen-fold-prose .agent-markdown p,
 .zen-fold-prose .agent-markdown li {

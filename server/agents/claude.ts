@@ -9,10 +9,12 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { AgentTask, Autonomy, Question, ToolCall, TurnUsage } from '../../shared/types.ts';
 import { reservedHomeFile } from '../agentHome.ts';
 import { approvalTitle, clip, resultSummary, toolActivity, toolDetail, toolResultText, toolSummary } from './describe.ts';
+import { toolPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
 import { commsMcpConfig, COMMS_TOOLS } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
@@ -349,7 +351,9 @@ export class ClaudeRunner implements Runner {
         if (message.parent_tool_use_id) {
           // Subagent traffic: only surface what it is doing.
           for (const block of blocks) {
-            if (block.type === 'tool_use') hooks.activity(clip(`Helper: ${toolActivity(block.name, block.input as Record<string, unknown>)}`, 44));
+            if (block.type !== 'tool_use') continue;
+            hooks.activity(clip(`Helper: ${toolActivity(block.name, block.input as Record<string, unknown>)}`, 44));
+            hooks.touched?.(toolPaths(block.name, block.input as Record<string, unknown>, this.ctx.cwd, os.homedir()));
           }
           return;
         }
@@ -372,6 +376,7 @@ export class ClaudeRunner implements Runner {
             this.tools.set(block.id, tool);
             hooks.entry({ id: block.id, kind: 'tool', text: '', tool });
             hooks.activity(toolActivity(block.name, input));
+            hooks.touched?.(toolPaths(block.name, input, this.ctx.cwd, os.homedir()));
           } else if (block.type === 'thinking') {
             hooks.activity('Thinking');
           }

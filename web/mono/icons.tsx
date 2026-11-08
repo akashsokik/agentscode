@@ -10,6 +10,8 @@ import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
 import ArrowShrink02Icon from "@hugeicons/core-free-icons/ArrowShrink02Icon";
 import EraserIcon from "@hugeicons/core-free-icons/EraserIcon";
 import ClipboardPasteIcon from "@hugeicons/core-free-icons/ClipboardPasteIcon";
+import Route01Icon from "@hugeicons/core-free-icons/Route01Icon";
+import Flowchart01Icon from "@hugeicons/core-free-icons/Flowchart01Icon";
 import Layout2RowIcon from "@hugeicons/core-free-icons/Layout2RowIcon";
 import Layout2ColumnIcon from "@hugeicons/core-free-icons/Layout2ColumnIcon";
 import AppWindowIcon from "@hugeicons/core-free-icons/AppWindowIcon";
@@ -256,6 +258,8 @@ export const PanelTop = wrap(LayoutAlignTopIcon, "PanelTop");
 /** Split a view: a box halved side by side (right) or stacked (down). Used for panes and terminals alike. */
 export const SplitColumns = wrap(Layout2ColumnIcon, "SplitColumns");
 export const SplitRows = wrap(Layout2RowIcon, "SplitRows");
+export const Route = wrap(Route01Icon, "Route");
+export const Workflow = wrap(Flowchart01Icon, "Workflow");
 // Terminal panel (AgentsCode): paste, clear, unzoom.
 export const ClipboardPaste = wrap(ClipboardPasteIcon, "ClipboardPaste");
 export const Eraser = wrap(EraserIcon, "Eraser");
