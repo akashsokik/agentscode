@@ -1,11 +1,12 @@
 /**
- * The app window's bridges to main. Only the AgentsCode page gets them: browser tabs run without a
- * preload, and main answers only the app window. CommonJS (.cts), because a sandboxed preload cannot
- * be an ES module; tsc compiles this to preload.cjs.
- *
- * - window.agentscodeDesktop.updates: the sidebar's update row (web/sidebar/SidebarUpdate.tsx).
- * - window.agentscode.browser: the integrated browser's controls (web/browser.ts).
+ * The desktop app's bridge to the page, as `window.agentscodeDesktop`:
+ * - `updates`, which the sidebar's update row reads (web/sidebar/SidebarUpdate.tsx);
+ * - `browser`, the integrated browser's controls and events (web/browser.ts).
+ * The page is the AgentsCode server's own UI on 127.0.0.1; main.ts answers only that origin, and
+ * browser tabs run without any preload. CommonJS because sandboxed preload scripts cannot be ES
+ * modules; tsc compiles this .cts to preload.cjs.
  */
+import type { DesktopBrowser } from '../shared/browser.ts';
 import type { DesktopUpdates, UpdateSnapshot } from '../shared/updates.ts';
 
 const { contextBridge, ipcRenderer } = require('electron') as typeof import('electron');
@@ -22,15 +23,15 @@ const updates: DesktopUpdates = {
   },
 };
 
-contextBridge.exposeInMainWorld('agentscodeDesktop', { updates });
-
-contextBridge.exposeInMainWorld('agentscode', {
-  browser: {
-    call: (op: string, args?: unknown): Promise<unknown> => ipcRenderer.invoke('browser', op, args),
-    onEvent: (listener: (event: unknown) => void): (() => void) => {
-      const handler = (_event: unknown, payload: unknown) => listener(payload);
-      ipcRenderer.on('browser:event', handler);
-      return () => ipcRenderer.removeListener('browser:event', handler);
-    },
+const browser: DesktopBrowser = {
+  call: (op, args) => ipcRenderer.invoke('browser:call', op, args),
+  onEvent(callback) {
+    const listener = (_event: unknown, payload: Parameters<typeof callback>[0]) => callback(payload);
+    ipcRenderer.on('browser:event', listener);
+    return () => {
+      ipcRenderer.removeListener('browser:event', listener);
+    };
   },
-});
+};
+
+contextBridge.exposeInMainWorld('agentscodeDesktop', { updates, browser });

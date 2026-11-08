@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { PRESSABLE_KEYS } from '../../shared/browserPolicy.ts';
+import { PRESSABLE_KEYS } from '../../shared/browser.ts';
 import { MEMORY_TEXT_LIMIT, MEMORY_WHY_LIMIT } from '../agentHome.ts';
 import { COMMS_MCP_ENTRY, COMMS_SERVER, NODE_RUNTIME, PORT } from '../config.ts';
 

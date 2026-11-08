@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { session, shell, WebContentsView, type BrowserWindow, type Input, type Session } from 'electron';
-import { blockedReason, normalizeAddress, type BrowserEvent, type BrowserTabState, type ConsoleEntry } from '../shared/browserPolicy.ts';
+import { blockedReason, normalizeAddress, type BrowserEvent, type BrowserTabState, type ConsoleEntry } from '../shared/browser.ts';
 import { BrowserError } from './browserError.ts';
 import { Cdp } from './cdp.ts';
 

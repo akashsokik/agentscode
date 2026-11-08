@@ -63,7 +63,7 @@ import { gitRun, isDirectory, isInsideGitRepo, normalizeDir } from './projects.t
 import { locate, type Place } from './whereabouts.ts';
 import { openuiGuide } from './openuiGuide.ts';
 import { BrowserBridge, BROWSER_WRITE_OPS, type BrowserOp } from './browserBridge.ts';
-import { blockedReason, normalizeAddress } from '../shared/browserPolicy.ts';
+import { blockedReason, normalizeAddress } from '../shared/browser.ts';
 import { createWalkthrough, deleteWalkthrough, listWalkthroughs, readWalkthrough, summaryOf, walkthroughImage, walkthroughMarkdown, type StepRoot } from './walkthroughs.ts';
 import type { Store } from './store.ts';
 import { createWorktree, removeWorktree } from './worktrees.ts';
@@ -1175,7 +1175,7 @@ export class AgentManager {
       throw new HttpError(403, 'Running scripts in pages is off. The user can turn on Browser scripts in Settings; until then use browser_snapshot and browser_console.');
     }
     if (op === 'open') {
-      // The same rules as the address bar and main (shared/browserPolicy.ts).
+      // The same rules as the address bar and main (shared/browser.ts).
       const url = normalizeAddress(String(input.url));
       if (!url) throw new HttpError(400, 'That is not a web address the browser can open. Use http or https, for example localhost:3000 or https://example.com.');
       const blocked = blockedReason(url, PORT);

@@ -7,7 +7,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
-import { isLocalUrl } from '../shared/browserPolicy.ts';
+import { isLocalUrl } from '../shared/browser.ts';
 import { BrowserError, BrowserHost, type Rect } from './browser.ts';
 import { BrowserBridge } from './bridge.ts';
 import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSnapshot } from './updater.ts';
@@ -229,10 +229,10 @@ function isRect(value: unknown): value is Rect {
   return Boolean(r) && [r!.x, r!.y, r!.width, r!.height].every(n => typeof n === 'number' && Number.isFinite(n));
 }
 
-/** The page's controls for browser tabs (web/browser.ts). Only the app window may call them. */
+/** The bridge behind window.agentscodeDesktop.browser (web/browser.ts). Only the AgentsCode page may call it. */
 function registerBrowserIpc(): void {
-  ipcMain.handle('browser', async (event, op: unknown, raw: unknown) => {
-    if (!window || event.sender !== window.webContents) throw new Error('Not allowed.');
+  ipcMain.handle('browser:call', async (event, op: unknown, raw: unknown) => {
+    if (!window || event.sender !== window.webContents || !fromApp(event)) throw new Error('Not allowed.');
     const args = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const id = typeof args.id === 'string' ? args.id : '';
     try {
@@ -279,8 +279,8 @@ function showWindow(): void {
     // The page leaves room for them and drags the window by its headers (the `desktop` variant).
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 16, y: 13 } } : {}),
     show: false,
-    // window.agentscodeDesktop (the sidebar's update row) and window.agentscode (the integrated
-    // browser's controls), both from electron/preload.cts; browser tabs never get a preload.
+    // window.agentscodeDesktop: the update row and the integrated browser's controls
+    // (electron/preload.cts). Browser tabs never get a preload.
     webPreferences: { preload: path.join(import.meta.dirname, 'preload.cjs') },
   });
   const opened = window;
