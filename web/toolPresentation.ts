@@ -45,6 +45,13 @@ const BROWSER_ACTIONS: Record<string, string> = {
   console: 'Console', click: 'Clicked', type: 'Typed', press: 'Pressed', eval: 'Ran script',
 };
 
+/** How a click, type or press reached the page, from its result: "trusted", "synthetic", or null when unknown. */
+export function browserInput(tool: ToolCall): 'trusted' | 'synthetic' | null {
+  if (tool.status !== 'ok' || !tool.output) return null;
+  const match = /"input"\s*:\s*"(trusted|synthetic)"/.exec(tool.output);
+  return match ? (match[1] as 'trusted' | 'synthetic') : null;
+}
+
 /** The file a successful browser_screenshot saved, from its result; null otherwise. */
 export function browserScreenshot(tool: ToolCall): string | null {
   if (!/(?:^mcp__agentscode__|^agentscode\.)browser_screenshot$/.test(tool.name) || tool.status !== 'ok' || !tool.output) return null;
@@ -368,7 +375,12 @@ export function presentTool(tool: ToolCall): ToolShown {
     default: {
       const name = tool.name;
       const browserOp = name.match(/(?:^mcp__agentscode__|^agentscode\.)browser_(\w+)$/)?.[1];
-      if (browserOp) return { action: BROWSER_ACTIONS[browserOp] ?? 'Browser', target: /^(mcp__|agentscode\.)/.test(target) ? '' : target };
+      if (browserOp) {
+        const shown = /^(mcp__|agentscode\.)/.test(target) ? '' : target;
+        // Input the browser had to replay as DOM events is not what a user could do; say so on the row.
+        const synthetic = ['click', 'type', 'press'].includes(browserOp) && browserInput(tool) === 'synthetic';
+        return { action: BROWSER_ACTIONS[browserOp] ?? 'Browser', target: synthetic ? `${shown} (synthetic input)`.trim() : shown };
+      }
       const channelTool = name.match(/(?:^mcp__agentscode__|^agentscode\.)(post_to_channel|read_channel|list_channels)$/)?.[1];
       if (channelTool) {
         const action = channelTool === 'post_to_channel' ? 'Posted' : channelTool === 'read_channel' ? 'Read channel' : 'Listed channels';

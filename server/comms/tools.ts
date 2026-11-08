@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { PRESSABLE_KEYS } from '../../shared/browserPolicy.ts';
 import { MEMORY_TEXT_LIMIT, MEMORY_WHY_LIMIT } from '../agentHome.ts';
 import { COMMS_MCP_ENTRY, COMMS_SERVER, NODE_RUNTIME, PORT } from '../config.ts';
 
@@ -90,16 +91,19 @@ export const browserInputs = {
   browser_eval: z.object({ tab_id: tabId, expression: z.string().min(1).max(20_000) }),
 } satisfies Record<BrowserTool, z.ZodObject>;
 
+/** What click, type and press report about how the input arrived; a judge should weigh synthetic input. */
+const INPUT_NOTE = 'Returns url, title and input: "trusted" when real input reached the element, "synthetic" when the browser dropped it (for example, the page was off screen) and it was replayed as DOM events, which a real user could not do.';
+
 const BROWSER_DESCRIPTIONS: Record<BrowserTool, string> = {
   browser_open: 'Open a web page in your own AgentsCode browser tab (a localhost dev server or any http(s) URL); the user sees it beside you. Without tab_id it reuses your latest tab. Returns tab_id, final url, HTTP status and title.',
   browser_list: 'Your open browser tabs.',
   browser_close: 'Close one of your browser tabs.',
   browser_snapshot: 'The page as an indented accessibility tree; actionable lines carry refs like [e12] for click and type. Refs last until the next snapshot or navigation. Take one before interacting.',
-  browser_screenshot: 'Save a PNG of the tab (full_page for the whole page) and return its path; read the file to see it.',
+  browser_screenshot: 'Save a PNG of the tab (full_page for the whole page) and return its path, its size in CSS pixels, and a note when a full page fell back to the viewport; read the file to see it.',
   browser_console: 'Console messages, page exceptions and failed requests from the tab. Pass since (the next value from the last call) to get only new ones.',
-  browser_click: 'Click the element with this ref from your latest snapshot.',
-  browser_type: 'Focus the element with this ref, type text into it, and press Enter if submit.',
-  browser_press: 'Press a key in the tab: Enter, Tab, Escape, Backspace, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, or one character.',
+  browser_click: `Click the element with this ref from your latest snapshot. ${INPUT_NOTE} A click that would land on something covering the element fails and names what is in the way.`,
+  browser_type: `Focus the element with this ref, type text into it, and press Enter if submit. ${INPUT_NOTE}`,
+  browser_press: `Press a key in the tab: ${PRESSABLE_KEYS.join(', ')}. ${INPUT_NOTE}`,
   browser_eval: 'Run a JavaScript expression in the page and return its value. Only works when the user has turned on Browser scripts in Settings.',
 };
 

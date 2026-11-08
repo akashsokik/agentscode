@@ -6,7 +6,8 @@ import path from 'node:path';
 // electron/browser.ts). Agents' browser_* tools become requests to the desktop app's main process,
 // which owns the browser views. Two transports carry the same JSON envelope: the utility process's
 // parentPort when main started this server, or a token-checked socket at /browser-bridge when main
-// attached to a server it did not start. Until main says hello, the browser is unavailable.
+// attached to a server it did not start. Until main says hello, the browser is unavailable; main may
+// say it before this side listens, so the server asks with a ping once it does.
 
 export const BROWSER_OPS = ['open', 'list', 'close', 'snapshot', 'screenshot', 'console', 'click', 'type', 'press', 'eval'] as const;
 export type BrowserOp = (typeof BROWSER_OPS)[number];
@@ -63,7 +64,8 @@ export class BrowserBridge {
     if (!raw || typeof raw !== 'object' || from !== this.transport) return;
     const message = raw as { type?: unknown; id?: unknown; ok?: unknown; result?: unknown; error?: unknown; version?: unknown };
     if (message.type === 'browser:hello') {
-      this.ready = message.version === BRIDGE_VERSION;
+      // Any hello means main is there (agreed with electron/bridge.ts); the version is for later changes.
+      this.ready = true;
       return;
     }
     if (message.type !== 'browser:response' || typeof message.id !== 'string') return;
@@ -124,6 +126,8 @@ export function attachParentPort(bridge: BrowserBridge, parentPort = (process as
   const transport: BridgeTransport = { send: message => parentPort.postMessage(message) };
   bridge.connect(transport);
   parentPort.on('message', event => bridge.receive(event?.data, transport));
+  // Main's first hello can arrive before the listener above existed; ask again.
+  transport.send({ type: 'browser:ping' });
   return true;
 }
 
@@ -143,19 +147,4 @@ export function bridgeTokenMatches(expected: string, given: unknown): boolean {
   const a = Buffer.from(expected);
   const b = Buffer.from(given);
   return a.length === b.length && timingSafeEqual(a, b);
-}
-
-/** A URL an agent may open: http or https, nothing else. Main also refuses the AgentsCode origin itself. */
-export function browsableUrl(raw: string): string | null {
-  const text = raw.trim();
-  // "localhost:3000" parses as a "localhost:" scheme, so bare local hosts are matched first.
-  const withScheme = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(text) ? `http://${text}`
-    : /^[a-z][a-z0-9+.-]*:/i.test(text) ? text
-    : `https://${text}`;
-  try {
-    const url = new URL(withScheme);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
-  } catch {
-    return null;
-  }
 }

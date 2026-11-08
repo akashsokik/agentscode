@@ -374,6 +374,7 @@ export function createServer(manager: AgentManager, hub: Hub, options: { distDir
       bridgeWss.handleUpgrade(req, socket, head, ws => {
         const transport = { send: (message: object) => ws.send(JSON.stringify(message)) };
         const detach = manager.browser.connect(transport);
+        transport.send({ type: 'browser:ping' }); // main says hello on open too; this covers a race
         ws.on('message', data => {
           try { manager.browser.receive(JSON.parse(String(data)), transport); } catch { /* not JSON: ignore */ }
         });

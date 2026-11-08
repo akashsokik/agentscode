@@ -54,7 +54,7 @@ import { ScopedRunner, type ExecutionContext } from './agents/scoped.ts';
 import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
 import { BROWSER_TOOLS, browserInputs, COMMS_TOOLS, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput, rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool } from './comms/tools.ts';
-import { IDLE_PROCESS_MS } from './config.ts';
+import { IDLE_PROCESS_MS, PORT } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { HttpError } from './errors.ts';
 import type { Broadcaster } from './hub.ts';
@@ -62,7 +62,8 @@ import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, empt
 import { gitRun, isDirectory, isInsideGitRepo, normalizeDir } from './projects.ts';
 import { locate, type Place } from './whereabouts.ts';
 import { openuiGuide } from './openuiGuide.ts';
-import { BrowserBridge, BROWSER_WRITE_OPS, browsableUrl, type BrowserOp } from './browserBridge.ts';
+import { BrowserBridge, BROWSER_WRITE_OPS, type BrowserOp } from './browserBridge.ts';
+import { blockedReason, normalizeAddress } from '../shared/browserPolicy.ts';
 import { createWalkthrough, deleteWalkthrough, listWalkthroughs, readWalkthrough, summaryOf, walkthroughImage, walkthroughMarkdown, type StepRoot } from './walkthroughs.ts';
 import type { Store } from './store.ts';
 import { createWorktree, removeWorktree } from './worktrees.ts';
@@ -1174,8 +1175,11 @@ export class AgentManager {
       throw new HttpError(403, 'Running scripts in pages is off. The user can turn on Browser scripts in Settings; until then use browser_snapshot and browser_console.');
     }
     if (op === 'open') {
-      const url = browsableUrl(String(input.url));
-      if (!url) throw new HttpError(400, 'Only http and https pages can be opened.');
+      // The same rules as the address bar and main (shared/browserPolicy.ts).
+      const url = normalizeAddress(String(input.url));
+      if (!url) throw new HttpError(400, 'That is not a web address the browser can open. Use http or https, for example localhost:3000 or https://example.com.');
+      const blocked = blockedReason(url, PORT);
+      if (blocked) throw new HttpError(400, blocked);
       input.url = url;
     }
     if (op === 'screenshot') {
