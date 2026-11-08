@@ -12,7 +12,8 @@ const server = createCommsMcpServer(async (tool, args) => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ tool, args }),
-    signal: AbortSignal.timeout(10_000),
+    // Browser ops wait on page loads (up to 45s on the server); everything else answers quickly.
+    signal: AbortSignal.timeout(tool.startsWith('browser_') ? 50_000 : 10_000),
   });
   const result = await response.json() as { error?: string };
   if (!response.ok) throw new Error(result.error ?? `AgentsCode request failed (${response.status}).`);
