@@ -13,7 +13,7 @@ export function agentState(agent: Agent, pending: boolean): { tone: Tone; busy?:
 export function AgentStatus({ agent, pending, className = '' }: { agent: Agent; pending: boolean; className?: string }) {
   const state = agentState(agent, pending);
   return (
-    <StatusLabel tone={state.tone} busy={state.busy} quiet={state.tone === 'muted'} className={className}>
+    <StatusLabel tone={state.tone} busy={state.busy} quiet={state.tone === 'muted'} shrink title={state.label} className={className}>
       <span className="min-w-0 truncate">{state.label}</span>
     </StatusLabel>
   );

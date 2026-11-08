@@ -132,16 +132,18 @@ const WORDS: Record<Tone, string> = {
  * `quiet` drops the words to the faintest ink and leaves the colour to the dot. Pass it
  * rather than a text colour in `className`, which would compete with the tone's.
  */
-export function StatusLabel({ tone = 'neutral', busy = false, quiet = false, title, className = '', children }: {
+export function StatusLabel({ tone = 'neutral', busy = false, quiet = false, shrink = false, title, className = '', children }: {
   tone?: Tone;
   busy?: boolean;
   quiet?: boolean;
+  /** May shrink below its text (the text truncates) instead of overflowing a narrow row. */
+  shrink?: boolean;
   title?: string;
   className?: string;
   children: ReactNode;
 }) {
   return (
-    <span title={title} className={cx('inline-flex shrink-0 items-center gap-1.5 font-sans', quiet ? 'text-content/35' : WORDS[tone], className)}>
+    <span title={title} className={cx('inline-flex items-center gap-1.5 font-sans', shrink ? 'min-w-0 max-w-full' : 'shrink-0', quiet ? 'text-content/35' : WORDS[tone], className)}>
       {busy ? <TerminalSpinner /> : <span aria-hidden className={cx('size-1.5 shrink-0 rounded-full', DOT[tone])} />}
       {children}
     </span>
