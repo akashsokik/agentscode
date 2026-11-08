@@ -10,7 +10,13 @@ export type TabContent =
   | { kind: 'comms'; conversationId?: string }
   | { kind: 'channel'; channelId: string }
   /** `title` names the tab before the walkthrough has loaded. */
-  | { kind: 'walkthrough'; agentId: string; id: string; title: string };
+  | { kind: 'walkthrough'; agentId: string; id: string; title: string }
+  /**
+   * A browser tab (web/browser.ts). Keyed by its id, so navigating keeps it the same tab; `url`
+   * and `title` follow the page so a restored layout reloads where it was. `agentId`: an agent
+   * opened it and may drive it.
+   */
+  | { kind: 'browser'; id: string; url: string; title?: string; agentId?: string | null };
 
 export interface Tab {
   id: string;
@@ -67,6 +73,7 @@ export function tabKey(content: TabContent): string {
     case 'comms': return 'comms';
     case 'channel': return `channel:${content.channelId}`;
     case 'walkthrough': return `walkthrough:${content.agentId}:${content.id}`;
+    case 'browser': return `browser:${content.id}`;
   }
 }
 
@@ -105,6 +112,12 @@ export function getLayout(): Layout {
   return layout;
 }
 
+/** Calls `listener` after every layout change; returns the unsubscribe. */
+export function subscribeLayout(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 let nextId = 0;
 const newId = (prefix: string) => `${prefix}${Date.now().toString(36)}${(nextId++).toString(36)}`;
 
@@ -133,6 +146,21 @@ export function open(content: TabContent): void {
   }
   const focused = layout.panes.find(p => p.id === layout.focused) ?? layout.panes[0];
   set({ ...layout, tabs, panes: layout.panes.map(p => (p.id === focused.id ? { ...p, tabId: tab.id } : p)), focused: focused.id });
+}
+
+/** Add a tab without showing it, unless it is there already. */
+export function addTab(content: TabContent): void {
+  const { tabs } = ensureTab(layout.tabs, content);
+  if (tabs !== layout.tabs) set({ ...layout, tabs });
+}
+
+/** Follow a browser tab's page: its URL and title, for the tab strip and a restored layout. */
+export function updateBrowserTab(id: string, patch: { url?: string; title?: string }): void {
+  const tab = layout.tabs.find(t => t.content.kind === 'browser' && t.content.id === id);
+  if (!tab || tab.content.kind !== 'browser') return;
+  const next = { ...tab.content, ...patch };
+  if (next.url === tab.content.url && next.title === tab.content.title) return;
+  set({ ...layout, tabs: layout.tabs.map(t => (t.id === tab.id ? { ...t, content: next } : t)) });
 }
 
 /** Show content in a new pane to the right (or the rightmost pane when full). */
@@ -202,6 +230,7 @@ export function pruneTabs(agentIds: Set<string>, channelIds: Set<string>): void 
     const c = t.content;
     if (c.kind === 'agent' || c.kind === 'walkthrough') return !agentIds.has(c.agentId);
     if (c.kind === 'channel') return !channelIds.has(c.channelId);
+    if (c.kind === 'browser') return Boolean(c.agentId) && !agentIds.has(c.agentId!);
     if ((c.kind === 'file' || c.kind === 'diff') && 'agent' in c.root) return !agentIds.has(c.root.agent);
     return false;
   });
@@ -255,6 +284,7 @@ export function focusedAgentId(l: Layout): string | null {
   if (!tab) return null;
   const c = tab.content;
   if (c.kind === 'agent') return c.agentId;
+  if (c.kind === 'browser' && c.agentId) return c.agentId;
   if ((c.kind === 'file' || c.kind === 'diff') && 'agent' in c.root) return c.root.agent;
   return null;
 }

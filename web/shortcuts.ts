@@ -3,6 +3,7 @@
  * browser does not keep the key for itself, in a browser tab. Cmd on macOS, Ctrl elsewhere.
  */
 import { useEffect } from 'react';
+import { openBrowser } from './browser.ts';
 import { closeTab, getLayout, open, setRightPanel, setSidebar } from './layout.ts';
 import { IS_MAC } from './platform.ts';
 import { isConfirmingClose, toggleTerminal } from './terminal/actions.ts';
@@ -18,6 +19,7 @@ export const SHORTCUTS = {
   sidebar: `${MOD}B`,
   panel: IS_MAC ? '⌥⌘B' : 'Ctrl+Alt+B',
   terminal: `${MOD}J`,
+  browser: IS_MAC ? '⇧⌘B' : 'Ctrl+Shift+B',
 } as const;
 
 function cycleTab(step: number): void {
@@ -61,6 +63,7 @@ export function runShortcut(e: KeyboardEvent): boolean {
   // e.code, not e.key: Option changes the character a key types on macOS.
   if (e.code === 'KeyB' && e.altKey && !e.shiftKey) setRightPanel(!layout.rightPanel);
   else if (e.altKey) handled = false;
+  else if (e.code === 'KeyB' && e.shiftKey) openBrowser();
   else if (e.code === 'KeyB' && !e.shiftKey) setSidebar(!layout.sidebar);
   else if (e.code === 'KeyN' && !e.shiftKey) handlers.newAgent();
   else if (e.code === 'KeyK' && !e.shiftKey) handlers.palette();

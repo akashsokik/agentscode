@@ -6,6 +6,7 @@
  */
 import type { FitAddon, Terminal } from 'ghostty-web';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { findLocalUrls } from '../../shared/browser.ts';
 import type { TerminalInfo, TerminalServerMessage } from '../../shared/types.ts';
 import { IS_MAC } from '../platform.ts';
 import { MOD, runShortcut } from '../shortcuts.ts';
@@ -14,7 +15,7 @@ import { cx, MenuDivider, MenuRow } from '../ui/common.tsx';
 import { ClipboardPaste, Copy, Eraser, Maximize2, Minimize2, SplitColumns, SplitRows, X } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import {
-  closeTerminals, equalizeSplits, focusSplit, newTerminal, noteTerminalFocus, noteTerminalSize, setTerminalTitle,
+  closeTerminals, equalizeSplits, focusSplit, newTerminal, notePreviewUrls, noteTerminalFocus, noteTerminalSize, setTerminalTitle,
   shellExited, splitTerminal, toggleZoom, useFocusRequest,
 } from './actions.ts';
 import { loadGhostty, TERMINAL_FONT, TERMINAL_FONT_SIZE, terminalTheme, useLightTheme } from './ghostty.ts';
@@ -62,6 +63,15 @@ export function TerminalView({ info, rect, dimmed, split, zoomed }: {
     let retryTimer: number | undefined;
     let term: Terminal | null = null;
     const encoder = new TextEncoder();
+    // A dev server's address, for the panel's Preview button. The tail carries a URL split
+    // across two reads into the next one.
+    const decoder = new TextDecoder();
+    let tail = '';
+    const watchForUrls = (bytes: Uint8Array) => {
+      const text = tail + decoder.decode(bytes, { stream: true });
+      tail = text.slice(-300);
+      if (text.includes('://')) notePreviewUrls(info.id, findLocalUrls(text));
+    };
     const self = () => infoRef.current;
 
     const sendSize = () => {
@@ -85,7 +95,9 @@ export function TerminalView({ info, rect, dimmed, split, zoomed }: {
       };
       ws.onmessage = event => {
         if (typeof event.data !== 'string') {
-          term?.write(new Uint8Array(event.data as ArrayBuffer));
+          const bytes = new Uint8Array(event.data as ArrayBuffer);
+          term?.write(bytes);
+          watchForUrls(bytes);
           return;
         }
         const message = JSON.parse(event.data) as TerminalServerMessage;

@@ -18,7 +18,7 @@ import { api } from '../api.ts';
 import { modelLabel } from '../format.ts';
 import { open, openToSide } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
-import { presentTool } from '../toolPresentation.ts';
+import { browserScreenshot, presentTool } from '../toolPresentation.ts';
 import { groupTurns, type Turn } from '../turns.ts';
 import { isAnchoring, openingAnchor, rememberedView, rememberView, type Opening } from '../transcriptView.ts';
 import { distanceFromEnd, Follower, scrollsUp, WHEEL_HOLD_MS } from '../transcriptScroll.ts';
@@ -426,6 +426,7 @@ function ActivityToolRow({ entry, agentId }: { entry: Entry; agentId: string }) 
   const failed = tool.status === 'error';
   const detail = [tool.detail, tool.output].filter(Boolean).join('\n\n').trim();
   const expandable = Boolean(detail) && detail !== tool.summary;
+  const shot = browserScreenshot(tool);
   return (
     <div className="flex min-w-0 flex-col">
       <div
@@ -448,6 +449,11 @@ function ActivityToolRow({ entry, agentId }: { entry: Entry; agentId: string }) 
           </button>
         ) : null}
       </div>
+      {shot ? (
+        <a href={`/api/agents/${agentId}/browser-shots/${shot}`} target="_blank" rel="noreferrer" className="mb-1 mt-0.5 block w-fit" title="Open the screenshot">
+          <img src={`/api/agents/${agentId}/browser-shots/${shot}`} alt="Browser screenshot" loading="lazy" className="max-h-48 max-w-[320px] rounded-md border border-content/10 object-contain object-left-top" />
+        </a>
+      ) : null}
       {open && expandable ? (
         <pre className={`min-w-0 whitespace-pre-wrap break-words py-1 font-mono text-[12px] leading-5 ${failed ? 'text-danger/80' : 'text-content/55'}`}>{detail}</pre>
       ) : null}

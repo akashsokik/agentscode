@@ -522,6 +522,8 @@ export interface Settings {
   shareActivity: boolean;
   /** Prefix each task with a snapshot of teammates. */
   autoTeamContext: boolean;
+  /** Let agents run their own JavaScript in browser tabs (browser_eval). Off by default. */
+  browserEval: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -529,6 +531,7 @@ export const DEFAULT_SETTINGS: Settings = {
   awareness: 'all',
   shareActivity: true,
   autoTeamContext: true,
+  browserEval: false,
 };
 
 export interface ModelOption {
