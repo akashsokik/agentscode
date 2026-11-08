@@ -19,7 +19,7 @@ import type { PaneChrome } from './panes/PaneFrame.tsx';
 import { RightPanel } from './right/RightPanel.tsx';
 import { IS_DESKTOP_APP } from './platform.ts';
 import { SHORTCUTS, useShortcuts } from './shortcuts.ts';
-import { weightOf } from './paneSizes.ts';
+import { paneGrow } from './paneSizes.ts';
 import { PaneDivider } from './ui/PaneDivider.tsx';
 import { openBrowser } from './browser.ts';
 import { Sidebars, useNavFull, type SidebarActions } from './sidebar/Sidebar.tsx';
@@ -408,7 +408,7 @@ export function App() {
                   <div
                     data-pane-box={pane.id}
                     className={`min-h-0 min-w-0 ${maximized && maximized !== pane.id ? 'hidden' : 'flex'}`}
-                    style={{ flexGrow: weightOf(layout.paneWeights, pane.id), flexShrink: 1, flexBasis: 0 }}
+                    style={{ flexGrow: paneGrow(layout.paneWeights, layout.panes.map(p => p.id), pane.id), flexShrink: 1, flexBasis: 0 }}
                   >
                     <PaneView
                       pane={pane}
