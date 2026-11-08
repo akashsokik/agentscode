@@ -4,17 +4,23 @@
  *
  * Windows (NSIS) and Linux (AppImage) download an update in the background and install it on
  * restart. macOS can only swap the app in place when the running app carries a Developer ID
- * signature (Squirrel.Mac checks it), so an unsigned Mac build offers the download page instead.
+ * signature (Squirrel.Mac checks it), so an unsigned Mac build offers the install command instead.
  * Errors are logged and never shown, except to someone who chose Check for Updates.
  */
 import { execFile } from 'node:child_process';
 import path from 'node:path';
-import { app, dialog, shell, type BrowserWindow } from 'electron';
+import { app, clipboard, dialog, shell, type BrowserWindow } from 'electron';
 import electronUpdater, { type UpdateInfo } from 'electron-updater';
 
 const { autoUpdater } = electronUpdater;
 
 const RELEASES_URL = 'https://github.com/akashsokik/agentscode/releases';
+/**
+ * The Mac installer (install.sh at the repo root). curl does not quarantine what it downloads, so
+ * an unsigned build it installs opens without Gatekeeper's "Apple could not verify" refusal. A copy
+ * downloaded in a browser is quarantined and needs Open Anyway in System Settings first.
+ */
+const MAC_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/akashsokik/agentscode/main/install.sh | bash';
 /** How often a running app looks for a new release. */
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 /** Give the server and window a moment before the first check. */
@@ -60,13 +66,14 @@ async function offerDownload(info: UpdateInfo): Promise<void> {
   prompted = info.version;
   const response = await showMessage({
     type: 'info',
-    buttons: ['Download', 'Later'],
+    buttons: ['Copy Install Command', 'Release Notes', 'Later'],
     defaultId: 0,
-    cancelId: 1,
+    cancelId: 2,
     message: `AgentsCode ${info.version} is available`,
-    detail: `You have ${app.getVersion()}. Download the new version and replace the app in Applications.`,
+    detail: `You have ${app.getVersion()}. To update, quit AgentsCode and run this in Terminal:\n\n${MAC_INSTALL_COMMAND}`,
   });
-  if (response === 0) void shell.openExternal(releasePage(info.version));
+  if (response === 0) clipboard.writeText(MAC_INSTALL_COMMAND);
+  if (response === 1) void shell.openExternal(releasePage(info.version));
 }
 
 async function offerRestart(info: UpdateInfo, force = false): Promise<void> {
