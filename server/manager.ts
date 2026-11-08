@@ -62,7 +62,7 @@ import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, empt
 import { gitRun, isDirectory, isInsideGitRepo, normalizeDir } from './projects.ts';
 import { locate, type Place } from './whereabouts.ts';
 import { openuiGuide } from './openuiGuide.ts';
-import { BrowserBridge, BROWSER_WRITE_OPS, type BrowserOp } from './browserBridge.ts';
+import { BrowserBridge, BROWSER_WRITE_OPS, compactConsole, type BrowserOp } from './browserBridge.ts';
 import { blockedReason, normalizeAddress } from '../shared/browser.ts';
 import { createWalkthrough, deleteWalkthrough, listWalkthroughs, readWalkthrough, summaryOf, walkthroughImage, walkthroughMarkdown, type StepRoot } from './walkthroughs.ts';
 import type { Store } from './store.ts';
@@ -1188,7 +1188,8 @@ export class AgentManager {
       input.path = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${String(input.tab_id).replace(/[^\w-]/g, '')}.png`);
     }
     try {
-      return await this.browser.request(agent.id, op, input);
+      const result = await this.browser.request(agent.id, op, input);
+      return op === 'console' ? compactConsole(result) : result;
     } catch (error) {
       throw new HttpError(409, (error as Error).message);
     }

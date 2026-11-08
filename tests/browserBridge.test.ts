@@ -234,3 +234,53 @@ test('the bridge socket takes main only: right token, no Origin; then requests f
     server.close();
   }
 });
+
+test('console results collapse repeats, keep errors within the budget, and keep the cursor', async () => {
+  const { compactConsole } = await import('../server/browserBridge.ts');
+  const preload = (n: number) => ({ seq: n, ts: n, level: 'warn', source: 'console', text: `The resource https://cdn.example/${n}.png was preloaded using link preload but not used.` });
+  const entries = [
+    ...Array.from({ length: 199 }, (_, i) => preload(i + 1)),
+    { seq: 200, ts: 200, level: 'error', source: 'exception', text: 'TypeError: x is undefined' },
+    { seq: 201, ts: 201, level: 'log', source: 'console', text: 'ready' },
+    { seq: 202, ts: 202, level: 'log', source: 'console', text: 'ready' },
+  ];
+  const out = compactConsole({ entries, next: 203 }) as { entries: { level: string; text: string; count?: number }[]; next: number; omitted?: number };
+  assert.equal(out.next, 203);
+  assert.equal(out.entries.length, 3);
+  assert.equal(out.omitted, undefined);
+  assert.equal(out.entries[0].count, 199);
+  assert.match(out.entries[0].text, /and 198 more like it, e\.g\. https:\/\/cdn\.example\/2\.png/);
+  assert.deepEqual(out.entries.map(e => e.level), ['warn', 'error', 'log'], 'original order is kept');
+  assert.match(out.entries[2].text, /^ready \(x2\)$/);
+
+  // Over budget: errors are kept first, and the agent is told how many were left out.
+  const noisy = Array.from({ length: 50 }, (_, i) => ({ seq: i, ts: i, level: 'log', source: 'console', text: `step ${i} ${'x'.repeat(200)}` }));
+  const tight = compactConsole({ entries: [...noisy, { seq: 99, ts: 99, level: 'error', source: 'console', text: 'boom' }], next: 100 }, 1200) as { entries: { text: string }[]; omitted: number; note: string };
+  assert.ok(tight.entries.some(e => e.text === 'boom'));
+  assert.ok(tight.omitted > 40);
+  assert.match(tight.note, /since=100/);
+  assert.ok(JSON.stringify(tight).length < 2000);
+
+  assert.equal(compactConsole('odd'), 'odd');
+});
+
+test('a snapshot reads a run of one-word text pieces as one line', async () => {
+  const { formatAXTree } = await import('../shared/browser.ts');
+  const node = (id: string, role: string, name: string, childIds: string[] = [], parentId?: string) => ({ nodeId: id, role: { value: role }, name: { value: name }, childIds, parentId });
+  const words = ['Paris', 'offers', 'modern', 'hotels.'];
+  const nodes = [
+    node('root', 'RootWebArea', 'Page', ['p'], undefined),
+    node('p', 'paragraph', '', [...words.map((_, i) => `w${i}`), 'a', 'w9'], 'root'),
+    ...words.map((w, i) => node(`w${i}`, 'StaticText', w, [], 'p')),
+    { ...node('a', 'link', 'More', [], 'p'), backendDOMNodeId: 7 },
+    node('w9', 'StaticText', 'after the link', [], 'p'),
+  ];
+  const { text } = formatAXTree(nodes, 10_000);
+  assert.equal(text, [
+    '- RootWebArea "Page"',
+    '  - paragraph',
+    '    - StaticText "Paris offers modern hotels."',
+    '    - link "More" [e1]',
+    '    - StaticText "after the link"',
+  ].join('\n'));
+});

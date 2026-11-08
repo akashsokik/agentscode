@@ -116,7 +116,8 @@ export class BrowserHost {
         item.setSavePath(freePath(path.join(os.homedir(), 'Downloads'), path.basename(item.getFilename()) || 'download'));
       });
       s.webRequest.onErrorOccurred(details => {
-        if (details.error === 'net::ERR_ABORTED' || details.webContentsId === undefined) return;
+        // Cancelled loads and cache-only misses (preload hints, back-forward reads) are not page faults.
+        if (details.error === 'net::ERR_ABORTED' || details.error === 'net::ERR_CACHE_MISS' || details.webContentsId === undefined) return;
         const tab = this.byContents(details.webContentsId);
         if (tab) this.log(tab, { level: 'error', source: 'network', text: `${details.error} ${details.method} ${details.url}`, url: details.url });
       });

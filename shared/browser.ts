@@ -96,13 +96,19 @@ const ACTIONABLE = new Set([
 const WRAPPERS = new Set(['generic', 'none', 'presentation', 'InlineTextBox', 'LineBreak', 'group', 'Section']);
 const STATES = ['checked', 'selected', 'expanded', 'disabled', 'pressed', 'required', 'focused'];
 
+/** A text piece with nothing to act on inside it: joined with its neighbours into one line. */
+function plainText(node: AXNode): boolean {
+  return !node.ignored && str(node.role?.value) === 'StaticText' && Boolean(str(node.name?.value).trim());
+}
+
 function str(value: unknown): string {
   return typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ? String(value) : '';
 }
 
 /**
  * The tree as indented lines an agent can read, with a ref on every node it can act on.
- * Text that only repeats its parent's name is dropped. `refs` maps each ref to its DOM node.
+ * Text that only repeats its parent's name is dropped, and a run of text pieces (pages that wrap
+ * each word in its own element for an animation) reads as one line. `refs` maps each ref to its DOM node.
  */
 export function formatAXTree(nodes: AXNode[], maxChars: number): { text: string; refs: Map<string, number>; truncated: boolean } {
   const byId = new Map(nodes.map(n => [n.nodeId, n]));
@@ -130,18 +136,37 @@ export function formatAXTree(nodes: AXNode[], maxChars: number): { text: string;
         refs.set(ref, node.backendDOMNodeId);
         line += ` [${ref}]`;
       }
-      if (length + line.length + 1 > maxChars) {
-        truncated = true;
-        return;
-      }
-      lines.push(line);
-      length += line.length + 1;
+      if (!push(line)) return;
       nextDepth = depth + 1;
     }
+    const childParent = skip ? parentName : name;
+    let run: string[] = [];
+    const flush = () => {
+      const text = run.join(' ').replace(/\s+/g, ' ').trim();
+      run = [];
+      if (text && !childParent.includes(text)) push(`${'  '.repeat(nextDepth)}- StaticText "${text.slice(0, 400)}"`);
+    };
     for (const id of node.childIds ?? []) {
       const child = byId.get(id);
-      if (child) walk(child, nextDepth, skip ? parentName : name);
+      if (!child) continue;
+      if (plainText(child)) {
+        run.push(str(child.name?.value));
+        continue;
+      }
+      flush();
+      walk(child, nextDepth, childParent);
     }
+    flush();
+  };
+  const push = (line: string): boolean => {
+    if (truncated) return false;
+    if (length + line.length + 1 > maxChars) {
+      truncated = true;
+      return false;
+    }
+    lines.push(line);
+    length += line.length + 1;
+    return true;
   };
   if (root) walk(root, 0, '');
   return { text: lines.join('\n'), refs, truncated };
