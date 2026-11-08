@@ -111,30 +111,45 @@ export class Cdp {
     return result.value as T;
   }
 
-  /** Listens for `type` in the element's document (or the focused one, for keys). */
-  private watch(objectId: string, type: string, focused: boolean): Promise<void> {
-    return this.call(objectId, `function (type, focused) {
-      let doc = this.ownerDocument || document;
+  /**
+   * Listens for any of `types` in the element's document (or the focused one, for keys). For a
+   * click, also notes what the first event hit: the element, or something covering it.
+   */
+  private watch(objectId: string, types: string[], focused: boolean): Promise<void> {
+    return this.call(objectId, `function (types, focused) {
+      const target = focused ? null : this;
+      let doc = this.ownerDocument || this;
       if (focused) { try { while (doc.activeElement && doc.activeElement.contentDocument) doc = doc.activeElement.contentDocument; } catch (e) {} }
       const w = doc.defaultView;
-      if (w.__agentscodeWatch) w.removeEventListener(w.__agentscodeWatch.type, w.__agentscodeWatch.fn, true);
-      const fn = () => { w.__agentscodeSeen = true; };
-      w.__agentscodeSeen = false;
-      w.__agentscodeWatch = { type, fn };
-      w.addEventListener(type, fn, true);
+      const old = w.__agentscodeWatch;
+      if (old) for (const t of old.types) w.removeEventListener(t, old.fn, true);
+      w.__agentscodeSeen = null;
+      const fn = (e) => {
+        if (w.__agentscodeSeen !== null) return;
+        if (!target || e.target === target || (e.target instanceof Node && target.contains(e.target))) { w.__agentscodeSeen = ''; return; }
+        const hit = e.target instanceof Element ? e.target : null;
+        const name = hit ? (hit.getAttribute('aria-label') || hit.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 60) : '';
+        w.__agentscodeSeen = hit ? hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') + (name ? ' "' + name + '"' : '') : 'another element';
+      };
+      w.__agentscodeWatch = { types, fn };
+      for (const t of types) w.addEventListener(t, fn, true);
       globalThis.__agentscodeWin = w;
-    }`, [type, focused]);
+    }`, [types, focused]);
   }
 
-  /** Whether the watched event arrived; stops listening either way. */
-  private async seen(objectId: string): Promise<boolean> {
-    return Boolean(await this.call<boolean>(objectId, `function () {
+  /**
+   * What the watch saw, and stops it: null when nothing arrived, '' when the input reached the
+   * element, or a description of the element it hit instead.
+   */
+  private async seen(objectId: string): Promise<string | null> {
+    return this.call<string | null>(objectId, `function () {
       const w = globalThis.__agentscodeWin || window;
-      const seen = Boolean(w.__agentscodeSeen);
-      if (w.__agentscodeWatch) w.removeEventListener(w.__agentscodeWatch.type, w.__agentscodeWatch.fn, true);
+      const seen = w.__agentscodeSeen === undefined ? null : w.__agentscodeSeen;
+      const old = w.__agentscodeWatch;
+      if (old) for (const t of old.types) w.removeEventListener(t, old.fn, true);
       w.__agentscodeWatch = undefined;
       return seen;
-    }`).catch(() => true)); // the page navigated away: the input arrived
+    }`).catch(() => ''); // the page navigated away: the input arrived
   }
 
   async click(ref: string): Promise<'trusted' | 'synthetic'> {
@@ -142,11 +157,22 @@ export class Cdp {
     const { x, y } = await this.centre(backendNodeId);
     const objectId = await this.objectId(backendNodeId);
     await this.prepareInput();
-    await this.watch(objectId, 'mousedown', false);
+    await this.watch(objectId, ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'], false);
     await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
     await this.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
     await this.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    if (await this.seen(objectId)) return 'trusted';
+    const seen = await this.seen(objectId);
+    if (seen === '') return 'trusted';
+    if (seen !== null) throw new BrowserError(`The click landed on ${seen}, which covers that element. Close it first, or take a new snapshot.`);
+    // Before clicking by DOM events, make sure a person could have: nothing may cover the element
+    // where it would be clicked. this.click() alone would reach it under a modal.
+    const cover = await this.call<string | null>(objectId, `function (x, y) {
+      const hit = this.ownerDocument.elementFromPoint(x, y);
+      if (!hit || hit === this || this.contains(hit) || (hit.control && hit.control === this)) return null;
+      const name = (hit.getAttribute('aria-label') || hit.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 60);
+      return hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') + (name ? ' "' + name + '"' : '');
+    }`, [x, y]);
+    if (cover) throw new BrowserError(`Something covers that element where it would be clicked: ${cover}. Close it first, or take a new snapshot.`);
     await this.call(objectId, `function (x, y) {
       const at = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0, view: this.ownerDocument.defaultView };
       this.dispatchEvent(new PointerEvent('pointerdown', { ...at, buttons: 1, pointerType: 'mouse', isPrimary: true }));
@@ -182,10 +208,10 @@ export class Cdp {
     await this.prepareInput();
     const { result } = await this.send<{ result: { objectId?: string } }>('Runtime.evaluate', { expression: 'document' });
     const doc = result.objectId;
-    if (doc) await this.watch(doc, 'keydown', true);
+    if (doc) await this.watch(doc, ['keydown', 'keypress', 'beforeinput', 'input', 'keyup'], true);
     await this.send('Input.dispatchKeyEvent', { type: event.text ? 'keyDown' : 'rawKeyDown', ...event });
     await this.send('Input.dispatchKeyEvent', { type: 'keyUp', key: event.key, code: event.code, windowsVirtualKeyCode: event.windowsVirtualKeyCode });
-    if (!doc || await this.seen(doc)) return 'trusted';
+    if (!doc || (await this.seen(doc)) !== null) return 'trusted';
     // The DOM version of the key: its events, then what the key would have done.
     await this.call(doc, `function (key, code) {
       let doc = this;

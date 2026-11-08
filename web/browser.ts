@@ -139,33 +139,18 @@ if (native) {
 
 /**
  * A native view paints above the whole page, so a dialog, menu or lightbox portalled to <body>
- * would open under it. While one is open, BrowserPane swaps the view for a still of it.
+ * would open under it. True when something like that is on screen over `rect`; BrowserPane then
+ * swaps the view for a still of it. Only what is visible and overlaps counts: a menu in the
+ * sidebar leaves the browser alone, and an off-screen measuring box (Mermaid's) never covers it.
  */
-let overlays = 0;
-const overlayListeners = new Set<() => void>();
-function countOverlays(): number {
-  let n = 0;
+export function coveredBy(rect: DOMRect): boolean {
   for (const el of Array.from(document.body.children)) {
     if (el.id === 'root' || el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'TEMPLATE' || el.tagName === 'LINK') continue;
     const style = getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden') continue;
-    n++;
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    if (r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top) return true;
   }
-  return n;
-}
-if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
-  const observe = () => {
-    const next = countOverlays();
-    if (next === overlays) return;
-    overlays = next;
-    for (const listener of overlayListeners) listener();
-  };
-  new MutationObserver(observe).observe(document.body, { childList: true });
-}
-
-export function useOverlayOpen(): boolean {
-  return useSyncExternalStore(listener => {
-    overlayListeners.add(listener);
-    return () => overlayListeners.delete(listener);
-  }, () => overlays > 0);
+  return false;
 }

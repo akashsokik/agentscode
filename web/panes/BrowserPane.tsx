@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { isLocalUrl, normalizeAddress, type BrowserTabState } from '../../shared/browserPolicy.ts';
-import { browserCall, HAS_NATIVE_BROWSER, onAddressFocus, primeBrowserTab, useBrowserTab, useOverlayOpen } from '../browser.ts';
+import { browserCall, coveredBy, HAS_NATIVE_BROWSER, onAddressFocus, primeBrowserTab, useBrowserTab } from '../browser.ts';
 import { useApp } from '../store.ts';
 import { ChevronLeft, ChevronRight, Code, ExternalLink, Globe, RefreshCw, X } from '../mono/icons.tsx';
 import { Empty, HeaderButton, TextButton } from '../ui/common.tsx';
@@ -90,33 +90,21 @@ function DriverBar({ tab }: { tab: BrowserTabState }) {
 
 function NativeBody({ id, tab, onRetry }: { id: string; tab: BrowserTabState | undefined; onRetry: () => void }) {
   const body = useRef<HTMLDivElement>(null);
-  const overlay = useOverlayOpen();
+  const [covered, setCovered] = useState(false);
+  const coveredRef = useRef(false);
+  // A still of the page while something covers it: null for none, '' when the capture came back empty.
   const [still, setStill] = useState<string | null>(null);
   const failure = tab?.failure ?? null;
   const blank = !tab?.url || tab.url === 'about:blank';
-  const live = !overlay && !failure && !blank;
-
-  // While a dialog is open, show a still of the page in its place; take it before hiding the
-  // view. '' marks a capture that came back empty, so the view still hides.
-  useEffect(() => {
-    if (!overlay) {
-      setStill(null);
-      return;
-    }
-    let cancelled = false;
-    const done = (image: string | null) => { if (!cancelled) setStill(image ?? ''); };
-    void browserCall<string | null>('capture', { id }).then(done, () => done(null));
-    return () => { cancelled = true; };
-  }, [overlay, id]);
+  const live = !failure && !blank;
 
   // Keep the view on the body's bounds, every frame: panes split, columns drag, the terminal
-  // grows, and none of that resizes the window.
+  // grows, and none of that resizes the window. While a dialog or menu covers the pane, the
+  // view stays down (the effect below hides it once the still is up).
   useEffect(() => {
     const el = body.current;
-    if (!el) return;
-    if (!live) {
-      // Hide once the still is up (or at once if there is none to wait for).
-      if (!overlay || still !== null) void browserCall('hide', { id }).catch(() => {});
+    if (!el || !live) {
+      void browserCall('hide', { id }).catch(() => {});
       return;
     }
     let frame = 0;
@@ -124,17 +112,38 @@ function NativeBody({ id, tab, onRetry }: { id: string; tab: BrowserTabState | u
     const tick = () => {
       const r = visibleRect(el);
       const visible = r.width > 0 && r.height > 0 && document.visibilityState === 'visible';
-      const key = visible ? `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}` : 'hidden';
+      const isCovered = visible && coveredBy(r);
+      if (isCovered !== coveredRef.current) {
+        coveredRef.current = isCovered;
+        setCovered(isCovered);
+      }
+      const key = isCovered ? 'covered' : visible ? `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}` : 'hidden';
       if (key !== last) {
         last = key;
-        if (visible) void browserCall('show', { id, rect: { x: r.x, y: r.y, width: r.width, height: r.height } }).catch(() => {});
-        else void browserCall('hide', { id }).catch(() => {});
+        if (key === 'hidden') void browserCall('hide', { id }).catch(() => {});
+        else if (key !== 'covered') void browserCall('show', { id, rect: { x: r.x, y: r.y, width: r.width, height: r.height } }).catch(() => {});
       }
       frame = requestAnimationFrame(tick);
     };
     tick();
     return () => cancelAnimationFrame(frame);
-  }, [id, live, overlay, still]);
+  }, [id, live]);
+
+  // Covered: take a still of the page as it is, put it in the view's place, then hide the view.
+  useEffect(() => {
+    if (!covered || !live) {
+      setStill(null);
+      return;
+    }
+    let cancelled = false;
+    const done = (image: string | null) => {
+      if (cancelled) return;
+      setStill(image ?? '');
+      void browserCall('hide', { id }).catch(() => {});
+    };
+    void browserCall<string | null>('capture', { id }).then(done, () => done(null));
+    return () => { cancelled = true; };
+  }, [covered, live, id]);
 
   // Leaving the screen (another tab in this pane, or the pane closed) hides the view.
   useEffect(() => () => { void browserCall('hide', { id }).catch(() => {}); }, [id]);
@@ -147,7 +156,7 @@ function NativeBody({ id, tab, onRetry }: { id: string; tab: BrowserTabState | u
         </Empty>
       ) : blank ? (
         <Empty icon={Globe} title="New browser tab">Type an address above. Links to localhost from transcripts and terminals open here too.</Empty>
-      ) : overlay && still ? (
+      ) : covered && still ? (
         <img src={still} alt="" className="absolute inset-0 size-full object-cover object-left-top" draggable={false} />
       ) : null}
     </div>
