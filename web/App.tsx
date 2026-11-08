@@ -9,6 +9,7 @@ import { SettingsDialog } from './dialogs/SettingsDialog.tsx';
 import { useGitStatus } from './git.ts';
 import { closeTab, focusedAgentId, open, pruneTabs, setProject, setRightPanel, setSidebar, setSidebarView, useLayout, type Pane, type Tab } from './layout.ts';
 import { AgentPane } from './panes/AgentPane.tsx';
+import { BrowserPane } from './panes/BrowserPane.tsx';
 import { ChannelPane } from './panes/ChannelPane.tsx';
 import { CommsPane } from './panes/CommsPane.tsx';
 import { DiffPane, FilePane } from './panes/FilePane.tsx';
@@ -27,7 +28,7 @@ import { dismissToast, useApp } from './store.ts';
 import { EngineIcon } from './ui/EngineIcon.tsx';
 import { UsageFooter } from './ui/UsageFooter.tsx';
 import { HeaderButton, StatusLabel } from './ui/common.tsx';
-import { AlertCircle, CheckCircle, Route, File, FileDiff, MessageMultiple, PanelLeft, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
+import { AlertCircle, CheckCircle, Route, File, FileDiff, Globe, MessageMultiple, PanelLeft, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
 import { LAYER } from './mono/layers.ts';
 import { Shimmer } from './mono/Shimmer.tsx';
 import { TabLabel } from './mono/TabLabel.tsx';
@@ -75,6 +76,16 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
   if (c.kind === 'walkthrough') {
     const agent = snapshot?.agents.find(a => a.id === c.agentId);
     return { icon: <Route className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: c.title, meta: `Walkthrough${agent ? `, ${agent.name}` : ''}` };
+  }
+  if (c.kind === 'browser') {
+    const agent = c.agentId ? snapshot?.agents.find(a => a.id === c.agentId) : undefined;
+    let host = '';
+    try {
+      host = c.url ? new URL(c.url).host : '';
+    } catch {
+      // not a URL yet
+    }
+    return { icon: <Globe className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: c.title || host || 'New tab', meta: agent ? `Browser, ${agent.name}` : host || 'Browser' };
   }
   if (c.kind === 'comms') {
     const active = snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0;
@@ -268,6 +279,7 @@ function PaneView({ pane, tab, chrome, actions }: { pane: Pane; tab: Tab | undef
     case 'comms': return <CommsPane conversationId={c.conversationId} chrome={chrome} />;
     case 'channel': return <ChannelPane key={pane.id + c.channelId} channelId={c.channelId} chrome={chrome} />;
     case 'walkthrough': return <WalkthroughPane key={pane.id + tab.id} agentId={c.agentId} id={c.id} chrome={chrome} />;
+    case 'browser': return <BrowserPane key={pane.id + tab.id} id={c.id} url={c.url} agentId={c.agentId ?? null} chrome={chrome} />;
   }
 }
 

@@ -1,8 +1,10 @@
 /**
- * The desktop app's bridge to the page: `window.agentscodeDesktop.updates`, which the sidebar's
- * update row reads (web/sidebar/SidebarUpdate.tsx). The page is the AgentsCode server's own UI on
- * 127.0.0.1; main.ts answers only that origin. CommonJS because sandboxed preload scripts cannot
- * be ES modules; tsc compiles this .cts to preload.cjs.
+ * The app window's bridges to main. Only the AgentsCode page gets them: browser tabs run without a
+ * preload, and main answers only the app window. CommonJS (.cts), because a sandboxed preload cannot
+ * be an ES module; tsc compiles this to preload.cjs.
+ *
+ * - window.agentscodeDesktop.updates: the sidebar's update row (web/sidebar/SidebarUpdate.tsx).
+ * - window.agentscode.browser: the integrated browser's controls (web/browser.ts).
  */
 import type { DesktopUpdates, UpdateSnapshot } from '../shared/updates.ts';
 
@@ -21,3 +23,14 @@ const updates: DesktopUpdates = {
 };
 
 contextBridge.exposeInMainWorld('agentscodeDesktop', { updates });
+
+contextBridge.exposeInMainWorld('agentscode', {
+  browser: {
+    call: (op: string, args?: unknown): Promise<unknown> => ipcRenderer.invoke('browser', op, args),
+    onEvent: (listener: (event: unknown) => void): (() => void) => {
+      const handler = (_event: unknown, payload: unknown) => listener(payload);
+      ipcRenderer.on('browser:event', handler);
+      return () => ipcRenderer.removeListener('browser:event', handler);
+    },
+  },
+});

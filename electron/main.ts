@@ -7,6 +7,9 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
+import { isLocalUrl } from '../shared/browserPolicy.ts';
+import { BrowserError, BrowserHost, type Rect } from './browser.ts';
+import { BrowserBridge } from './bridge.ts';
 import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSnapshot } from './updater.ts';
 
 const PORT = Number(process.env.PORT ?? 4320);
@@ -25,6 +28,9 @@ let quitting = false;
 const recentOutput: string[] = [];
 /** Resolves whoever waits in stopServer() once the bundled server has exited. */
 const serverStopped: Array<() => void> = [];
+/** The integrated browser's tabs, and the line the server's agent tools reach them by. */
+const browser = new BrowserHost({ appPort: PORT, window: () => window });
+const bridge = new BrowserBridge(browser, PORT);
 
 /** Finder starts apps with a bare PATH; agents need the user's own to find node, git, claude and codex. */
 function useLoginShellPath(): void {
@@ -76,6 +82,7 @@ function startServer(): void {
     });
   }
   server.on('exit', onServerExit);
+  bridge.useUtility(server);
   // In case the ready line is missed, ask the server itself.
   const started = Date.now();
   const poll = setInterval(() => {
@@ -139,6 +146,7 @@ function onServerExit(code: number): void {
     // Another AgentsCode server took the port first (it came back while ours started): use it.
     if (up) {
       markReady();
+      bridge.useSocket();
       watchAttachedServer();
       return;
     }
@@ -207,6 +215,50 @@ function setMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+function openLink(url: string, external: boolean): void {
+  if (!/^https?:/i.test(url)) return;
+  if (!external && isLocalUrl(url) && new URL(url).origin !== ORIGIN && window) {
+    window.webContents.send('browser:event', { type: 'open-url', url });
+    return;
+  }
+  void shell.openExternal(url);
+}
+
+function isRect(value: unknown): value is Rect {
+  const r = value as Rect | null;
+  return Boolean(r) && [r!.x, r!.y, r!.width, r!.height].every(n => typeof n === 'number' && Number.isFinite(n));
+}
+
+/** The page's controls for browser tabs (web/browser.ts). Only the app window may call them. */
+function registerBrowserIpc(): void {
+  ipcMain.handle('browser', async (event, op: unknown, raw: unknown) => {
+    if (!window || event.sender !== window.webContents) throw new Error('Not allowed.');
+    const args = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const id = typeof args.id === 'string' ? args.id : '';
+    try {
+      switch (op) {
+        case 'create': return browser.state(browser.create(id, typeof args.url === 'string' ? args.url : ''));
+        case 'show': if (isRect(args.rect)) browser.show(id, args.rect); return null;
+        case 'hide': browser.hide(id); return null;
+        case 'navigate': browser.navigate(id, String(args.url ?? '')); return null;
+        case 'back': case 'forward': case 'reload': case 'stop': browser.history(id, op); return null;
+        case 'devtools': browser.devtools(id); return null;
+        case 'external': browser.openExternal(id); return null;
+        case 'capture': return await browser.capture(id);
+        case 'destroy': browser.destroy(id); return null;
+        case 'pause': browser.setPaused(id, args.paused === true); return null;
+        case 'sync': return browser.sync(Array.isArray(args.ids) ? args.ids.filter((x): x is string => typeof x === 'string') : []);
+        case 'list': return browser.list();
+        default: throw new BrowserError('Unknown browser call.');
+      }
+    } catch (err) {
+      // The page shows these; other errors are bugs and keep their stack in the main log.
+      if (err instanceof BrowserError) return { error: err.message };
+      throw err;
+    }
+  });
+}
+
 function showWindow(): void {
   if (!ready) return;
   if (window) {
@@ -227,22 +279,28 @@ function showWindow(): void {
     // The page leaves room for them and drags the window by its headers (the `desktop` variant).
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 16, y: 13 } } : {}),
     show: false,
-    // window.agentscodeDesktop, for the sidebar's update row (electron/preload.cts).
+    // window.agentscodeDesktop (the sidebar's update row) and window.agentscode (the integrated
+    // browser's controls), both from electron/preload.cts; browser tabs never get a preload.
     webPreferences: { preload: path.join(import.meta.dirname, 'preload.cjs') },
   });
+  const opened = window;
+  browser.attachWindow(opened);
+  // Browser tabs outlive the window (agents keep using theirs while it is closed on macOS).
+  opened.on('close', () => browser.detachWindow(opened));
   window.once('ready-to-show', () => window?.show());
   window.on('closed', () => {
     window = null;
   });
-  // Anything that is not AgentsCode itself opens in the user's browser.
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url)) void shell.openExternal(url);
+  // A localhost link (a dev server an agent mentions) opens in a browser tab beside; anything
+  // else, and a Cmd-clicked localhost link, opens in the user's browser.
+  window.webContents.setWindowOpenHandler(({ url, disposition }) => {
+    openLink(url, disposition === 'background-tab');
     return { action: 'deny' };
   });
   window.webContents.on('will-navigate', (event) => {
     if (new URL(event.url).origin === ORIGIN) return;
     event.preventDefault();
-    if (/^https?:/i.test(event.url)) void shell.openExternal(event.url);
+    openLink(event.url, false);
   });
   // Right-click: the usual edit commands in a text field, Copy on selected text. Paste runs the
   // page's own paste handling, so an image on the clipboard attaches in the composer.
@@ -304,8 +362,10 @@ if (!app.requestSingleInstanceLock()) {
     if (app.isPackaged) useLoginShellPath();
     // A packaged app gets its icon from the bundle; running from source would show Electron's.
     else app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
+    registerBrowserIpc();
     if (await serverAnswers()) {
       markReady();
+      bridge.useSocket();
       watchAttachedServer();
     } else startServer();
     void startUpdater({ window: () => window, stopServer });

@@ -5,18 +5,19 @@
  * keeps each screen as it was.
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
+import { openBrowser } from '../browser.ts';
 import { shortPath } from '../format.ts';
 import { currentProjectId, setTerminalHeight, useLayout } from '../layout.ts';
 import { IS_MAC } from '../platform.ts';
 import { SHORTCUTS } from '../shortcuts.ts';
 import { useApp } from '../store.ts';
 import { cx, Empty, HeaderButton, PRIMARY } from '../ui/common.tsx';
-import { Maximize2, Minimize2, PanelBottom, Plus, SplitColumns, SplitRows, Terminal as TerminalIcon, X } from '../mono/icons.tsx';
+import { Globe, Maximize2, Minimize2, PanelBottom, Plus, SplitColumns, SplitRows, Terminal as TerminalIcon, X } from '../mono/icons.tsx';
 import { Modal } from '../mono/Modal.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import {
   answerClose, closeTerminals, frontOf, hideTerminal, newTerminal, pickTab, projectTabs, setSplitRatio, splitFront,
-  toggleZoom, useCloseRequest, usePlacing, useTerminalTitles, type CloseRequest,
+  toggleZoom, useCloseRequest, usePlacing, useTerminalPreviews, useTerminalTitles, type CloseRequest,
 } from './actions.ts';
 import { dividers, leaves, rects, setRatio, type Divider, type Rect, type SplitTree } from './splits.ts';
 import { TerminalView } from './TerminalView.tsx';
@@ -249,6 +250,7 @@ export function TerminalPanel() {
   const home = useApp(s => s.snapshot?.home ?? '');
   const terminals = useApp(s => s.terminals);
   const titles = useTerminalTitles();
+  const previews = useTerminalPreviews();
   const placing = usePlacing();
   const closeRequest = useCloseRequest();
   const projectId = currentProjectId(layout, projects?.map(p => p.id) ?? []);
@@ -270,6 +272,14 @@ export function TerminalPanel() {
   const lines = shown && !zoomed ? dividers(shown) : [];
   const splits = shown ? leaves(shown).length : 0;
   const front = mine.find(t => t.id === frontId);
+  // The newest localhost address the shell in front printed: a dev server to preview.
+  const devUrl = frontId ? previews[frontId]?.at(-1) : undefined;
+  let previewLabel = '';
+  try {
+    previewLabel = devUrl ? new URL(devUrl).host : '';
+  } catch {
+    // findLocalUrls only keeps parsable URLs
+  }
 
   const windowHeight = useWindowHeight();
   const max = Math.max(MIN_HEIGHT, Math.floor(windowHeight * MAX_SHARE));
@@ -326,6 +336,17 @@ export function TerminalPanel() {
             <Plus className="size-3.5" strokeWidth={1.75} />
           </button>
         </div>
+        {devUrl ? (
+          <button
+            type="button"
+            onClick={() => openBrowser(devUrl, true)}
+            title={`Open ${devUrl} in a browser tab beside`}
+            className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[11.5px] text-content/55 transition-colors duration-150 hover:bg-content/7 hover:text-content"
+          >
+            <Globe className="size-3.5" strokeWidth={1.75} />
+            Preview <span className="font-mono text-[11px]">{previewLabel}</span>
+          </button>
+        ) : null}
         {project ? (
           <span className="min-w-0 max-w-[30%] shrink truncate font-mono text-[11px] text-content/35" title={project.path}>
             {shortPath(project.path, home)}
