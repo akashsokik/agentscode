@@ -6,7 +6,7 @@
  * The debugger attaches on first use, after the tab has loaded something (CDP on a tab that has
  * never navigated does not answer).
  */
-import type { WebContents } from 'electron';
+import { nativeImage, type WebContents } from 'electron';
 import { formatAXTree, keyEvent, PRESSABLE_KEYS, type AXNode } from '../shared/browser.ts';
 import { BrowserError } from './browserError.ts';
 
@@ -253,15 +253,34 @@ export class Cdp {
       const size = metrics.cssContentSize;
       const clip = { x: 0, y: 0, width: Math.min(size.width, 4000), height: Math.min(size.height, 16_000), scale };
       // A tab no pane shows cannot always lay out beyond its viewport; fall back to the viewport.
-      const full = await Promise.race([
-        this.send<{ data: string }>('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip }).catch(() => null),
-        new Promise<null>(resolve => setTimeout(() => resolve(null), 4000)),
-      ]);
-      if (full) return { png: Buffer.from(full.data, 'base64'), fullPage: true };
+      const full = await this.capture({ format: 'png', captureBeyondViewport: true, clip }, 4000);
+      if (full) return { png: full, fullPage: true };
     }
-    const clip = { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale };
-    const { data } = await this.send<{ data: string }>('Page.captureScreenshot', { format: 'png', clip });
-    return { png: Buffer.from(data, 'base64'), fullPage: false };
+    // A tab no pane shows paints only when asked, and a capture can wait for a frame that never
+    // comes. Ask for a frame and try again, alternating a plain capture (scaled down here) and a
+    // clipped one, which Chromium answers from different paths.
+    const width = Math.round(view.clientWidth);
+    const height = Math.round(view.clientHeight);
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (!this.wc.isDestroyed()) this.wc.invalidate();
+      if (attempt % 2 === 0) {
+        // The first try is short: it mostly serves to make the page paint for the next.
+        const png = await this.capture({ format: 'png' }, attempt === 0 ? 700 : 2500);
+        if (png) return { png: scale === 1 ? png : nativeImage.createFromBuffer(png).resize({ width, height, quality: 'best' }).toPNG(), fullPage: false };
+      } else {
+        const png = await this.capture({ format: 'png', clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale } }, 2500);
+        if (png) return { png, fullPage: false };
+      }
+    }
+    throw new BrowserError('The page did not paint a frame to capture. Open its tab in a pane and try again.');
+  }
+
+  /** One capture, or null when it does not come back in time. */
+  private capture(params: object, ms: number): Promise<Buffer | null> {
+    return Promise.race([
+      this.send<{ data: string }>('Page.captureScreenshot', params).then(r => Buffer.from(r.data, 'base64'), () => null),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), ms)),
+    ]);
   }
 
   async evaluate(expression: string): Promise<{ type: string; value: string }> {

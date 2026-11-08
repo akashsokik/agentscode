@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { session, shell, WebContentsView, type BrowserWindow, type Input, type Session } from 'electron';
+import { BrowserWindow, session, shell, WebContentsView, type Input, type Session } from 'electron';
 import { blockedReason, normalizeAddress, type BrowserEvent, type BrowserTabState, type ConsoleEntry } from '../shared/browser.ts';
 import { BrowserError } from './browserError.ts';
 import { Cdp } from './cdp.ts';
@@ -25,6 +25,8 @@ const CONSOLE_LIMIT = 1000;
 const DRIVING_MS = 2500;
 const OPEN_TIMEOUT_MS = 30_000;
 const OP_TIMEOUT_MS = 10_000;
+/** A tab no pane shows paints only now and then, so its screenshot may take a few tries. */
+const SHOT_TIMEOUT_MS = 20_000;
 
 export interface Rect { x: number; y: number; width: number; height: number }
 
@@ -81,6 +83,12 @@ function appShortcut(input: Input, mac: boolean): boolean {
 export class BrowserHost {
   private tabs = new Map<string, Tab>();
   private attachedTo: BrowserWindow | null = null;
+  /**
+   * Where tabs live while no app window is open (macOS keeps running with it closed): a window
+   * that is never shown. A view in no window at all paints once and then stops, so screenshots of
+   * it hang; in this one they do not. Elsewhere the app quits with its window, so there is none.
+   */
+  private holder: BrowserWindow | null = null;
   private configured = false;
 
   private options: Options;
@@ -228,8 +236,7 @@ export class BrowserHost {
     });
     wc.on('focus', () => this.send({ type: 'focus', id: tab.id }));
     this.tabs.set(id, tab);
-    const win = this.attachedTo;
-    if (win && !win.isDestroyed()) win.contentView.addChildView(view);
+    this.parent()?.contentView.addChildView(view);
     return tab;
   }
 
@@ -335,8 +342,8 @@ export class BrowserHost {
     this.tabs.delete(id);
     clearTimeout(tab.drivingTimer);
     tab.cdp.detach();
-    const win = this.attachedTo;
-    if (win && !win.isDestroyed()) win.contentView.removeChildView(tab.view);
+    const parent = this.parent(false);
+    if (parent) parent.contentView.removeChildView(tab.view);
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
     this.send({ type: 'closed', id });
   }
@@ -366,29 +373,47 @@ export class BrowserHost {
     return [...this.tabs.values()].map(tab => this.state(tab));
   }
 
+  /** The window tabs belong in now: the app window, else (on macOS) the hidden holder. */
+  private parent(create = true): BrowserWindow | null {
+    if (this.attachedTo && !this.attachedTo.isDestroyed()) return this.attachedTo;
+    if (this.holder && !this.holder.isDestroyed()) return this.holder;
+    if (!create || process.platform !== 'darwin') return null;
+    this.holder = new BrowserWindow({ show: false, width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height, skipTaskbar: true, focusable: false, webPreferences: { backgroundThrottling: false } });
+    return this.holder;
+  }
+
   /** Puts every tab in a new window (the previous one closed, or this is the first). */
   attachWindow(win: BrowserWindow): void {
+    const from = this.parent(false);
     this.attachedTo = win;
     for (const tab of this.tabs.values()) {
       tab.shown = false;
       tab.view.setVisible(false);
+      if (from && from !== win) from.contentView.removeChildView(tab.view);
       win.contentView.addChildView(tab.view);
     }
+    if (this.holder && !this.holder.isDestroyed()) this.holder.destroy();
+    this.holder = null;
   }
 
-  /** Takes the tabs out of a closing window so they outlive it. */
+  /** Takes the tabs out of a closing window so they outlive it, into the holder on macOS. */
   detachWindow(win: BrowserWindow): void {
     if (this.attachedTo !== win) return;
+    this.attachedTo = null;
+    const holder = this.tabs.size ? this.parent() : null;
     for (const tab of this.tabs.values()) {
       tab.shown = false;
       tab.view.setVisible(false);
       if (!win.isDestroyed()) win.contentView.removeChildView(tab.view);
+      holder?.contentView.addChildView(tab.view);
+      tab.view.setBounds({ x: 0, y: 0, ...DEFAULT_SIZE });
     }
-    this.attachedTo = null;
   }
 
   closeAll(): void {
     for (const id of [...this.tabs.keys()]) this.destroy(id);
+    if (this.holder && !this.holder.isDestroyed()) this.holder.destroy();
+    this.holder = null;
   }
 
   // ---- The agents' side (electron/bridge.ts) ----
@@ -498,7 +523,7 @@ export class BrowserHost {
           throw new BrowserError(`Unknown browser operation ${op}.`);
       }
     };
-    return withTimeout(run(), op === 'open' ? OPEN_TIMEOUT_MS : OP_TIMEOUT_MS, `browser ${op}`);
+    return withTimeout(run(), op === 'open' ? OPEN_TIMEOUT_MS : op === 'screenshot' ? SHOT_TIMEOUT_MS : OP_TIMEOUT_MS, `browser ${op}`);
   }
 
   agentRemoved(agentId: string): void {
