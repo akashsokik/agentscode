@@ -9,7 +9,8 @@ import type { SidebarActions } from '../sidebar/Sidebar.tsx';
 import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
-import { Chatting, FolderPlus, MessageMultiple, Plus, Search, Settings, type IconComponent } from '../mono/icons.tsx';
+import { Chatting, FolderPlus, Globe, MessageMultiple, Plus, Search, Settings, type IconComponent } from '../mono/icons.tsx';
+import { openBrowser } from '../browser.ts';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
 
 const RECENT = 6;
@@ -45,6 +46,7 @@ export function HomePane({ chrome, actions }: { chrome: PaneChrome; actions: Sid
               <ActionRow icon={FolderPlus} label="Add project" onClick={actions.addProject} />
               <ActionRow icon={Chatting} label="New channel" onClick={actions.newChannel} />
               <ActionRow icon={MessageMultiple} label="Open Comms" onClick={() => open({ kind: 'comms' })} />
+              <ActionRow icon={Globe} label="New browser tab" hint={SHORTCUTS.browser} onClick={() => openBrowser()} />
               <ActionRow icon={Search} label="Command palette" hint={SHORTCUTS.palette} onClick={actions.palette} />
               <ActionRow icon={Settings} label="Settings" hint={SHORTCUTS.settings} onClick={actions.settings} />
             </Section>
