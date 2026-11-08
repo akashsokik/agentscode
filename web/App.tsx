@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Snapshot } from '../shared/types.ts';
 import { AddProjectDialog } from './dialogs/AddProjectDialog.tsx';
 import { AgentSettingsDialog } from './dialogs/AgentSettingsDialog.tsx';
@@ -19,6 +19,8 @@ import type { PaneChrome } from './panes/PaneFrame.tsx';
 import { RightPanel } from './right/RightPanel.tsx';
 import { IS_DESKTOP_APP } from './platform.ts';
 import { SHORTCUTS, useShortcuts } from './shortcuts.ts';
+import { weightOf } from './paneSizes.ts';
+import { PaneDivider } from './ui/PaneDivider.tsx';
 import { openBrowser } from './browser.ts';
 import { Sidebars, useNavFull, type SidebarActions } from './sidebar/Sidebar.tsx';
 import { toggleTerminal } from './terminal/actions.ts';
@@ -396,17 +398,35 @@ export function App() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {spans ? null : tabBar}
           {/* Below 1280px the right panel floats over the panes instead of squeezing them. */}
-          <div className="relative flex min-h-0 min-w-0 flex-1 divide-x divide-stroke">
-            {layout.panes.map(pane => (
-              <PaneView
-                key={pane.id}
-                pane={pane}
-                tab={layout.tabs.find(t => t.id === pane.tabId)}
-                actions={actions}
-                chrome={{ paneId: pane.id, focused: pane.id === layout.focused, canSplit: layout.panes.length < MAX_PANES, multiple: layout.panes.length > 1 }}
-              />
-            ))}
-            {layout.rightPanel ? <RightPanel /> : null}
+          <div className="relative flex min-h-0 min-w-0 flex-1">
+            {/* Panes share the width by weight (web/paneSizes.ts); dividers move it, one pane can fill it. */}
+            {layout.panes.map((pane, index) => {
+              const maximized = layout.maximized && layout.panes.some(p => p.id === layout.maximized) ? layout.maximized : null;
+              return (
+                <Fragment key={pane.id}>
+                  {index > 0 && !maximized ? <PaneDivider left={layout.panes[index - 1].id} right={pane.id} /> : null}
+                  <div
+                    data-pane-box={pane.id}
+                    className={`min-h-0 min-w-0 ${maximized && maximized !== pane.id ? 'hidden' : 'flex'}`}
+                    style={{ flexGrow: weightOf(layout.paneWeights, pane.id), flexShrink: 1, flexBasis: 0 }}
+                  >
+                    <PaneView
+                      pane={pane}
+                      tab={layout.tabs.find(t => t.id === pane.tabId)}
+                      actions={actions}
+                      chrome={{
+                        paneId: pane.id,
+                        focused: pane.id === layout.focused,
+                        canSplit: layout.panes.length < MAX_PANES,
+                        multiple: layout.panes.length > 1,
+                        maximized: maximized === pane.id,
+                      }}
+                    />
+                  </div>
+                </Fragment>
+              );
+            })}
+            {layout.rightPanel ? <><div aria-hidden className="w-px shrink-0 bg-stroke max-xl:hidden" /><RightPanel /></> : null}
           </div>
           <TerminalPanel />
           <StatusFooter />

@@ -84,7 +84,7 @@ function appShortcut(input: Input, mac: boolean): boolean {
   if (input.control && !input.meta && !input.alt && input.code === 'Tab') return true;
   if (input.control && !input.meta && input.code === 'Backquote') return true;
   if (!mod) return false;
-  if (input.shift) return ['BracketLeft', 'BracketRight', 'KeyB'].includes(input.code);
+  if (input.shift) return ['BracketLeft', 'BracketRight', 'KeyB', 'Enter', 'NumpadEnter'].includes(input.code);
   if (input.alt) return input.code === 'KeyB';
   return ['KeyW', 'KeyK', 'KeyN', 'KeyB', 'KeyJ', 'Comma'].includes(input.code) || /^Digit[1-9]$/.test(input.code);
 }

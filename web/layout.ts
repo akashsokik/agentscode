@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { Root } from './api.ts';
+import { prunedWeights, weightOf } from './paneSizes.ts';
 import type { SplitTree } from './terminal/splits.ts';
 
 /** What a tab shows. Tabs are keyed by content, so opening the same thing twice focuses it. */
@@ -45,6 +46,10 @@ export interface Layout {
   widths?: Partial<Record<ColumnKey, number>>;
   rightPanel: boolean;
   rightView: 'overview' | 'comms' | 'changes';
+  /** How side-by-side panes share the width, by pane id (web/paneSizes.ts); a pane without one weighs 1. */
+  paneWeights?: Record<string, number>;
+  /** The pane filling the whole width while the others wait, if one is maximized. */
+  maximized?: string | null;
   /** The terminal panel under the panes: shown or hidden, and the height the user dragged it to. */
   terminal?: boolean;
   terminalHeight?: number;
@@ -82,7 +87,9 @@ function initial(): Layout {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Layout | null;
     if (!saved || !Array.isArray(saved.tabs) || !Array.isArray(saved.panes) || !saved.panes.length) return fallback;
-    return { ...fallback, ...saved };
+    const restored = { ...fallback, ...saved };
+    const ids = restored.panes.map(p => p.id);
+    return { ...restored, paneWeights: prunedWeights(restored.paneWeights, ids), maximized: restored.maximized && ids.includes(restored.maximized) && ids.length > 1 ? restored.maximized : null };
   } catch {
     return fallback;
   }
@@ -189,7 +196,26 @@ export function splitPane(paneId: string): void {
   const candidate = layout.tabs.find(t => !shown.has(t.id)) ?? null;
   const index = layout.panes.findIndex(p => p.id === paneId);
   const pane = { id: newId('p'), tabId: candidate?.id ?? null };
-  set({ ...layout, panes: [...layout.panes.slice(0, index + 1), pane, ...layout.panes.slice(index + 1)], focused: pane.id });
+  // The new pane takes half of the one it split from, so the other panes keep their widths.
+  const half = weightOf(layout.paneWeights, paneId) / 2;
+  set({
+    ...layout,
+    panes: [...layout.panes.slice(0, index + 1), pane, ...layout.panes.slice(index + 1)],
+    focused: pane.id,
+    paneWeights: { ...layout.paneWeights, [paneId]: half, [pane.id]: half },
+    maximized: null,
+  });
+}
+
+/** After dragging a divider: the panes' new weights (web/paneSizes.ts). */
+export function setPaneWeights(paneWeights: Record<string, number>): void {
+  set({ ...layout, paneWeights: prunedWeights(paneWeights, layout.panes.map(p => p.id)) });
+}
+
+/** One pane fills the width, or (again) they share it. */
+export function toggleMaximize(paneId: string): void {
+  if (layout.panes.length < 2) return;
+  set({ ...layout, maximized: layout.maximized === paneId ? null : paneId, focused: paneId });
 }
 
 export function focusPane(paneId: string): void {
@@ -204,7 +230,16 @@ export function closePane(paneId: string): void {
   const index = layout.panes.findIndex(p => p.id === paneId);
   const panes = layout.panes.filter(p => p.id !== paneId);
   const focused = layout.focused === paneId ? panes[Math.max(0, index - 1)].id : layout.focused;
-  set({ ...layout, panes, focused });
+  // Its width goes to the neighbour that takes its place, so the rest stay put.
+  const heir = panes[Math.max(0, index - 1)].id;
+  const weights = { ...layout.paneWeights, [heir]: weightOf(layout.paneWeights, heir) + weightOf(layout.paneWeights, paneId) };
+  set({
+    ...layout,
+    panes,
+    focused,
+    paneWeights: panes.length > 1 ? prunedWeights(weights, panes.map(p => p.id)) : undefined,
+    maximized: layout.maximized === paneId || panes.length < 2 ? null : layout.maximized,
+  });
 }
 
 export function closeTab(tabId: string): void {
