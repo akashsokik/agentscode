@@ -6,7 +6,7 @@
  */
 import type { FitAddon, Terminal } from 'ghostty-web';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { findLocalUrls } from '../../shared/browserPolicy.ts';
+import { findLocalUrls } from '../../shared/browser.ts';
 import type { TerminalInfo, TerminalServerMessage } from '../../shared/types.ts';
 import { IS_MAC } from '../platform.ts';
 import { MOD, runShortcut } from '../shortcuts.ts';

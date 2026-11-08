@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { blockedReason, findLocalUrls, formatAXTree, isLocalUrl, keyEvent, normalizeAddress, type AXNode } from '../shared/browserPolicy.ts';
+import { blockedReason, findLocalUrls, formatAXTree, isLocalUrl, keyEvent, normalizeAddress, type AXNode } from '../shared/browser.ts';
 import { closeTab, getLayout, open, pruneTabs, tabKey, updateBrowserTab } from '../web/layout.ts';
 
 test('typed addresses become URLs: local hosts get http, others https, and non-addresses are refused', () => {

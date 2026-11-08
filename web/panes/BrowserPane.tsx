@@ -5,7 +5,7 @@
  * In a plain browser tab, localhost pages show in an iframe and anything else opens outside.
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { isLocalUrl, normalizeAddress, type BrowserTabState } from '../../shared/browserPolicy.ts';
+import { isLocalUrl, normalizeAddress, type BrowserTabState } from '../../shared/browser.ts';
 import { browserCall, coveredBy, HAS_NATIVE_BROWSER, onAddressFocus, primeBrowserTab, useBrowserTab } from '../browser.ts';
 import { useApp } from '../store.ts';
 import { ChevronLeft, ChevronRight, Code, ExternalLink, Globe, RefreshCw, X } from '../mono/icons.tsx';

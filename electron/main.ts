@@ -6,11 +6,11 @@
  */
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
-import { isLocalUrl } from '../shared/browserPolicy.ts';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
+import { isLocalUrl } from '../shared/browser.ts';
 import { BrowserError, BrowserHost, type Rect } from './browser.ts';
 import { BrowserBridge } from './bridge.ts';
-import { checkForUpdates, startUpdater } from './updater.ts';
+import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSnapshot } from './updater.ts';
 
 const PORT = Number(process.env.PORT ?? 4320);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -229,10 +229,10 @@ function isRect(value: unknown): value is Rect {
   return Boolean(r) && [r!.x, r!.y, r!.width, r!.height].every(n => typeof n === 'number' && Number.isFinite(n));
 }
 
-/** The page's controls for browser tabs (web/browser.ts). Only the app window may call them. */
+/** The bridge behind window.agentscodeDesktop.browser (web/browser.ts). Only the AgentsCode page may call it. */
 function registerBrowserIpc(): void {
-  ipcMain.handle('browser', async (event, op: unknown, raw: unknown) => {
-    if (!window || event.sender !== window.webContents) throw new Error('Not allowed.');
+  ipcMain.handle('browser:call', async (event, op: unknown, raw: unknown) => {
+    if (!window || event.sender !== window.webContents || !fromApp(event)) throw new Error('Not allowed.');
     const args = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const id = typeof args.id === 'string' ? args.id : '';
     try {
@@ -279,7 +279,8 @@ function showWindow(): void {
     // The page leaves room for them and drags the window by its headers (the `desktop` variant).
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 16, y: 13 } } : {}),
     show: false,
-    // window.agentscode (the integrated browser's controls); browser tabs never get it.
+    // window.agentscodeDesktop: the update row and the integrated browser's controls
+    // (electron/preload.cts). Browser tabs never get a preload.
     webPreferences: { preload: path.join(import.meta.dirname, 'preload.cjs') },
   });
   const opened = window;
@@ -322,6 +323,22 @@ function showWindow(): void {
   void window.loadURL(ORIGIN);
 }
 
+/** Only the AgentsCode page itself may use the desktop bridge. */
+function fromApp(event: IpcMainInvokeEvent): boolean {
+  try {
+    return new URL(event.senderFrame?.url ?? '').origin === ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+/** The bridge behind window.agentscodeDesktop.updates (electron/preload.cts). */
+function serveUpdates(): void {
+  ipcMain.handle('updates:get', event => (fromApp(event) ? updateSnapshot() : null));
+  ipcMain.handle('updates:install', event => (fromApp(event) ? installUpdate() : undefined));
+  onUpdateChange(snapshot => window?.webContents.send('updates:changed', snapshot));
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -341,6 +358,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   void app.whenReady().then(async () => {
     setMenu();
+    serveUpdates();
     if (app.isPackaged) useLoginShellPath();
     // A packaged app gets its icon from the bundle; running from source would show Electron's.
     else app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));

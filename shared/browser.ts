@@ -226,3 +226,9 @@ export type BrowserEvent =
   | { type: 'focus'; id: string }
   /** Cmd+L inside a browser view: put the caret in that tab's address bar. */
   | { type: 'focus-address'; id: string };
+
+/** What the preload script puts on `window.agentscodeDesktop.browser` (electron/preload.cts). */
+export interface DesktopBrowser {
+  call(op: string, args?: unknown): Promise<unknown>;
+  onEvent(callback: (event: BrowserEvent) => void): () => void;
+}

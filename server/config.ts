@@ -15,6 +15,10 @@ const desktopNode = takeEnv('AGENTSCODE_NODE');
 
 export const PORT = Number(process.env.PORT ?? 4320);
 export const HOST = '127.0.0.1';
+/** The Vite dev server's port (vite.config.ts), whose pages call the API through its proxy during `npm run dev`. */
+export const DEV_WEB_PORT = 5174;
+/** Set by the desktop app when it starts this server itself; then no dev page is expected. */
+export const IN_DESKTOP_APP = Boolean(process.env.AGENTSCODE_NODE);
 export const DATA_DIR = process.env.AGENTSCODE_HOME ?? path.join(os.homedir(), '.agentscode');
 export const ROOT_DIR = path.resolve(import.meta.dirname, '..');
 export const DIST_DIR = path.join(ROOT_DIR, 'dist');

@@ -7,7 +7,7 @@
  * never navigated does not answer).
  */
 import type { WebContents } from 'electron';
-import { formatAXTree, keyEvent, PRESSABLE_KEYS, type AXNode } from '../shared/browserPolicy.ts';
+import { formatAXTree, keyEvent, PRESSABLE_KEYS, type AXNode } from '../shared/browser.ts';
 import { BrowserError } from './browserError.ts';
 
 const EVAL_LIMIT = 20_000;

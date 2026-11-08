@@ -1,21 +1,16 @@
 /**
  * The page's side of the integrated browser. In the desktop app, main draws each browser tab as
  * a native view over its pane (electron/browser.ts); this module talks to it through the preload
- * (`window.agentscode.browser`), keeps each tab's live state for BrowserPane, and keeps main's
+ * (`window.agentscodeDesktop.browser`), keeps each tab's live state for BrowserPane, and keeps main's
  * tabs and the layout's tabs in step. In a plain browser there is no native view: BrowserPane
  * falls back to an iframe for localhost pages.
  */
 import { useSyncExternalStore } from 'react';
-import { normalizeAddress, type BrowserEvent, type BrowserTabState } from '../shared/browserPolicy.ts';
+import { normalizeAddress, type BrowserEvent, type BrowserTabState, type DesktopBrowser } from '../shared/browser.ts';
 import { addTab, closeTab, focusPane, getLayout, open, openToSide, subscribeLayout, updateBrowserTab } from './layout.ts';
 import { runShortcut } from './shortcuts.ts';
 
-interface NativeBrowser {
-  call(op: string, args?: unknown): Promise<unknown>;
-  onEvent(listener: (event: BrowserEvent) => void): () => void;
-}
-
-const native = (window as unknown as { agentscode?: { browser?: NativeBrowser } }).agentscode?.browser;
+const native = (window as unknown as { agentscodeDesktop?: { browser?: DesktopBrowser } }).agentscodeDesktop?.browser;
 
 /** True in the desktop app, where browser tabs are real browser views. */
 export const HAS_NATIVE_BROWSER = Boolean(native);
