@@ -64,6 +64,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
   });
 }
 
+/** `name` in `dir`, or "name (2).ext" and so on when that is taken, as browsers save downloads. */
+export function freePath(dir: string, name: string, exists: (file: string) => boolean = fs.existsSync): string {
+  const ext = path.extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  let file = path.join(dir, name);
+  for (let n = 2; exists(file) && n < 1000; n++) file = path.join(dir, `${stem} (${n})${ext}`);
+  return file;
+}
+
 /** A PNG's width and height, from its IHDR chunk. */
 function pngSize(png: Buffer): { width: number; height: number } {
   return png.length > 24 ? { width: png.readUInt32BE(16), height: png.readUInt32BE(20) } : { width: 0, height: 0 };
@@ -104,7 +113,7 @@ export class BrowserHost {
       s.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
       s.setPermissionCheckHandler(() => false);
       s.on('will-download', (_event, item) => {
-        item.setSavePath(path.join(os.homedir(), 'Downloads', path.basename(item.getFilename()) || 'download'));
+        item.setSavePath(freePath(path.join(os.homedir(), 'Downloads'), path.basename(item.getFilename()) || 'download'));
       });
       s.webRequest.onErrorOccurred(details => {
         if (details.error === 'net::ERR_ABORTED' || details.webContentsId === undefined) return;
