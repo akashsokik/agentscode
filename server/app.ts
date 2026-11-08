@@ -7,6 +7,7 @@ import type { Hub } from './hub.ts';
 import type { WorktreeCleanup } from '../shared/types.ts';
 import { DEV_WEB_PORT, IN_DESKTOP_APP, PORT } from './config.ts';
 import { HttpError } from './errors.ts';
+import { BRIDGE_HEADER, bridgeTokenMatches } from './browserBridge.ts';
 import type { AgentManager } from './manager.ts';
 import { listProjectFiles } from './fileList.ts';
 import { listDirs, normalizeDir } from './projects.ts';
@@ -120,6 +121,9 @@ export function createApp(
   });
   app.get('/api/agents/:id/attachments/:file', (req, res) => {
     sendStoredImage(res, manager.attachmentFile(param(req, 'id'), param(req, 'file')));
+  });
+  app.get('/api/agents/:id/browser-shots/:file', (req, res) => {
+    sendStoredImage(res, manager.browserShot(param(req, 'id'), param(req, 'file')));
   });
   app.get('/api/agents/:id/walkthroughs', (req, res) => {
     res.json(manager.walkthroughs(param(req, 'id')));
@@ -335,7 +339,7 @@ export function createApp(
  * snapshot on connect and live events after, and one socket per terminal. The caller decides
  * where to listen. Closing the server ends its terminals.
  */
-export function createServer(manager: AgentManager, hub: Hub, options: { distDir?: string; terminals?: Terminals } = {}): http.Server {
+export function createServer(manager: AgentManager, hub: Hub, options: { distDir?: string; terminals?: Terminals; bridgeToken?: string } = {}): http.Server {
   const terminals = options.terminals ?? new Terminals(id => manager.project(id));
   terminals.onChange(list => hub.broadcast({ type: 'terminals', terminals: list }));
   const app = createApp(manager, terminals);
@@ -357,8 +361,26 @@ export function createServer(manager: AgentManager, hub: Hub, options: { distDir
   const wss = new WebSocketServer({ noServer: true });
   // A terminal socket carries keystrokes into a shell, so it gets the same localhost guard.
   const terminalWss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });
+  // The desktop app's main process, when it attached to a server it did not start (server/browserBridge.ts).
+  const bridgeWss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });
   server.on('upgrade', (req, socket, head) => {
     const { pathname } = new URL(req.url ?? '/', 'http://localhost');
+    if (pathname === '/browser-bridge') {
+      // Main sends no Origin; a web page always does, so one with an Origin is never the bridge.
+      if (!options.bridgeToken || !isLocalHost(req.headers.host) || req.headers.origin !== undefined || !bridgeTokenMatches(options.bridgeToken, req.headers[BRIDGE_HEADER])) {
+        socket.destroy();
+        return;
+      }
+      bridgeWss.handleUpgrade(req, socket, head, ws => {
+        const transport = { send: (message: object) => ws.send(JSON.stringify(message)) };
+        const detach = manager.browser.connect(transport);
+        ws.on('message', data => {
+          try { manager.browser.receive(JSON.parse(String(data)), transport); } catch { /* not JSON: ignore */ }
+        });
+        ws.on('close', detach);
+      });
+      return;
+    }
     const terminalId = /^\/ws\/terminal\/([\w-]{1,64})$/.exec(pathname)?.[1];
     if ((pathname !== '/ws' && !terminalId) || !isLocalHost(req.headers.host) || !isLocalOrigin(req.headers.origin)) {
       socket.destroy();
@@ -382,9 +404,10 @@ export function createServer(manager: AgentManager, hub: Hub, options: { distDir
   server.on('close', () => {
     clearInterval(ping);
     terminals.closeAll();
-    for (const ws of [...wss.clients, ...terminalWss.clients]) ws.terminate();
+    for (const ws of [...wss.clients, ...terminalWss.clients, ...bridgeWss.clients]) ws.terminate();
     wss.close();
     terminalWss.close();
+    bridgeWss.close();
   });
   return server;
 }

@@ -39,6 +39,25 @@ export interface ToolShown {
   description?: string;
 }
 
+/** How each browser tool call leads its row. */
+const BROWSER_ACTIONS: Record<string, string> = {
+  open: 'Opened', list: 'Listed tabs', close: 'Closed tab', snapshot: 'Read page', screenshot: 'Screenshot',
+  console: 'Console', click: 'Clicked', type: 'Typed', press: 'Pressed', eval: 'Ran script',
+};
+
+/** The file a successful browser_screenshot saved, from its result; null otherwise. */
+export function browserScreenshot(tool: ToolCall): string | null {
+  if (!/(?:^mcp__agentscode__|^agentscode\.)browser_screenshot$/.test(tool.name) || tool.status !== 'ok' || !tool.output) return null;
+  const start = tool.output.indexOf('{');
+  try {
+    const shot = JSON.parse(tool.output.slice(start)) as { path?: unknown };
+    const file = typeof shot.path === 'string' ? shot.path.split(/[\\/]/).pop() ?? '' : '';
+    return /^[\w-]+\.png$/.test(file) ? file : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Splits a shell word list the way POSIX shells do; undefined when a quote or escape is left open. */
 export function shellWords(text: string): string[] | undefined {
   const words: string[] = [];
@@ -348,6 +367,8 @@ export function presentTool(tool: ToolCall): ToolShown {
     case 'Plan': return { action: 'Plan', target };
     default: {
       const name = tool.name;
+      const browserOp = name.match(/(?:^mcp__agentscode__|^agentscode\.)browser_(\w+)$/)?.[1];
+      if (browserOp) return { action: BROWSER_ACTIONS[browserOp] ?? 'Browser', target: /^(mcp__|agentscode\.)/.test(target) ? '' : target };
       const channelTool = name.match(/(?:^mcp__agentscode__|^agentscode\.)(post_to_channel|read_channel|list_channels)$/)?.[1];
       if (channelTool) {
         const action = channelTool === 'post_to_channel' ? 'Posted' : channelTool === 'read_channel' ? 'Read channel' : 'Listed channels';

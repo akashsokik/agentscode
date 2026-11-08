@@ -61,8 +61,24 @@ export function toolActivity(name: string, input: Input): string {
   }
 }
 
+const BROWSER_TOOL = /(?:^mcp__agentscode__|^agentscode\.)browser_(\w+)$/;
+
+/** A browser tool call in a few words: the page it opened, the ref it clicked, the key it pressed. */
+export function browserSummary(op: string, input: Input): string {
+  switch (op) {
+    case 'open': return clip(str(input.url).replace(/^https?:\/\//, ''), 120);
+    case 'click': return str(input.ref);
+    case 'type': return clip(`${str(input.ref)} "${str(input.text)}"${input.submit ? ' and Enter' : ''}`, 120);
+    case 'press': return str(input.key);
+    case 'eval': return clip(str(input.expression), 120);
+    default: return str(input.tab_id);
+  }
+}
+
 /** One line for the chat transcript. */
 export function toolSummary(name: string, input: Input, cwd?: string): string {
+  const browser = BROWSER_TOOL.exec(name)?.[1];
+  if (browser) return browserSummary(browser, input);
   switch (name) {
     case 'Bash':
       return clip(relativize(str(input.command), cwd), 160);
@@ -183,6 +199,7 @@ export function resultSummary(name: string, output: string): string | undefined 
 /** The summary for a teammate-comms call made by Codex, whose items carry the server, tool and arguments. */
 export function mcpSummary(server: string, tool: string, args: Input, output: string): string {
   const name = `mcp__${server}__${tool}`;
+  if (server === COMMS_SERVER && tool.startsWith('browser_')) return browserSummary(tool.slice('browser_'.length), args);
   if (server !== COMMS_SERVER || (tool !== 'remember' && tool !== 'forget')) return `${server}.${tool}`;
   const summary = resultSummary(name, output) ?? toolSummary(name, args);
   // Without the text (an item shaped differently than expected), the tool name says more.

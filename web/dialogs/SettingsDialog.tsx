@@ -56,6 +56,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <Row label="Start tasks with a team snapshot" description="Agents see who is working on what before they begin.">
             <Toggle label="Start tasks with a team snapshot" on={settings.autoTeamContext} onChange={autoTeamContext => void save({ autoTeamContext })} />
           </Row>
+          <Row label="Browser scripts" description="Let agents run their own JavaScript in their browser tabs (browser_eval). Plan-only agents never can.">
+            <Toggle label="Browser scripts" on={settings.browserEval} onChange={browserEval => void save({ browserEval })} />
+          </Row>
         </Group>
 
         <Group

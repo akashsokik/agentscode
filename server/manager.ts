@@ -53,7 +53,7 @@ import { Attachments } from './attachments.ts';
 import { ScopedRunner, type ExecutionContext } from './agents/scoped.ts';
 import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
-import { COMMS_TOOLS, walkthroughInput, delegationInput, forgetInput, postInput, readChannelInput, rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool } from './comms/tools.ts';
+import { BROWSER_TOOLS, browserInputs, COMMS_TOOLS, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput, rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool } from './comms/tools.ts';
 import { IDLE_PROCESS_MS } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { HttpError } from './errors.ts';
@@ -62,6 +62,7 @@ import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, empt
 import { gitRun, isDirectory, isInsideGitRepo, normalizeDir } from './projects.ts';
 import { locate, type Place } from './whereabouts.ts';
 import { openuiGuide } from './openuiGuide.ts';
+import { BrowserBridge, BROWSER_WRITE_OPS, browsableUrl, type BrowserOp } from './browserBridge.ts';
 import { createWalkthrough, deleteWalkthrough, listWalkthroughs, readWalkthrough, summaryOf, walkthroughImage, walkthroughMarkdown, type StepRoot } from './walkthroughs.ts';
 import type { Store } from './store.ts';
 import { createWorktree, removeWorktree } from './worktrees.ts';
@@ -114,6 +115,8 @@ export interface ManagerOptions {
   dreamEngine?: DreamEngine;
   /** How long an idle agent's process stays open (and when the idle dream may run). */
   idleProcessMs?: number;
+  /** The bridge to the desktop app's browser; tests pass one wired to a fake. */
+  browser?: BrowserBridge;
 }
 
 /** Longest model id kept; OrcaCode's `provider::vendor/model:variant` ids run long. */
@@ -156,6 +159,9 @@ export class AgentManager {
   private processCost = new Map<string, number>();
   private shuttingDown = false;
 
+  /** The desktop app's browser, for agents' browser_* tools (server/browserBridge.ts). */
+  readonly browser: BrowserBridge;
+
   constructor(store: Store, hub: Broadcaster, engines: Record<EngineKind, EngineInfo>, options: ManagerOptions = {}) {
     this.store = store;
     this.hub = hub;
@@ -166,6 +172,7 @@ export class AgentManager {
     this.homes = new AgentHomes(path.join(store.dataDir, 'agents'));
     this.createRunner = options.createRunner ?? (ctx => createEngineRunner(ctx));
     this.idleProcessMs = options.idleProcessMs ?? IDLE_PROCESS_MS;
+    this.browser = options.browser ?? new BrowserBridge();
     this.dreamer = new Dreamer({
       homes: this.homes,
       agent: id => this.store.agents.get(id),
@@ -481,6 +488,7 @@ export class AgentManager {
     // If removal fails (e.g. uncommitted changes without "discard"), the agent stays.
     if (cleanup !== 'keep' && agent.worktree) await removeWorktree(agent.worktree, cleanup === 'discard');
     this.channels.agentRemoved(id);
+    this.browser.agentRemoved(id);
     this.mailbox.forget(id);
     this.store.agents.delete(id);
     this.store.deleteTranscript(id);
@@ -760,6 +768,7 @@ export class AgentManager {
       }, parsed.data);
       return { created: summaryOf(walkthrough), folder: path.join(this.walkthroughDir(agent.id), walkthrough.id), note: 'The user can open it from your transcript in AgentsCode.' };
     }
+    if (BROWSER_TOOLS.includes(tool as BrowserTool)) return this.browserTool(agent, tool as BrowserTool, args);
     if (agent.autonomy === 'readonly' && (tool === 'send_message' || tool === 'delegate_task' || (tool === 'reply' && args.expects_reply === true))) {
       throw new HttpError(403, 'Plan-only agents can reply with findings, but need the user\'s approval before sending work to teammates.');
     }
@@ -1150,6 +1159,45 @@ export class AgentManager {
     }
   }
 
+  // ---- browser ------------------------------------------------------------
+
+  /** One browser_* call: check it here (plan-only, the scripts setting, the URL), then ask the desktop app. */
+  private async browserTool(agent: Agent, tool: BrowserTool, args: Record<string, unknown>): Promise<unknown> {
+    const parsed = browserInputs[tool].safeParse(args);
+    if (!parsed.success) throw new HttpError(400, `Check the ${tool} arguments: ${parsed.error.issues.slice(0, 3).map(i => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ')}`);
+    const op = tool.slice('browser_'.length) as BrowserOp;
+    const input: Record<string, unknown> = { ...parsed.data };
+    if (agent.autonomy === 'readonly' && BROWSER_WRITE_OPS.includes(op)) {
+      throw new HttpError(403, 'Plan-only agents can open, read, screenshot and check the console of pages, but not click, type, press keys, close tabs or run scripts.');
+    }
+    if (op === 'eval' && !this.store.settings.browserEval) {
+      throw new HttpError(403, 'Running scripts in pages is off. The user can turn on Browser scripts in Settings; until then use browser_snapshot and browser_console.');
+    }
+    if (op === 'open') {
+      const url = browsableUrl(String(input.url));
+      if (!url) throw new HttpError(400, 'Only http and https pages can be opened.');
+      input.url = url;
+    }
+    if (op === 'screenshot') {
+      const dir = path.join(this.homes.path(agent.id), 'browser');
+      fs.mkdirSync(dir, { recursive: true });
+      input.path = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${String(input.tab_id).replace(/[^\w-]/g, '')}.png`);
+    }
+    try {
+      return await this.browser.request(agent.id, op, input);
+    } catch (error) {
+      throw new HttpError(409, (error as Error).message);
+    }
+  }
+
+  /** A screenshot browser_screenshot saved in the agent's folder, for the transcript thumbnail. */
+  browserShot(agentId: string, file: string): { path: string; mediaType: ImageAttachment['mediaType'] } {
+    if (!/^[\w-]+\.png$/.test(file)) throw new HttpError(404, 'No such screenshot.');
+    const full = path.join(this.homes.path(this.agent(agentId).id), 'browser', file);
+    if (!fs.existsSync(full)) throw new HttpError(404, 'No such screenshot.');
+    return { path: full, mediaType: 'image/png' };
+  }
+
   // ---- walkthroughs --------------------------------------------------------
 
   private walkthroughDir(agentId: string): string {
@@ -1452,7 +1500,7 @@ export class AgentManager {
 
   updateSettings(input: Partial<Settings>): Settings {
     if (input.awareness !== undefined && !['off', 'project', 'all'].includes(input.awareness)) throw new HttpError(400, 'Choose Off, Same project or All projects.');
-    for (const key of ['shareActivity', 'autoTeamContext'] as const) {
+    for (const key of ['shareActivity', 'autoTeamContext', 'browserEval'] as const) {
       if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new HttpError(400, 'Toggles must be true or false.');
     }
     if (input.messageLimit !== undefined && (!Number.isSafeInteger(input.messageLimit) || input.messageLimit < 0)) {
@@ -1463,6 +1511,7 @@ export class AgentManager {
     if (input.awareness !== undefined) settings.awareness = input.awareness;
     if (input.shareActivity !== undefined) settings.shareActivity = input.shareActivity;
     if (input.autoTeamContext !== undefined) settings.autoTeamContext = input.autoTeamContext;
+    if (input.browserEval !== undefined) settings.browserEval = input.browserEval;
     this.store.save();
     this.hub.broadcast({ type: 'settings', settings });
     return settings;
