@@ -37,6 +37,8 @@ export const REVERT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** A session ends at a new session or after this long without activity, for both groups alike. */
 export const SESSION_GAP_MS = 60 * 60 * 1000;
 export const DREAM_TIMEOUT_MS = 5 * 60 * 1000;
+/** The abort reason when a dream runs past DREAM_TIMEOUT_MS; any other abort means it was stopped on purpose. */
+export const DREAM_TIMED_OUT = 'timeout';
 const SERIES = 30;
 
 // ---- the engine ------------------------------------------------------------------------
@@ -55,6 +57,11 @@ export interface DreamEngineResult {
 }
 /** One model call with no tools: the prompt in, the reply text out. The offline eval passes its own. */
 export type DreamEngine = (request: DreamEngineRequest) => Promise<DreamEngineResult>;
+
+/** Why an aborted engine call stopped, in words for the record (not the CLI's own "aborted by user"). */
+export function abortedMessage(signal: AbortSignal): string {
+  return signal.reason === DREAM_TIMED_OUT ? 'The dream took too long and was stopped.' : 'The dream was stopped before it finished.';
+}
 
 // ---- the digest --------------------------------------------------------------------------
 
@@ -1040,7 +1047,7 @@ export class Dreamer {
     return false;
   }
 
-  /** Stop dreams in flight (AgentsCode is closing, or the agent is removed). */
+  /** Stop dreams in flight (AgentsCode is closing, the agent is removed or dreaming is turned off). They record nothing. */
   abort(agentId?: string): void {
     for (const [id, controller] of this.running) if (!agentId || id === agentId) controller.abort();
   }
@@ -1051,7 +1058,7 @@ export class Dreamer {
     const lock = this.file(agent, '.dream.lock');
     const controller = new AbortController();
     this.running.set(agent.id, controller);
-    const timer = setTimeout(() => controller.abort(), DREAM_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(DREAM_TIMED_OUT), DREAM_TIMEOUT_MS);
     timer.unref();
     const state = this.state(agent);
     try {
@@ -1059,8 +1066,10 @@ export class Dreamer {
         homes, agent, entries: this.host.entries(agent.id), engine: this.host.engine, reason, state,
         signal: controller.signal, stillThere: () => this.host.agent(agent.id) === agent && agent.dreaming, now: () => this.now(),
       });
-      // The agent was removed, or dreaming was turned off, while the model thought: write nothing.
+      // The agent was removed, dreaming was turned off, or AgentsCode is closing while the model
+      // thought: write nothing, so the next dream reads the same session instead of logging a failure.
       if (!outcome || this.host.agent(agent.id) !== agent || !agent.dreaming) return null;
+      if (controller.signal.aborted && controller.signal.reason !== DREAM_TIMED_OUT) return null;
       const { record, digest, applied, proposal, memoryHash } = outcome;
       saveRecord(homes, agent, { ...record, memoryHash });
       fs.appendFileSync(this.file(agent, 'dreams.md'), renderDream(record));
@@ -1253,13 +1262,20 @@ export function claudeDreamEngine(binPath: string | null, queryFn: typeof query 
         pathToClaudeCodeExecutable: binPath ?? undefined,
       },
     });
-    for await (const message of q) {
-      if (message.type !== 'result') continue;
-      if (message.subtype !== 'success' || message.is_error) throw new Error(message.subtype === 'success' ? message.result : message.errors.join('\n') || message.subtype);
-      const u = message.usage;
-      const tokens = (u?.input_tokens ?? 0) + (u?.output_tokens ?? 0) + (u?.cache_read_input_tokens ?? 0) + (u?.cache_creation_input_tokens ?? 0);
-      return { text: message.result, tokens: tokens || undefined, costUsd: message.total_cost_usd };
+    try {
+      for await (const message of q) {
+        if (message.type !== 'result') continue;
+        if (message.subtype !== 'success' || message.is_error) throw new Error(message.subtype === 'success' ? message.result : message.errors.join('\n') || message.subtype);
+        const u = message.usage;
+        const tokens = (u?.input_tokens ?? 0) + (u?.output_tokens ?? 0) + (u?.cache_read_input_tokens ?? 0) + (u?.cache_creation_input_tokens ?? 0);
+        return { text: message.result, tokens: tokens || undefined, costUsd: message.total_cost_usd };
+      }
+    } catch (err) {
+      // The SDK reports any abort as "Claude Code process aborted by user"; say what really stopped it.
+      if (signal.aborted) throw new Error(abortedMessage(signal));
+      throw err;
     }
+    if (signal.aborted) throw new Error(abortedMessage(signal));
     throw new Error('Claude ended without a reply.');
   };
 }
@@ -1287,7 +1303,7 @@ export function codexDreamEngine(binPath: string | null): DreamEngine {
     child.on('error', reject);
     child.on('close', code => {
       signal.removeEventListener('abort', kill);
-      if (signal.aborted) return reject(new Error('The dream took too long and was stopped.'));
+      if (signal.aborted) return reject(new Error(abortedMessage(signal)));
       if (code !== 0 || !text) return reject(new Error(clip(stderr || `codex exited with code ${code}`, 300)));
       resolve({ text, tokens });
     });
@@ -1325,7 +1341,7 @@ export function orcacodeDreamEngine(binPath: string | null): DreamEngine {
     child.on('error', reject);
     child.on('close', code => {
       signal.removeEventListener('abort', kill);
-      if (signal.aborted) return reject(new Error('The dream took too long and was stopped.'));
+      if (signal.aborted) return reject(new Error(abortedMessage(signal)));
       if (code !== 0 || !text) return reject(new Error(clip(stderr || `orcacode exited with code ${code}`, 300)));
       resolve({ text, tokens, costUsd });
     });

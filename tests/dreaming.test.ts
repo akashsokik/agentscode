@@ -7,6 +7,7 @@ import type { Agent, DreamRecord, Entry, MemoryEntry, ServerEvent } from '../sha
 import { AgentHomes, MEMORY_LIMIT, renderMemory } from '../server/agentHome.ts';
 import { createApp } from '../server/app.ts';
 import {
+  abortedMessage, DREAM_TIMED_OUT,
   applyDream, buildDigest, defaultDreamEngine, dream, Dreamer, dreamLine, dreamPrompt, dreamStats, isApproval, judgeCorrections, mentions,
   parseDreamReply, readRecords, removedTooMuch, sessionCounts, soulChange, soulProblem, trustedEvidence, type DreamReply, type Revert,
 } from '../server/dream.ts';
@@ -1002,6 +1003,32 @@ test('turning dreaming off stops a dream that is thinking, and it writes nothing
   assert.equal(aborted, true, 'the model call was stopped');
   assert.equal(h.manager.dreams(ada.id).dreams.length, 0, 'no record');
   assert.ok(!h.manager.entries(ada.id).some(e => e.text.startsWith('Dreamed:')));
+});
+
+test('a dream stopped because AgentsCode is closing records no failure', async () => {
+  const h = harness();
+  const project = h.manager.addProject({ path: projectDir(h.dir, 'app') });
+  const ada = await h.manager.create({ name: 'Ada', engine: 'claude', projectId: project.id });
+  await workedSession(h, ada.id, [{ ask: 'No, never do that.', answer: 'OK.' }]);
+  // Like the Claude SDK: any abort rejects with "aborted by user".
+  (h.manager as unknown as { dreamer: { host: { engine: unknown } } }).dreamer.host.engine = ({ signal }: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new Error('Claude Code process aborted by user')));
+  });
+  const running = h.manager.dreamNow(ada.id);
+  await settle();
+  (h.manager as unknown as { dreamer: { abort(id?: string): void } }).dreamer.abort();
+  assert.equal(await running, null);
+  assert.equal(h.manager.dreams(ada.id).dreams.length, 0, 'no failed record');
+  assert.ok(!h.manager.entries(ada.id).some(e => e.text.startsWith('Dreamed:')), 'no "Dreamed: failed" line');
+});
+
+test('an aborted dream says why it stopped, not the CLI abort text', () => {
+  const timedOut = new AbortController();
+  timedOut.abort(DREAM_TIMED_OUT);
+  assert.equal(abortedMessage(timedOut.signal), 'The dream took too long and was stopped.');
+  const stopped = new AbortController();
+  stopped.abort();
+  assert.equal(abortedMessage(stopped.signal), 'The dream was stopped before it finished.');
 });
 
 test('removing an agent mid-dream writes nothing back into its deleted home', async () => {
