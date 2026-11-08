@@ -99,6 +99,7 @@ export class ScopedRunner implements Runner {
           session: id => { if (live()) hooks.session(id); },
           entry: entry => { if (live() && this.current && !this.ended) hooks.entry(entry); },
           activity: text => { if (live() && this.current && !this.ended) hooks.activity(text); },
+          touched: paths => { if (live() && this.current && !this.ended) hooks.touched?.(paths); },
           turnStart: task => { if (live()) hooks.turnStart(task); },
           turnEnd: result => { if (live()) this.finish(result); },
           context: reading => { if (live()) hooks.context?.(reading); },

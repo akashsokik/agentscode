@@ -81,8 +81,17 @@ validations through built-in messaging tools, and every exchange is visible in *
 
 ### Download
 
-Get the app for your platform from [orcapods.ai/agentscode](https://orcapods.ai/agentscode) or the
-[latest release](https://github.com/akashsokik/agentscode/releases/latest):
+On a Mac, install from Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/akashsokik/agentscode/main/install.sh | bash
+```
+
+It picks the Apple silicon or Intel build, checks it against the release's `SHA256SUMS`, puts it in
+`/Applications` and opens it. Run it again to update (quit AgentsCode first).
+
+Or get the app for your platform from [orcapods.ai/agentscode](https://orcapods.ai/agentscode) or
+the [latest release](https://github.com/akashsokik/agentscode/releases/latest):
 
 | Platform | File |
 | :-- | :-- |
@@ -101,9 +110,12 @@ and the Help menu on Windows and Linux.
   answers on port 4320 (for example `npm run dev`), the window opens on that one instead, so two
   servers never share `~/.agentscode`.
 - Quitting the app stops its agents. Closing the window keeps them working.
-- **macOS:** until releases are signed with a Developer ID, the first launch shows "Apple could not
-  verify AgentsCode". Open **System Settings > Privacy & Security** and choose **Open Anyway**. An
-  unsigned Mac build tells you about a new version and opens its download instead of installing it.
+- **macOS:** releases are not signed with a Developer ID yet. The install command above opens the
+  app directly, because macOS only checks apps downloaded in a browser. A DMG downloaded in a browser
+  is blocked the first time with "Apple could not verify AgentsCode": click **Done**, open
+  **System Settings > Privacy & Security**, scroll down to **Security**, click **Open Anyway** and
+  enter your password. An unsigned Mac build doesn't install updates itself: it tells you about a
+  new version and gives you the install command to run.
 - **Windows:** the installer is not code-signed yet, so SmartScreen may ask you to confirm
   (**More info > Run anyway**).
 - **Linux:** make the AppImage executable (`chmod +x AgentsCode-linux-x86_64.AppImage`) and run it.

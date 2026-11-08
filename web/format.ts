@@ -28,6 +28,13 @@ export function cost(usd: number | undefined): string {
 }
 
 /** "Ada", "Ada and Bo", "Ada, Bo and Cy". */
+/** A token count at a glance: 950, 12.4k, 3.1M. */
+export function tokenCount(n: number): string {
+  if (n < 1000) return String(Math.max(0, Math.round(n)));
+  if (n < 999_500) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`;
+  return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0).replace(/\.0$/, '')}M`;
+}
+
 export function joinNames(names: string[]): string {
   return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] ?? '';
 }

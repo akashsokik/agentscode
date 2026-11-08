@@ -53,13 +53,16 @@ import { Attachments } from './attachments.ts';
 import { ScopedRunner, type ExecutionContext } from './agents/scoped.ts';
 import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
-import { COMMS_TOOLS, delegationInput, forgetInput, postInput, readChannelInput, rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool } from './comms/tools.ts';
+import { COMMS_TOOLS, walkthroughInput, delegationInput, forgetInput, postInput, readChannelInput, rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool } from './comms/tools.ts';
 import { IDLE_PROCESS_MS } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { HttpError } from './errors.ts';
 import type { Broadcaster } from './hub.ts';
 import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, emptyModels } from './models.ts';
-import { isDirectory, isInsideGitRepo, normalizeDir } from './projects.ts';
+import { gitRun, isDirectory, isInsideGitRepo, normalizeDir } from './projects.ts';
+import { locate, type Place } from './whereabouts.ts';
+import { openuiGuide } from './openuiGuide.ts';
+import { createWalkthrough, deleteWalkthrough, listWalkthroughs, readWalkthrough, summaryOf, walkthroughImage, walkthroughMarkdown, type StepRoot } from './walkthroughs.ts';
 import type { Store } from './store.ts';
 import { createWorktree, removeWorktree } from './worktrees.ts';
 
@@ -704,6 +707,7 @@ export class AgentManager {
     if (tool === 'read_messages') return this.mailbox.history(id);
     if (tool === 'list_delegations') return this.mailbox.delegations(id);
     if (tool === 'list_channels') return this.channels.forAgent(id);
+    if (tool === 'openui_guide') return { guide: openuiGuide() };
     if (tool === 'read_channel') {
       const parsed = readChannelInput.safeParse(args);
       if (!parsed.success) throw new HttpError(400, 'Provide a channel id or name, and a limit from 1 to 100.');
@@ -740,6 +744,21 @@ export class AgentManager {
       this.publishMemory(agent.id, entries);
       this.sawOwnMemory(agent, before, entries);
       return { forgot: entry };
+    }
+    // A walkthrough only describes work, so plan-only agents may make one too.
+    if (tool === 'create_walkthrough') {
+      const parsed = walkthroughInput.safeParse(args);
+      if (!parsed.success) throw new HttpError(400, `Give a title, a summary and 1 to 30 steps, each with a kind and a title. ${parsed.error.issues.slice(0, 3).map(i => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
+      const walkthrough = await createWalkthrough({
+        agentId: agent.id,
+        agentName: agent.name,
+        dir: this.walkthroughDir(agent.id),
+        cwd: this.cwdOf(agent),
+        home: os.homedir(),
+        rootOf: (target) => this.stepRoot(agent, target),
+        fallback: { projectId: agent.workingIn?.projectId ?? agent.projectId, root: agent.workingIn?.root ?? null, branch: agent.workingIn?.branch ?? null },
+      }, parsed.data);
+      return { created: summaryOf(walkthrough), folder: path.join(this.walkthroughDir(agent.id), walkthrough.id), note: 'The user can open it from your transcript in AgentsCode.' };
     }
     if (agent.autonomy === 'readonly' && (tool === 'send_message' || tool === 'delegate_task' || (tool === 'reply' && args.expects_reply === true))) {
       throw new HttpError(403, 'Plan-only agents can reply with findings, but need the user\'s approval before sending work to teammates.');
@@ -1017,6 +1036,7 @@ export class AgentManager {
         agent.activity = text;
         this.hub.broadcast({ type: 'agent', agent });
       },
+      touched: (paths) => this.noteWhereabouts(agentId, paths),
       turnStart: (task) => {
         const agent = live();
         if (!agent) return;
@@ -1033,6 +1053,7 @@ export class AgentManager {
         agent.turnStartedAt = Date.now();
         agent.lastActiveAt = agent.turnStartedAt;
         agent.error = null;
+        this.seedWhereabouts(agent);
         this.emitAgent(agent);
       },
       turnEnd: (result) => this.onTurnEnd(agentId, result),
@@ -1129,9 +1150,150 @@ export class AgentManager {
     }
   }
 
+  // ---- walkthroughs --------------------------------------------------------
+
+  private walkthroughDir(agentId: string): string {
+    return path.join(this.homes.path(agentId), 'walkthroughs');
+  }
+
+  /** The folder a walkthrough step's file is in, and how the viewer opens it: a project, a worktree, or the agent's own workspace. */
+  private stepRoot(agent: Agent, target: string): StepRoot | null {
+    const real = (dir: string): string | null => { try { return fs.realpathSync(dir); } catch { return null; } };
+    const inside = (dir: string) => target === dir || target.startsWith(dir + path.sep);
+    const place = locate(target, this.places());
+    if (place?.agentId) {
+      // A worktree opens through its agent, whose workspace is the worktree's cwd.
+      const owner = this.store.agents.get(place.agentId);
+      const cwd = owner?.worktree ? real(owner.worktree.cwd) : null;
+      return cwd && inside(cwd) ? { root: cwd, open: { agent: place.agentId }, projectId: place.projectId } : { root: place.root, open: null, projectId: place.projectId };
+    }
+    if (place) return { root: place.root, open: { project: place.projectId }, projectId: place.projectId };
+    const own = real(this.workspaceOf(agent.id).root);
+    if (own && inside(own)) return { root: own, open: { agent: agent.id }, projectId: agent.projectId };
+    const home = real(this.homes.path(agent.id));
+    if (home && inside(home)) return { root: home, open: null, projectId: null };
+    return null;
+  }
+
+  walkthroughs(agentId: string) {
+    return listWalkthroughs(this.walkthroughDir(this.agent(agentId).id));
+  }
+
+  walkthrough(agentId: string, id: string) {
+    return readWalkthrough(this.walkthroughDir(this.agent(agentId).id), id);
+  }
+
+  walkthroughMarkdown(agentId: string, id: string): string {
+    return walkthroughMarkdown(this.walkthrough(agentId, id));
+  }
+
+  walkthroughImage(agentId: string, id: string, file: string): { path: string; mediaType: ImageAttachment['mediaType'] } {
+    const walkthrough = this.walkthrough(agentId, id);
+    const image = walkthrough.steps.find(step => step.image?.file === file)?.image;
+    if (!image) throw new HttpError(404, 'No such image.');
+    return { path: walkthroughImage(this.walkthroughDir(agentId), id, file), mediaType: image.mediaType };
+  }
+
+  deleteWalkthrough(agentId: string, id: string): void {
+    deleteWalkthrough(this.walkthroughDir(this.agent(agentId).id), id);
+  }
+
+  // ---- whereabouts --------------------------------------------------------
+
+  /** Branch lookups per folder, so tool calls never wait on git; refreshed at each turn's end. */
+  private branches = new Map<string, Promise<string | null>>();
+
+  /** Every folder an agent can work in, canonical: each project's checkout and each agent worktree. */
+  private places(): Place[] {
+    const real = (dir: string): string | null => { try { return fs.realpathSync(dir); } catch { return null; } };
+    const places: Place[] = [];
+    for (const project of this.store.projects.values()) {
+      const root = real(project.path);
+      if (root) places.push({ root, projectId: project.id });
+    }
+    for (const agent of this.store.agents.values()) {
+      const root = agent.worktree && agent.projectId ? real(agent.worktree.path) : null;
+      if (root && agent.projectId) places.push({ root, projectId: agent.projectId, branch: agent.worktree!.branch, agentId: agent.id });
+    }
+    return places;
+  }
+
+  /** A path made canonical as far as it exists, so /tmp and /private/tmp match; new files resolve through their folder. */
+  private canonicalPath(target: string): string {
+    let dir = target;
+    for (let i = 0; i < 64; i++) {
+      try { return path.join(fs.realpathSync(dir), path.relative(dir, target)); } catch { /* go up */ }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    return target;
+  }
+
+  private branchOf(root: string, fresh = false): Promise<string | null> {
+    const cached = this.branches.get(root);
+    if (cached && !fresh) return cached;
+    const lookup = (async () => {
+      const named = await gitRun(root, ['branch', '--show-current'], 5_000);
+      if (!named.ok) return null;
+      if (named.stdout.trim()) return named.stdout.trim();
+      const head = await gitRun(root, ['rev-parse', '--short', 'HEAD'], 5_000);
+      return head.ok && head.stdout.trim() ? head.stdout.trim() : null;
+    })();
+    this.branches.set(root, lookup);
+    return lookup;
+  }
+
+  /** Move the agent to a place, then fill in its branch once git answers. */
+  private moveTo(agent: Agent, place: Place, fresh = false): void {
+    const now = Date.now();
+    const same = agent.workingIn?.root === place.root && agent.workingIn.projectId === place.projectId;
+    if (same && !fresh) {
+      agent.workingIn!.at = now;
+      return;
+    }
+    const branch = place.branch ?? (same ? agent.workingIn!.branch : null);
+    agent.workingIn = { projectId: place.projectId, root: place.root, branch, at: now };
+    if (!same) this.emitAgent(agent);
+    if (place.branch) return;
+    void this.branchOf(place.root, fresh).then((found) => {
+      const live = this.store.agents.get(agent.id);
+      if (!live?.workingIn || live.workingIn.root !== place.root || live.workingIn.branch === found) return;
+      live.workingIn = { ...live.workingIn, branch: found };
+      this.emitAgent(live);
+    });
+  }
+
+  /** A tool call pointed at these paths: the last one inside a project says where the agent is. */
+  private noteWhereabouts(agentId: string, paths: string[]): void {
+    const agent = this.store.agents.get(agentId);
+    if (!agent || !paths.length) return;
+    const places = this.places();
+    for (let i = paths.length - 1; i >= 0; i--) {
+      const place = locate(this.canonicalPath(paths[i]), places);
+      if (place) return this.moveTo(agent, place);
+    }
+  }
+
+  /** A project agent starts each turn in its own folder; an agent with no project keeps its last place. */
+  private seedWhereabouts(agent: Agent): void {
+    if (agent.projectId === null) return;
+    let root: string;
+    try {
+      root = fs.realpathSync(agent.worktree?.path ?? this.project(agent.projectId).path);
+    } catch {
+      return;
+    }
+    this.moveTo(agent, { root, projectId: agent.projectId, branch: agent.worktree?.branch });
+  }
+
   private onTurnEnd(agentId: string, result: TurnResult): void {
     const agent = this.store.agents.get(agentId);
     if (!agent) return;
+    // The turn may have switched branches; ask git again.
+    if (agent.workingIn && !(agent.worktree && agent.workingIn.branch === agent.worktree.branch)) {
+      this.moveTo(agent, { root: agent.workingIn.root, projectId: agent.workingIn.projectId }, true);
+    }
     const now = Date.now();
     const task = agent.currentTask;
     agent.currentTask = null;

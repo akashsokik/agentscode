@@ -6,14 +6,17 @@ import { modelLabel, relativeTime, shortPath } from '../format.ts';
 import { closeTab, focusedAgentId, focusedChannelId, open, openToSide, setProject, setRail, setSidebarView, useLayout, type Layout } from '../layout.ts';
 import { ChangesView } from '../right/RightPanel.tsx';
 import { attempt, useApp } from '../store.ts';
+import { whereabouts } from '../whereabouts.ts';
 import { BrandMark } from '../ui/BrandMark.tsx';
+import { SidebarUpdateFooter, useDesktopUpdate } from './SidebarUpdate.tsx';
+import { isUpdateActionable, updateLabel } from '../../shared/updates.ts';
 import { DreamNowMenuRow } from '../ui/DreamNowMenuRow.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ResizeHandle, useColumnWidth, useWindowWidth } from '../ui/ResizeHandle.tsx';
 import { SHORTCUTS } from '../shortcuts.ts';
 import { showTerminal } from '../terminal/actions.ts';
 import { cx, Empty, HeaderButton, Loading, MenuDivider, MenuLabel, MenuRow, StatusLabel } from '../ui/common.tsx';
-import { ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, SplitColumns, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
+import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, SplitColumns, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
@@ -143,6 +146,8 @@ function AgentCard({ agent, selected, now, actions }: { agent: Agent; selected: 
   const models = useApp(s => s.snapshot?.models[agent.engine]);
   const pending = useApp(s => Boolean(s.snapshot?.approvals.some(a => a.agentId === agent.id)));
   const from = useApp(s => (agent.currentTask?.source === 'agent' ? s.snapshot?.agents.find(a => a.id === agent.currentTask?.fromAgentId)?.name : undefined));
+  const projects = useApp(s => s.snapshot?.projects);
+  const where = whereabouts(agent, projects);
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
   const task = agent.status === 'error' && agent.error ? agent.error : agent.currentTask?.summary || agent.lastSummary || 'No task yet';
   return (
@@ -175,10 +180,13 @@ function AgentCard({ agent, selected, now, actions }: { agent: Agent; selected: 
           {from ? <span className="text-content/50">from {from}: </span> : null}
           {task}
         </span>
-        {agent.worktree ? (
-          <span className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-content/45">
+        {where && (where.branch || !where.own) ? (
+          <span className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-content/45" title={`Working in ${where.project}${where.branch ? ` on ${where.branch}` : ''}`}>
             <GitBranch className="size-3 shrink-0" strokeWidth={1.75} />
-            <span className="min-w-0 truncate">{agent.worktree.branch}</span>
+            {/* The card sits under its own project already, so only another project is named. */}
+            {where.own ? null : <span className="max-w-[60%] shrink-0 truncate text-content/60">{where.project}</span>}
+            {where.own || !where.branch ? null : <span aria-hidden className="shrink-0 text-content/25">/</span>}
+            {where.branch ? <span className="min-w-0 truncate">{where.branch}</span> : null}
           </span>
         ) : agent.status === 'working' && agent.activity ? <span className="mt-1 min-w-0 truncate text-[11px] text-content/45">{agent.activity}</span> : null}
       </button>
@@ -536,6 +544,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
           {projects && !projects.length ? <RailEmptyRow label="Add project" onClick={actions.addProject} /> : null}
         </RailSection>
       </div>
+      <SidebarUpdateFooter />
       <div className="flex shrink-0 flex-col gap-px p-2">
         <RailAction icon={Settings} label="Settings" hint={SHORTCUTS.settings} onClick={actions.settings} />
       </div>
@@ -775,6 +784,7 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
   const projects = useApp(s => s.snapshot?.projects);
   const agents = useApp(s => s.snapshot?.agents);
   const inFlight = useApp(s => s.snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0);
+  const update = useDesktopUpdate();
   const focusedPane = layout.panes.find(p => p.id === layout.focused);
   const commsOpen = layout.tabs.find(t => t.id === focusedPane?.tabId)?.content.kind === 'comms';
   const channelId = focusedChannelId(layout);
@@ -811,6 +821,15 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
         ))}
       </div>
       <div className="flex shrink-0 flex-col items-center gap-0.5 pb-2 pt-1">
+        {update && isUpdateActionable(update) ? (
+          <RailIconButton
+            label={`${updateLabel(update)} (you have v${update.currentVersion})`}
+            dot={<span className="size-1.5 rounded-full bg-accent" />}
+            onClick={() => void window.agentscodeDesktop?.updates?.install()}
+          >
+            <ArrowDownCircle className="size-4 text-accent" strokeWidth={1.75} />
+          </RailIconButton>
+        ) : null}
         <RailIconButton label={`Settings (${SHORTCUTS.settings})`} onClick={actions.settings}><Settings className="size-4" strokeWidth={1.75} /></RailIconButton>
       </div>
     </nav>

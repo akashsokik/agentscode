@@ -26,6 +26,8 @@ import type {
   Snapshot,
   TerminalInfo,
   TreeListing,
+  Walkthrough,
+  WalkthroughSummary,
   WorktreeCleanup,
 } from '../shared/types.ts';
 import type { ComposerCommand, ProjectFileList } from '../shared/composer.ts';
@@ -56,6 +58,14 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 /** Where an attached image can be loaded from. */
 export function attachmentUrl(agentId: string, image: Pick<ImageAttachment, 'id'>): string {
   return `/api/agents/${agentId}/attachments/${image.id}`;
+}
+
+/** A walkthrough's image, and its markdown. */
+export function walkthroughImageUrl(agentId: string, walkthroughId: string, file: string): string {
+  return `/api/agents/${agentId}/walkthroughs/${walkthroughId}/images/${file}`;
+}
+export function walkthroughMarkdownUrl(agentId: string, walkthroughId: string): string {
+  return `/api/agents/${agentId}/walkthroughs/${walkthroughId}/markdown`;
 }
 
 /** Where an image attached to a channel post can be loaded from. */
@@ -114,6 +124,10 @@ export const api = {
   undoDream: (id: string, dreamId: string) => request<DreamRecord>('POST', `/api/agents/${id}/dreams/${dreamId}/undo`),
   /** Accept or reject the soul proposal waiting for the agent. */
   soulProposal: (id: string, action: 'accept' | 'reject') => request<{ ok: true }>('POST', `/api/agents/${id}/soul-proposal`, { action }),
+  /** The agent's walkthroughs, newest first. */
+  walkthroughs: (id: string) => request<WalkthroughSummary[]>('GET', `/api/agents/${id}/walkthroughs`),
+  walkthrough: (id: string, walkthroughId: string) => request<Walkthrough>('GET', `/api/agents/${id}/walkthroughs/${walkthroughId}`),
+  deleteWalkthrough: (id: string, walkthroughId: string) => request<void>('DELETE', `/api/agents/${id}/walkthroughs/${walkthroughId}`),
   /** Dreaming stats for each agent, and for agents with dreaming on and off as groups. */
   dreamStats: () => request<DreamStatsReport>('GET', '/api/dream-stats'),
 

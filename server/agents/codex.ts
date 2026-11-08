@@ -1,11 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import type { Agent, AgentTask, Autonomy, ToolCall, TurnUsage } from '../../shared/types.ts';
 import { usageSince, usageTotal } from '../../shared/turnUsage.ts';
 import { clip, mcpSummary, toolResultText } from './describe.ts';
+import { commandPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
 import { codexCommsConfig, COMMS_INSTRUCTIONS } from '../comms/tools.ts';
 
@@ -332,7 +334,10 @@ export class CodexRunner implements Runner {
             status: status(item.exit_code === 0 || (item.exit_code == null && item.status === 'completed')),
           },
         });
-        if (!completed) hooks.activity(`Running ${clip(command, 32)}`);
+        if (!completed) {
+          hooks.activity(`Running ${clip(command, 32)}`);
+          hooks.touched?.(commandPaths(command, this.ctx.cwd, os.homedir()));
+        }
         return;
       }
       case 'file_change': {
@@ -350,6 +355,7 @@ export class CodexRunner implements Runner {
           },
         });
         hooks.activity(`Editing ${path.basename(first)}`);
+        hooks.touched?.(changes.flatMap((c) => (c.path ? [path.resolve(this.ctx.cwd, c.path)] : [])));
         return;
       }
       case 'mcp_tool_call': {
@@ -358,7 +364,7 @@ export class CodexRunner implements Runner {
         const name = `${server}.${tool}`;
         const args = item.arguments && typeof item.arguments === 'object' ? item.arguments as Record<string, unknown> : {};
         const output = toolResultText((item.result as { content?: unknown } | undefined)?.content);
-        hooks.entry({ id, kind: 'tool', text: '', tool: { name, summary: mcpSummary(server, tool, args, output), status: status(item.status !== 'failed') } });
+        hooks.entry({ id, kind: 'tool', text: '', tool: { name, summary: mcpSummary(server, tool, args, output), status: status(item.status !== 'failed'), ...(output ? { output: output.length > 4000 ? `${output.slice(0, 4000)}\n...` : output } : {}) } });
         hooks.activity(`Using ${clip(name, 36)}`);
         return;
       }

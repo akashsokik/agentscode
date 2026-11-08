@@ -12,7 +12,9 @@ import { AgentPane } from './panes/AgentPane.tsx';
 import { ChannelPane } from './panes/ChannelPane.tsx';
 import { CommsPane } from './panes/CommsPane.tsx';
 import { DiffPane, FilePane } from './panes/FilePane.tsx';
-import { PaneFrame, type PaneChrome } from './panes/PaneFrame.tsx';
+import { HomePane } from './panes/HomePane.tsx';
+import { WalkthroughPane } from './panes/WalkthroughPane.tsx';
+import type { PaneChrome } from './panes/PaneFrame.tsx';
 import { RightPanel } from './right/RightPanel.tsx';
 import { IS_DESKTOP_APP } from './platform.ts';
 import { SHORTCUTS, useShortcuts } from './shortcuts.ts';
@@ -24,10 +26,9 @@ import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
 import { EngineIcon } from './ui/EngineIcon.tsx';
 import { UsageFooter } from './ui/UsageFooter.tsx';
-import { Empty, HeaderButton, PRIMARY, StatusLabel } from './ui/common.tsx';
-import { AlertCircle, AppWindow, CheckCircle, File, FileDiff, MessageMultiple, PanelLeft, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
+import { HeaderButton, StatusLabel } from './ui/common.tsx';
+import { AlertCircle, CheckCircle, Route, File, FileDiff, MessageMultiple, PanelLeft, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
 import { LAYER } from './mono/layers.ts';
-import { SecondaryButton } from './mono/SecondaryButton.tsx';
 import { Shimmer } from './mono/Shimmer.tsx';
 import { TabLabel } from './mono/TabLabel.tsx';
 import { TabWidthMotion } from './mono/TabWidthMotion.tsx';
@@ -70,6 +71,10 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
       busy: onIt.some(a => a.status === 'working'),
       attention: onIt.some(a => a.status === 'waiting'),
     };
+  }
+  if (c.kind === 'walkthrough') {
+    const agent = snapshot?.agents.find(a => a.id === c.agentId);
+    return { icon: <Route className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: c.title, meta: `Walkthrough${agent ? `, ${agent.name}` : ''}` };
   }
   if (c.kind === 'comms') {
     const active = snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0;
@@ -253,25 +258,8 @@ function StatusFooter() {
   );
 }
 
-function PaneView({ pane, tab, chrome, onNewAgent }: { pane: Pane; tab: Tab | undefined; chrome: PaneChrome; onNewAgent: () => void }) {
-  if (!tab) {
-    return (
-      <PaneFrame chrome={chrome} title={<span className="text-content/50">Empty</span>}>
-        <Empty
-          icon={AppWindow}
-          title="Nothing open here"
-          action={
-            <div className="flex gap-2">
-              <button type="button" className={PRIMARY} onClick={onNewAgent}><Plus className="size-3.5" strokeWidth={2} /> New agent</button>
-              <SecondaryButton onClick={() => open({ kind: 'comms' })}>Open Comms</SecondaryButton>
-            </div>
-          }
-        >
-          Pick an agent in the sidebar, or a tab above. Cmd+click an agent to open it beside this one.
-        </Empty>
-      </PaneFrame>
-    );
-  }
+function PaneView({ pane, tab, chrome, actions }: { pane: Pane; tab: Tab | undefined; chrome: PaneChrome; actions: SidebarActions }) {
+  if (!tab) return <HomePane chrome={chrome} actions={actions} />;
   const c = tab.content;
   switch (c.kind) {
     case 'agent': return <AgentPane key={pane.id + c.agentId} agentId={c.agentId} chrome={chrome} />;
@@ -279,6 +267,7 @@ function PaneView({ pane, tab, chrome, onNewAgent }: { pane: Pane; tab: Tab | un
     case 'diff': return <DiffPane key={pane.id + tab.id} root={c.root} path={c.path} chrome={chrome} />;
     case 'comms': return <CommsPane conversationId={c.conversationId} chrome={chrome} />;
     case 'channel': return <ChannelPane key={pane.id + c.channelId} channelId={c.channelId} chrome={chrome} />;
+    case 'walkthrough': return <WalkthroughPane key={pane.id + tab.id} agentId={c.agentId} id={c.id} chrome={chrome} />;
   }
 }
 
@@ -394,7 +383,7 @@ export function App() {
                 key={pane.id}
                 pane={pane}
                 tab={layout.tabs.find(t => t.id === pane.tabId)}
-                onNewAgent={() => actions.newAgent()}
+                actions={actions}
                 chrome={{ paneId: pane.id, focused: pane.id === layout.focused, canSplit: layout.panes.length < MAX_PANES, multiple: layout.panes.length > 1 }}
               />
             ))}

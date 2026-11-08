@@ -21,8 +21,9 @@ name: release
 # macOS signing is optional. With the secrets MAC_CSC_LINK (base64 .p12 of a Developer ID
 # Application certificate), MAC_CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and
 # APPLE_TEAM_ID set, the app is signed and notarized, and Mac auto-update installs in place.
-# Without them the app is ad-hoc signed: it opens after "Open Anyway" in System Settings, and the
-# app offers new versions as a download instead of installing them (electron/updater.ts).
+# Without them the app is ad-hoc signed: install.sh (curl, so no quarantine) installs it and it
+# opens directly; a browser download opens only after "Open Anyway" in System Settings. The app
+# offers new versions through the install command instead of installing them (electron/updater.ts).
 
 on:
   push:

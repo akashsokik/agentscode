@@ -10,6 +10,7 @@ import { Empty, HeaderButton } from '../ui/common.tsx';
 import { Bot, Settings } from '../mono/icons.tsx';
 import { Composer } from './Composer.tsx';
 import { Transcript } from './Transcript.tsx';
+import { OpenUIActionContext } from '../openui/context.ts';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
 
 /** One agent's session: transcript, inline approvals and the composer. */
@@ -21,6 +22,7 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
   const approvals = useMemo(() => (allApprovals ?? []).filter(a => a.agentId === agentId), [allApprovals, agentId]);
   const question = approvals.find(a => a.type === 'question');
   const [settings, setSettings] = useState(false);
+  const answer = useMemo(() => (text: string) => void attempt(() => api.send(agentId, text)), [agentId]);
 
   useEffect(() => {
     void loadEntries(agentId);
@@ -50,7 +52,10 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
       }
       actions={<HeaderButton icon={Settings} label="Agent settings" onClick={() => setSettings(true)} />}
     >
-      <Transcript agent={agent} entries={entries} approvals={approvals} />
+      {/* Buttons in the agent's ```openui-lang blocks answer it as if you had typed their message. */}
+      <OpenUIActionContext.Provider value={answer}>
+        <Transcript agent={agent} entries={entries} approvals={approvals} />
+      </OpenUIActionContext.Provider>
       {/* A soul change a dream proposed waits here until you accept or reject it in the settings. */}
       <SoulProposalNotice agent={agent} onReview={() => setSettings(true)} />
       <Composer agent={agent} project={project} question={question} onSettings={() => setSettings(true)} />

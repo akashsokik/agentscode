@@ -1,0 +1,17 @@
+import type { Agent, Project } from '../shared/types.ts';
+
+export interface Whereabouts {
+  /** The project's name, or the folder's when the project was removed. */
+  project: string;
+  branch: string | null;
+  /** Whether it is the agent's own project; an agent's card sits under its project already. */
+  own: boolean;
+}
+
+/** Which codebase an agent is in and on which branch, from its last tool calls; null until known. */
+export function whereabouts(agent: Agent, projects: readonly Pick<Project, 'id' | 'name'>[] | undefined): Whereabouts | null {
+  const place = agent.workingIn;
+  if (!place) return agent.worktree ? { project: projects?.find(p => p.id === agent.projectId)?.name ?? '', branch: agent.worktree.branch, own: true } : null;
+  const project = projects?.find(p => p.id === place.projectId)?.name ?? place.root.split('/').filter(Boolean).pop() ?? place.root;
+  return { project, branch: place.branch, own: place.projectId === agent.projectId };
+}

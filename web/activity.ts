@@ -11,6 +11,9 @@ export const SENDING_TOOLS = /(?:^mcp__agentscode__|^agentscode\.)(send_message|
 /** Memory tools: what the agent learned or dropped reads as one line of its own, not as work. */
 export const MEMORY_TOOLS = /(?:^mcp__agentscode__|^agentscode\.)(remember|forget)$/;
 
+/** The walkthrough tool: what it made shows as a card of its own, not as work. */
+export const WALKTHROUGH_TOOL = /(?:^mcp__agentscode__|^agentscode\.)create_walkthrough$/;
+
 export type WorkKind = 'edit' | 'run' | 'agent' | 'research' | 'plan' | 'other';
 /** A group's icon: the work it did most of, or a note when it holds only messages and status. */
 export type PhaseKind = WorkKind | 'note';
@@ -19,6 +22,7 @@ export type TurnItem =
   | { type: 'prose'; entry: Entry }
   | { type: 'memory'; entry: Entry }
   | { type: 'dream'; entry: Entry }
+  | { type: 'walkthrough'; entry: Entry }
   | { type: 'activity'; entries: Entry[] };
 
 /** The span of a turn's items that folds away once the agent has answered for it. */
@@ -33,6 +37,24 @@ export function isHiddenTool(entry: Entry): boolean {
 
 export function isMemoryTool(entry: Entry): boolean {
   return entry.kind === 'tool' && MEMORY_TOOLS.test(entry.tool?.name ?? '');
+}
+
+export function isWalkthroughTool(entry: Entry): boolean {
+  return entry.kind === 'tool' && WALKTHROUGH_TOOL.test(entry.tool?.name ?? '');
+}
+
+/** The walkthrough a create_walkthrough call made, read from the tool's result; null until it succeeds. */
+export function walkthroughResult(tool: ToolCall): { id: string; title: string; stepCount: number } | null {
+  if (tool.status !== 'ok' || !tool.output) return null;
+  const start = tool.output.indexOf('{');
+  if (start < 0) return null;
+  try {
+    const created = (JSON.parse(tool.output.slice(start)) as { created?: { id?: unknown; title?: unknown; stepCount?: unknown } }).created;
+    if (typeof created?.id !== 'string' || typeof created.title !== 'string') return null;
+    return { id: created.id, title: created.title, stepCount: typeof created.stepCount === 'number' ? created.stepCount : 0 };
+  } catch {
+    return null;
+  }
 }
 
 /** The line a dream writes when it finishes: "Dreamed: +2 -1 ~1, soul change proposed". */
@@ -53,7 +75,7 @@ export function memoryLine(tool: ToolCall): { verb: string; text: string } {
 
 /** Tool calls, status lines and teammate messages: the steps of a turn's work. */
 export function isActivity(entry: Entry): boolean {
-  if (entry.kind === 'tool') return !isHiddenTool(entry) && !isMemoryTool(entry);
+  if (entry.kind === 'tool') return !isHiddenTool(entry) && !isMemoryTool(entry) && !isWalkthroughTool(entry);
   if (isDreamLine(entry)) return false;
   return entry.kind === 'system' || entry.kind === 'peer';
 }
@@ -82,6 +104,9 @@ export function groupTurnItems(entries: Entry[]): TurnItem[] {
     } else if (isDreamLine(entry)) {
       flush();
       items.push({ type: 'dream', entry });
+    } else if (isWalkthroughTool(entry)) {
+      flush();
+      items.push({ type: 'walkthrough', entry });
     } else if (isActivity(entry)) {
       run.push(entry);
     } else if (entry.kind === 'agent' && entry.text.trim()) {
@@ -111,7 +136,7 @@ export function foldableWork(items: TurnItem[]): WorkFold | undefined {
 
 /** The items of a closed fold that stay in view under its line: what the agent remembered, forgot or dreamed. */
 export function keptInView(items: TurnItem[], fold: WorkFold | undefined): TurnItem[] {
-  return fold ? items.slice(fold.start, fold.end + 1).filter(item => item.type === 'memory' || item.type === 'dream') : [];
+  return fold ? items.slice(fold.start, fold.end + 1).filter(item => item.type === 'memory' || item.type === 'dream' || item.type === 'walkthrough') : [];
 }
 
 export function toolCategory(tool: ToolCall): WorkKind {

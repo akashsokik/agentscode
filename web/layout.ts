@@ -8,7 +8,9 @@ export type TabContent =
   | { kind: 'file'; root: Root; path: string }
   | { kind: 'diff'; root: Root; path: string }
   | { kind: 'comms'; conversationId?: string }
-  | { kind: 'channel'; channelId: string };
+  | { kind: 'channel'; channelId: string }
+  /** `title` names the tab before the walkthrough has loaded. */
+  | { kind: 'walkthrough'; agentId: string; id: string; title: string };
 
 export interface Tab {
   id: string;
@@ -64,6 +66,7 @@ export function tabKey(content: TabContent): string {
     case 'diff': return `diff:${rootKey(content.root)}:${content.path}`;
     case 'comms': return 'comms';
     case 'channel': return `channel:${content.channelId}`;
+    case 'walkthrough': return `walkthrough:${content.agentId}:${content.id}`;
   }
 }
 
@@ -197,7 +200,7 @@ export function closeTab(tabId: string): void {
 export function pruneTabs(agentIds: Set<string>, channelIds: Set<string>): void {
   const stale = layout.tabs.filter(t => {
     const c = t.content;
-    if (c.kind === 'agent') return !agentIds.has(c.agentId);
+    if (c.kind === 'agent' || c.kind === 'walkthrough') return !agentIds.has(c.agentId);
     if (c.kind === 'channel') return !channelIds.has(c.channelId);
     if ((c.kind === 'file' || c.kind === 'diff') && 'agent' in c.root) return !agentIds.has(c.root.agent);
     return false;

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import type { Hub } from './hub.ts';
 import type { WorktreeCleanup } from '../shared/types.ts';
+import { DEV_WEB_PORT, IN_DESKTOP_APP, PORT } from './config.ts';
 import { HttpError } from './errors.ts';
 import type { AgentManager } from './manager.ts';
 import { listProjectFiles } from './fileList.ts';
@@ -24,11 +25,20 @@ export function isLocalHost(host: string | undefined): boolean {
   return name === 'localhost' || name === '127.0.0.1' || name === '::1';
 }
 
-export function isLocalOrigin(origin: string | undefined): boolean {
+/** Ports whose pages are AgentsCode's own: this server, and the Vite dev page outside the desktop app. */
+const APP_PORTS: readonly number[] = IN_DESKTOP_APP ? [PORT] : [PORT, DEV_WEB_PORT];
+
+/**
+ * Whether a request's Origin may write or open a socket: AgentsCode's own page (this server's port on
+ * a loopback name) or, outside the desktop app, the Vite dev page. Any other local page, such as a
+ * dev server open in the user's browser or in AgentsCode's own browser tab, cannot drive the API.
+ */
+export function isLocalOrigin(origin: string | undefined, ports: readonly number[] = APP_PORTS): boolean {
   if (!origin) return true; // same-origin navigations and non-browser clients
   try {
     const url = new URL(origin);
-    return (url.protocol === 'http:' || url.protocol === 'https:') && isLocalHost(url.host);
+    if (url.protocol !== 'http:' || !isLocalHost(url.host)) return false;
+    return ports.includes(Number(url.port || 80));
   } catch {
     return false;
   }
@@ -110,6 +120,22 @@ export function createApp(
   });
   app.get('/api/agents/:id/attachments/:file', (req, res) => {
     sendStoredImage(res, manager.attachmentFile(param(req, 'id'), param(req, 'file')));
+  });
+  app.get('/api/agents/:id/walkthroughs', (req, res) => {
+    res.json(manager.walkthroughs(param(req, 'id')));
+  });
+  app.get('/api/agents/:id/walkthroughs/:wid', (req, res) => {
+    res.json(manager.walkthrough(param(req, 'id'), param(req, 'wid')));
+  });
+  app.get('/api/agents/:id/walkthroughs/:wid/markdown', (req, res) => {
+    res.type('text/markdown').send(manager.walkthroughMarkdown(param(req, 'id'), param(req, 'wid')));
+  });
+  app.get('/api/agents/:id/walkthroughs/:wid/images/:file', (req, res) => {
+    sendStoredImage(res, manager.walkthroughImage(param(req, 'id'), param(req, 'wid'), param(req, 'file')));
+  });
+  app.delete('/api/agents/:id/walkthroughs/:wid', (req, res) => {
+    manager.deleteWalkthrough(param(req, 'id'), param(req, 'wid'));
+    res.status(204).end();
   });
   app.post('/api/agents/:id/stop', async (req, res) => {
     await manager.stop(param(req, 'id'));

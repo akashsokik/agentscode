@@ -13,7 +13,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { Agent, Approval, Entry, PeerMessage, ToolCall, TurnMeta } from '../../shared/types.ts';
 import { turnMetricsText } from '../../shared/turnUsage.ts';
-import { foldableWork, groupTurnItems, isDreamLine, keptInView, memoryLine, turnItemKey, workKind, workSummaryLine, type TurnItem } from '../activity.ts';
+import { foldableWork, groupTurnItems, isDreamLine, keptInView, memoryLine, turnItemKey, walkthroughResult, workKind, workSummaryLine, type TurnItem } from '../activity.ts';
 import { api } from '../api.ts';
 import { modelLabel } from '../format.ts';
 import { open, openToSide } from '../layout.ts';
@@ -27,7 +27,7 @@ import { Markdown } from '../ui/Markdown.tsx';
 import { MentionText } from '../ui/MentionText.tsx';
 import { reducedMotion, staggerWordFades, WORD_FADE_MS } from '../ui/wordFade.ts';
 import { ChipButton, Empty, INPUT, Loading, StatusLabel, TextButton } from '../ui/common.tsx';
-import { AiIdea, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, CircleDashed, Copy, Eraser, File, Folder, MessageSquare, Search, Sparkles, X } from '../mono/icons.tsx';
+import { AiIdea, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, CircleDashed, Copy, Eraser, File, Folder, MessageSquare, Route, Search, Sparkles, X } from '../mono/icons.tsx';
 import { PhaseTile, ProviderTile } from '../mono/ActivityTile.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
@@ -868,6 +868,40 @@ function DreamLine({ entry }: { entry: Entry }) {
   );
 }
 
+/** What create_walkthrough made: a card that opens the walkthrough beside the agent. */
+function WalkthroughCard({ entry, agentId }: { entry: Entry; agentId: string }) {
+  if (!entry.tool) return null;
+  const made = walkthroughResult(entry.tool);
+  if (!made) {
+    const failed = entry.tool.status === 'error';
+    return (
+      <div className="flex min-w-0 items-start gap-1.5 py-1 font-sans text-sm">
+        <Route className={`mt-[3px] size-3.5 shrink-0 ${failed ? 'text-danger' : 'text-content/45'}`} strokeWidth={1.75} />
+        <span className={`min-w-0 ${failed ? 'text-danger' : 'text-content/50'}`}>
+          {entry.tool.status === 'running' ? <Shimmer className="inline" duration={1.6}>Making a walkthrough</Shimmer> : failed ? 'Walkthrough not saved' : 'Made a walkthrough'}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-walkthrough-card={made.id}
+      onClick={() => openToSide({ kind: 'walkthrough', agentId, id: made.id, title: made.title })}
+      className="my-1.5 flex w-full max-w-md min-w-0 items-center gap-3 rounded-xl border border-content/10 bg-content/[0.03] px-3.5 py-2.5 text-left font-sans transition-colors duration-150 hover:border-content/20 hover:bg-content/[0.06]"
+    >
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-content/10 bg-content/5 text-content/60">
+        <Route className="size-4" strokeWidth={1.75} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-medium text-content">{made.title}</span>
+        <span className="block text-[11.5px] text-content/45">Walkthrough{made.stepCount ? `, ${made.stepCount} steps` : ''}</span>
+      </span>
+      <span className="shrink-0 text-[12px] text-content/55">Open</span>
+    </button>
+  );
+}
+
 function MemoryLine({ entry }: { entry: Entry }) {
   if (!entry.tool) return null;
   const { verb, text } = memoryLine(entry.tool);
@@ -888,6 +922,7 @@ function MemoryLine({ entry }: { entry: Entry }) {
 function TurnItemView({ item, active, selfId, underLine }: { item: TurnItem; active: boolean; selfId: string; underLine: boolean }) {
   if (item.type === 'memory') return <div className="px-4"><MemoryLine entry={item.entry} /></div>;
   if (item.type === 'dream') return <div className="px-4"><DreamLine entry={item.entry} /></div>;
+  if (item.type === 'walkthrough') return <div className="px-4"><WalkthroughCard entry={item.entry} agentId={selfId} /></div>;
   if (item.type === 'prose') {
     return (
       <div data-chat-message={item.entry.id} data-chat-message-role="assistant" className={`min-w-0 px-4 pb-1 text-content ${underLine ? 'pt-1' : 'pt-3'}`}>
@@ -912,6 +947,7 @@ function ArrivingGroup({ item, active, selfId }: { item: Extract<TurnItem, { typ
 function FoldItemView({ item, selfId }: { item: TurnItem; selfId: string }) {
   if (item.type === 'memory') return <MemoryLine entry={item.entry} />;
   if (item.type === 'dream') return <DreamLine entry={item.entry} />;
+  if (item.type === 'walkthrough') return <WalkthroughCard entry={item.entry} agentId={selfId} />;
   if (item.type === 'prose') return <div className="py-1"><Markdown text={item.entry.text} /></div>;
   return <ActivityPhaseGroup entries={item.entries} active={false} selfId={selfId} />;
 }
