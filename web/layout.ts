@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { Root } from './api.ts';
-import { prunedWeights, weightOf } from './paneSizes.ts';
+import { closedWeights, prunedWeights, weightOf } from './paneSizes.ts';
 import type { SplitTree } from './terminal/splits.ts';
 
 /** What a tab shows. Tabs are keyed by content, so opening the same thing twice focuses it. */
@@ -256,7 +256,11 @@ export function closeTab(tabId: string): void {
     panes = [{ ...layout.panes[0], tabId: next?.id ?? null }];
   }
   const focused = panes.some(p => p.id === layout.focused) ? layout.focused : panes[0].id;
-  set({ ...layout, tabs, panes, focused });
+  // Closed panes hand their width on, as closePane does, so the rest still fill the row.
+  const ids = panes.map(p => p.id);
+  const paneWeights = closedWeights(layout.paneWeights, layout.panes.map(p => p.id), ids);
+  const maximized = layout.maximized && ids.includes(layout.maximized) && ids.length > 1 ? layout.maximized : null;
+  set({ ...layout, tabs, panes, focused, paneWeights, maximized });
 }
 
 /** Drop tabs whose agent or channel was removed. */

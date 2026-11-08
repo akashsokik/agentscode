@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { evenPair, prunedWeights, resizePair, weightOf } from '../web/paneSizes.ts';
-import { closePane, getLayout, setPaneWeights, splitPane, toggleMaximize } from '../web/layout.ts';
+import { closedWeights, evenPair, paneGrow, prunedWeights, resizePair, weightOf } from '../web/paneSizes.ts';
+import { closePane, closeTab, getLayout, open, setPaneWeights, splitPane, toggleMaximize } from '../web/layout.ts';
 
 test('a divider moves width between its two panes only, within the minimum', () => {
   assert.equal(weightOf(undefined, 'a'), 1);
@@ -39,4 +39,31 @@ test('splitting halves a pane, closing hands its width to its neighbour, maximiz
   assert.equal(layout.panes.length, 1);
   assert.equal(layout.maximized, null, 'closing the maximized pane restores the layout');
   assert.equal(layout.paneWeights, undefined, 'a lone pane needs no weights');
+});
+
+test('pane grows always add up to 1, so a lone pane left at 0.5 still fills the width', () => {
+  assert.equal(paneGrow({ a: 0.5 }, ['a'], 'a'), 1);
+  assert.equal(paneGrow(undefined, ['a', 'b'], 'a'), 0.5);
+  assert.equal(paneGrow({ a: 0.25, b: 0.25, c: 0.5 }, ['a', 'b', 'c'], 'c'), 0.5);
+  assert.equal(paneGrow({ a: 0.25, b: 0.25 }, ['a', 'b', 'c'], 'c'), 2 / 3);
+});
+
+test('closed panes hand their weight to the nearest kept pane', () => {
+  assert.deepEqual(closedWeights({ a: 0.5, b: 0.25, c: 0.25 }, ['a', 'b', 'c'], ['a', 'c']), { a: 0.75, c: 0.25 });
+  assert.deepEqual(closedWeights({ a: 0.5, b: 0.25, c: 0.25 }, ['a', 'b', 'c'], ['b', 'c']), { b: 0.75, c: 0.25 });
+  assert.equal(closedWeights({ a: 0.5, b: 0.5 }, ['a', 'b'], ['a']), undefined, 'a lone pane needs no weight');
+});
+
+test('closing the tab of a split pane leaves the other pane filling the width', () => {
+  open({ kind: 'agent', agentId: 'tab-a' });
+  open({ kind: 'agent', agentId: 'tab-b' });
+  const first = getLayout().panes[0].id;
+  splitPane(first);
+  let layout = getLayout();
+  assert.equal(layout.panes.length, 2);
+  const closing = layout.tabs.find(t => t.id === layout.panes[1].tabId)!;
+  closeTab(closing.id);
+  layout = getLayout();
+  assert.equal(layout.panes.length, 1);
+  assert.equal(layout.paneWeights, undefined, 'no half weight left behind');
 });

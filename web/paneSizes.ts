@@ -43,4 +43,27 @@ export function prunedWeights(weights: Record<string, number> | undefined, paneI
   return Object.keys(kept).length ? kept : undefined;
 }
 
+/**
+ * A pane's flex-grow: its weight as a share of all the panes' weights. Flexbox leaves free space
+ * empty when the grows add up to less than 1 (one pane left at 0.5 fills half the width), so the
+ * shares always add up to exactly 1.
+ */
+export function paneGrow(weights: Record<string, number> | undefined, paneIds: string[], paneId: string): number {
+  const total = paneIds.reduce((sum, id) => sum + weightOf(weights, id), 0);
+  return total > 0 ? weightOf(weights, paneId) / total : 1;
+}
+
+/** Weights after panes close: each closed pane's weight goes to the nearest kept pane before it (or after, at the start). */
+export function closedWeights(weights: Record<string, number> | undefined, before: string[], kept: string[]): Record<string, number> | undefined {
+  if (kept.length < 2) return undefined;
+  const next = { ...weights };
+  for (const id of before) {
+    if (kept.includes(id)) continue;
+    const index = before.indexOf(id);
+    const heir = [...before.slice(0, index)].reverse().find(p => kept.includes(p)) ?? before.slice(index + 1).find(p => kept.includes(p));
+    if (heir) next[heir] = weightOf(next, heir) + weightOf(weights, id);
+  }
+  return prunedWeights(next, kept);
+}
+
 const round = (n: number) => Math.round(n * 1000) / 1000;
