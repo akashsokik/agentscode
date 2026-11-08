@@ -83,3 +83,27 @@ test('a browser tab is keyed by its id, follows its page, and closes with the ag
   closeTab(tabs()[0].id);
   assert.equal(tabs().length, 0);
 });
+
+test('words an animation wraps one per element read as one line; a longer block keeps its own', () => {
+  const t = (nodeId: string, parentId: string, name: string): AXNode => ({ nodeId, parentId, role: { value: 'StaticText' }, name: { value: name } });
+  const g = (nodeId: string, parentId: string, childIds: string[], ignored = false): AXNode => ({ nodeId, parentId, role: { value: 'generic' }, ignored, childIds });
+  const nodes: AXNode[] = [
+    { nodeId: 'r', role: { value: 'RootWebArea' }, name: { value: 'T' }, childIds: ['p', 'note'] },
+    { nodeId: 'p', parentId: 'r', role: { value: 'paragraph' }, childIds: ['w1', 's1', 'w2', 's2', 'w3', 'tail', 'a', 'end'] },
+    g('w1', 'p', ['w1t']), t('w1t', 'w1', 'Words'), t('s1', 'p', ' '),
+    g('w2', 'p', ['w2t'], true), t('w2t', 'w2', 'that'), t('s2', 'p', ' '),
+    g('w3', 'p', ['w3t']), t('w3t', 'w3', 'animate'),
+    t('tail', 'p', ' in, then'),
+    { nodeId: 'a', parentId: 'p', role: { value: 'link' }, name: { value: 'the docs' }, backendDOMNodeId: 7, childIds: ['at'] }, t('at', 'a', 'the docs'),
+    t('end', 'p', 'and more.'),
+    g('note', 'r', ['nt']), t('nt', 'note', 'A longer note that stays a block of its own'),
+  ];
+  assert.equal(formatAXTree(nodes, 10_000).text, [
+    '- RootWebArea "T"',
+    '  - paragraph',
+    '    - StaticText "Words that animate in, then"',
+    '    - link "the docs" [e1]',
+    '    - StaticText "and more."',
+    '  - StaticText "A longer note that stays a block of its own"',
+  ].join('\n'));
+});

@@ -96,9 +96,32 @@ const ACTIONABLE = new Set([
 const WRAPPERS = new Set(['generic', 'none', 'presentation', 'InlineTextBox', 'LineBreak', 'group', 'Section']);
 const STATES = ['checked', 'selected', 'expanded', 'disabled', 'pressed', 'required', 'focused'];
 
-/** A text piece with nothing to act on inside it: joined with its neighbours into one line. */
-function plainText(node: AXNode): boolean {
-  return !node.ignored && str(node.role?.value) === 'StaticText' && Boolean(str(node.name?.value).trim());
+/** The longest a run of joined text gets before it is cut. */
+const RUN_LIMIT = 2000;
+/** A wrapper holding at most this many words is a piece of a run (a word an animation wraps). */
+const PIECE_WORDS = 3;
+
+/**
+ * The text of a piece that joins its neighbours into one line, or null when it is not one. A
+ * piece is a text node, or a wrapper (an inline-block <span> per word, as animated headings do)
+ * that holds only text, and a few words of it: a wrapper with more stays its own block.
+ */
+function pieceText(node: AXNode, byId: Map<string, AXNode>, top = true): string | null {
+  const role = str(node.role?.value);
+  if (role === 'StaticText') return node.ignored ? '' : str(node.name?.value);
+  if (!node.ignored && !WRAPPERS.has(role)) return null;
+  const parts: string[] = [];
+  for (const id of node.childIds ?? []) {
+    const child = byId.get(id);
+    if (!child) continue;
+    const inner = pieceText(child, byId, false);
+    if (inner === null) return null;
+    parts.push(inner);
+  }
+  // Pieces in separate elements are separate words, as the run joins them too.
+  const text = parts.join(' ').replace(/\s+/g, ' ').trim();
+  if (top && text.split(' ').length > PIECE_WORDS) return null;
+  return text;
 }
 
 function str(value: unknown): string {
@@ -144,13 +167,14 @@ export function formatAXTree(nodes: AXNode[], maxChars: number): { text: string;
     const flush = () => {
       const text = run.join(' ').replace(/\s+/g, ' ').trim();
       run = [];
-      if (text && !childParent.includes(text)) push(`${'  '.repeat(nextDepth)}- StaticText "${text.slice(0, 400)}"`);
+      if (text && !childParent.includes(text)) push(`${'  '.repeat(nextDepth)}- StaticText "${text.length > RUN_LIMIT ? `${text.slice(0, RUN_LIMIT)}…` : text}"`);
     };
     for (const id of node.childIds ?? []) {
       const child = byId.get(id);
       if (!child) continue;
-      if (plainText(child)) {
-        run.push(str(child.name?.value));
+      const piece = pieceText(child, byId);
+      if (piece !== null) {
+        if (piece.trim()) run.push(piece);
         continue;
       }
       flush();
