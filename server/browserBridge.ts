@@ -148,3 +148,64 @@ export function bridgeTokenMatches(expected: string, given: unknown): boolean {
   const b = Buffer.from(given);
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+interface ConsoleLine {
+  seq: number;
+  ts: number;
+  level: string;
+  source: string;
+  text: string;
+  url?: string;
+}
+
+const SEVERITY: Record<string, number> = { error: 0, warn: 1, info: 2, log: 3, debug: 4 };
+/** About 12k characters of console per call: enough to act on, small enough for any agent. */
+export const CONSOLE_BUDGET = 12_000;
+
+/**
+ * A console result as an agent can use it: the same message repeated becomes one line with a
+ * count, messages that differ only in their URLs become one line with a count and an example, and
+ * the whole stays within a budget, errors first. `next` is kept, so the agent's cursor still works.
+ */
+export function compactConsole(result: unknown, budget = CONSOLE_BUDGET): unknown {
+  const raw = result as { entries?: unknown; next?: unknown } | null;
+  if (!raw || !Array.isArray(raw.entries)) return result;
+  const entries = raw.entries as ConsoleLine[];
+  const groups = new Map<string, { first: ConsoleLine; count: number; urls: Set<string> }>();
+  for (const entry of entries) {
+    const text = String(entry.text ?? '');
+    const pattern = text.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>)]+/gi, '<url>');
+    const key = `${entry.level}|${entry.source}|${pattern}`;
+    const group = groups.get(key);
+    if (group) {
+      group.count += 1;
+      if (group.urls.size < 3 && text !== group.first.text) group.urls.add(text.match(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>)]+/i)?.[0] ?? '');
+    } else {
+      groups.set(key, { first: entry, count: 1, urls: new Set() });
+    }
+  }
+  const lines = [...groups.values()].map(({ first, count, urls }) => {
+    const examples = [...urls].filter(Boolean);
+    const text = count > 1 && examples.length
+      ? `${first.text} (and ${count - 1} more like it, e.g. ${examples.join(', ')})`
+      : count > 1 ? `${first.text} (x${count})` : first.text;
+    return { ...first, text: text.length > 600 ? `${text.slice(0, 600)}...` : text, ...(count > 1 ? { count } : {}) };
+  });
+  // Within the budget, errors before warnings before the rest; shown in their original order.
+  const ranked = [...lines].sort((a, b) => (SEVERITY[a.level] ?? 5) - (SEVERITY[b.level] ?? 5) || a.seq - b.seq);
+  const kept = new Set<ConsoleLine>();
+  let used = 0;
+  for (const line of ranked) {
+    const size = JSON.stringify(line).length;
+    if (used + size > budget) continue;
+    kept.add(line);
+    used += size;
+  }
+  const shown = lines.filter(line => kept.has(line));
+  const omitted = entries.length - shown.reduce((n, line) => n + ((line as { count?: number }).count ?? 1), 0);
+  return {
+    ...raw,
+    entries: shown,
+    ...(omitted > 0 ? { omitted, note: `${omitted} more console entries were left out to keep this short (lower-severity first). Call again with since=${String(raw.next)} for newer ones.` } : {}),
+  };
+}

@@ -82,7 +82,8 @@ export const browserInputs = {
   browser_open: z.object({ url: z.string().trim().min(1).max(4000), tab_id: tabId.optional() }),
   browser_list: z.object({}),
   browser_close: z.object({ tab_id: tabId }),
-  browser_snapshot: z.object({ tab_id: tabId, max_chars: z.number().int().min(1000).max(60_000).optional() }),
+  // 40k keeps a whole snapshot inside what an agent's tool output can hold.
+  browser_snapshot: z.object({ tab_id: tabId, max_chars: z.number().int().min(1000).max(40_000).optional() }),
   browser_screenshot: z.object({ tab_id: tabId, full_page: z.boolean().optional() }),
   browser_console: z.object({ tab_id: tabId, since: z.number().int().min(0).optional() }),
   browser_click: z.object({ tab_id: tabId, ref }),
@@ -100,7 +101,7 @@ const BROWSER_DESCRIPTIONS: Record<BrowserTool, string> = {
   browser_close: 'Close one of your browser tabs.',
   browser_snapshot: 'The page as an indented accessibility tree; actionable lines carry refs like [e12] for click and type. Refs last until the next snapshot or navigation. Take one before interacting.',
   browser_screenshot: 'Save a PNG of the tab (full_page for the whole page) and return its path, its size in CSS pixels, and a note when a full page fell back to the viewport; read the file to see it.',
-  browser_console: 'Console messages, page exceptions and failed requests from the tab. Pass since (the next value from the last call) to get only new ones.',
+  browser_console: 'Console messages, page exceptions and failed requests from the tab, errors first. Repeats are collapsed with a count and the result is kept short; omitted says how many were left out. Pass since (the next value from the last call) to get only new ones.',
   browser_click: `Click the element with this ref from your latest snapshot. ${INPUT_NOTE} A click that would land on something covering the element fails and names what is in the way.`,
   browser_type: `Focus the element with this ref, type text into it, and press Enter if submit. ${INPUT_NOTE}`,
   browser_press: `Press a key in the tab: ${PRESSABLE_KEYS.join(', ')}. ${INPUT_NOTE}`,
