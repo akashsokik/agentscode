@@ -19,6 +19,7 @@ import type { PaneChrome } from './panes/PaneFrame.tsx';
 import { RightPanel } from './right/RightPanel.tsx';
 import { IS_DESKTOP_APP } from './platform.ts';
 import { SHORTCUTS, useShortcuts } from './shortcuts.ts';
+import { openBrowser } from './browser.ts';
 import { Sidebars, useNavFull, type SidebarActions } from './sidebar/Sidebar.tsx';
 import { toggleTerminal } from './terminal/actions.ts';
 import { TerminalPanel } from './terminal/TerminalPanel.tsx';
@@ -205,6 +206,12 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
             <span className="text-diff-del-fg">-{status.removed}</span>
           </button>
         ) : null}
+        <HeaderButton
+          icon={Globe}
+          label="New browser tab"
+          title={`New browser tab (${SHORTCUTS.browser}); Cmd+click to open it beside`}
+          onClick={e => openBrowser('', e.metaKey || e.ctrlKey)}
+        />
         <HeaderButton
           icon={PanelRight}
           label={layout.rightPanel ? 'Hide panel' : 'Show panel'}
