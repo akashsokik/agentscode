@@ -5,10 +5,19 @@ import { COMMS_MCP_ENTRY, COMMS_SERVER, NODE_RUNTIME, PORT } from '../config.ts'
 
 export type CommsTool =
   | 'list_agents' | 'send_message' | 'reply' | 'read_messages' | 'set_task_summary' | 'remember' | 'forget' | 'delegate_task' | 'list_delegations'
-  | 'report_result' | 'list_channels' | 'read_channel' | 'post_to_channel' | 'create_walkthrough' | 'openui_guide';
+  | 'report_result' | 'list_channels' | 'read_channel' | 'post_to_channel' | 'create_walkthrough' | 'openui_guide'
+  | BrowserTool;
+export type BrowserTool =
+  | 'browser_open' | 'browser_list' | 'browser_close' | 'browser_snapshot' | 'browser_screenshot' | 'browser_console'
+  | 'browser_click' | 'browser_type' | 'browser_press' | 'browser_eval';
+export const BROWSER_TOOLS: BrowserTool[] = [
+  'browser_open', 'browser_list', 'browser_close', 'browser_snapshot', 'browser_screenshot', 'browser_console',
+  'browser_click', 'browser_type', 'browser_press', 'browser_eval',
+];
 export const COMMS_TOOLS: CommsTool[] = [
   'list_agents', 'send_message', 'reply', 'read_messages', 'set_task_summary', 'remember', 'forget', 'delegate_task', 'list_delegations',
   'report_result', 'list_channels', 'read_channel', 'post_to_channel', 'create_walkthrough', 'openui_guide',
+  ...BROWSER_TOOLS,
 ];
 export type CommsHandler = (tool: CommsTool, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
@@ -65,6 +74,34 @@ export const walkthroughInput = z.object({
   summary: z.string().trim().min(1).max(2000),
   steps: z.array(walkthroughStepInput).min(1).max(WALKTHROUGH_MAX_STEPS),
 });
+const tabId = z.string().trim().min(1).max(80);
+const ref = z.string().trim().min(1).max(40);
+/** Each browser tool's input, keyed by tool; the op sent to the desktop app is the name without `browser_`. */
+export const browserInputs = {
+  browser_open: z.object({ url: z.string().trim().min(1).max(4000), tab_id: tabId.optional() }),
+  browser_list: z.object({}),
+  browser_close: z.object({ tab_id: tabId }),
+  browser_snapshot: z.object({ tab_id: tabId, max_chars: z.number().int().min(1000).max(60_000).optional() }),
+  browser_screenshot: z.object({ tab_id: tabId, full_page: z.boolean().optional() }),
+  browser_console: z.object({ tab_id: tabId, since: z.number().int().min(0).optional() }),
+  browser_click: z.object({ tab_id: tabId, ref }),
+  browser_type: z.object({ tab_id: tabId, ref, text: z.string().max(10_000), submit: z.boolean().optional() }),
+  browser_press: z.object({ tab_id: tabId, key: z.string().min(1).max(20) }),
+  browser_eval: z.object({ tab_id: tabId, expression: z.string().min(1).max(20_000) }),
+} satisfies Record<BrowserTool, z.ZodObject>;
+
+const BROWSER_DESCRIPTIONS: Record<BrowserTool, string> = {
+  browser_open: 'Open a web page in your own AgentsCode browser tab (a localhost dev server or any http(s) URL); the user sees it beside you. Without tab_id it reuses your latest tab. Returns tab_id, final url, HTTP status and title.',
+  browser_list: 'Your open browser tabs.',
+  browser_close: 'Close one of your browser tabs.',
+  browser_snapshot: 'The page as an indented accessibility tree; actionable lines carry refs like [e12] for click and type. Refs last until the next snapshot or navigation. Take one before interacting.',
+  browser_screenshot: 'Save a PNG of the tab (full_page for the whole page) and return its path; read the file to see it.',
+  browser_console: 'Console messages, page exceptions and failed requests from the tab. Pass since (the next value from the last call) to get only new ones.',
+  browser_click: 'Click the element with this ref from your latest snapshot.',
+  browser_type: 'Focus the element with this ref, type text into it, and press Enter if submit.',
+  browser_press: 'Press a key in the tab: Enter, Tab, Escape, Backspace, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, or one character.',
+  browser_eval: 'Run a JavaScript expression in the page and return its value. Only works when the user has turned on Browser scripts in Settings.',
+};
 
 /** The MCP surface every agent sees. Each call is forwarded to the IDE, which knows the caller from its token. */
 export function createCommsMcpServer(call: CommsHandler): McpServer {
@@ -140,6 +177,14 @@ export function createCommsMcpServer(call: CommsHandler): McpServer {
     description: 'The syntax and components for interactive UI in your replies (```openui-lang blocks: cards, metrics, tables, charts, diagrams, buttons). Read it once before writing your first block.',
     inputSchema: {}, annotations: { readOnlyHint: true },
   }, args => invoke('openui_guide', args));
+  for (const tool of BROWSER_TOOLS) {
+    const readOnly = tool === 'browser_list' || tool === 'browser_snapshot' || tool === 'browser_console';
+    server.registerTool(tool, {
+      description: BROWSER_DESCRIPTIONS[tool],
+      inputSchema: browserInputs[tool].shape,
+      ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
+    }, (args: Record<string, unknown>) => invoke(tool, args));
+  }
   return server;
 }
 
@@ -163,6 +208,7 @@ export function codexCommsConfig(token: string): string {
 export const COMMS_INSTRUCTIONS = [
   `AgentsCode gives you ${COMMS_SERVER} MCP tools to work with teammate agents: list_agents, send_message, reply, read_messages, set_task_summary, delegate_task, list_delegations, report_result, list_channels, read_channel and post_to_channel. remember and forget keep your own memory. create_walkthrough publishes a guided tour of your work, only when the user asks for one.`,
   'Replies can also include interactive UI (metrics, tables, charts, status, buttons the user clicks to answer you) in ```openui-lang blocks. Use it when the user would rather see or click than read; call openui_guide once for the syntax first.',
+  'In the desktop app you have your own browser: browser_open a page (e.g. your dev server), browser_snapshot to read it, then browser_click, browser_type and browser_press to use it, browser_screenshot to see it and browser_console for errors. Use it to check web work the way the user would.',
   'AgentsCode draws ```mermaid code blocks as diagrams in your replies, channel posts and walkthroughs (flowchart, sequenceDiagram, architecture-beta, classDiagram, erDiagram, stateDiagram). Use one when a flow, a sequence of calls or an architecture is clearer as a picture than as prose.',
   'Check list_agents when planning shared work to see who is working on what. Only start new messages to agents with canMessage=true; use reply or report_result to answer requests you received.',
   'Messages are asynchronous: send_message returns a receipt and replies arrive as later turns. Continue independent work or finish your turn; never wait or poll for a teammate.',

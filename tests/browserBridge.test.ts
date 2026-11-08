@@ -1,0 +1,236 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+import { BROWSER_UNAVAILABLE, BrowserBridge, attachParentPort, browsableUrl, bridgeTokenMatches, writeBridgeToken, type BridgeTransport } from '../server/browserBridge.ts';
+import { browserSummary } from '../server/agents/describe.ts';
+import { browserScreenshot, presentTool } from '../web/toolPresentation.ts';
+import { harness, projectDir, settle, tempDir } from './helpers.ts';
+
+/** A stand-in for the desktop app's main process: records requests, answers when told. */
+function fakeMain() {
+  const sent: Record<string, any>[] = [];
+  const transport: BridgeTransport = { send: message => sent.push(message as Record<string, any>) };
+  return { sent, transport, last: () => sent[sent.length - 1] };
+}
+
+test('the bridge is unavailable until main says hello with version 1', async () => {
+  const bridge = new BrowserBridge();
+  await assert.rejects(bridge.request('a', 'list', {}), new RegExp(BROWSER_UNAVAILABLE));
+  const main = fakeMain();
+  bridge.connect(main.transport);
+  await assert.rejects(bridge.request('a', 'list', {}), new RegExp(BROWSER_UNAVAILABLE));
+  bridge.receive({ type: 'browser:hello', version: 2 });
+  assert.equal(bridge.available, false);
+  bridge.receive({ type: 'browser:hello', version: 1 });
+  assert.equal(bridge.available, true);
+});
+
+test('requests carry the envelope; answers resolve, and main\'s error text passes through', async () => {
+  const bridge = new BrowserBridge();
+  const main = fakeMain();
+  bridge.connect(main.transport);
+  bridge.receive({ type: 'browser:hello', version: 1 });
+
+  const opening = bridge.request('agent-1', 'open', { url: 'http://localhost:3000/' });
+  const request = main.last();
+  assert.equal(request.type, 'browser:request');
+  assert.equal(request.agentId, 'agent-1');
+  assert.equal(request.op, 'open');
+  assert.deepEqual(request.args, { url: 'http://localhost:3000/' });
+  assert.match(request.id, /^[0-9a-f-]{36}$/);
+  bridge.receive({ type: 'browser:response', id: request.id, ok: true, result: { tab_id: 't1', title: 'Home' } });
+  assert.deepEqual(await opening, { tab_id: 't1', title: 'Home' });
+
+  const clicking = bridge.request('agent-1', 'click', { tab_id: 't1', ref: 'e9' });
+  bridge.receive({ type: 'browser:response', id: main.last().id, ok: false, error: 'No element e9; take a new snapshot.' });
+  await assert.rejects(clicking, /No element e9; take a new snapshot\./);
+
+  // Unknown ids and junk are ignored.
+  bridge.receive({ type: 'browser:response', id: 'nope', ok: true });
+  bridge.receive('junk');
+});
+
+test('a request with no answer times out; a replaced or closed connection fails what it was carrying', async () => {
+  const bridge = new BrowserBridge(30);
+  const first = fakeMain();
+  const detachFirst = bridge.connect(first.transport);
+  bridge.receive({ type: 'browser:hello', version: 1 });
+  await assert.rejects(bridge.request('a', 'snapshot', { tab_id: 't' }), /did not answer within 0s/);
+
+  const slow = new BrowserBridge(60_000);
+  const a = fakeMain();
+  slow.connect(a.transport);
+  slow.receive({ type: 'browser:hello', version: 1 });
+  const pending = slow.request('x', 'list', {});
+  const b = fakeMain();
+  const detachB = slow.connect(b.transport); // the newest connection wins
+  await assert.rejects(pending, /replaced/);
+  assert.equal(slow.available, false, 'the new connection must say hello first');
+  slow.receive({ type: 'browser:response', id: a.last().id, ok: true }, a.transport); // late answer on the old one: ignored
+  slow.receive({ type: 'browser:hello', version: 1 }, b.transport);
+  const onB = slow.request('x', 'list', {});
+  detachB();
+  await assert.rejects(onB, /closed the browser connection/);
+  assert.equal(slow.available, false);
+  detachFirst(); // detaching a connection that was already replaced changes nothing
+});
+
+test('agent removal is sent to main only while the bridge is up', () => {
+  const bridge = new BrowserBridge();
+  const main = fakeMain();
+  bridge.connect(main.transport);
+  bridge.agentRemoved('gone');
+  assert.equal(main.sent.length, 0);
+  bridge.receive({ type: 'browser:hello', version: 1 });
+  bridge.agentRemoved('gone');
+  assert.deepEqual(main.last(), { type: 'browser:agent-removed', agentId: 'gone' });
+});
+
+test('the parentPort transport carries the same envelope', async () => {
+  const listeners: ((event: { data: unknown }) => void)[] = [];
+  const posted: any[] = [];
+  const port = { on: (_: 'message', listener: (event: { data: unknown }) => void) => { listeners.push(listener); }, postMessage: (m: unknown) => { posted.push(m); } };
+  const bridge = new BrowserBridge();
+  assert.equal(attachParentPort(bridge, undefined), false);
+  assert.equal(attachParentPort(bridge, port), true);
+  listeners[0]({ data: { type: 'browser:hello', version: 1 } });
+  const listing = bridge.request('a', 'list', {});
+  listeners[0]({ data: { type: 'browser:response', id: posted[0].id, ok: true, result: { tabs: [] } } });
+  assert.deepEqual(await listing, { tabs: [] });
+});
+
+test('the socket token is private to the user, fresh each start, and checked in constant time', () => {
+  const dir = tempDir('bridge');
+  const one = writeBridgeToken(dir);
+  const file = path.join(dir, 'browser-bridge.token');
+  assert.match(one, /^[0-9a-f]{64}$/);
+  assert.equal(fs.readFileSync(file, 'utf8'), one);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const two = writeBridgeToken(dir);
+  assert.notEqual(two, one);
+  assert.equal(bridgeTokenMatches(two, two), true);
+  assert.equal(bridgeTokenMatches(two, one), false);
+  assert.equal(bridgeTokenMatches(two, two.slice(1)), false);
+  assert.equal(bridgeTokenMatches(two, undefined), false);
+  assert.equal(bridgeTokenMatches('', ''), false);
+});
+
+test('only http and https pages can be opened; bare hosts get a scheme', () => {
+  assert.equal(browsableUrl('localhost:3000'), 'http://localhost:3000/');
+  assert.equal(browsableUrl('127.0.0.1:5173/app'), 'http://127.0.0.1:5173/app');
+  assert.equal(browsableUrl('example.com'), 'https://example.com/');
+  assert.equal(browsableUrl('https://example.com/a?b=1'), 'https://example.com/a?b=1');
+  for (const bad of ['file:///etc/passwd', 'javascript:alert(1)', 'data:text/html,hi', 'chrome://settings', 'about:blank']) assert.equal(browsableUrl(bad), null, bad);
+});
+
+test('browser calls read as short rows, and a screenshot row finds its file', () => {
+  assert.equal(browserSummary('open', { url: 'http://localhost:3000/login' }), 'localhost:3000/login');
+  assert.equal(browserSummary('type', { ref: 'e4', text: 'ada@example.com', submit: true }), 'e4 "ada@example.com" and Enter');
+  assert.deepEqual(presentTool({ name: 'mcp__agentscode__browser_open', summary: 'localhost:3000/login', status: 'ok' }), { action: 'Opened', target: 'localhost:3000/login' });
+  assert.deepEqual(presentTool({ name: 'agentscode.browser_snapshot', summary: 'agentscode.browser_snapshot', status: 'ok' }), { action: 'Read page', target: '' });
+  const shot = { name: 'mcp__agentscode__browser_screenshot', summary: 't1', status: 'ok' as const, output: JSON.stringify({ path: '/Users/me/.agentscode/agents/x/browser/2026-11-08T13-00-00-000Z-t1.png', width: 1280, height: 800 }) };
+  assert.equal(browserScreenshot(shot), '2026-11-08T13-00-00-000Z-t1.png');
+  assert.equal(browserScreenshot({ ...shot, status: 'error' }), null);
+  assert.equal(browserScreenshot({ ...shot, output: JSON.stringify({ path: '/x/../../etc/passwd' }) }), null);
+});
+
+test('agents\' browser tools: plan-only limits, the scripts setting, URL check, screenshot path, removal', async () => {
+  const h = harness();
+  const web = h.manager.addProject({ path: projectDir(h.dir, 'web') });
+  const ada = await h.manager.create({ name: 'Ada', engine: 'claude', projectId: web.id });
+  const reader = await h.manager.create({ name: 'Reader', engine: 'claude', projectId: web.id, autonomy: 'readonly' });
+  const main = fakeMain();
+  h.manager.browser.connect(main.transport);
+  h.manager.browser.receive({ type: 'browser:hello', version: 1 });
+  // main answers every request with its own op, so the test sees what reached it.
+  const answer = () => { const r = main.last(); h.manager.browser.receive({ type: 'browser:response', id: r.id, ok: true, result: { op: r.op, args: r.args } }); };
+  const call = async (agentId: string, tool: string, args: Record<string, unknown>) => {
+    const pending = h.manager.commsTool(h.runner(agentId).ctx.commsToken!, tool, args);
+    pending.catch(() => {}); // refusals are asserted by the caller; mark them handled while main answers
+    await settle();
+    if (main.sent.length && main.last().type === 'browser:request' && !(main.last() as { answered?: boolean }).answered) { answer(); (main.last() as { answered?: boolean }).answered = true; }
+    return pending as Promise<{ op: string; args: Record<string, unknown> }>;
+  };
+  h.manager.send(ada.id, 'Go.');
+  h.manager.send(reader.id, 'Look.');
+  await settle();
+
+  const opened = await call(ada.id, 'browser_open', { url: 'localhost:3000' });
+  assert.deepEqual(opened, { op: 'open', args: { url: 'http://localhost:3000/' } });
+  await assert.rejects(call(ada.id, 'browser_open', { url: 'file:///etc/passwd' }), /Only http and https/);
+
+  const shot = await call(ada.id, 'browser_screenshot', { tab_id: 't1' });
+  const shotPath = String(shot.args.path);
+  assert.ok(shotPath.startsWith(path.join(ada.home, 'browser') + path.sep), shotPath);
+  assert.match(shotPath, /-t1\.png$/);
+  fs.writeFileSync(shotPath, 'png');
+  assert.equal(h.manager.browserShot(ada.id, path.basename(shotPath)).path, shotPath);
+  assert.throws(() => h.manager.browserShot(ada.id, '../soul.md'), /No such screenshot/);
+
+  // Plan-only agents can look but not touch.
+  assert.equal((await call(reader.id, 'browser_snapshot', { tab_id: 't2' })).op, 'snapshot');
+  assert.equal((await call(reader.id, 'browser_console', { tab_id: 't2', since: 3 })).op, 'console');
+  for (const [tool, args] of [['browser_click', { tab_id: 't2', ref: 'e1' }], ['browser_type', { tab_id: 't2', ref: 'e1', text: 'x' }], ['browser_press', { tab_id: 't2', key: 'Enter' }], ['browser_close', { tab_id: 't2' }], ['browser_eval', { tab_id: 't2', expression: '1' }]] as const) {
+    await assert.rejects(call(reader.id, tool, args), /Plan-only agents/, tool);
+  }
+
+  // Scripts need the setting, which is off by default.
+  assert.equal(h.store.settings.browserEval, false);
+  await assert.rejects(call(ada.id, 'browser_eval', { tab_id: 't1', expression: 'document.title' }), /Browser scripts in Settings/);
+  h.manager.updateSettings({ browserEval: true });
+  assert.equal((await call(ada.id, 'browser_eval', { tab_id: 't1', expression: 'document.title' })).op, 'eval');
+
+  await assert.rejects(call(ada.id, 'browser_click', { tab_id: 't1' }), /Check the browser_click arguments/);
+
+  // Removing an agent tells main to close its tabs.
+  await h.manager.remove(reader.id);
+  assert.deepEqual(main.last(), { type: 'browser:agent-removed', agentId: reader.id });
+});
+
+test('without the desktop app, browser tools say so', async () => {
+  const h = harness();
+  const web = h.manager.addProject({ path: projectDir(h.dir, 'web') });
+  const ada = await h.manager.create({ name: 'Ada', engine: 'claude', projectId: web.id });
+  h.manager.send(ada.id, 'Go.');
+  await settle();
+  await assert.rejects(h.manager.commsTool(h.runner(ada.id).ctx.commsToken!, 'browser_list', {}), new RegExp(BROWSER_UNAVAILABLE));
+});
+
+test('the bridge socket takes main only: right token, no Origin; then requests flow both ways', async () => {
+  const { createServer } = await import('../server/app.ts');
+  const { Hub } = await import('../server/hub.ts');
+  const { default: WebSocket } = await import('ws');
+  const h = harness();
+  const token = 'a'.repeat(64);
+  const server = createServer(h.manager, new Hub(), { bridgeToken: token });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as import('node:net').AddressInfo).port;
+  const url = `ws://127.0.0.1:${port}/browser-bridge`;
+  const refused = (headers: Record<string, string>) => new Promise<boolean>(resolve => {
+    const ws = new WebSocket(url, { headers });
+    ws.on('open', () => { ws.close(); resolve(false); });
+    ws.on('error', () => resolve(true));
+  });
+  try {
+    assert.equal(await refused({}), true, 'no token');
+    assert.equal(await refused({ 'x-agentscode-bridge': 'b'.repeat(64) }), true, 'wrong token');
+    assert.equal(await refused({ 'x-agentscode-bridge': token, Origin: `http://127.0.0.1:${port}` }), true, 'a page, even the app\'s own');
+
+    const ws = new WebSocket(url, { headers: { 'x-agentscode-bridge': token } });
+    await new Promise(resolve => ws.on('open', resolve));
+    ws.send(JSON.stringify({ type: 'browser:hello', version: 1 }));
+    ws.on('message', data => {
+      const request = JSON.parse(String(data));
+      ws.send(JSON.stringify({ type: 'browser:response', id: request.id, ok: true, result: { tabs: [{ tab_id: 't1' }] } }));
+    });
+    await settle();
+    assert.equal(h.manager.browser.available, true);
+    assert.deepEqual(await h.manager.browser.request('a', 'list', {}), { tabs: [{ tab_id: 't1' }] });
+    ws.close();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(h.manager.browser.available, false, 'closing the socket takes the browser away');
+  } finally {
+    server.close();
+  }
+});

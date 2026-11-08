@@ -1,4 +1,5 @@
-import { DIST_DIR, HOST, PORT, detectEngine } from './config.ts';
+import { DATA_DIR, DIST_DIR, HOST, PORT, detectEngine } from './config.ts';
+import { attachParentPort, writeBridgeToken } from './browserBridge.ts';
 import { createServer } from './app.ts';
 import { Hub } from './hub.ts';
 import { AgentManager } from './manager.ts';
@@ -13,8 +14,13 @@ const manager = new AgentManager(store, hub, { claude, codex, orcacode });
 manager.init();
 void manager.refreshModels(); // fills in the model pickers a few seconds after start
 
+// The desktop app's browser: through the utility process's parentPort when the app started this
+// server, else through /browser-bridge with this token (main reads it from the data folder).
+attachParentPort(manager.browser);
+const bridgeToken = writeBridgeToken(DATA_DIR);
+
 const terminals = new Terminals(id => manager.project(id));
-const server = createServer(manager, hub, { distDir: DIST_DIR, terminals });
+const server = createServer(manager, hub, { distDir: DIST_DIR, terminals, bridgeToken });
 
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
