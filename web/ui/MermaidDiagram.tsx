@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Check, Code, Copy, Maximize2, Minimize2 } from '../mono/icons.tsx';
-import { hasHue, mermaidTheme, parseRgb, themeGrey, type AppColours, type Rgb } from '../mermaidTheme.ts';
+import { hasHue, mermaidTheme, overlappingPairs, parseRgb, themeGrey, type AppColours, type Rgb } from '../mermaidTheme.ts';
 
 type MermaidApi = typeof import('mermaid').default;
 
@@ -132,9 +132,19 @@ export function MermaidDiagram({ source, className = '' }: { source: string; cla
     });
   };
 
-  // Before paint, so a diagram never shows its own colours even for a frame.
+  // Before paint, so a diagram never shows its own colours even for a frame. Then look for
+  // architecture services Mermaid drew on top of each other, to say so instead of leaving it garbled.
+  const [overlap, setOverlap] = useState<string | null>(null);
   useLayoutEffect(() => {
-    if (drawn.current && svg && !showSource) neutralizeColours(drawn.current, appColours());
+    if (!drawn.current || !svg || showSource) return;
+    neutralizeColours(drawn.current, appColours());
+    const boxes = [...drawn.current.querySelectorAll<SVGGElement>('.architecture-service')].map(el => {
+      const r = el.getBoundingClientRect();
+      const label = el.querySelector('text')?.textContent?.trim();
+      return { id: label || el.id, x: r.x, y: r.y, width: r.width, height: r.height };
+    });
+    const pairs = overlappingPairs(boxes);
+    setOverlap(pairs.length ? pairs.map(([a, b]) => `${a} and ${b}`).join('; ') : null);
   }, [svg, showSource]);
 
   const stale = settled !== source.trim();
@@ -168,6 +178,11 @@ export function MermaidDiagram({ source, className = '' }: { source: string; cla
       ) : (
         <div className="px-3.5 py-6 text-center font-sans text-[12px] text-content/40">Drawing diagram...</div>
       )}
+      {overlap && !showSource && !failed ? (
+        <figcaption className="border-t border-content/10 px-3.5 py-1.5 font-sans text-[11.5px] text-content/55">
+          Drawn on top of each other: {overlap}. Mermaid places architecture services by the sides their edges use; give each neighbour its own side (L, R, T, B).
+        </figcaption>
+      ) : null}
       {failed ? <figcaption className="border-t border-content/10 px-3.5 py-1.5 font-sans text-[11.5px] text-danger/90">Could not draw this diagram: {error!.split('\n')[0]}</figcaption> : null}
     </figure>
   );

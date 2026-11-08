@@ -135,7 +135,10 @@ export function mermaidTheme({ ink, background, font, light }: AppColours): Merm
       `.architecture-service rect[style*="087ebf"], .architecture-groups rect[style*="087ebf"] { fill: ${iconTile} !important; }`,
       `.architecture-service [style*="fill: #fff"], .architecture-groups [style*="fill: #fff"], .architecture-service [fill="#fff"], .architecture-groups [fill="#fff"] { fill: ${fg} !important; }`,
       `.architecture-service [style*="stroke: #fff"], .architecture-groups [style*="stroke: #fff"], .architecture-service [stroke="#fff"], .architecture-groups [stroke="#fff"] { stroke: ${fg} !important; }`,
-      `.architecture-service-label, .architecture-groups text { fill: ${fg} !important; }`,
+      `.architecture-service text, .architecture-groups text { fill: ${fg} !important; }`,
+      // Labels sit under their icon, so an edge leaving a service downward runs through its label.
+      // A halo in the background colour keeps the words readable over the line.
+      `.architecture-service text, .architecture-groups text { paint-order: stroke fill; stroke: ${bg} !important; stroke-width: 5px; stroke-linejoin: round; }`,
       `.edgeLabel, .edgeLabel p { color: ${muted}; }`,
       // Sankey flows blend with "multiply", which turns them darker than a dark background.
       `.links > .link { mix-blend-mode: normal !important; }`,
@@ -159,4 +162,25 @@ export function themeGrey(colour: Rgb, { ink, background, light }: Pick<AppColou
   const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   const amount = light ? 1 - luminance : luminance;
   return mix(ink, background, Math.max(0.06, Math.min(0.92, amount)));
+}
+
+export interface Box { id: string; x: number; y: number; width: number; height: number }
+
+/**
+ * Pairs of boxes drawn on top of each other: more than a quarter of the smaller one covered.
+ * Mermaid's architecture layout places each service by the sides its edges use, so two services
+ * wired to the same side of a third can land on the same spot.
+ */
+export function overlappingPairs(boxes: readonly Box[]): [string, string][] {
+  const pairs: [string, string][] = [];
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i];
+      const b = boxes[j];
+      const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+      const h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+      if (w > 0 && h > 0 && w * h > 0.25 * Math.min(a.width * a.height, b.width * b.height)) pairs.push([a.id, b.id]);
+    }
+  }
+  return pairs;
 }

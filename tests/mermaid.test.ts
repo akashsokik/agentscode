@@ -74,3 +74,13 @@ test('a colour a diagram brings in becomes the theme grey of the same lightness'
   assert.ok(value(themeGrey([255, 255, 0], dark)) > value(themeGrey([0, 0, 128], dark)));
   assert.ok(value(themeGrey([255, 255, 0], light)) > value(themeGrey([0, 0, 128], light)));
 });
+
+test('services drawn on top of each other are found; neighbours that only touch are not', async () => {
+  const { overlappingPairs, mermaidTheme } = await import('../web/mermaidTheme.ts');
+  const box = (id: string, x: number, y: number) => ({ id, x, y, width: 80, height: 100 });
+  assert.deepEqual(overlappingPairs([box('App page', 100, 100), box('Server', 100, 100), box('Main', 300, 100)]), [['App page', 'Server']]);
+  assert.deepEqual(overlappingPairs([box('a', 0, 0), box('b', 80, 0), box('c', 70, 90)]), [], 'edges touching or a corner clipped are fine');
+  // Labels get a halo in the background colour, so an edge under them stays readable.
+  const theme = mermaidTheme({ ink: [235, 235, 235], background: [23, 23, 23], font: 'x', light: false });
+  assert.match(theme.themeCSS, /\.architecture-service text[^{]*\{ paint-order: stroke fill; stroke: #171717/);
+});
