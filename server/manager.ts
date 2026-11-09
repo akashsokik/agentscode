@@ -266,7 +266,6 @@ export class AgentManager {
         return reason;
       },
       userTurn: id => this.store.agents.get(id)?.role === 'super' && this.store.agents.get(id)?.currentTask?.source === 'user',
-      keepOnRestart: message => message.toAgentId === this.superId(),
       changed: message => this.publishMessage(message),
       conversationChanged: conversation => this.hub.broadcast({ type: 'conversation', conversation }),
       inChannel: (channelId, agentId) => this.channels.isMember(channelId, agentId),
@@ -312,6 +311,8 @@ export class AgentManager {
     }
     this.refreshProjects();
     this.store.save();
+    // Mail that outlived a restart (see Mailbox.recover) goes now.
+    setImmediate(() => this.mailbox.drainAll());
     // The SuperAgent's minute: updates that waited for it to be idle, and agents stuck too long.
     this.superTimer = setInterval(() => this.superTick(), 60_000);
     this.superTimer.unref?.();

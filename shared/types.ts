@@ -493,6 +493,8 @@ export interface PeerMessage {
   /** Set when an agent mentioned the recipient in a channel post (postId), or answered one. */
   channelId?: string;
   postId?: string;
+  /** It was being handled when AgentsCode restarted, so it is delivered once more; the recipient may have started on it. */
+  redelivered?: boolean;
 }
 
 /** A chain of peer messages started by one task. All its messages share one budget. */
