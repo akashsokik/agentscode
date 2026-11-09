@@ -64,7 +64,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </Row>
         </Group>
 
-        <Group title="SuperAgent" description="It runs your team across every project. It never edits code; agents do the work.">
+        <Group title="SuperAgent" description="It runs your team across every project. It never edits code; agents do the work. The limits below stop only what it starts on its own: your own messages to it, and the work you asked it for, always go.">
           <Row label="Wake it when agents finish, fail or get stuck" description="Updates are batched into one turn, and only sent while it is idle.">
             <Toggle label="Wake the SuperAgent" on={settings.superWake} onChange={superWake => void save({ superWake })} />
           </Row>

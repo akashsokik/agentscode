@@ -239,6 +239,8 @@ export interface SuperAction {
   why: string;
   undo?: SuperUndo;
   undoneAt?: number;
+  /** Done for work the user asked for (a turn they gave it, or mail on such work), not on its own. */
+  forUser?: boolean;
 }
 
 /** queued: waiting its turn; in_progress: an agent is on it; blocked: waiting for the user; done. */

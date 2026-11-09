@@ -205,7 +205,7 @@ export class AgentManager {
         return Boolean(agent) && !this.runners.get(id!)?.busy && agent!.status !== 'working' && agent!.status !== 'waiting';
       },
       settings: () => this.store.settings,
-      cost: () => { const id = this.superId(); return id ? this.store.agents.get(id)?.costUsd ?? 0 : 0; },
+      mailQueued: messageId => this.store.messages.some(m => m.id === messageId && m.status === 'queued'),
       store: this.superStore,
       deliver: (prompt, events) => this.wakeSuper(prompt, `Update: ${events.map(e => e.text).join('; ')}`),
     });
@@ -1166,9 +1166,16 @@ export class AgentManager {
     return { ...this.superStore.view(this.superId()), held: this.heldMail() };
   }
 
+  /** The SuperAgent view last sent to the app, so an unchanged one is not sent again (the minute tick). */
+  private superSent = '';
+
   private publishSuper(): SuperState {
     const view = this.superView();
-    this.hub.broadcast({ type: 'super', super: view });
+    const key = JSON.stringify(view);
+    if (key !== this.superSent) {
+      this.superSent = key;
+      this.hub.broadcast({ type: 'super', super: view });
+    }
     return view;
   }
 
@@ -1260,6 +1267,11 @@ export class AgentManager {
       if (tool === 'update_goal' && [input.status, input.text, input.agent_id, input.delegation_id, input.notes].every(v => v === undefined)) {
         return fail('Say what to change: status, text, agent_id, delegation_id or notes.');
       }
+      // Goals are handed out only in update turns. Mail about work you asked for skips the wake limits,
+      // so a goal started from it would skip them too: starting one (in progress, or given to an agent) there is refused.
+      if (tool === 'update_goal' && (input.status === 'in_progress' || input.agent_id) && this.inUserWorkMail(caller.id)) {
+        throw new HttpError(409, 'Hand out goals only in update turns, not while handling a report or reply on work the user asked for. Finish this turn; the next update lists the queued goals.');
+      }
       const before = this.superStore.goal(input.goal_id);
       const agentId = input.agent_id === undefined ? undefined : input.agent_id === '' ? '' : this.teammate(input.agent_id).id;
       const goal = this.superStore.updateGoal(before.id, {
@@ -1279,14 +1291,17 @@ export class AgentManager {
       const parsed = createAgentInput.safeParse(args);
       if (!parsed.success) return fail('Give a name, engine, role, an optional project, model, worktree and first task, and a why.');
       const input = parsed.data;
+      // The cap stops only agents it creates on its own: in a turn you gave it, or on mail about work
+      // you asked for, it creates what the work needs.
+      const forUser = caller.currentTask?.source === 'user' || this.inUserWorkMail(caller.id);
       const cap = this.store.settings.superMaxCreatesPerDay;
-      if (this.superStore.createdSince(Date.now() - 86_400_000) >= cap) {
+      if (!forUser && this.superStore.createdSince(Date.now() - 86_400_000) >= cap) {
         throw new HttpError(429, `You created ${cap} agents in the last day, the most the user allows (Settings, SuperAgent). Ask the user before creating more.`);
       }
       const projectId = input.project ? this.projectRef(input.project).id : null;
       const agent = await this.create({ name: input.name, engine: input.engine, projectId, role: input.role, model: input.model, worktree: input.worktree, task: input.task });
       this.recordSuper({
-        tool, why: input.why, undo: { kind: 'removeAgent', agentId: agent.id },
+        tool, why: input.why, undo: { kind: 'removeAgent', agentId: agent.id }, ...(forUser ? { forUser: true } : {}),
         summary: `Created ${agent.name} (${rolePreset(agent.role).name}, ${ENGINE_LABELS[agent.engine]}) ${projectId ? `on ${this.store.projects.get(projectId)?.name}` : 'across all projects'}${input.task ? `, first task: ${clip(input.task.replace(/\s+/g, ' '), 120)}` : ''}`,
       });
       return { created: { id: agent.id, name: agent.name, role: agent.role, autonomy: agent.autonomy, projectId: agent.projectId } };
@@ -1475,7 +1490,14 @@ export class AgentManager {
 
   /** Why mail in this conversation may not start a SuperAgent turn now, or null. */
   private mailHold(conversation: Conversation | undefined): string | null {
-    return conversation?.userStarted ? this.watcher.dailyHeld() : this.watcher.held();
+    // Work you asked for always goes, past the daily budget too: the caps stop only what it starts on its own.
+    return conversation?.userStarted ? null : this.watcher.held();
+  }
+
+  /** The SuperAgent is handling mail about work the user asked for (a report or reply in such a conversation). */
+  private inUserWorkMail(superId: string): boolean {
+    const message = this.mailbox.activeMessage(superId);
+    return Boolean(message && this.store.conversations.find(c => c.id === message.conversationId)?.userStarted);
   }
 
   /** Whether a peer message belongs to work the user asked the SuperAgent for. */
@@ -1952,6 +1974,11 @@ export class AgentManager {
       turnCost = result.costUsd >= last ? result.costUsd - last : result.costUsd;
       this.processCost.set(agentId, result.costUsd);
       agent.costUsd += turnCost;
+      // The daily budget covers only what the SuperAgent does on its own: its update turns, and mail
+      // about work it began itself. Your turns, and mail about work you asked for, never count.
+      if (agent.role === 'super' && (task?.source === 'system' || (task?.source === 'agent' && !this.userWork(task.messageId)))) {
+        this.superStore.addAutonomousCost(turnCost);
+      }
     }
     if (result.tokens) agent.tokens += result.tokens;
     if (result.threadUsage) agent.threadUsage = result.threadUsage;

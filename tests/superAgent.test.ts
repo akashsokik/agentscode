@@ -121,7 +121,13 @@ test('create_agent: the role\'s own permissions, a project by name, a daily cap,
   assert.ok(t.view().log[0].undoneAt);
   await assert.rejects(t.manager.undoSuper(entry.id), e => status(e) === 409);
 
-  for (let i = 1; i < MAX_CREATES_PER_DAY; i++) await t.call('create_agent', { name: `Extra${i}`, why: 'Load.' });
+  // The cap counts agents it makes on its own, in an update turn; Tess was made in your turn.
+  t.runner.complete();
+  await settle();
+  const watcher = (t.manager as unknown as { watcher: SuperWatcher }).watcher;
+  watcher.note({ agentId: t.ada.id, key: 'k', text: 'Ada is free' });
+  assert.ok(watcher.flush());
+  for (let i = 0; i < MAX_CREATES_PER_DAY; i++) await t.call('create_agent', { name: `Extra${i}`, why: 'Load.' });
   await assert.rejects(t.call('create_agent', { name: 'OneTooMany', why: 'Load.' }), e => status(e) === 429);
 });
 
@@ -212,8 +218,8 @@ test('the watcher batches, waits while busy, in quiet hours or over budget, and 
   let idle = false;
   const delivered: string[] = [];
   const settings = { ...DEFAULT_SETTINGS, superMaxWakesPerHour: 2 };
-  let cost = 1;
-  const host: WatcherHost = { superId: () => 'sup', idle: () => idle, settings: () => settings, cost: () => cost, store: new SuperStore(tempDir('super')), deliver: p => delivered.push(p), now: () => now };
+  const store = new SuperStore(tempDir('super'));
+  const host: WatcherHost = { superId: () => 'sup', idle: () => idle, settings: () => settings, store, deliver: p => delivered.push(p), now: () => now };
   const watcher = new SuperWatcher(host);
   watcher.note({ agentId: 'sup', key: 'self', text: 'SuperAgent finished' });
   assert.equal(watcher.waiting(), 0);
@@ -238,7 +244,7 @@ test('the watcher batches, waits while busy, in quiet hours or over budget, and 
   assert.equal(watcher.flush(), true, 'a new hour, a new budget');
   // Over the day's budget, updates wait for tomorrow.
   watcher.note({ agentId: 'a2', key: 'cost', text: 'Something costly' });
-  cost = 1 + settings.superDailyBudgetUsd;
+  store.addAutonomousCost(1 + settings.superDailyBudgetUsd, new Date(now));
   assert.equal(watcher.blocked(), 'the daily budget is used');
   now += 86_400_000;
   assert.equal(watcher.blocked(), null, 'a new day starts at zero');

@@ -40,8 +40,11 @@ interface Stored {
   log: SuperAction[];
   /** When it was woken, for the hourly budget. */
   wakes: number[];
-  /** The SuperAgent's running cost when the local day began, for the daily budget. */
-  costDay?: { day: string; start: number };
+  /**
+   * What the SuperAgent's own turns (updates, and mail about work it began itself) cost on a local
+   * day, for the daily budget. Turns you start, and mail about work you asked for, are not in it.
+   */
+  autoSpend?: { day: string; usd: number };
   /** The local day of the last morning brief. */
   briefDay?: string;
   goals: SuperGoal[];
@@ -58,7 +61,7 @@ export class SuperStore {
         asks: Array.isArray(raw.asks) ? raw.asks : [],
         log: Array.isArray(raw.log) ? raw.log : [],
         wakes: Array.isArray(raw.wakes) ? raw.wakes.filter(n => typeof n === 'number') : [],
-        ...(raw.costDay && typeof raw.costDay.start === 'number' ? { costDay: raw.costDay } : {}),
+        ...(raw.autoSpend && typeof raw.autoSpend.usd === 'number' && typeof raw.autoSpend.day === 'string' ? { autoSpend: raw.autoSpend } : {}),
         ...(typeof raw.briefDay === 'string' ? { briefDay: raw.briefDay } : {}),
         goals: Array.isArray(raw.goals) ? raw.goals.filter(validGoal) : [],
       };
@@ -72,7 +75,7 @@ export class SuperStore {
     const closed = stored.asks.filter(a => !isOpen(a)).slice(0, Math.max(0, ASKS_KEPT - open.length));
     const next: Stored = {
       asks: [...open, ...closed].sort((a, b) => b.createdAt - a.createdAt), log: stored.log.slice(0, LOG_KEPT), wakes: stored.wakes.slice(-100),
-      ...(stored.costDay ? { costDay: stored.costDay } : {}),
+      ...(stored.autoSpend ? { autoSpend: stored.autoSpend } : {}),
       ...(stored.briefDay ? { briefDay: stored.briefDay } : {}),
       goals: orderGoals(stored.goals),
     };
@@ -232,8 +235,9 @@ export class SuperStore {
   }
 
   /** Agents it created since `since`, for the daily cap. */
+  /** Agents it created on its own since `since`; ones made for work the user asked for are not counted. */
   createdSince(since: number): number {
-    return this.read().log.filter(a => a.tool === 'create_agent' && a.at >= since).length;
+    return this.read().log.filter(a => a.tool === 'create_agent' && a.at >= since && !a.forUser).length;
   }
 
   wakesSince(since: number): number {
@@ -249,13 +253,19 @@ export class SuperStore {
     return true;
   }
 
-  /** What it spent since the local day began, from its running total; a new day starts at zero. */
-  spentToday(total: number, now: Date): number {
-    const day = localDay(now);
+  /** What its own turns spent today (local day); a new day starts at zero. */
+  spentToday(now: Date): number {
+    const spend = this.read().autoSpend;
+    return spend?.day === localDay(now) ? spend.usd : 0;
+  }
+
+  /** A turn it started on its own cost this much: it counts toward today's budget. */
+  addAutonomousCost(usd: number, now: Date = new Date()): void {
+    if (!(usd > 0)) return;
     const stored = this.read();
-    if (stored.costDay?.day === day && stored.costDay.start <= total) return total - stored.costDay.start;
-    this.write({ ...stored, costDay: { day, start: total } });
-    return 0;
+    const day = localDay(now);
+    const usdToday = stored.autoSpend?.day === day ? stored.autoSpend.usd : 0;
+    this.write({ ...stored, autoSpend: { day, usd: usdToday + usd } });
   }
 
   noteWake(now = Date.now()): void {
@@ -341,8 +351,8 @@ export interface WatcherHost {
   /** Whether it can take a turn now: idle, not working or waiting on the user. */
   idle(): boolean;
   settings(): Settings;
-  /** The SuperAgent's running cost in dollars, for the daily budget. */
-  cost(): number;
+  /** Whether a message is still queued (held mail the next update reports). */
+  mailQueued?(messageId: string): boolean;
   store: SuperStore;
   /** Start the update turn: the prompt it reads, and the events behind it (for the transcript's line). */
   deliver(prompt: string, events: SuperEvent[]): void;
@@ -409,10 +419,10 @@ export class SuperWatcher {
     return null;
   }
 
-  /** The daily dollar budget: it holds every turn but the ones you start yourself. */
+  /** The daily dollar budget: it holds what the SuperAgent starts on its own, never your turns or work you asked for. */
   dailyHeld(): string | null {
     const settings = this.host.settings();
-    if (settings.superDailyBudgetUsd > 0 && this.host.store.spentToday(this.host.cost(), new Date(this.now())) >= settings.superDailyBudgetUsd) return 'the daily budget is used';
+    if (settings.superDailyBudgetUsd > 0 && this.host.store.spentToday(new Date(this.now())) >= settings.superDailyBudgetUsd) return 'the daily budget is used';
     return null;
   }
 
@@ -437,7 +447,9 @@ export class SuperWatcher {
     if (!this.pending.length || this.blocked()) return false;
     const events = this.pending;
     this.pending = [];
-    const held = this.heldMail.size ? { count: this.heldMail.size, reasons: [...new Set(this.heldMail.values())] } : undefined;
+    // Only mail still waiting counts: what went or was cancelled since it was noted is no news.
+    const still = [...this.heldMail].filter(([id]) => this.host.mailQueued?.(id) ?? true);
+    const held = still.length ? { count: still.length, reasons: [...new Set(still.map(([, reason]) => reason))] } : undefined;
     this.heldMail.clear();
     this.host.store.noteWake(this.now());
     this.host.deliver(updatePrompt(events, this.host.store.openAsks(), this.now(), this.host.store.goals(), held), events);
