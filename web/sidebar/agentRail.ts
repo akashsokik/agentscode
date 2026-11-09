@@ -1,4 +1,4 @@
-import { ALL_PROJECTS, type Agent } from '../../shared/types.ts';
+import { ALL_PROJECTS, type Agent, type Approval, type SuperAsk } from '../../shared/types.ts';
 
 /** The navigation column's Agents section. Pure, so it is tested directly. */
 
@@ -56,4 +56,74 @@ export function groupAgents<A extends Pick<Agent, 'id' | 'status'>>(agents: read
   return order
     .map(key => ({ key, agents: agents.filter(agent => agentGroup(agent, pendingIds.has(agent.id)) === key) }))
     .filter(group => group.agents.length > 0);
+}
+
+/** One thing waiting on the user, for the navigation column's Needs you block. */
+export interface NeedsYouItem {
+  key: string;
+  agentId: string;
+  /** The agent's name. */
+  who: string;
+  /** What it waits for, in a few words: "wants to run npm test", "asks: which staging URL?". */
+  what: string;
+  /** Since when. */
+  at: number;
+}
+
+const lowerFirst = (text: string) => (/^[A-Z][a-z]/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text);
+
+/** An approval as the words after the agent's name. */
+export function approvalWords(approval: Pick<Approval, 'type' | 'title' | 'questions'>): string {
+  if (approval.type === 'plan') return 'has a plan for your OK';
+  if (approval.type === 'question') return `asks: ${approval.questions?.[0]?.question || approval.title}`;
+  const title = approval.title.trim().replace(/\?$/, '');
+  return title ? `wants to ${lowerFirst(title)}` : 'needs your OK';
+}
+
+/**
+ * Everything waiting on the user, the longest wait first: tool approvals, plans and questions, the
+ * SuperAgent's open asks, and any agent that says it is waiting with nothing of those to show for
+ * it. `shown` is the first `limit`; `more` counts the rest.
+ */
+export function needsYou(
+  input: {
+    agents: readonly Pick<Agent, 'id' | 'name' | 'status' | 'activity' | 'lastActiveAt'>[];
+    approvals: readonly Pick<Approval, 'id' | 'agentId' | 'type' | 'title' | 'questions' | 'createdAt'>[];
+    asks: readonly Pick<SuperAsk, 'id' | 'question' | 'createdAt' | 'answeredAt'>[];
+    superId: string | null;
+  },
+  limit = 4,
+): { shown: NeedsYouItem[]; more: number; total: number } {
+  const name = (id: string) => input.agents.find(a => a.id === id)?.name;
+  const items: NeedsYouItem[] = [];
+  for (const approval of input.approvals) {
+    const who = name(approval.agentId);
+    if (who) items.push({ key: `approval:${approval.id}`, agentId: approval.agentId, who, what: approvalWords(approval), at: approval.createdAt });
+  }
+  if (input.superId) {
+    const who = name(input.superId) ?? 'SuperAgent';
+    for (const ask of input.asks) {
+      if (ask.answeredAt === undefined) items.push({ key: `ask:${ask.id}`, agentId: input.superId, who, what: `asks: ${ask.question}`, at: ask.createdAt });
+    }
+  }
+  const covered = new Set(items.map(item => item.agentId));
+  for (const agent of input.agents) {
+    if (agent.status === 'waiting' && !covered.has(agent.id)) items.push({ key: `agent:${agent.id}`, agentId: agent.id, who: agent.name, what: agent.activity ? lowerFirst(agent.activity) : 'is waiting for you', at: agent.lastActiveAt });
+  }
+  items.sort((a, b) => a.at - b.at);
+  return { shown: items.slice(0, limit), more: Math.max(0, items.length - limit), total: items.length };
+}
+
+/** What a folded section, a project row or a rail icon says about the agents behind it. */
+export function agentsSummary(agents: readonly Pick<Agent, 'id' | 'status'>[], pendingIds: ReadonlySet<string>): { needsYou: number; working: boolean } {
+  const needs = agents.filter(a => a.status === 'waiting' || pendingIds.has(a.id)).length;
+  return { needsYou: needs, working: agents.some(a => a.status === 'working' && !pendingIds.has(a.id)) };
+}
+
+/** An agent's row takes a second line, saying what it is on, only while it is working or waiting on you. */
+export function railAgentTask(agent: Pick<Agent, 'status' | 'activity' | 'currentTask'>, pending: boolean, fromName?: string): string | null {
+  if (!pending && agent.status !== 'working' && agent.status !== 'waiting') return null;
+  const task = agent.currentTask?.summary?.trim() || agent.activity?.trim();
+  if (!task) return null;
+  return fromName ? `from ${fromName}: ${task}` : task;
 }
