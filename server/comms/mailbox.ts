@@ -40,7 +40,6 @@ export class Mailbox {
     this.delivery = delivery;
   }
 
-  /** After a restart nothing is running. Never replay a message that might already have edited files. */
   /**
    * After a restart, mail is not lost: queued messages stay queued, and one that was being handled is
    * delivered once more, marked so the recipient can spot work it may have started. One that was

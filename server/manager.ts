@@ -66,7 +66,7 @@ import {
   appScreenshotInput, EYES_TOOLS, runCheckInput, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
 } from './comms/tools.ts';
 import { capJson, GH_UNTRUSTED, GhError, ghArgs, logTail, repoFromRemote, runGh, type Exec } from './github.ts';
-import { CheckError, runCheck, type CheckExec } from './checks.ts';
+import { CHECK_UNTRUSTED, CheckError, runCheck, type CheckExec } from './checks.ts';
 import { IDLE_PROCESS_MS, PORT } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { capProfile, findPromotions, ProfileStore } from './userProfile.ts';
@@ -196,6 +196,8 @@ export class AgentManager {
   readonly browser: BrowserBridge;
   private ghExec: Exec | undefined;
   private checkExec: CheckExec | undefined;
+  /** Folders with a run_check in progress. */
+  private checksRunning = new Set<string>();
   private gitRemote: (projectPath: string) => Promise<string | null>;
 
   constructor(store: Store, hub: Broadcaster, engines: Record<EngineKind, EngineInfo>, options: ManagerOptions = {}) {
@@ -1905,10 +1907,20 @@ export class AgentManager {
       if (!parsed.success) return bad(`Give a project and one of the checks: ${parsed.error.issues.slice(0, 2).map(i => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
       const { project: ref, command, ...options } = parsed.data;
       const project = this.eyesProject(agent, ref); // the same scope as the GitHub tools
+      // In the caller's own worktree for that project when it has one, so it checks its own code.
+      const cwd = agent.worktree && agent.projectId === project.id ? agent.worktree.cwd : project.path;
+      // One check per folder at a time: a slow test run is never stacked by a retry.
+      if (this.checksRunning.has(cwd)) throw new HttpError(409, `A check is already running in ${project.name}. Wait for it to finish.`);
+      this.checksRunning.add(cwd);
       try {
-        return { project: project.name, ...(await runCheck(project.path, command, options, this.checkExec)) };
+        // npm scripts are the project's own code: only an agent already at Full access may run them.
+        const result = await runCheck(cwd, command, { ...options, scripts: agent.autonomy === 'full' && agent.role !== 'super' }, this.checkExec);
+        const { output, ...rest } = result;
+        return { about: CHECK_UNTRUSTED, project: project.name, ...rest, untrusted: { output } };
       } catch (error) {
-        throw new HttpError(error instanceof CheckError ? 400 : 500, (error as Error).message);
+        throw new HttpError(error instanceof CheckError ? 403 : 500, (error as Error).message);
+      } finally {
+        this.checksRunning.delete(cwd);
       }
     }
     const run = async (gh: string[]) => {

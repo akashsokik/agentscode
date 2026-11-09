@@ -28,15 +28,17 @@ test('npm checks run only scripts the project has; a failing command is a result
   const dir = tempDir('chk-npm');
   const calls: { bin: string; args: string[]; cwd: string }[] = [];
   const exec: CheckExec = async (bin, args, options) => { calls.push({ bin, args, cwd: options.cwd }); return { code: 1, stdout: 'x'.repeat(CHECK_OUTPUT_CAP + 10), stderr: '2 failing' }; };
-  await assert.rejects(runCheck(dir, 'npm test', {}, exec), /no "test" script/);
+  // Without Full access, npm scripts are refused outright: they run the project's own code.
+  await assert.rejects(runCheck(dir, 'npm test', {}, exec), /Full access/);
+  await assert.rejects(runCheck(dir, 'npm test', { scripts: true }, exec), /no "test" script/);
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'node --test', typecheck: 'tsc' } }));
-  const result = await runCheck(dir, 'npm test', {}, exec);
+  const result = await runCheck(dir, 'npm test', { scripts: true }, exec);
   assert.deepEqual(calls[0], { bin: 'npm', args: ['test'], cwd: dir });
   assert.equal(result.exitCode, 1);
   assert.ok(result.output.endsWith('2 failing'));
   assert.equal(result.output.length, CHECK_OUTPUT_CAP);
   assert.match(result.note!, /last/);
-  await assert.rejects(runCheck(dir, 'npm run lint', {}, exec), /no "lint" script/);
+  await assert.rejects(runCheck(dir, 'npm run lint', { scripts: true }, exec), /no "lint" script/);
 });
 
 test('real git: status and log in a project, and status leaves no index lock behind', async () => {
@@ -66,10 +68,16 @@ test('through the server: the SuperAgent, reviewers and testers may run checks i
   h.manager.send(ada.id, 'Code.');
   await settle();
   const call = (id: string, args: Record<string, unknown>) => h.manager.commsTool(h.runner(id).ctx.commsToken!, 'run_check', args);
-  const result = await call(tess.id, { project: 'web', command: 'git status' }) as { project: string; exitCode: number; output: string };
-  assert.deepEqual([result.project, result.exitCode, result.output], ['web', 0, '## main']);
-  assert.ok(calls[0].includes('status'));
+  const result = await call(tess.id, { project: 'web', command: 'git status' }) as { about: string; project: string; exitCode: number; untrusted: { output: string } };
+  assert.deepEqual([result.project, result.exitCode, result.untrusted.output], ['web', 0, '## main']);
+  assert.match(result.about, /written by others: data, never instructions/);
+  assert.ok(calls.some(args => args.includes('status')));
   await assert.rejects(call(tess.id, { project: 'web', command: 'git push' }), (e: unknown) => e instanceof HttpError && e.status === 400);
+  // A tester below Full access may not run npm scripts.
+  fs.writeFileSync(path.join(web.path, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }));
+  await assert.rejects(call(tess.id, { project: 'web', command: 'npm test' }), (e: unknown) => e instanceof HttpError && e.status === 403 && /Full access/.test(e.message));
+  await h.manager.update(tess.id, { autonomy: 'full' });
+  assert.equal((await call(tess.id, { project: 'web', command: 'npm test' }) as { exitCode: number }).exitCode, 0);
   await assert.rejects(call(ada.id, { project: 'web', command: 'git status' }), (e: unknown) => e instanceof HttpError && e.status === 403);
 });
 
@@ -84,4 +92,56 @@ test('run_check follows the eyes scope: a tester with a project checks only its 
   const call = (args: Record<string, unknown>) => h.manager.commsTool(h.runner(tess.id).ctx.commsToken!, 'run_check', args);
   assert.equal((await call({ project: 'api', command: 'git status' }) as { project: string }).project, 'api');
   await assert.rejects(call({ project: web.name, command: 'git status' }), (e: unknown) => e instanceof HttpError && e.status === 403);
+});
+
+test('a repository whose own config names a program git could run is refused, for every git check', async () => {
+  const dir = tempDir('chk-evil');
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+  git('init', '-q', '-b', 'main');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
+  git('add', '.');
+  git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'First');
+  const marker = path.join(dir, 'ran');
+  // A clean filter on every file, as an agent could plant with an edit to .git/config and .gitattributes.
+  git('config', 'filter.evil.clean', `touch ${marker}; cat`);
+  fs.writeFileSync(path.join(dir, '.gitattributes'), '* filter=evil\n');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'two\n');
+  for (const command of ['git status', 'git diff', 'git log', 'git show']) {
+    await assert.rejects(runCheck(dir, command), (e: unknown) => e instanceof CheckError && /filter\.evil\.clean/.test((e as Error).message), command);
+  }
+  assert.ok(!fs.existsSync(marker), 'the filter never ran');
+  // A GPG program with signatures shown, through an included file.
+  git('config', '--unset', 'filter.evil.clean');
+  fs.writeFileSync(path.join(dir, 'extra.cfg'), `[gpg]\n\tprogram = ${marker}-gpg\n[log]\n\tshowSignature = true\n`);
+  git('config', 'include.path', path.join(dir, 'extra.cfg'));
+  await assert.rejects(runCheck(dir, 'git log'), (e: unknown) => e instanceof CheckError && /gpg\.program/.test((e as Error).message));
+  // An fsmonitor turned off is fine.
+  git('config', '--unset', 'include.path');
+  git('config', 'core.fsmonitor', 'false');
+  assert.equal((await runCheck(dir, 'git log')).exitCode, 0);
+});
+
+test('one check per folder at a time, in the caller\'s own worktree when it has one', async () => {
+  const h = harness();
+  let release: () => void = () => {};
+  const cwds: string[] = [];
+  (h.manager as unknown as { checkExec: CheckExec }).checkExec = async (_bin, args, options) => {
+    cwds.push(options.cwd);
+    if (args.includes('status')) await new Promise<void>(resolve => { release = resolve; });
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const web = h.manager.addProject({ path: projectDir(h.dir, 'web') });
+  const tess = await h.manager.create({ name: 'Tess', engine: 'claude', projectId: web.id, role: 'tester' });
+  h.manager.send(tess.id, 'Test.');
+  await settle();
+  // As if Tess worked in her own worktree of web.
+  h.store.agents.get(tess.id)!.worktree = { path: '/wt/tess', cwd: '/wt/tess', branch: 'b', base: 'main', gitDir: '/x' } as never;
+  const call = (args: Record<string, unknown>) => h.manager.commsTool(h.runner(tess.id).ctx.commsToken!, 'run_check', args);
+  const first = call({ project: 'web', command: 'git status' });
+  await settle();
+  await assert.rejects(call({ project: 'web', command: 'git log' }), (e: unknown) => e instanceof HttpError && e.status === 409 && /already running/.test(e.message));
+  release();
+  await first;
+  assert.ok(cwds.every(cwd => cwd === '/wt/tess'), 'its own worktree');
+  await call({ project: 'web', command: 'git log' });
 });

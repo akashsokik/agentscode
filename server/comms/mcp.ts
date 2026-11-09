@@ -17,7 +17,8 @@ const server = createCommsMcpServer(async (tool, args) => {
     body: JSON.stringify({ tool, args }),
     // Browser ops wait on page loads (up to 45s on the server), and creating an agent may build a
     // git worktree: a short timeout there would make the model retry a command that went through.
-    signal: AbortSignal.timeout(tool.startsWith('browser_') || tool.startsWith('gh_') || tool === 'app_screenshot' || tool === 'create_agent' ? 50_000 : 10_000),
+    // run_check waits on git (20s) or a test run (5 minutes) on the server; the client waits longer.
+    signal: AbortSignal.timeout(tool === 'run_check' ? 330_000 : tool.startsWith('browser_') || tool.startsWith('gh_') || tool === 'app_screenshot' || tool === 'create_agent' ? 50_000 : 10_000),
   });
   const result = await response.json() as { error?: string };
   if (!response.ok) throw new Error(result.error ?? `AgentsCode request failed (${response.status}).`);
