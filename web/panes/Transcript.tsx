@@ -33,7 +33,7 @@ import { RevealHeight } from '../mono/RevealHeight.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { MessageImages } from './ImageViews.tsx';
 import { Comms, DelegationRow, EDGE, GUTTER, PeerPrompt, PeerTrailRow } from './PeerMessages.tsx';
-import { APPROVAL_KEY_GUARD_MS, approvalKeyAction, approvalText } from '../approvalText.ts';
+import { approvalKeyAction, approvalText } from '../approvalText.ts';
 import { commsIndex, repeatedPromptTurns } from '../peerText.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 
@@ -733,12 +733,26 @@ function overlayOpen(): boolean {
   return Boolean(document.querySelector('[role="dialog"], [role="menu"], [role="listbox"], [aria-modal="true"]'));
 }
 
+/** When an approval in a pane was last answered, so a second Enter does not answer the next one too. */
+const answeredAt = new WeakMap<Element, number>();
+
+/** Whether `el` is laid out and wholly inside its scroller's view (and the window's). */
+function inView(el: Element | null, scroller: Element | null): boolean {
+  if (!el || !el.getClientRects().length) return false;
+  const rect = el.getBoundingClientRect();
+  const view = scroller?.getBoundingClientRect();
+  const top = Math.max(0, view?.top ?? 0);
+  const bottom = Math.min(window.innerHeight, view?.bottom ?? window.innerHeight);
+  return rect.height > 0 && rect.top >= top && rect.bottom <= bottom;
+}
+
 /**
  * A tool call or plan waiting on the user, in the conversation's own flow: the agent's avatar in the
  * gutter, "needs your OK" beside its name, and the question as a sentence in the soft plate a
- * teammate's message gets. Raw tool input waits behind "Show details"; a command or a diff shows up
- * front, since that is what you are allowing. Enter allows and Esc denies (approvalKeyAction says
- * when). Deny by its button can carry a note.
+ * teammate's message gets. Only a read-only lookup's raw input waits behind "Show details"; a
+ * command, a diff or any other tool's input shows up front, since that is what you are allowing.
+ * Enter allows and Esc denies, for the first approval of the pane you are in while it is on screen
+ * (approvalKeyAction says when). Deny by its button can carry a note.
  */
 function ApprovalRow({ approval }: { approval: Approval }) {
   const [noting, setNoting] = useState(false);
@@ -753,34 +767,39 @@ function ApprovalRow({ approval }: { approval: Approval }) {
 
   useEffect(() => {
     const shownAt = performance.now();
+    const pane = root.current?.closest('section') ?? null;
     const onKey = (event: KeyboardEvent) => {
       const el = root.current;
-      if (!el) return;
-      const pane = el.closest('section');
+      if (!el || !pane) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       const field = target?.closest<HTMLElement>('input, textarea, select, [contenteditable="true"]') ?? null;
-      const ownComposer = field instanceof HTMLTextAreaElement && Boolean(field.closest('[data-composer]')) && Boolean(pane?.contains(field));
-      // The composer marks itself idle when it holds neither text nor images (Composer.tsx).
-      const emptyComposer = ownComposer && field.hasAttribute('data-idle');
-      // Something else took the key (a menu, a picker). The empty composer always takes Enter, to
+      // The composer marks itself idle once it has held neither text nor images for a moment (Composer.tsx).
+      const idleComposer = field instanceof HTMLTextAreaElement && Boolean(field.closest('[data-composer]')) && pane.contains(field) && field.hasAttribute('data-idle');
+      // Something else took the key (a menu, a picker). The idle composer always takes Enter, to
       // send nothing, so there the key is still ours.
-      if (event.defaultPrevented && !emptyComposer) return;
+      if (event.defaultPrevented && !idleComposer) return;
       const action = approvalKeyAction({
         key: event.key,
         modified: event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.repeat || event.isComposing,
-        shownForMs: performance.now() - shownAt,
-        inScope: !target || target === document.body || Boolean(pane?.contains(target)),
-        typing: Boolean(field) && !emptyComposer,
+        focus: !target || target === document.body || target === document.documentElement ? 'none' : pane.contains(target) ? 'pane' : 'elsewhere',
+        paneFocused: pane.hasAttribute('data-pane-focused'),
+        onScreen: inView(el.querySelector('[data-approval-allow]'), el.closest('.agent-transcript')),
+        first: pane.querySelector('[data-approval]') === el,
+        settledForMs: performance.now() - Math.max(shownAt, answeredAt.get(pane) ?? 0),
+        typing: Boolean(field) && !idleComposer,
         // A button or link with focus takes Enter itself.
-        overlay: overlayOpen() || (event.key === 'Enter' && Boolean(target?.closest('button, a, summary'))),
-        first: pane?.querySelector('[data-approval]') === el,
+        overlay: overlayOpen() || Boolean(target?.closest('button, a, summary')),
       });
       if (!action) return;
       event.preventDefault();
       void attempt(() => api.resolveApproval(approval.id, { allow: action === 'allow' }));
     };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      // This one is answered (or gone): the next in its pane waits a moment before keys reach it.
+      if (pane) answeredAt.set(pane, performance.now());
+    };
   }, [approval.id]);
 
   const key = (label: string) => <kbd className="font-sans font-normal opacity-45">{label}</kbd>;
@@ -805,7 +824,7 @@ function ApprovalRow({ approval }: { approval: Approval }) {
           ) : null}
           {approval.description ? <p className="mt-1.5 text-xs text-warning">{approval.description}</p> : null}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            <ChipButton primary title={`${plan ? 'Approve plan' : 'Allow'} (Enter)`} onClick={() => void decide(true)}>{plan ? 'Approve plan' : 'Allow'} {key('Enter')}</ChipButton>
+            <ChipButton primary data-approval-allow title={`${plan ? 'Approve plan' : 'Allow'} (Enter)`} onClick={() => void decide(true)}>{plan ? 'Approve plan' : 'Allow'} {key('Enter')}</ChipButton>
             {approval.canAlwaysAllow ? <ChipButton onClick={() => void decide(true, true)}>Always allow</ChipButton> : null}
             <ChipButton
               aria-expanded={plan ? undefined : noting}

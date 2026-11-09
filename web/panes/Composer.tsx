@@ -32,6 +32,7 @@ import { MenuLabel, MenuRow } from '../ui/common.tsx';
 import { AccessPicker } from '../mono/AccessPicker.tsx';
 import { ContextMeter } from '../mono/ContextMeter.tsx';
 import { contextPercent } from '../../shared/contextUsage.ts';
+import { APPROVAL_KEY_GUARD_MS } from '../approvalText.ts';
 import { ArrowUp, Folder, GitBranch, ImagePlus, MoreHorizontal, RotateCcw, Settings, Square } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { QuestionForm } from '../mono/QuestionForm.tsx';
@@ -119,6 +120,18 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
   const canSend = (Boolean(text.trim()) || images.ready.length > 0) && !images.uploading && !sending;
 
   useEffect(() => { drafts.set(agent.id, text); }, [agent.id, text]);
+  // Idle once it has held neither text nor images for a moment. The Enter that sends a message
+  // empties it, so a second Enter right after is still the composer's and answers no approval.
+  const blank = !text.trim() && !images.images.length;
+  const [idle, setIdle] = useState(false);
+  useEffect(() => {
+    if (!blank) {
+      setIdle(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setIdle(true), APPROVAL_KEY_GUARD_MS);
+    return () => window.clearTimeout(timer);
+  }, [blank]);
   useEffect(() => {
     const el = field.current;
     if (!el) return;
@@ -347,8 +360,8 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
           value={text}
           rows={2}
           aria-label={`Message ${agent.name}`}
-          // Nothing to send: Enter here may answer a waiting approval instead (Transcript's ApprovalRow).
-          data-idle={!text.trim() && !images.images.length ? '' : undefined}
+          // Nothing to send, and not just now: Enter here may answer a waiting approval instead (Transcript's ApprovalRow).
+          data-idle={idle ? '' : undefined}
           aria-autocomplete="list"
           aria-expanded={slashOpen || mentionOpen}
           onChange={(e) => {

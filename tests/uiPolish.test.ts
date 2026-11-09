@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Agent, PeerMessage } from '../shared/types.ts';
-import { APPROVAL_KEY_GUARD_MS, approvalKeyAction, approvalText, tildePath, type ApprovalKey } from '../web/approvalText.ts';
+import { APPROVAL_KEY_GUARD_MS, approvalKeyAction, approvalText, inputSummary, tildePath, type ApprovalKey } from '../web/approvalText.ts';
 import { messagePhrase, trailPhrase } from '../web/peerText.ts';
 import { homeRecent, homeTarget } from '../web/quick/route.ts';
 import { emptySections } from '../web/right/overviewText.ts';
@@ -30,22 +30,37 @@ test('a message in an agent\'s own trail is told from that agent\'s side', () =>
   assert.equal(trailPhrase(message({ ...sent, channelId: 'c1' }), 'ada', 'release'), 'Posted in #release');
 });
 
-test('an approval\'s question names what it acts on; raw tool input waits behind Show details', () => {
-  const read = approvalText({ title: 'Use Read?', detail: '{\n  "file_path": "/Users/me/work/demo-shot.png"\n}' });
-  assert.deepEqual(read, { lead: 'Read', target: 'demo-shot.png', path: '~/work/demo-shot.png', shown: '', hidden: '{\n  "file_path": "/Users/me/work/demo-shot.png"\n}' });
-  // A command or a diff is what you are allowing, so it shows up front.
-  const run = approvalText({ title: 'Run npm test?', detail: 'npm test\n# run the suite' });
-  assert.deepEqual(run, { lead: 'Run', target: 'npm test', path: '', shown: 'npm test\n# run the suite', hidden: '' });
-  // A tool with no file keeps its own name; its JSON is still tucked away.
-  const mcp = approvalText({ title: 'Use agentscode send_message?', detail: '{"to":"ada"}' });
-  assert.equal(mcp.lead, 'Use');
-  assert.equal(mcp.target, 'agentscode send_message');
-  assert.equal(mcp.path, '');
-  assert.equal(mcp.hidden, '{"to":"ada"}');
+test('a read-only lookup names its file and tucks its raw input away', () => {
+  const detail = '{\n  "file_path": "/Users/me/work/demo-shot.png"\n}';
+  assert.deepEqual(approvalText({ toolName: 'Read', title: 'Use Read?', detail }), { lead: 'Read', target: 'demo-shot.png', path: '~/work/demo-shot.png', shown: '', hidden: detail });
+  const grep = approvalText({ toolName: 'Grep', title: 'Use Grep?', detail: '{"pattern":"TODO","path":"/Users/me/src"}' });
+  assert.deepEqual([grep.lead, grep.target, grep.path, grep.shown], ['Grep', 'src', '~/src', '']);
+  assert.equal(approvalText({ toolName: 'LS', title: 'Use LS?', detail: '{"path":"/tmp/x"}' }).lead, 'List');
+});
+
+test('every other tool keeps its input in sight, whatever shape it has', () => {
+  // A command or a diff is what you are allowing.
+  assert.deepEqual(approvalText({ toolName: 'Bash', title: 'Run npm test?', detail: 'npm test\n# run the suite' }), { lead: 'Run', target: 'npm test', path: '', shown: 'npm test\n# run the suite', hidden: '' });
+  // A file being written that happens to be JSON is content, not input: shown as is, no path pulled out of it.
+  const content = '{\n  "path": "/etc/hosts",\n  "enabled": true\n}';
+  assert.deepEqual(approvalText({ toolName: 'Write', title: 'Write config.json?', detail: content }), { lead: 'Write', target: 'config.json', path: '', shown: content, hidden: '' });
+  // An MCP tool's input is shown one key a line, nothing hidden or dropped.
+  const mcp = approvalText({ toolName: 'mcp__github__create_issue', title: 'Use github create_issue?', detail: '{\n  "repo": "acme/web",\n  "title": "x",\n  "labels": ["bug"],\n  "body": "secret"\n}' });
+  assert.deepEqual(mcp, { lead: 'Use', target: 'github create_issue', path: '', shown: 'repo: acme/web\ntitle: x\nlabels: [\n  "bug"\n]\nbody: secret', hidden: '' });
+  // Tools with a title of their own keep the server's detail untouched.
+  const notebook = '{\n  "notebook_path": "/Users/me/a.ipynb",\n  "new_source": "import os"\n}';
+  assert.deepEqual(approvalText({ toolName: 'NotebookEdit', title: 'Edit a.ipynb?', detail: notebook }), { lead: 'Edit', target: 'a.ipynb', path: '', shown: notebook, hidden: '' });
+  const fetch = '{\n  "url": "https://example.com/x?token=1",\n  "prompt": "p"\n}';
+  assert.deepEqual(approvalText({ toolName: 'WebFetch', title: 'Fetch example.com?', detail: fetch }), { lead: 'Fetch', target: 'example.com', path: '', shown: fetch, hidden: '' });
+  // A tool that merely shares a read-only tool's JSON shape is not read-only.
+  assert.equal(approvalText({ toolName: 'mcp__x__delete', title: 'Use x delete?', detail: '{"file_path":"/Users/me/a"}' }).hidden, '');
   // A title that is not "Verb target?" is shown as it is.
-  assert.deepEqual(approvalText({ title: 'Plan ready', detail: '' }), { lead: 'Plan ready', target: '', path: '', shown: '', hidden: '' });
-  // Text that only looks like JSON is not hidden.
-  assert.equal(approvalText({ title: 'Run x?', detail: '{ not json' }).shown, '{ not json');
+  assert.deepEqual(approvalText({ toolName: 'ExitPlanMode', title: 'Plan ready', detail: '' }), { lead: 'Plan ready', target: '', path: '', shown: '', hidden: '' });
+});
+
+test('a tool\'s input reads one key a line', () => {
+  assert.equal(inputSummary({ to: 'ada', urgent: true, n: 2 }), 'to: ada\nurgent: true\nn: 2');
+  assert.equal(inputSummary({}), '');
 });
 
 test('the home folder shows as ~', () => {
@@ -54,20 +69,44 @@ test('the home folder shows as ~', () => {
   assert.equal(tildePath('/var/log/x'), '/var/log/x');
 });
 
-test('Enter allows and Esc denies an approval only when the key is clearly meant for it', () => {
-  const press = (fields: Partial<ApprovalKey>): ApprovalKey => ({ key: 'Enter', modified: false, shownForMs: 5000, inScope: true, typing: false, overlay: false, first: true, ...fields });
+const press = (fields: Partial<ApprovalKey>): ApprovalKey => ({ key: 'Enter', modified: false, focus: 'pane', paneFocused: true, onScreen: true, first: true, settledForMs: 5000, typing: false, overlay: false, ...fields });
+
+test('Enter allows and Esc denies the approval you are looking at', () => {
   assert.equal(approvalKeyAction(press({})), 'allow');
   assert.equal(approvalKeyAction(press({ key: 'Escape' })), 'deny');
   assert.equal(approvalKeyAction(press({ key: 'a' })), null);
-  // Typing a message, a held modifier, an open menu, another pane, or a later approval: not ours.
-  assert.equal(approvalKeyAction(press({ typing: true })), null);
-  assert.equal(approvalKeyAction(press({ modified: true })), null);
-  assert.equal(approvalKeyAction(press({ overlay: true })), null);
-  assert.equal(approvalKeyAction(press({ inScope: false })), null);
-  assert.equal(approvalKeyAction(press({ first: false })), null);
-  // A key already on its way down when the approval landed was meant for something else.
-  assert.equal(approvalKeyAction(press({ shownForMs: APPROVAL_KEY_GUARD_MS - 1 })), null);
-  assert.equal(approvalKeyAction(press({ shownForMs: APPROVAL_KEY_GUARD_MS })), 'allow');
+  // Typing a message, a held modifier, an open menu or a focused button: not ours.
+  for (const key of ['Enter', 'Escape']) {
+    assert.equal(approvalKeyAction(press({ key, typing: true })), null);
+    assert.equal(approvalKeyAction(press({ key, modified: true })), null);
+    assert.equal(approvalKeyAction(press({ key, overlay: true })), null);
+  }
+});
+
+test('keys only reach the first approval of the focused pane, while it is on screen', () => {
+  for (const key of ['Enter', 'Escape']) {
+    // Focus nowhere (the body): only the focused pane's approval answers.
+    assert.notEqual(approvalKeyAction(press({ key, focus: 'none', paneFocused: true })), null);
+    assert.equal(approvalKeyAction(press({ key, focus: 'none', paneFocused: false })), null);
+    // Focus in another pane or outside any pane: never, even if this pane is marked focused.
+    assert.equal(approvalKeyAction(press({ key, focus: 'elsewhere', paneFocused: true })), null);
+    assert.equal(approvalKeyAction(press({ key, focus: 'elsewhere', paneFocused: false })), null);
+    // Scrolled out of view, or in a hidden tab.
+    assert.equal(approvalKeyAction(press({ key, onScreen: false })), null);
+    assert.equal(approvalKeyAction(press({ key, focus: 'none', onScreen: false })), null);
+    // A later approval waits its turn.
+    assert.equal(approvalKeyAction(press({ key, first: false })), null);
+  }
+});
+
+test('a key is ignored until the approval has settled: just shown, or just become first', () => {
+  // settledForMs counts from when it appeared or from when the one before it was answered,
+  // whichever is later, so a second Enter does not allow the next approval too.
+  for (const key of ['Enter', 'Escape']) {
+    assert.equal(approvalKeyAction(press({ key, settledForMs: 0 })), null);
+    assert.equal(approvalKeyAction(press({ key, settledForMs: APPROVAL_KEY_GUARD_MS - 1 })), null);
+    assert.notEqual(approvalKeyAction(press({ key, settledForMs: APPROVAL_KEY_GUARD_MS })), null);
+  }
 });
 
 const agent = (id: string, status: Agent['status'], lastActiveAt = 0): Agent => ({ id, name: id, status, lastActiveAt, role: 'dev' }) as Agent;
