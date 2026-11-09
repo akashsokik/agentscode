@@ -77,7 +77,7 @@ function dialogLayer(layer: number | undefined, inDialog: boolean): number {
   );
 }
 
-const FRAME = "isolate overflow-hidden border border-content/10 shadow-xl";
+const FRAME = "isolate overflow-hidden border border-content/10";
 
 /** Which corner the open animation grows from, so it reads as anchored. */
 function origin(side: PopoverSide, align: PopoverAlign): string {

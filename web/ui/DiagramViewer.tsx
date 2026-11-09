@@ -102,7 +102,7 @@ export function DiagramViewer({ svg, title = 'Diagram', onClose }: { svg: string
       className="fixed inset-0 bg-black/60 p-6 sm:p-10"
       onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}
     >
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border border-content/10 bg-background-base shadow-2xl">
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border border-content/10 bg-background-base">
         <div className="flex h-11 shrink-0 items-center gap-1 border-b border-content/10 pl-4 pr-2 font-sans text-[12.5px]">
           <span className="min-w-0 flex-1 truncate text-content/70">{title}</span>
           <button type="button" className={button} onClick={() => zoomBy(1 / STEP)} title="Zoom out (-)" aria-label="Zoom out">

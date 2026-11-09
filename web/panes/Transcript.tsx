@@ -1548,7 +1548,7 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
         <button
           type="button"
           onClick={() => jump(true)}
-          className="toast-in absolute bottom-3 left-1/2 z-[2] flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-content/10 bg-background-base px-3 py-1 font-sans text-[12px] text-content shadow-lg hover:bg-selection"
+          className="toast-in absolute bottom-3 left-1/2 z-[2] flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-content/10 bg-background-base px-3 py-1 font-sans text-[12px] text-content hover:bg-selection"
         >
           <ChevronDown className="size-3.5" strokeWidth={1.75} />
           New activity, jump to latest

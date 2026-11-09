@@ -323,7 +323,7 @@ function Toasts() {
         <div
           key={t.id}
           role={t.tone === 'error' ? 'alert' : 'status'}
-          className={`toast-in pointer-events-auto relative isolate flex items-start gap-2 overflow-hidden rounded-xl border bg-background-base px-3 py-2.5 font-sans text-[12px] text-content shadow-xl ${t.tone === 'error' ? 'border-danger/25' : 'border-content/10'}`}
+          className={`toast-in pointer-events-auto relative isolate flex items-start gap-2 overflow-hidden rounded-xl border bg-background-base px-3 py-2.5 font-sans text-[12px] text-content ${t.tone === 'error' ? 'border-danger/25' : 'border-content/10'}`}
         >
           {t.tone === 'error'
             ? <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-danger" strokeWidth={1.75} />

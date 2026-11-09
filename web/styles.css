@@ -409,7 +409,6 @@ html.theme-light .sidebar-glass {
   --color-stroke: var(--inset-stroke);
   border-color: var(--inset-stroke);
   background: var(--inset-panel);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
   transition: background-color var(--motion-feedback-duration)
     var(--motion-ease-out);
 }
@@ -555,8 +554,8 @@ html.theme-light .sidebar-glass {
     transition: none;
   }
 }
-/* The composer floats over the conversation, like the quick composer: a soft radius, a frosted
-   fill and a shadow that lifts it off the page. The conversation fades out before it reaches it. */
+/* The composer sits over the conversation, like the quick composer: a soft radius and a frosted
+   fill, flat on the page. The conversation fades out before it reaches it. */
 [data-composer-box] {
   --composer-radius: 0.875rem;
   --composer-blur: 24px;
@@ -564,10 +563,6 @@ html.theme-light .sidebar-glass {
 
 html:not(.theme-light) [data-composer-box] {
   border-color: color-mix(in srgb, var(--color-content) 11%, transparent);
-  box-shadow:
-    0 18px 48px rgb(0 0 0 / 0.45),
-    0 2px 8px rgb(0 0 0 / 0.3),
-    inset 0 1px 0 color-mix(in srgb, var(--color-content) 5%, transparent);
 }
 
 .transcript-fade {
@@ -585,9 +580,6 @@ html:not(.theme-light) [data-composer-box] {
 html.theme-light .mono-pill {
   background: #fff;
   border-color: rgb(0 0 0 / 0.06);
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 0.06),
-    0 4px 14px rgb(0 0 0 / 0.08);
 }
 
 /* The inset layout rounds the box like a multi-line user message. */
@@ -616,8 +608,7 @@ html:not(.is-mac) [data-composer-box]::before {
   clip-path: none;
   border-radius: inherit;
 }
-/* The light box is already solid, so a blur behind it has nothing to frost
-   and only smears its shadow in over the edges. */
+/* The light box is already solid, so a blur behind it has nothing to frost. */
 html.theme-light [data-composer-box]::before {
   background: transparent;
   -webkit-backdrop-filter: none;
@@ -627,9 +618,6 @@ html.theme-light [data-composer-box]::before {
 html.theme-light [data-composer-box],
 html.theme-light .agent-chat-composer {
   background: var(--color-background-base);
-  box-shadow:
-    0 6px 24px color-mix(in srgb, var(--color-content) 9%, transparent),
-    0 2px 6px color-mix(in srgb, var(--color-content) 6%, transparent);
 }
 /* Solid primary actions share the composer submit treatment. */
 .primary-action:not(:disabled) {
@@ -659,13 +647,11 @@ html.theme-light .primary-action:disabled {
   background: color-mix(in srgb, var(--color-content) 25%, transparent);
   color: color-mix(in srgb, var(--color-background-base) 75%, transparent);
 }
-/* Light mode raises the chosen segment like a native segmented control
+/* Light mode marks the chosen segment with a white fill and a hairline edge
    instead of tinting it grey. */
 html.theme-light .segmented-active {
   background: #fff;
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 0.08),
-    0 0 0 1px color-mix(in srgb, var(--color-content) 7%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--color-content) 7%, transparent);
 }
 
 .shimmer-text {
@@ -840,7 +826,6 @@ html.theme-light .segmented-active {
   --tile-bottom: #1c1c1e;
   --tile-sheen: rgb(255 255 255 / 0.16);
   --tile-rim: rgb(255 255 255 / 0.14);
-  --tile-lift: rgb(0 0 0 / 0.3);
   position: relative;
   display: block;
   flex-shrink: 0;
@@ -852,20 +837,15 @@ html.theme-light .segmented-active {
   background:
     linear-gradient(180deg, var(--tile-sheen), transparent),
     linear-gradient(180deg, var(--tile-top), var(--tile-bottom));
-  box-shadow:
-    inset 0 0 0 1px var(--tile-rim),
-    0 1px 0 var(--tile-lift);
-}
-
-html.theme-light .activity-tile {
-  --tile-lift: rgb(0 0 0 / 0.1);
+  outline: 1px solid var(--tile-rim);
+  outline-offset: -1px;
 }
 
 /* A turn's tile is the agent's own avatar: no raised tile behind it, the chevron still slides in. */
 .activity-tile[data-face="bare"],
 html.theme-light .activity-tile[data-face="bare"] {
   background: none;
-  box-shadow: none;
+  outline: none;
   color: var(--color-content);
 }
 /* The avatar fills the transcript's 22px gutter, so the bare tile is square. */
@@ -1868,17 +1848,6 @@ html.layout-inset.theme-light .dialog-scrim {
   mask-composite: intersect;
 }
 
-.codex-effort-option::after {
-  box-sizing: border-box;
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  border-radius: inherit;
-  content: "";
-  pointer-events: none;
-  opacity: 0;
-}
-
 .codex-effort-option > :not(.codex-effort-tiles) {
   position: relative;
   z-index: 1;
@@ -1895,8 +1864,8 @@ html.layout-inset.theme-light .dialog-scrim {
 .codex-effort-tile {
   box-sizing: border-box;
   background-color: transparent;
-  box-shadow: inset -1px -1px 0
-    color-mix(in srgb, var(--codex-effort-color) 32%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--codex-effort-color) 32%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--codex-effort-color) 32%, transparent);
 }
 
 .codex-effort-option:is(:hover, :focus-visible, .bg-selection)
@@ -1909,11 +1878,6 @@ html.layout-inset.theme-light .dialog-scrim {
   animation: codex-effort-tile-fill 1400ms ease-out 3 both;
   animation-delay: calc(var(--tile-distance) * 420ms);
   will-change: background-color;
-}
-
-.codex-effort-option:is(:hover, :focus-visible, .bg-selection)::after {
-  animation: codex-effort-edge-ripple 5000ms ease-in-out 1 both;
-  will-change: box-shadow, opacity;
 }
 
 @keyframes codex-effort-tiles-clear {
@@ -1948,32 +1912,6 @@ html.layout-inset.theme-light .dialog-scrim {
   }
 }
 
-@keyframes codex-effort-edge-ripple {
-  0%,
-  12%,
-  26%,
-  40%,
-  54%,
-  68%,
-  82% {
-    opacity: 0.3;
-    box-shadow: inset 0 0 4px 0 transparent;
-  }
-
-  19%,
-  47%,
-  75% {
-    opacity: 0.85;
-    box-shadow: inset 0 0 12px 1px
-      color-mix(in srgb, var(--codex-effort-color) 55%, transparent);
-  }
-
-  100% {
-    opacity: 0;
-    box-shadow: inset 0 0 4px 0 transparent;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .codex-effort-option > .codex-effort-tiles {
     transition: none;
@@ -1984,13 +1922,6 @@ html.layout-inset.theme-light .dialog-scrim {
     animation: none;
     opacity: 0.72;
     visibility: visible;
-  }
-
-  .codex-effort-option:is(:hover, :focus-visible, .bg-selection)::after {
-    animation: none;
-    opacity: 0.42;
-    box-shadow: none;
-    will-change: auto;
   }
 
   .codex-effort-option:is(:hover, :focus-visible, .bg-selection)

@@ -23,7 +23,7 @@ function QuickWindowApp() {
   useEffect(() => desktop?.onShow(() => focus.current()), []);
   const onHeight = useCallback((height: number) => desktop?.fit(height), []);
   return (
-    // The clear margin around the card is room for its shadow; a click there puts the window away, as one outside it does.
+    // A click in the clear margin around the card puts the window away, as one outside it does.
     <div style={{ padding: QUICK_MARGIN }} onMouseDown={e => { if (e.target === e.currentTarget) desktop?.hide(); }}>
       <QuickComposer
         mode="window"

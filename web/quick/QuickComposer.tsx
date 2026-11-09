@@ -232,7 +232,7 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
     : `Describe the task for a new agent ${project ? `in ${project.name}` : 'across all projects'}`;
 
   const surface = mode === 'window'
-    ? 'rounded-[16px] border border-content/10 bg-background-base shadow-[0_14px_32px_-10px_rgba(0,0,0,0.55),0_0_0_0.5px_rgba(0,0,0,0.2)]'
+    ? 'rounded-[16px] border border-content/10 bg-background-base'
     : '';
 
   return (
