@@ -214,8 +214,9 @@ function GoalsView() {
           value={text}
           rows={2}
           maxLength={500}
-          onChange={e => setText(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void add(); } }}
+          // A goal is one line: Enter adds it, and pasted line breaks become spaces.
+          onChange={e => setText(oneLine(e.target.value))}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void add(); } }}
           placeholder="Add a goal for the SuperAgent"
           className={`${TEXTAREA} text-[13px]`}
         />
@@ -259,6 +260,22 @@ function GoalItem({ goal, index, last }: { goal: SuperGoal; index: number; last:
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(goal.text);
   const [busy, setBusy] = useState(false);
+  // Remove asks once: the first press arms it for a few seconds, the second removes.
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = setTimeout(() => setConfirming(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirming]);
+  // After Save or Cancel, focus goes back to the Edit button, not to the page.
+  const editButton = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (wasEditing.current && !editing) editButton.current?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
+  // Every control names its goal, so a screen reader can tell the rows apart.
+  const named = `"${goal.text.length > 60 ? `${goal.text.slice(0, 59)}…` : goal.text}"`;
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     const ok = await attempt(action);
@@ -274,7 +291,7 @@ function GoalItem({ goal, index, last }: { goal: SuperGoal; index: number; last:
     <li data-goal={goal.id} data-goal-status={goal.status} className="group/goal border-b border-content/5 px-3.5 py-2.5 last:border-b-0">
       <div className="flex items-center gap-1">
         <select
-          aria-label="Status"
+          aria-label={`Status of ${named}`}
           value={goal.status}
           disabled={busy}
           onChange={e => void run(() => api.updateGoal(goal.id, { status: e.target.value as GoalStatus }))}
@@ -284,29 +301,34 @@ function GoalItem({ goal, index, last }: { goal: SuperGoal; index: number; last:
         </select>
         {project ? <span className="min-w-0 truncate text-[11px] text-content/35">· {project.name}</span> : null}
         <span className="flex-1" />
-        <span className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/goal:opacity-100 focus-within:opacity-100">
+        <span className={cx('flex shrink-0 items-center transition-opacity group-hover/goal:opacity-100 focus-within:opacity-100', confirming ? 'opacity-100' : 'opacity-0')}>
           {!done ? (
             <>
-              <IconButton icon={ChevronUp} label="Move up" disabled={busy || index === 0} onClick={() => void run(() => api.moveGoal(goal.id, index - 1))} />
-              <IconButton icon={ChevronDown} label="Move down" disabled={busy || last} onClick={() => void run(() => api.moveGoal(goal.id, index + 1))} />
+              <IconButton icon={ChevronUp} label={`Move ${named} up`} disabled={busy || index === 0} onClick={() => void run(() => api.moveGoal(goal.id, index - 1))} />
+              <IconButton icon={ChevronDown} label={`Move ${named} down`} disabled={busy || last} onClick={() => void run(() => api.moveGoal(goal.id, index + 1))} />
             </>
           ) : null}
-          <IconButton icon={Pencil} label="Edit" disabled={busy} onClick={() => { setText(goal.text); setEditing(true); }} />
-          <IconButton icon={Trash2} label="Remove" disabled={busy} onClick={() => void run(() => api.removeGoal(goal.id))} />
+          <IconButton ref={editButton} icon={Pencil} label={`Edit ${named}`} disabled={busy} onClick={() => { setText(goal.text); setEditing(true); }} />
+          {confirming ? (
+            <button type="button" aria-label={`Confirm removing ${named}`} disabled={busy} onClick={() => void run(() => api.removeGoal(goal.id))} className="h-5 rounded px-1.5 text-[11px] font-medium text-danger transition-colors hover:bg-selection-hover disabled:opacity-30">
+              Remove?
+            </button>
+          ) : <IconButton icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => setConfirming(true)} />}
         </span>
       </div>
       {editing ? (
         <div className="mt-1 flex flex-col gap-1.5">
           <textarea
             autoFocus
-            aria-label="Goal"
+            aria-label={`Edit ${named}`}
             value={text}
             rows={2}
             maxLength={500}
-            onChange={e => setText(e.target.value)}
+            onChange={e => setText(oneLine(e.target.value))}
             onKeyDown={e => {
-              if (e.key === 'Escape') { e.stopPropagation(); setEditing(false); }
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void save(); }
+              // Escape cancels the edit and stops here, so a panel around it does not also close.
+              if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(false); }
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void save(); }
             }}
             className={`${TEXTAREA} text-[13px]`}
           />
@@ -332,9 +354,12 @@ function GoalItem({ goal, index, last }: { goal: SuperGoal; index: number; last:
   );
 }
 
-function IconButton({ icon: Icon, label, disabled, onClick }: { icon: typeof Pencil; label: string; disabled?: boolean; onClick: () => void }) {
+/** Goals are one line; line breaks typed or pasted become spaces. */
+const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ');
+
+function IconButton({ icon: Icon, label, disabled, onClick, ref }: { icon: typeof Pencil; label: string; disabled?: boolean; onClick: () => void; ref?: React.Ref<HTMLButtonElement> }) {
   return (
-    <button type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick} className="grid size-5 place-items-center rounded text-content/40 transition-colors hover:bg-selection-hover hover:text-content disabled:pointer-events-none disabled:opacity-30">
+    <button ref={ref} type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick} className="grid size-5 place-items-center rounded text-content/40 transition-colors hover:bg-selection-hover hover:text-content disabled:pointer-events-none disabled:opacity-30">
       <Icon className="size-3" strokeWidth={1.75} />
     </button>
   );

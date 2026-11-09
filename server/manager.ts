@@ -236,9 +236,13 @@ export class AgentManager {
       },
     });
     this.mailbox = new Mailbox(store, {
-      ready: id => this.store.agents.has(id) && !this.runners.get(id)?.busy,
+      // Mail to the SuperAgent (reports, replies) waits while its wake-ups are off, in quiet hours or
+      // over budget, as its updates do; your own messages to it never wait.
+      ready: id => this.store.agents.has(id) && !this.runners.get(id)?.busy && !(id === this.superId() && this.watcher.held()),
       send: (id, text, task) => {
         this.clearIdleTimer(id);
+        // A turn started by mail counts against its wake budget like an update.
+        if (id === this.superId()) this.superStore.noteWake();
         this.runnerFor(this.agent(id)).send(text, task);
       },
       changed: message => this.publishMessage(message),
@@ -1241,6 +1245,9 @@ export class AgentManager {
       const parsed = tool === 'update_goal' ? updateGoalInput.safeParse(args) : completeGoalInput.safeParse(args);
       if (!parsed.success) return fail('Give the goal id, what to change (status, text, agent_id, delegation_id or notes), and a why.');
       const input = parsed.data as { goal_id: string; status?: SuperGoal['status']; text?: string; agent_id?: string; delegation_id?: string; notes?: string; why: string };
+      if (tool === 'update_goal' && [input.status, input.text, input.agent_id, input.delegation_id, input.notes].every(v => v === undefined)) {
+        return fail('Say what to change: status, text, agent_id, delegation_id or notes.');
+      }
       const before = this.superStore.goal(input.goal_id);
       const agentId = input.agent_id === undefined ? undefined : input.agent_id === '' ? '' : this.teammate(input.agent_id).id;
       const goal = this.superStore.updateGoal(before.id, {
@@ -1287,6 +1294,10 @@ export class AgentManager {
       const parsed = agentCommandInput.safeParse(args);
       if (!parsed.success) return fail('Give the agent id or name, and a why.');
       const agent = this.teammate(parsed.data.agent_id);
+      // A fresh session would lift a Stop the user pressed: only the user restarts a stopped agent.
+      if (tool === 'new_session' && this.mailbox.stopped(agent.id)) {
+        throw new HttpError(409, `The user stopped ${agent.name}. Only the user restarts it: ask them with ask_user instead.`);
+      }
       if (tool === 'new_session') await this.newSession(agent.id);
       else await this.stop(agent.id);
       this.recordSuper({ tool, why: parsed.data.why, summary: tool === 'new_session' ? `Started a fresh session for ${agent.name}` : `Stopped ${agent.name}'s turn` });
@@ -1351,19 +1362,28 @@ export class AgentManager {
   // in its next update's goal list.
 
   addGoal(body: { text?: unknown; projectId?: unknown }): SuperState {
-    const projectId = body?.projectId ? this.project(String(body.projectId)).id : null;
-    const goal = this.superStore.addGoal({ text: String(body?.text ?? ''), projectId, by: 'user' });
+    if (typeof body?.text !== 'string') throw new HttpError(400, 'Say what the goal is.');
+    const goal = this.superStore.addGoal({ text: body.text, projectId: this.goalProject(body.projectId), by: 'user' });
     this.watcher.note({ agentId: 'user', key: `goal:${goal.id}`, text: `The user added a goal: "${goal.text}"` });
     return this.publishSuper();
   }
 
   updateGoal(id: string, body: { text?: unknown; projectId?: unknown; status?: unknown }): SuperState {
+    if (body?.text !== undefined && typeof body.text !== 'string') throw new HttpError(400, 'A goal is text.');
+    if (body?.status !== undefined && typeof body.status !== 'string') throw new HttpError(400, 'A goal is queued, in_progress, blocked or done.');
     this.superStore.updateGoal(id, {
-      ...(body?.text !== undefined ? { text: String(body.text) } : {}),
-      ...(body?.projectId !== undefined ? { projectId: body.projectId ? this.project(String(body.projectId)).id : null } : {}),
-      ...(body?.status !== undefined ? { status: body.status as SuperGoal['status'] } : {}),
+      ...(typeof body?.text === 'string' ? { text: body.text } : {}),
+      ...(body?.projectId !== undefined ? { projectId: this.goalProject(body.projectId) } : {}),
+      ...(typeof body?.status === 'string' ? { status: body.status as SuperGoal['status'] } : {}),
     });
     return this.publishSuper();
+  }
+
+  /** A goal's project from the app: a project id, or null (or nothing) for none. */
+  private goalProject(raw: unknown): string | null {
+    if (raw === undefined || raw === null || raw === '') return null;
+    if (typeof raw !== 'string') throw new HttpError(400, 'A project is given by its id.');
+    return this.project(raw).id;
   }
 
   removeGoal(id: string): SuperState {
@@ -1429,11 +1449,13 @@ export class AgentManager {
   private noteForSuper(agent: Agent, task: AgentTask | null, result: TurnResult): void {
     const superId = this.superId();
     if (!superId || agent.id === superId || result.stopped) return;
-    // An agent came free while goals wait: the SuperAgent picks the next one. Through the watcher,
-    // so the wake switch, quiet hours, budgets and the idle check all apply.
-    const queued = this.superStore.goals().filter(g => g.status === 'queued').length;
-    if (queued) this.watcher.note({ agentId: agent.id, key: 'goals', text: `${agent.name} is free and ${queued} queued ${queued === 1 ? 'goal waits' : 'goals wait'}` });
     if (task?.source === 'agent' && task.fromAgentId === superId) return;
+    // An agent came free (nothing queued for it) while goals wait: the SuperAgent picks the next one.
+    // Not after a turn you started, which is yours, and only through the watcher, so the wake switch,
+    // quiet hours, budgets and the idle check all apply.
+    const free = (result.pending ?? 0) === 0 && this.mailbox.pending(agent.id) === 0;
+    const queued = this.superStore.goals().filter(g => g.status === 'queued').length;
+    if (queued && free && task?.source !== 'user') this.watcher.note({ agentId: agent.id, key: 'goals', text: `${agent.name} is free and ${queued} queued ${queued === 1 ? 'goal waits' : 'goals wait'}` });
     const asked = task?.summary ? `Task: ${clip(task.summary, 160).replace(/\.$/, '')}. ` : '';
     if (result.ok) this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} finished a turn`, untrusted: `${asked}Result: ${clip(summarize(result.summary) || 'Finished.', 400)}` });
     else this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} hit a problem`, untrusted: `${asked}Error: ${clip(result.error ?? 'Something went wrong.', 400)}` });
@@ -1441,8 +1463,11 @@ export class AgentManager {
 
   /** Every minute: send what waits if it may go now, and report agents stuck in a turn or on the user. */
   private superTick(): void {
-    if (!this.superId()) return;
+    const superId = this.superId();
+    if (!superId) return;
     this.watcher.morning();
+    // Held mail goes once quiet hours end or a new hour's budget begins.
+    this.mailbox.drain(superId);
     const now = Date.now();
     for (const agent of this.store.agents.values()) {
       if (agent.role === 'super') continue;
@@ -2069,6 +2094,9 @@ export class AgentManager {
     for (const key of ['superQuietFrom', 'superQuietTo'] as const) if (input[key] !== undefined) settings[key] = input[key]!.trim();
     this.store.save();
     this.hub.broadcast({ type: 'settings', settings });
+    // Mail held for the SuperAgent may go now (wake-ups back on, a bigger budget).
+    const superId = this.superId();
+    if (superId) setImmediate(() => this.mailbox.drain(superId));
     return settings;
   }
 }

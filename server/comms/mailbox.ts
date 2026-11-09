@@ -80,8 +80,9 @@ export class Mailbox {
         allProjects: a.projectId === null || undefined,
         workspace: a.worktree?.cwd ?? project?.path ?? (a.projectId === null ? noProjectFolder(a.home) : null),
         branch: a.worktree?.branch ?? null,
-        // The SuperAgent is read-only so it never edits, but messaging every agent is its job.
-        canMessage: source.role === 'super' ? !this.stoppedAgents.has(id) : source.autonomy !== 'readonly' && !this.stoppedAgents.has(a.id) && !this.stoppedAgents.has(id),
+        // The SuperAgent is read-only so it never edits, but messaging agents is its job. An agent the
+        // user stopped is off limits to it too: it asks the user instead.
+        canMessage: (source.role === 'super' || source.autonomy !== 'readonly') && !this.stoppedAgents.has(a.id) && !this.stoppedAgents.has(id),
         currentTask: share ? a.currentTask?.summary ?? null : undefined,
         activity: share ? a.activity : undefined,
         queued: a.queued,
@@ -109,6 +110,11 @@ export class Mailbox {
   history(id: string): PeerMessage[] {
     this.agent(id);
     return this.store.messages.filter(m => m.fromAgentId === id || m.toAgentId === id).slice(-50);
+  }
+
+  /** The user stopped this agent: nothing reaches it, and nothing may restart it, until the user gives it a task. */
+  stopped(id: string): boolean {
+    return this.stoppedAgents.has(id);
   }
 
   pending(id: string): number {
@@ -177,8 +183,7 @@ export class Mailbox {
     if (!this.canRoute(from, to, replyTo, metadata.channelId)) {
       throw new HttpError(403, metadata.channelId ? `${to.name} is not a member of that channel.` : 'That agent is not visible to you under the current team settings.');
     }
-    // The SuperAgent may reach an agent whose messaging the user paused: nudging stuck agents is its job.
-    if (this.stoppedAgents.has(fromId) || (this.stoppedAgents.has(toId) && from.role !== 'super')) throw new HttpError(409, 'Messaging is paused for this agent until the user sends it a new task.');
+    if (this.stoppedAgents.has(fromId) || this.stoppedAgents.has(toId)) throw new HttpError(409, 'Messaging is paused for this agent until the user sends it a new task.');
     const text = typeof rawText === 'string' ? rawText.trim() : '';
     if (!text || text.length > 10_000) throw new HttpError(400, 'Message must contain 1 to 10,000 characters.');
 
@@ -198,9 +203,7 @@ export class Mailbox {
         conversation = current;
       }
     }
-    // The SuperAgent's wake-ups are not user tasks, so a root conversation would never reset and its
-    // budget would run out for good: each new message of its own starts a collaboration.
-    if (from.role !== 'super') conversation ??= this.roots.get(fromId);
+    conversation ??= this.roots.get(fromId);
     if (!conversation) {
       conversation = { id: randomUUID(), startedBy: fromId, messageLimit: this.store.settings.messageLimit, stopped: false, createdAt: Date.now() };
       this.store.conversations.push(conversation);

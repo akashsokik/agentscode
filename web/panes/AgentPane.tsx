@@ -77,7 +77,7 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
           {agent.role === 'super' ? (
             <HeaderButton
               icon={PanelRight}
-              label="Decision log"
+              label="SuperAgent sidebar"
               active={logMode !== 'hidden'}
               aria-expanded={logMode !== 'hidden'}
               aria-controls={`super-log-${agentId}`}

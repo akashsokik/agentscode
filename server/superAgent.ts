@@ -60,7 +60,7 @@ export class SuperStore {
         wakes: Array.isArray(raw.wakes) ? raw.wakes.filter(n => typeof n === 'number') : [],
         ...(raw.costDay && typeof raw.costDay.start === 'number' ? { costDay: raw.costDay } : {}),
         ...(typeof raw.briefDay === 'string' ? { briefDay: raw.briefDay } : {}),
-        goals: Array.isArray(raw.goals) ? raw.goals : [],
+        goals: Array.isArray(raw.goals) ? raw.goals.filter(validGoal) : [],
       };
     } catch {
       return { asks: [], log: [], wakes: [], goals: [] };
@@ -164,10 +164,19 @@ export class SuperStore {
     return this.read().goals;
   }
 
-  /** Put a goal back as it was (undo); null removes it. */
+  /**
+   * Put a goal back as it was (undo); null removes it. Refused (409) when the goal is gone since, or
+   * when putting it back would break the open-goal cap or repeat another open goal.
+   */
   restoreGoal(id: string, before: SuperGoal | null): void {
     const stored = this.read();
+    const current = stored.goals.find(g => g.id === id);
+    if (!current) throw new HttpError(409, 'That goal was removed since, so there is nothing to undo.');
     const rest = stored.goals.filter(g => g.id !== id);
+    if (before && before.status !== 'done') {
+      if (current.status === 'done' && rest.filter(g => g.status !== 'done').length >= MAX_OPEN_GOALS) throw new HttpError(409, `${MAX_OPEN_GOALS} goals are open already.`);
+      if (rest.some(g => g.status !== 'done' && g.text === before.text)) throw new HttpError(409, 'Another open goal says the same thing now.');
+    }
     this.write({ ...stored, goals: before ? [...rest, before] : rest });
   }
 
@@ -257,6 +266,18 @@ export class SuperStore {
 
 const isOpen = (ask: SuperAsk) => ask.answeredAt === undefined;
 
+/** A goal as super.json must hold it; anything else (a hand edit gone wrong) is left out. */
+function validGoal(raw: unknown): raw is SuperGoal {
+  const g = raw as Partial<SuperGoal> | null;
+  return Boolean(g) && typeof g!.id === 'string' && typeof g!.text === 'string' && g!.text.trim() !== ''
+    && (g!.projectId === null || typeof g!.projectId === 'string') && GOAL_STATUSES.includes(g!.status as GoalStatus)
+    && typeof g!.order === 'number' && Number.isFinite(g!.order) && typeof g!.createdAt === 'number' && typeof g!.updatedAt === 'number'
+    && (g!.by === 'user' || g!.by === 'super')
+    && (g!.agentId === undefined || typeof g!.agentId === 'string') && (g!.delegationId === undefined || typeof g!.delegationId === 'string')
+    && (g!.notes === undefined || typeof g!.notes === 'string') && (g!.doneAt === undefined || typeof g!.doneAt === 'number');
+}
+
+/** One line: a goal is a short statement, so newlines and runs of space are folded (the inputs are single-line too). */
 function goalText(raw: unknown): string {
   const text = String(raw ?? '').replace(/\s+/g, ' ').trim();
   if (!text) throw new HttpError(400, 'Say what the goal is.');
@@ -369,14 +390,24 @@ export class SuperWatcher {
     this.timer.unref?.();
   }
 
-  /** Why an update cannot go now, or null. */
-  blocked(): string | null {
+  /**
+   * Why no turn the SuperAgent did not get from the user may start now, or null: wake-ups off, quiet
+   * hours, or a budget used up. Agent mail to it (reports, replies) waits on this as updates do.
+   */
+  held(): string | null {
     const settings = this.host.settings();
-    if (!this.host.superId()) return 'there is no SuperAgent';
     if (!settings.superWake) return 'wake-ups are off';
     if (inQuietHours(settings, new Date(this.now()))) return 'quiet hours';
     if (this.host.store.wakesSince(this.now() - 3_600_000) >= Math.max(0, settings.superMaxWakesPerHour)) return 'the hourly budget is used';
     if (settings.superDailyBudgetUsd > 0 && this.host.store.spentToday(this.host.cost(), new Date(this.now())) >= settings.superDailyBudgetUsd) return 'the daily budget is used';
+    return null;
+  }
+
+  /** Why an update cannot go now, or null. */
+  blocked(): string | null {
+    if (!this.host.superId()) return 'there is no SuperAgent';
+    const held = this.held();
+    if (held) return held;
     if (!this.host.idle()) return 'the SuperAgent is busy';
     return null;
   }
