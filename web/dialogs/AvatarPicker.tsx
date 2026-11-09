@@ -3,7 +3,7 @@
  * small choices, no boxes; the chosen one carries the selection fill. Saved with the dialog.
  */
 import type { ReactNode } from 'react';
-import { AVATAR_COLORS, AVATAR_EYES, AVATAR_SHAPES, freshLook, type AvatarLook } from '../../shared/avatar.ts';
+import { AVATAR_COLORS, AVATAR_EYES, AVATAR_SHAPES, freshLook, isSuperPair, type AvatarLook } from '../../shared/avatar.ts';
 import { AVATAR_FILL, AvatarGlyph } from '../ui/Avatar.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 
@@ -12,7 +12,7 @@ const SHAPE_NAMES: Record<AvatarLook['shape'], string> = {
 };
 const EYE_NAMES: Record<AvatarLook['eyes'], string> = { round: 'Round eyes', tall: 'Tall eyes', wide: 'Wide eyes' };
 
-function Choice({ selected, label, onPick, children }: { selected: boolean; label: string; onPick: () => void; children: ReactNode }) {
+function Choice({ selected, label, onPick, disabled = false, children }: { selected: boolean; label: string; onPick: () => void; disabled?: boolean; children: ReactNode }) {
   return (
     <button
       type="button"
@@ -21,7 +21,8 @@ function Choice({ selected, label, onPick, children }: { selected: boolean; labe
       aria-label={label}
       title={label}
       onClick={onPick}
-      className={`grid size-8 place-items-center rounded-md transition-colors duration-150 ${selected ? 'bg-selection' : 'hover:bg-content/6'}`}
+      disabled={disabled}
+      className={`grid size-8 place-items-center rounded-md transition-colors duration-150 disabled:opacity-30 ${selected ? 'bg-selection' : 'hover:bg-content/6'}`}
     >
       {children}
     </button>
@@ -37,14 +38,14 @@ export function AvatarPicker({ look, others, onChange }: { look: AvatarLook; oth
       </div>
       <div role="radiogroup" aria-label="Shape" className="flex flex-wrap gap-0.5">
         {AVATAR_SHAPES.map(shape => (
-          <Choice key={shape} label={SHAPE_NAMES[shape]} selected={look.shape === shape} onPick={() => onChange({ ...look, shape })}>
+          <Choice key={shape} label={isSuperPair({ shape, color: look.color }) ? `${SHAPE_NAMES[shape]} (the SuperAgent's in this colour)` : SHAPE_NAMES[shape]} disabled={isSuperPair({ shape, color: look.color })} selected={look.shape === shape} onPick={() => onChange({ ...look, shape })}>
             <AvatarGlyph look={{ ...look, shape }} animate={false} className="size-5" />
           </Choice>
         ))}
       </div>
       <div role="radiogroup" aria-label="Colour" className="flex flex-wrap gap-0.5">
         {AVATAR_COLORS.map(color => (
-          <Choice key={color} label={color[0].toUpperCase() + color.slice(1)} selected={look.color === color} onPick={() => onChange({ ...look, color })}>
+          <Choice key={color} label={isSuperPair({ shape: look.shape, color }) ? `${color[0].toUpperCase() + color.slice(1)} (the SuperAgent's in this shape)` : color[0].toUpperCase() + color.slice(1)} disabled={isSuperPair({ shape: look.shape, color })} selected={look.color === color} onPick={() => onChange({ ...look, color })}>
             <span aria-hidden className="size-4 rounded-full" style={{ background: AVATAR_FILL[color] }} />
           </Choice>
         ))}

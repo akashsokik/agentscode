@@ -61,6 +61,11 @@ export function agentLook(agent: { id: string; role?: string; avatar?: unknown }
 
 const key = (look: AvatarLook) => `${look.shape}:${look.color}`;
 
+/** The SuperAgent's shape and colour pair, which no other agent may take. */
+export function isSuperPair(look: Pick<AvatarLook, 'shape' | 'color'>): boolean {
+  return look.shape === SUPER_LOOK.shape && look.color === SUPER_LOOK.color;
+}
+
 /**
  * A look for a new agent: random, avoiding a shape and colour pair another agent already has (and
  * the SuperAgent's) while any is free. `random` returns [0, 1), for tests.

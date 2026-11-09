@@ -59,6 +59,9 @@ test('agents get a look when made; a change is validated, and the SuperAgent kee
   const updated = await h.manager.update(ada.id, { avatar: { shape: 'diamond', color: 'coral', eyes: 'wide' } });
   assert.deepEqual(updated.avatar, { shape: 'diamond', color: 'coral', eyes: 'wide' });
   await assert.rejects(h.manager.update(ada.id, { avatar: { shape: 'star', color: 'coral', eyes: 'wide' } as never }), (e: unknown) => e instanceof HttpError && e.status === 400);
+  await assert.rejects(h.manager.update(ada.id, { avatar: { ...SUPER_LOOK, eyes: 'round' } }), (e: unknown) => e instanceof HttpError && e.status === 400, 'no one else looks like the SuperAgent');
+  const copycat = await h.manager.create({ name: 'Cy', engine: 'claude', projectId: project.id, avatar: SUPER_LOOK });
+  assert.ok(isLook(copycat.avatar) && !(copycat.avatar!.shape === SUPER_LOOK.shape && copycat.avatar!.color === SUPER_LOOK.color), 'a create asking for it gets a free look');
   const sup = await h.manager.createSuper();
   assert.equal(sup.avatar, undefined);
   await assert.rejects(h.manager.update(sup.id, { avatar: { shape: 'circle', color: 'teal', eyes: 'round' } }), (e: unknown) => e instanceof HttpError && e.status === 400);
