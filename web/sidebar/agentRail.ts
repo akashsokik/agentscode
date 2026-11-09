@@ -35,3 +35,25 @@ export function railAgentStatus(agent: Pick<Agent, 'status' | 'unread'>, pending
   if (agent.unread) return 'unread';
   return null;
 }
+
+/** The workspace column's groups, in the order they want your attention. */
+export type AgentGroupKey = 'needs-you' | 'working' | 'idle';
+
+export const AGENT_GROUP_LABEL: Record<AgentGroupKey, string> = { 'needs-you': 'Needs you', working: 'Working', idle: 'Idle' };
+
+/** Which group an agent is listed under: waiting on you first, then working; everything else is idle. */
+export function agentGroup(agent: Pick<Agent, 'status'>, pending: boolean): AgentGroupKey {
+  if (pending || agent.status === 'waiting') return 'needs-you';
+  return agent.status === 'working' ? 'working' : 'idle';
+}
+
+/**
+ * A project's agents under Needs you, Working and Idle, empty groups left out. Within a group the
+ * agents keep the order they came in, so a card only moves when its agent's state changes.
+ */
+export function groupAgents<A extends Pick<Agent, 'id' | 'status'>>(agents: readonly A[], pendingIds: ReadonlySet<string>): { key: AgentGroupKey; agents: A[] }[] {
+  const order: AgentGroupKey[] = ['needs-you', 'working', 'idle'];
+  return order
+    .map(key => ({ key, agents: agents.filter(agent => agentGroup(agent, pendingIds.has(agent.id)) === key) }))
+    .filter(group => group.agents.length > 0);
+}

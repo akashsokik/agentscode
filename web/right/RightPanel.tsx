@@ -144,20 +144,23 @@ function CommsFeed({ agent }: { agent: Agent | undefined }) {
   );
 }
 
-/** One of the Overview's totals: MonoCode's stat card, a big number over its label. */
-function StatCard({ value, label }: { value: ReactNode; label: string }) {
+/** One of the Overview's totals, inline: a number and its label, no box. */
+function Stat({ value, label }: { value: ReactNode; label: string }) {
   return (
-    <div className="rounded-xl border border-content/10 bg-content/3 px-3.5 py-3">
-      <div className="text-xl font-semibold leading-7 tabular-nums text-content">{value}</div>
-      <div className="mt-0.5 text-[12px] text-content/50">{label}</div>
-    </div>
+    <span className="flex items-baseline gap-1.5">
+      <span className="text-[15px] font-semibold tabular-nums text-content">{value}</span>
+      <span className="text-[12px] text-content/45">{label}</span>
+    </span>
   );
 }
 
-function OverviewSection({ title, children }: { title: string; children: ReactNode }) {
+function OverviewSection({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
   return (
-    <section className="px-4 pt-6">
-      <h3 className="pb-2.5 text-[12px] font-medium text-content/50">{title}</h3>
+    <section className="px-4 pt-[22px]">
+      <h3 className="flex items-center pb-1.5 text-[11px] font-medium tracking-[0.02em] text-content/40">
+        {title}
+        {count ? <span className="ml-auto font-normal tabular-nums text-content/30">{count}</span> : null}
+      </h3>
       {children}
     </section>
   );
@@ -172,7 +175,7 @@ function TeamRow({ agent, pending }: { agent: Agent; pending: boolean }) {
       title={`Open ${agent.name}`}
       className="flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-150 hover:bg-content/5"
     >
-      <AgentAvatar agent={agent} className="size-4" />
+      <AgentAvatar agent={agent} className="size-[18px]" />
       <span className="shrink-0 text-[13px] font-medium text-content">{agent.name}</span>
       <span className="shrink-0 text-[11px] text-content/40">{rolePreset(agent.role).name}</span>
       <AgentStatus agent={agent} pending={pending} className="ml-auto min-w-0 max-w-[55%] text-[12px]" />
@@ -203,7 +206,7 @@ function TeamOverview() {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto pb-6 font-sans">
       <div className="flex items-center gap-3.5 px-4 pt-5">
-        <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-xl border border-content/8 bg-content/5 text-content/55">
+        <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-xl bg-content/[0.06] text-content/55">
           {channel ? <span className="text-[18px] leading-none">#</span> : <Bot className="size-5" strokeWidth={1.75} />}
         </span>
         <div className="min-w-0">
@@ -213,15 +216,13 @@ function TeamOverview() {
           </p>
         </div>
       </div>
-      <OverviewSection title="Now">
-        <div className="grid grid-cols-2 gap-2">
-          <StatCard value={working} label="Working" />
-          <StatCard value={waiting ? <span className="text-warning">{waiting}</span> : 0} label={waiting === 1 ? 'Needs you' : 'Need you'} />
-          <StatCard value={turns} label={turns === 1 ? 'Turn' : 'Turns'} />
-          <StatCard value={cost(spent) || '$0'} label="Cost" />
-        </div>
-      </OverviewSection>
-      <OverviewSection title={channel ? 'Members' : 'Agents'}>
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 pt-4">
+        <Stat value={working} label="working" />
+        <Stat value={waiting ? <span className="text-warning">{waiting}</span> : 0} label={waiting === 1 ? 'needs you' : 'need you'} />
+        <Stat value={turns} label={turns === 1 ? 'turn' : 'turns'} />
+        <Stat value={cost(spent) || '$0'} label="spent" />
+      </div>
+      <OverviewSection title={channel ? 'Members' : 'Agents'} count={agents.length}>
         {agents.length ? (
           <div className="-mx-2 flex flex-col gap-px">
             {agents.map(agent => <TeamRow key={agent.id} agent={agent} pending={pending(agent)} />)}
@@ -286,6 +287,8 @@ export function RightPanel() {
   const superTabs = useSuperTabs(isSuper ? view : '');
   const column = useColumnWidth('panel', 320, 260, 0.4);
   const list = useRef<HTMLDivElement>(null);
+  // Every tab keeps its name while the panel has room for them all; narrower, only the open one does.
+  const labelled = column.width >= tabs.length * 88 + 40;
   const count = (tab: PanelView): number | undefined => {
     if (tab === 'comms') return inFlight || undefined;
     if (isSuper && (tab === 'decisions' || tab === 'goals' || tab === 'routines')) return superTabs.counts[tab] || undefined;
@@ -326,6 +329,7 @@ export function RightPanel() {
                 aria-label={words}
                 title={words}
                 selected={view === tab.view}
+                labelled={labelled}
                 count={n}
                 dot={fresh}
                 onClick={() => pick(tab.view)}

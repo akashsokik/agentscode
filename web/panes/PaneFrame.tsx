@@ -24,6 +24,8 @@ export function PaneFrame({ chrome, title, actions, children }: { chrome: PaneCh
       onPointerDownCapture={() => focusPane(chrome.paneId)}
       // Tabbing into a pane makes it the focused one too, not only clicking.
       onFocusCapture={() => focusPane(chrome.paneId)}
+      // Read by what acts on keys pressed with focus nowhere (an approval's Enter and Esc).
+      data-pane-focused={chrome.focused || undefined}
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
     >
       <PaneHeader className={`transition-opacity duration-150 ${chrome.multiple && !chrome.focused ? 'opacity-65' : ''}`}>

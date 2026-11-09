@@ -65,16 +65,19 @@ export function ChipButton({ primary = false, className = '', type = 'button', .
 
 /**
  * MonoCode's icon tab (MonoOverview's TabButton): an icon that, while selected, opens out into
- * its name and count, and folds back into the icon when not. `dot` marks a folded tab that
- * holds something new.
+ * its name and count, and folds back into the icon when not (unless `labelled`). `dot` marks a
+ * tab that holds something new.
  */
-export function IconTab({ icon: Icon, label, selected, count, dot = false, className = '', ...props }: Omit<ComponentPropsWithoutRef<'button'>, 'children'> & {
+export function IconTab({ icon: Icon, label, selected, count, dot = false, labelled = false, className = '', ...props }: Omit<ComponentPropsWithoutRef<'button'>, 'children'> & {
   icon: IconComponent;
   label: string;
   selected: boolean;
   count?: number;
   dot?: boolean;
+  /** There is room for every tab's name, so none folds to its icon. */
+  labelled?: boolean;
 }) {
+  const open = selected || labelled;
   return (
     <button
       type="button"
@@ -94,8 +97,8 @@ export function IconTab({ icon: Icon, label, selected, count, dot = false, class
         </span>
       ) : <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />}
       <span
-        aria-hidden={!selected}
-        className={cx('grid transition-[grid-template-columns,opacity] duration-200 ease-out motion-reduce:transition-none', selected ? 'grid-cols-[1fr] opacity-100' : 'grid-cols-[0fr] opacity-0')}
+        aria-hidden={!open}
+        className={cx('grid transition-[grid-template-columns,opacity] duration-200 ease-out motion-reduce:transition-none', open ? 'grid-cols-[1fr] opacity-100' : 'grid-cols-[0fr] opacity-0')}
       >
         <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
           <span className="pl-1.5">{label}</span>

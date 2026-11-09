@@ -10,7 +10,7 @@ import type { PeerMessage } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { openToSide } from '../layout.ts';
 import {
-  arrivalNote, delegationState, kindWords, messageMarkdown, messagePreview, messageTag, outcomeTone, outcomeWords, reportKind, taskTitle,
+  arrivalNote, delegationState, kindWords, messageMarkdown, messagePhrase, messagePreview, messageTag, outcomeTone, outcomeWords, reportKind, taskTitle, trailPhrase,
   type CommsIndex, type DelegationState, type OutcomeTone,
 } from '../peerText.ts';
 import { useApp } from '../store.ts';
@@ -55,6 +55,14 @@ function useAgent(id: string) {
 function useChannel(message: PeerMessage): string | undefined {
   return useApp(s => (message.channelId ? s.snapshot?.channels.find(c => c.id === message.channelId)?.name ?? 'deleted-channel' : undefined));
 }
+
+/**
+ * The transcript's gutter: a 22px avatar column and 8px, which with the row's 16px of padding puts
+ * every name, bubble and paragraph on the 46px edge the fold line's title already sits on.
+ */
+export const GUTTER = 'grid min-w-0 grid-cols-[22px_minmax(0,1fr)] gap-x-2';
+/** Rows with no avatar of their own that keep to the same edge. */
+export const EDGE = 'pl-[46px] pr-4';
 
 /** Who a teammate is at a glance: engine mark, name and role. */
 function Who({ id, name, role = true }: { id: string; name: string; role?: boolean }) {
@@ -144,28 +152,20 @@ export function PeerBubble({ message, between = false, answered, arrivedAt, thre
   const [expanded, setExpanded] = useState(false);
   const bodyId = useId();
   const channel = useChannel(message);
+  const sender = useAgent(message.fromAgentId);
   const outcome = useOutcome(message, answered);
   const preview = messagePreview(message);
   const full = messageMarkdown(message);
   const more = full.replace(/\s+/g, ' ').trim() !== preview.replace(/…$/, '').trim();
   const late = arrivalNote(message.ts, arrivedAt, clock);
   const tag = channel ? (message.replyTo ? `Answer in #${channel}` : `Mention in #${channel}`) : messageTag(message);
-  return (
-    <div data-peer-message={message.id} tabIndex={-1} className="flex w-fit min-w-0 max-w-full flex-col items-start rounded font-sans outline-none focus-visible:ring-1 focus-visible:ring-content/30">
-      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 pb-1 text-[12px]">
-        {between ? (
-          <span className="flex min-w-0 items-center gap-1.5 text-content/45">
-            <Who id={message.fromAgentId} name={message.fromName} role={false} />
-            <span className="shrink-0">to</span>
-            <Who id={message.toAgentId} name={message.toName} role={false} />
-          </span>
-        ) : <Who id={message.fromAgentId} name={message.fromName} />}
-        <span className="shrink-0 text-content/45">{tag}</span>
-        {outcome ? <OutcomeChip words={outcome.words} tone={outcome.tone} /> : null}
-        <time dateTime={new Date(message.ts).toISOString()} title={`Sent ${new Date(message.ts).toLocaleString()}`} className="shrink-0 tabular-nums text-content/35">
-          {late ?? clock(message.ts)}
-        </time>
-      </div>
+  const time = (
+    <time dateTime={new Date(message.ts).toISOString()} title={`Sent ${new Date(message.ts).toLocaleString()}`} className={cx('shrink-0 tabular-nums', between ? 'text-content/35' : 'ml-auto pl-2 text-[11.5px] text-content/30')}>
+      {late ?? clock(message.ts)}
+    </time>
+  );
+  const body = (
+    <>
       {/* Your messages sit on the right in a stronger fill; a teammate's on the left, a shade lighter. */}
       <div className="w-fit min-w-0 max-w-[min(100%,40rem)] rounded-xl bg-content/[0.055] px-3 py-2 text-content">
         {expanded ? (
@@ -174,7 +174,7 @@ export function PeerBubble({ message, between = false, answered, arrivedAt, thre
           <p id={bodyId} className="line-clamp-3 min-w-0 whitespace-pre-wrap break-words text-sm leading-5.5">{preview}</p>
         )}
       </div>
-      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-1 gap-y-0.5 pt-1 text-xs">
+      <div className="-ml-0.5 flex min-w-0 max-w-full flex-wrap items-center gap-x-1 gap-y-0.5 pt-1 text-xs">
         {more ? (
           <TextButton aria-expanded={expanded} aria-controls={bodyId} onClick={() => setExpanded(v => !v)}>
             {expanded ? 'Show less' : 'Show more'}
@@ -185,6 +185,40 @@ export function PeerBubble({ message, between = false, answered, arrivedAt, thre
         <span className="ml-1"><DeliveryNote message={message} /></span>
       </div>
       {trailing}
+    </>
+  );
+  // Comms shows who wrote to whom on one line above the bubble.
+  if (between) {
+    return (
+      <div data-peer-message={message.id} tabIndex={-1} className="flex w-fit min-w-0 max-w-full flex-col items-start rounded font-sans outline-none focus-visible:ring-1 focus-visible:ring-content/30">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 pb-1 text-[12px]">
+          <span className="flex min-w-0 items-center gap-1.5 text-content/45">
+            <Who id={message.fromAgentId} name={message.fromName} role={false} />
+            <span className="shrink-0">to</span>
+            <Who id={message.toAgentId} name={message.toName} role={false} />
+          </span>
+          <span className="shrink-0 text-content/45">{tag}</span>
+          {outcome ? <OutcomeChip words={outcome.words} tone={outcome.tone} /> : null}
+          {time}
+        </div>
+        {body}
+      </div>
+    );
+  }
+  // In a transcript the sender's avatar hangs in the gutter (GUTTER), so its name, its bubble and
+  // the agent's answer under it all start on one left edge. The header reads as a sentence.
+  return (
+    <div data-peer-message={message.id} tabIndex={-1} className={cx(GUTTER, 'w-full rounded font-sans outline-none focus-visible:ring-1 focus-visible:ring-content/30')}>
+      <AgentAvatar agent={sender ?? { id: message.fromAgentId }} className="size-[22px]" />
+      <div className="flex min-w-0 flex-col items-start">
+        <div className="flex h-[22px] w-full min-w-0 items-center gap-1.5 text-[12.5px]">
+          <span className="shrink-0 font-semibold text-content/90">{message.fromName}</span>
+          <span className="min-w-0 truncate text-content/45">{messagePhrase(message, channel)}</span>
+          {outcome ? <OutcomeChip words={outcome.words} tone={outcome.tone} /> : null}
+          {time}
+        </div>
+        <div className="flex w-full min-w-0 flex-col items-start pt-1">{body}</div>
+      </div>
     </div>
   );
 }
@@ -197,14 +231,14 @@ export function PeerBubble({ message, between = false, answered, arrivedAt, thre
 export function PeerPrompt({ message, arrivedAt, firstAt }: { message: PeerMessage; arrivedAt?: number; firstAt?: number }) {
   if (firstAt !== undefined) {
     return (
-      <p className="flex min-w-0 items-center gap-1.5 px-4 pb-2 pt-1 font-sans text-xs text-content/40">
+      <p className={cx(EDGE, 'flex min-w-0 items-center gap-1.5 pb-2 pt-1 font-sans text-xs text-content/40')}>
         <span className="shrink-0">Redelivered:</span>
         <span className="min-w-0 truncate">same {messageTag(message).toLowerCase()} from {message.fromName} as {clock(firstAt)}</span>
       </p>
     );
   }
   return (
-    <section aria-label={`${messageTag(message)} from ${message.fromName}`} className="flex flex-col items-start pb-5 pl-4 pr-14 pt-1.5">
+    <section aria-label={`${messageTag(message)} from ${message.fromName}`} className="flex flex-col items-start px-4 pb-5 pt-1.5">
       <PeerBubble message={message} arrivedAt={arrivedAt} />
     </section>
   );
@@ -270,33 +304,46 @@ export function DelegationRow({ message }: { message: PeerMessage }) {
  * Any other teammate message inside the work trail, one line that opens in place: to or from whom,
  * the kind, the outcome and what it says.
  */
-export function PeerTrailRow({ message, selfId }: { message: PeerMessage; selfId: string }) {
+export function PeerTrailRow({ message, selfId, lead = false, trailing }: {
+  message: PeerMessage;
+  selfId: string;
+  /** On its own outside a group of work: led by a small arrow instead of a tile. */
+  lead?: boolean;
+  /** At the right of the row: the turn's actions, when this row closes the turn. */
+  trailing?: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const detailId = useId();
   const channel = useChannel(message);
   const outcome = useOutcome(message);
   const other = useAgent(message.toAgentId === selfId ? message.fromAgentId : message.toAgentId);
   if (message.delegation && message.fromAgentId === selfId) return <DelegationRow message={message} />;
-  const who = message.toAgentId === selfId ? `From ${message.fromName}` : `To ${message.toName}`;
-  const otherId = message.toAgentId === selfId ? message.fromAgentId : message.toAgentId;
-  const tag = channel ? `#${channel}` : messageTag(message);
+  const sent = message.toAgentId !== selfId;
+  const otherId = sent ? message.toAgentId : message.fromAgentId;
+  const phrase = trailPhrase(message, selfId, channel);
   const preview = messagePreview(message);
+  // A report this agent sent says again what its answer just said above; the row opens to show it.
+  const showPreview = !(sent && message.report);
   return (
     <div className="flex min-w-0 flex-col">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={detailId}
-        aria-label={`${who}, ${tag}${outcome ? `, ${outcome.words}` : ''}: ${preview}`}
-        onClick={() => setOpen(v => !v)}
-        className="group flex min-w-0 items-center gap-1.5 py-1 text-left font-sans text-sm"
-      >
-        {/* The other agent's avatar: the recipient for what this agent sent, the sender for what it got. */}
-        <span className="flex shrink-0 items-center gap-1 text-content/50"><AgentAvatar agent={other ?? { id: otherId }} animate={false} className="size-3.5" />{who}</span>
-        <span className="shrink-0 text-content/40">{tag}</span>
-        {outcome ? <span className="text-[12px]"><OutcomeChip words={outcome.words} tone={outcome.tone} /></span> : null}
-        <span className="min-w-0 flex-1 truncate text-content/50 transition-colors duration-200 group-hover:text-content/75">{preview}</span>
-      </button>
+      <div className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={detailId}
+          aria-label={`${phrase}${outcome ? `, ${outcome.words}` : ''}: ${preview}`}
+          onClick={() => setOpen(v => !v)}
+          className="group flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left font-sans text-[12.5px]"
+        >
+          {lead ? <CornerDownRight aria-hidden className="size-3 shrink-0 text-content/40" strokeWidth={1.75} /> : null}
+          {/* The other agent's avatar: the recipient for what this agent sent, the sender for what it got. */}
+          <AgentAvatar agent={other ?? { id: otherId }} animate={false} className="size-3.5" />
+          <span className="shrink-0 text-content/50 transition-colors duration-200 group-hover:text-content/75">{phrase}</span>
+          {outcome ? <span className="text-[12px]"><OutcomeChip words={outcome.words} tone={outcome.tone} /></span> : null}
+          {showPreview ? <span className="min-w-0 flex-1 truncate text-content/40 transition-colors duration-200 group-hover:text-content/65">{preview}</span> : null}
+        </button>
+        {trailing}
+      </div>
       {open ? (
         <div id={detailId} className="min-w-0 pb-2 text-[13px]">
           <Markdown inert text={messageMarkdown(message)} />
