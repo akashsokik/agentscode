@@ -14,7 +14,11 @@ export default defineConfig({
       '/ws': { target: api, ws: true },
     },
   },
-  optimizeDeps: { entries: ['index.html'] },
+  optimizeDeps: { entries: ['index.html', 'quick.html'] },
   // The syntax highlighter's language pack is large; fine for an app served from localhost.
-  build: { outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 1500 },
+  // quick.html is the desktop app's floating quick composer window (web/quick, electron/quickWindow.ts).
+  build: {
+    outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 1500,
+    rollupOptions: { input: { main: 'index.html', quick: 'quick.html' } },
+  },
 });

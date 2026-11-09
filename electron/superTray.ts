@@ -1,10 +1,12 @@
 /**
  * The SuperAgent outside the window: a menu bar item with what it is doing and the questions it
- * waits on you for, and a system-wide shortcut for its quick bar. The page keeps the menu bar
+ * waits on you for, and a system-wide shortcut for its floating quick composer (quickWindow.ts),
+ * which opens over the app in front without raising AgentsCode. The page keeps the menu bar
  * current (window.agentscodeDesktop.super.status) and gets the commands back (web/super.ts).
  */
 import { globalShortcut, ipcMain, Menu, nativeImage, Tray, type BrowserWindow, type IpcMainEvent, type MenuItemConstructorOptions } from 'electron';
 import { SUPER_GLOBAL_ACCELERATOR, type SuperCommand, type SuperTrayState } from '../shared/superAgent.ts';
+import type { QuickWindow } from './quickWindow.ts';
 
 interface Options {
   window: () => BrowserWindow | null;
@@ -12,6 +14,8 @@ interface Options {
   show: () => void;
   /** Only the AgentsCode page may drive the menu bar. */
   fromApp: (event: IpcMainEvent) => boolean;
+  /** The floating quick composer. */
+  quick: QuickWindow;
 }
 
 /**
@@ -68,7 +72,7 @@ export function startSuperBridge(options: Options): void {
       { type: 'separator' },
       ...state.asks.slice(0, 5).map((ask): MenuItemConstructorOptions => ({ label: ask.question.length > 70 ? `${ask.question.slice(0, 69)}…` : ask.question, click: () => send({ type: 'open' }) })),
       ...(state.asks.length ? [{ type: 'separator' } as MenuItemConstructorOptions] : []),
-      { label: 'Ask the SuperAgent…', accelerator: SUPER_GLOBAL_ACCELERATOR, click: () => send({ type: 'quick' }) },
+      { label: 'Ask the SuperAgent…', accelerator: SUPER_GLOBAL_ACCELERATOR, click: () => options.quick.show() },
       { label: 'Open the SuperAgent', click: () => send({ type: 'open' }) },
       { label: 'Show AgentsCode', click: () => options.show() },
     ];
@@ -82,9 +86,22 @@ export function startSuperBridge(options: Options): void {
   ipcMain.on('super:focus', (event) => {
     if (options.fromApp(event)) options.show();
   });
+  // The quick composer's own messages; only its window may send them.
+  const fromQuick = (event: IpcMainEvent) => options.fromApp(event) && options.quick.owns(event.sender);
+  ipcMain.on('quick:fit', (event, height: unknown) => {
+    if (fromQuick(event) && typeof height === 'number') options.quick.fit(height);
+  });
+  ipcMain.on('quick:hide', (event) => {
+    if (fromQuick(event)) options.quick.hide();
+  });
+  ipcMain.on('quick:open', (event, agentId: unknown) => {
+    if (!fromQuick(event) || typeof agentId !== 'string' || !agentId) return;
+    options.quick.hide();
+    send({ type: 'openAgent', agentId });
+  });
 
   // Another app may hold the keys already; the quick bar still works inside the window.
-  if (!globalShortcut.register(SUPER_GLOBAL_ACCELERATOR, () => send({ type: 'quick' }))) {
+  if (!globalShortcut.register(SUPER_GLOBAL_ACCELERATOR, () => options.quick.toggle())) {
     console.warn(`[super] ${SUPER_GLOBAL_ACCELERATOR} is taken by another app; the SuperAgent's quick bar works inside AgentsCode only.`);
   }
 }

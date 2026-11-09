@@ -36,7 +36,8 @@ export interface SuperTrayState {
   asks: { id: string; question: string }[];
 }
 
-export type SuperCommand = { type: 'quick' } | { type: 'open' };
+/** quick: the in-app quick bar; open: the SuperAgent's tab; openAgent: that agent's tab, in the main window. */
+export type SuperCommand = { type: 'quick' } | { type: 'open' } | { type: 'openAgent'; agentId: string };
 
 export interface DesktopSuper {
   /** Keep the menu bar up to date; an empty state with no SuperAgent hides it. */
@@ -45,4 +46,20 @@ export interface DesktopSuper {
   focus(): void;
   /** The system-wide shortcut or the menu bar wants the quick bar, or the SuperAgent's tab. */
   onCommand(callback: (command: SuperCommand) => void): () => void;
+}
+
+/** The width of the floating quick composer window, and the room around its card for the shadow. */
+export const QUICK_WIDTH = 680;
+export const QUICK_MARGIN = 16;
+
+/** The floating quick composer's bridge (`window.agentscodeDesktop.quick`), only in its own window. */
+export interface DesktopQuick {
+  /** Size the window to the card, in CSS pixels; the top edge stays put. */
+  fit(height: number): void;
+  /** Put the window away; it keeps its draft. */
+  hide(): void;
+  /** Open an agent's conversation in the main window. */
+  openInMain(agentId: string): void;
+  /** The window was just shown. */
+  onShow(callback: () => void): () => void;
 }
