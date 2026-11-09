@@ -97,7 +97,7 @@ export function AccessPicker({
   };
 
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className="relative min-w-0">
       <button
         type="button"
         data-access-picker-trigger
@@ -115,10 +115,10 @@ export function AccessPicker({
         }}
         className={
           variant === "plain"
-            ? `-mx-1.5 flex h-7 max-w-52 items-center gap-2 rounded-md px-1.5 text-[12px] text-content/85 ${
+            ? `-mx-1.5 flex h-7 min-w-0 max-w-52 items-center gap-2 rounded-md px-1.5 text-[12px] text-content/85 ${
                 open ? "bg-content/8" : "hover:bg-content/6"
               }`
-            : `flex h-6.5 max-w-52 items-center gap-1 rounded-md px-1.5 ${
+            : `flex h-6.5 min-w-0 max-w-[min(13rem,100%)] items-center gap-1 rounded-md px-1.5 ${
                 open
                   ? "bg-selection text-content"
                   : "bg-selection text-content hover:bg-selection-hover"
