@@ -72,3 +72,16 @@ test('through the server: the SuperAgent, reviewers and testers may run checks i
   await assert.rejects(call(tess.id, { project: 'web', command: 'git push' }), (e: unknown) => e instanceof HttpError && e.status === 400);
   await assert.rejects(call(ada.id, { project: 'web', command: 'git status' }), (e: unknown) => e instanceof HttpError && e.status === 403);
 });
+
+test('run_check follows the eyes scope: a tester with a project checks only its own', async () => {
+  const h = harness();
+  (h.manager as unknown as { checkExec: CheckExec }).checkExec = async () => ({ code: 0, stdout: 'ok', stderr: '' });
+  const web = h.manager.addProject({ path: projectDir(h.dir, 'web') });
+  const api = h.manager.addProject({ path: projectDir(h.dir, 'api') });
+  const tess = await h.manager.create({ name: 'Tess', engine: 'claude', projectId: api.id, role: 'tester' });
+  h.manager.send(tess.id, 'Test.');
+  await settle();
+  const call = (args: Record<string, unknown>) => h.manager.commsTool(h.runner(tess.id).ctx.commsToken!, 'run_check', args);
+  assert.equal((await call({ project: 'api', command: 'git status' }) as { project: string }).project, 'api');
+  await assert.rejects(call({ project: web.name, command: 'git status' }), (e: unknown) => e instanceof HttpError && e.status === 403);
+});
