@@ -1,4 +1,5 @@
 import type { ComposerCommand } from '../../shared/composer.ts';
+import { mentionStart } from '../../shared/mentions.ts';
 
 /*
  * The composer's `/` and `@` tokens and how their pickers rank what they offer, after MonoCode's
@@ -130,10 +131,13 @@ export function isLeading(text: string, token: Token): boolean {
   return text.slice(0, token.start).trim() === '';
 }
 
-/** The `@path` the caret is in, if the user is mentioning a file. */
+/**
+ * The `@mention` the caret is in, if the user is mentioning an agent, project or file. An @ inside
+ * code, an email or a path is not one (mentionStart).
+ */
 export function mentionTokenAt(text: string, cursor: number): Token | null {
   const { start, end, caret } = wordAround(text, cursor);
-  if (text[start] !== '@') return null;
+  if (!mentionStart(text, start)) return null;
   const typed = text.slice(start + 1, caret);
   if (typed.includes('@') || typed.length > 120) return null;
   return { start, end, query: typed };
@@ -233,4 +237,65 @@ export function rankFiles(entries: RankedFile[], query: string, limit = MAX_FILE
 /** What a picked entry writes after the `@`: its path, with a slash for a folder. */
 export function mentionValue(file: RankedFile): string {
   return file.isDir ? `${file.relative}/` : file.relative;
+}
+
+// ---- one @ picker: agents, projects and files ------------------------------------
+
+export interface PickAgent { id: string; name: string }
+export interface PickProject { id: string; name: string; path: string }
+
+export type MentionPick = (
+  | { kind: 'agent'; agent: PickAgent; positions: number[] }
+  | { kind: 'project'; project: PickProject; positions: number[] }
+  | { kind: 'everyone'; positions: number[] }
+  | { kind: 'file'; file: RankedFile }
+) & {
+  /** Named exactly as typed: listed first, under its own header. */
+  best?: boolean;
+};
+
+const MAX_AGENTS = 8;
+const MAX_PROJECTS = 6;
+
+/** What a pick writes after the @. */
+export function pickValue(pick: MentionPick): string {
+  if (pick.kind === 'agent') return pick.agent.name;
+  if (pick.kind === 'project') return pick.project.name;
+  if (pick.kind === 'everyone') return 'all';
+  return mentionValue(pick.file);
+}
+
+function rankNamed<T extends { name: string }>(items: T[], query: string, limit: number): { item: T; positions: number[]; score: number }[] {
+  const needle = query.trim();
+  if (!needle) return items.slice(0, limit).map(item => ({ item, positions: [], score: 0 }));
+  const out: { item: T; positions: number[]; score: number }[] = [];
+  for (const item of items) {
+    const hit = fuzzyMatch(needle, item.name);
+    if (hit) out.push({ item, positions: hit.positions, score: hit.score });
+  }
+  out.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name));
+  return out.slice(0, limit);
+}
+
+/**
+ * The @ picker's rows, in groups: agents, then projects, then files, each ranked by the same fuzzy
+ * match as before (rankFiles for files). A name typed exactly ("@ada" for Ada) leads, whatever its
+ * group. `everyone` offers @all (channels with more than one member).
+ */
+export function rankMentions(input: { agents: PickAgent[]; projects: PickProject[]; files: RankedFile[]; query: string; everyone?: boolean }): MentionPick[] {
+  const needle = input.query.trim().toLowerCase();
+  const agents: MentionPick[] = rankNamed(input.agents, input.query, MAX_AGENTS).map(r => ({ kind: 'agent', agent: r.item, positions: r.positions }));
+  const projects: MentionPick[] = rankNamed(input.projects, input.query, MAX_PROJECTS).map(r => ({ kind: 'project', project: r.item, positions: r.positions }));
+  const everyone: MentionPick[] = input.everyone && 'all'.startsWith(needle) ? [{ kind: 'everyone', positions: [] }] : [];
+  const files: MentionPick[] = rankFiles(input.files, input.query).map(file => ({ kind: 'file', file }));
+  const all = [...agents, ...everyone, ...projects, ...files];
+  if (!needle) return all;
+  const exact = all.filter(p => pickValue(p).replace(/\/$/, '').toLowerCase() === needle);
+  return [...exact.map(p => ({ ...p, best: true })), ...all.filter(p => !exact.includes(p))];
+}
+
+/** The group a pick is listed under, for the picker's headers. */
+export function pickGroup(pick: MentionPick): 'Best match' | 'Agents' | 'Projects' | 'Files' {
+  if (pick.best) return 'Best match';
+  return pick.kind === 'agent' || pick.kind === 'everyone' ? 'Agents' : pick.kind === 'project' ? 'Projects' : 'Files';
 }

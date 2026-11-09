@@ -141,7 +141,7 @@ export function CopyTurnButton({ text, label = 'Copy response' }: { text: string
  * it fits on one line and rounded once it wraps. Copy and the time show under it on hover.
  */
 export function UserMessageBlock({ entry, media, caption, actions, footer, className = 'pb-5 pt-1.5' }: {
-  entry: Pick<Entry, 'id' | 'agentId' | 'text' | 'ts' | 'images'>;
+  entry: Pick<Entry, 'id' | 'agentId' | 'text' | 'ts' | 'images' | 'mentions'>;
   /** Shown above the bubble in place of the entry's own images (a channel post's uploads). */
   media?: ReactNode;
   caption?: ReactNode;
@@ -175,7 +175,7 @@ export function UserMessageBlock({ entry, media, caption, actions, footer, class
         {/* A message can be images alone; then there is no bubble. */}
         {entry.text ? (
           <div data-chat-message={entry.id} data-chat-message-role="user" className={`user-message-bubble relative w-fit min-w-0 max-w-[min(100%,36rem)] bg-content/10 px-3 py-2 font-sans text-content transition-[background-color] duration-200 ${singleLine && !overflows ? 'rounded-full' : 'rounded-xl'}`}>
-            <pre ref={textRef} className={`min-w-0 whitespace-pre-wrap break-words font-sans text-sm ${expanded ? '' : 'line-clamp-4'}`}><MentionText text={entry.text} /></pre>
+            <pre ref={textRef} className={`min-w-0 whitespace-pre-wrap break-words font-sans text-sm ${expanded ? '' : 'line-clamp-4'}`}><MentionText text={entry.text} refs={entry.mentions} agentId={entry.agentId || undefined} /></pre>
             {overflows ? (
               <TextButton aria-expanded={expanded} className="mt-1 -ml-1" onClick={() => setExpanded(v => !v)}>
                 {expanded ? 'Show less' : 'Show more'}

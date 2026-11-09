@@ -1,3 +1,4 @@
+import { findMentions, mentionContext, type MentionAgent, type MentionProject, type MentionRef } from '../shared/mentions.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -281,8 +282,9 @@ export class AgentManager {
     this.channels = new Channels(store, this.mailbox, {
       broadcast: event => this.hub.broadcast(event),
       // Each recipient gets its own copy, so its transcript shows the images and outlives the channel.
-      startUserTask: (agentId, text, prompt, task, channel, images) =>
-        this.startUserTask(agentId, text, prompt, task, channel, images.map(image => this.attachments.adopt(this.agent(agentId).id, image))),
+      startUserTask: (agentId, text, prompt, task, channel, images, mentions) =>
+        this.startUserTask(agentId, text, prompt, task, channel, images.map(image => this.attachments.adopt(this.agent(agentId).id, image)), mentions),
+      mentionLookup: () => this.mentionLookup(),
     });
   }
 
@@ -600,9 +602,13 @@ export class AgentManager {
     if (isIdeCommand(text)) throw new HttpError(400, 'Use New session to clear the conversation.');
     const pictures = images.length === 1 ? 'an image' : `${images.length} images`;
     // The engines need some text with an image: Claude refuses an empty text block, Codex an empty prompt.
-    const prompt = this.withSkills(id, text) || `(The user sent ${pictures} with no text.)`;
+    // An @mention of an agent or project is a reference: the agent is told exactly who or what it is.
+    const mentions = findMentions(text, this.mentionLookup());
+    const context = mentionContext(mentions, { ...this.mentionLookup(), roleName: role => rolePreset(role as Agent['role']).name });
+    const base = this.withSkills(id, text) || `(The user sent ${pictures} with no text.)`;
+    const prompt = context ? `${base}\n\n${context}` : base;
     const summary = text ? clip(text.replace(/\s+/g, ' '), 280) : `Sent ${pictures}`;
-    this.startUserTask(id, text, prompt, { summary, source: 'user' }, undefined, images);
+    this.startUserTask(id, text, prompt, { summary, source: 'user' }, undefined, images, mentions);
   }
 
   /** Store an image for this agent's next message; the message names it by the returned id. */
@@ -614,6 +620,14 @@ export class AgentManager {
     return this.attachments.file(this.agent(id).id, file);
   }
 
+  /** Everyone and every project a mention can name, for shared/mentions.ts. */
+  mentionLookup(): { agents: MentionAgent[]; projects: MentionProject[] } {
+    return {
+      agents: [...this.store.agents.values()].map(a => ({ id: a.id, name: a.name, role: a.role, projectId: a.projectId })),
+      projects: [...this.store.projects.values()].map(p => ({ id: p.id, name: p.name, path: p.path })),
+    };
+  }
+
   /** Queue a user task: the transcript shows `text`, the engine gets `prompt`. */
   private startUserTask(
     id: string,
@@ -622,12 +636,17 @@ export class AgentManager {
     task: AgentTask,
     channel?: { id: string; postId: string },
     images: { attachment: ImageAttachment; path: string }[] = [],
+    mentions: MentionRef[] = [],
   ): void {
     const agent = this.agent(id);
     if (this.runners.get(id)?.accepting === false) throw new HttpError(409, 'The agent session is closing. Try again in a moment.');
     this.clearIdleTimer(id);
     const entryId = randomUUID();
-    this.addEntry(id, { id: entryId, kind: 'user', text, channel, images: images.length ? images.map(i => i.attachment) : undefined });
+    this.addEntry(id, {
+      id: entryId, kind: 'user', text, channel,
+      images: images.length ? images.map(i => i.attachment) : undefined,
+      ...(mentions.length ? { mentions } : {}),
+    });
     this.mailbox.userTask(id);
     const runner = this.runnerFor(agent);
     agent.unread = false;
