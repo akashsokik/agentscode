@@ -1,17 +1,19 @@
 /**
  * The SuperAgent's own parts of its pane: the questions it waits on you for, as cards with the
- * choices to click, and its decision log, where anything it did on its own can be undone.
+ * choices to click, and its decision log on the right of the pane, where anything it did on its own
+ * can be undone.
  */
-import { useState } from 'react';
-import type { SuperAction, SuperAsk } from '../../shared/types.ts';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { SuperAsk } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { memoryDate } from '../memory.ts';
 import { openAsks } from '../super.ts';
+import { decisionRows, superLogMax, superLogWidth, type DecisionRow } from '../superText.ts';
 import { attempt, useApp } from '../store.ts';
-import { PRIMARY, TextButton } from '../ui/common.tsx';
-import { Modal } from '../mono/Modal.tsx';
+import { cx, HeaderButton, PRIMARY, TextButton } from '../ui/common.tsx';
+import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
+import { ListBullet, PanelRight } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
-import { Group } from '../mono/settings.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
 export function SuperInbox() {
@@ -52,50 +54,159 @@ function AskCard({ ask }: { ask: SuperAsk }) {
 
 const time = (ts: number) => `${memoryDate(ts)} ${new Date(ts).toTimeString().slice(0, 5)}`;
 
-/** Everything the SuperAgent did on its own, newest first, and what it asked you. */
-export function SuperLogDialog({ onClose }: { onClose: () => void }) {
-  const log = useApp(s => s.snapshot?.super.log) ?? [];
-  const asks = useApp(s => s.snapshot?.super.asks) ?? [];
-  const answered = asks.filter(a => a.answeredAt !== undefined);
+/**
+ * The SuperAgent's decision log, on the right of its pane: what it did on its own, newest first,
+ * each with why and Undo, then what you answered it. Kept live by `super` events. `over` floats it
+ * above the conversation in a narrow pane; otherwise it sits beside it, resizable from its left edge.
+ */
+export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; over: boolean; focused: boolean; onClose: () => void }) {
+  const log = useApp(s => s.snapshot?.super.log);
+  const asks = useApp(s => s.snapshot?.super.asks);
+  const rows = decisionRows(log);
+  const answered = (asks ?? []).filter(a => a.answeredAt !== undefined);
+  const column = useColumnWidth('superLog', 300, 240, 0.4);
+  const root = useRef<HTMLElement>(null);
+  // The pane's width, measured here (before the first paint) so resizing re-renders only the sidebar.
+  const paneWidth = useParentWidth(root);
+  const mode = over ? 'over' : 'beside';
+  // The width you chose, cut to the pane it is in: the window-based cap alone lets it fill a split pane.
+  const width = superLogWidth(column.width, column.min, paneWidth, mode);
+  // Dragging and the arrow keys stop at the pane-based limit too, and the handle reports it.
+  const max = paneWidth > 0 ? Math.min(column.max, superLogMax(column.min, paneWidth, mode)) : column.max;
+  const fit = (value: number) => Math.min(max, value);
+  const handle = { ...column, width, max, preview: (value: number | null) => column.preview(value === null ? null : fit(value)), commit: (value: number | undefined) => column.commit(value === undefined ? undefined : fit(value)) };
+  const close = useRef(onClose);
+  close.current = onClose;
+
+  // Over the conversation it is a popover: focus moves into it when it opens, and goes back to the
+  // header's toggle when it closes, however it closes (Hide, Escape, a click outside).
+  useEffect(() => {
+    if (!over) return;
+    root.current?.querySelector<HTMLElement>('[data-super-log-hide]')?.focus({ preventScroll: true });
+    const panel = root.current;
+    return () => {
+      if (panel?.isConnected) return;
+      const toggle = document.querySelector<HTMLElement>('[data-super-log-toggle]');
+      if (toggle && (document.activeElement === document.body || !document.activeElement)) toggle.focus({ preventScroll: true });
+    };
+  }, [over]);
+
+  // Escape or a click outside closes it. Escape is heard as it bubbles (as ChannelThread's), only
+  // while this pane has focus, never when something inside it already handled Escape (an edit box
+  // cancelling), and never while a dialog or popover is open: that one takes Escape.
+  useEffect(() => {
+    if (!over || !focused) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"], [data-dialog-popover]')) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && root.current?.contains(target) && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      event.preventDefault();
+      close.current();
+    };
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      // The header's toggle does its own closing; closing here too would reopen it on its click.
+      if (!target || root.current?.contains(target) || target.closest('[data-super-log-toggle]')) return;
+      close.current();
+    };
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointer, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointer, true);
+    };
+  }, [over, focused]);
+  const undoable = rows.filter(r => r.undoable).length;
   return (
-    <Modal title="What the SuperAgent did" size="md" fitViewport onClose={onClose}>
-      <div className="px-4 pb-4 pt-4">
-        <Group title="Decisions" description="What it did on its own, and why. Undo puts it back, and the SuperAgent hears that you undid it.">
-          {log.length ? log.map(action => <ActionRow key={action.id} action={action} />) : (
-            <p className="px-4 py-3.5 text-[12px] text-content/45">Nothing yet. Its decisions show here as it makes them.</p>
-          )}
-        </Group>
+    <aside
+      id={id}
+      aria-label="Decision log"
+      data-super-log
+      ref={root}
+      style={{ width }}
+      // One position utility only: with both, .relative (later in the CSS) wins and it never floats.
+      className={cx('flex shrink-0 flex-col border-l border-stroke font-sans', over ? 'body-glass absolute inset-y-0 right-0 z-20 shadow-2xl' : 'relative')}
+    >
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-stroke pl-3.5 pr-1.5">
+        <h2 className="min-w-0 flex-1 truncate text-[12px] font-medium text-content/80">
+          Decisions
+          {rows.length ? <span className="ml-1.5 font-normal tabular-nums text-content/40">{rows.length}</span> : null}
+        </h2>
+        <HeaderButton data-super-log-hide icon={PanelRight} label="Hide the decision log" active onClick={onClose} />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {rows.length ? (
+          <>
+            <p className="px-3.5 pb-1 pt-2.5 text-[11px] leading-relaxed text-content/40">
+              What it did on its own.{undoable ? ' Undo puts it back, and the SuperAgent hears that you did.' : ''}
+            </p>
+            <ol>{rows.map(row => <DecisionItem key={row.id} row={row} />)}</ol>
+          </>
+        ) : (
+          <div className="flex flex-col items-center px-6 pb-6 pt-10 text-center">
+            <ListBullet className="size-5 text-content/25" strokeWidth={1.5} />
+            <p className="mt-2.5 text-[13px] text-content/60">No decisions yet</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-content/40">When the SuperAgent creates agents or channels, delegates or nudges, it shows here with why, and you can undo it.</p>
+          </div>
+        )}
         {answered.length ? (
-          <Group title="Your answers">
-            {answered.map(ask => (
-              <div key={ask.id} className="border-b border-content/5 px-4 py-3 last:border-b-0">
-                <p className="text-[13px] leading-5 text-content">{ask.question}</p>
-                <p className="mt-0.5 text-[12px] text-content/55">{ask.dismissed ? 'Put aside' : `You answered: ${ask.answer}`}</p>
-                <p className="mt-0.5 text-[11px] text-content/35">{time(ask.answeredAt!)}</p>
-              </div>
-            ))}
-          </Group>
+          <section aria-label="Your answers" className="mt-2 border-t border-stroke">
+            <h3 className="px-3.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-content/40">Your answers</h3>
+            <ol>
+              {answered.map(ask => (
+                <li key={ask.id} className="px-3.5 py-2">
+                  <p className="text-[12px] leading-5 text-content/75">{ask.question}</p>
+                  <p className="text-[12px] leading-5 text-content/45">{ask.dismissed ? 'Put aside' : ask.answer}</p>
+                  <p className="text-[11px] text-content/30">{time(ask.answeredAt!)}</p>
+                </li>
+              ))}
+            </ol>
+          </section>
         ) : null}
       </div>
-    </Modal>
+      {/* From the width on screen, so a drag never jumps from a wider saved width. */}
+      <ResizeHandle column={handle} edge="left" label="Resize the decision log" />
+    </aside>
   );
 }
 
-function ActionRow({ action }: { action: SuperAction }) {
+function DecisionItem({ row }: { row: DecisionRow }) {
   const [busy, setBusy] = useState(false);
   const undo = async () => {
     setBusy(true);
-    await attempt(() => api.undoSuper(action.id));
+    await attempt(() => api.undoSuper(row.id));
     setBusy(false);
   };
+  const undone = row.undoneAt !== undefined;
   return (
-    <div data-super-action={action.id} className="flex items-start gap-3 border-b border-content/5 px-4 py-3 last:border-b-0">
-      <div className="min-w-0 flex-1">
-        <p className={`text-[13px] leading-5 ${action.undoneAt ? 'text-content/45 line-through decoration-content/25' : 'text-content'}`}>{action.summary}</p>
-        {action.why ? <p className="mt-0.5 text-[12px] leading-relaxed text-content/45">Why: {action.why}</p> : null}
-        <p className="mt-0.5 text-[11px] text-content/35">{time(action.at)}{action.undoneAt ? ` · undone ${time(action.undoneAt)}` : ''}</p>
+    <li data-super-action={row.id} className="group/decision border-b border-content/5 px-3.5 py-2.5 last:border-b-0">
+      <div className="flex items-baseline gap-2">
+        <time dateTime={new Date(row.at).toISOString()} title={new Date(row.at).toLocaleString()} className="min-w-0 flex-1 truncate text-[11px] tabular-nums text-content/35">
+          {time(row.at)}{undone ? ' · undone' : ''}
+        </time>
+        {row.undoable ? (
+          <TextButton aria-label={`Undo: ${row.summary}`} disabled={busy} onClick={() => void undo()} className="shrink-0 opacity-70 transition-opacity group-hover/decision:opacity-100 focus-visible:opacity-100">
+            {busy ? 'Undoing…' : 'Undo'}
+          </TextButton>
+        ) : null}
       </div>
-      {action.undo && !action.undoneAt ? <SecondaryButton disabled={busy} onClick={() => void undo()}>Undo</SecondaryButton> : null}
-    </div>
+      <p className={cx('mt-0.5 text-[13px] leading-5', undone ? 'text-content/40 line-through decoration-content/25' : 'text-content/85')}>{row.summary}</p>
+      {row.why ? <p className="mt-0.5 text-[12px] leading-relaxed text-content/45">{row.why}</p> : null}
+    </li>
   );
+}
+
+/** The width of an element's parent, measured before the first paint and kept current; 0 until then. */
+function useParentWidth(ref: React.RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const parent = ref.current?.parentElement;
+    if (!parent) return;
+    setWidth(Math.round(parent.getBoundingClientRect().width));
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, [ref]);
+  return width;
 }

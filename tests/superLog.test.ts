@@ -1,0 +1,94 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import type { SuperAction } from '../shared/types.ts';
+import { decisionRows, peekAfter, SUPER_LOG_CONVERSATION_MIN, SUPER_LOG_MIN_PANE, superLogMode, superLogMax, superLogWidth, nextLogState } from '../web/superText.ts';
+import { harness, settle } from './helpers.ts';
+
+test('the decision log sits beside the conversation in a wide pane, over it in a narrow one only when asked, and not when closed', () => {
+  assert.equal(superLogMode(true, SUPER_LOG_MIN_PANE, false), 'beside');
+  assert.equal(superLogMode(true, 1400, true), 'beside');
+  assert.equal(superLogMode(true, SUPER_LOG_MIN_PANE - 1, false), 'hidden', 'it gives way to the conversation on its own');
+  assert.equal(superLogMode(true, 500, true), 'over');
+  assert.equal(superLogMode(false, 1400, true), 'hidden');
+  assert.equal(superLogMode(false, 500, true), 'over', 'a narrow peek shows it whatever the wide-pane choice');
+  assert.equal(superLogMode(true, 0, false), 'hidden', 'before the pane is measured');
+});
+
+test('the log lists decisions newest first; only those with an undo, not yet undone, can be undone', () => {
+  const log: SuperAction[] = [
+    { id: 'a', at: 1, tool: 'delegate_task', summary: 'Delegated review to Ada', why: 'You want reviews' },
+    { id: 'b', at: 3, tool: 'create_agent', summary: 'Created Tess', why: 'Tests first', undo: { kind: 'removeAgent', agentId: 't' } },
+    { id: 'c', at: 2, tool: 'create_channel', summary: 'Created #release', why: '', undo: { kind: 'removeChannel', channelId: 'c' }, undoneAt: 4 },
+  ];
+  assert.deepEqual(decisionRows(log).map(r => [r.id, r.undoable, r.undoneAt ?? null]), [['b', true, null], ['c', false, 4], ['a', false, null]]);
+  assert.deepEqual(decisionRows(undefined), []);
+});
+
+test('undo from the log: the row turns undone and its action is put back', async () => {
+  const h = harness();
+  h.manager.updateSettings({ superQuietFrom: '00:00', superQuietTo: '00:00' });
+  const sup = await h.manager.createSuper();
+  h.manager.send(sup.id, 'Set up a channel.');
+  await settle();
+  const token = h.runner(sup.id).ctx.commsToken!;
+  await h.manager.commsTool(token, 'create_channel', { name: 'release', member_ids: [], why: 'Release coordination.' });
+  const [row] = decisionRows(h.manager.superView().log);
+  assert.equal(row.summary, 'Created #release with no members');
+  assert.equal(row.why, 'Release coordination.');
+  assert.equal(row.undoable, true);
+  const after = await h.manager.undoSuper(row.id);
+  const [undone] = decisionRows(after.log);
+  assert.equal(undone.undoable, false);
+  assert.ok(undone.undoneAt);
+  assert.equal(h.manager.snapshot().channels.length, 0);
+});
+
+test('the log width follows the pane: the conversation keeps its minimum beside it, and over it the log stays inside the pane', () => {
+  // Beside: a wide choice in a 760px pane leaves the conversation 420px.
+  assert.equal(superLogWidth(700, 240, 760, 'beside'), 760 - SUPER_LOG_CONVERSATION_MIN);
+  assert.equal(superLogWidth(300, 240, 1600, 'beside'), 300, 'room enough: as chosen');
+  assert.equal(superLogWidth(300, 240, 600, 'beside'), 240, 'never under its minimum');
+  // Over: never past the pane's left edge.
+  assert.equal(superLogWidth(700, 240, 500, 'over'), 500);
+  assert.equal(superLogWidth(300, 240, 500, 'over'), 300);
+  assert.equal(superLogWidth(300, 240, 0, 'over'), 300, 'before the pane is measured');
+});
+
+test('once the pane is wide, a narrow pane does not reopen the log over the conversation', () => {
+  assert.equal(peekAfter(1200, true), false);
+  assert.equal(peekAfter(600, true), true);
+  assert.equal(peekAfter(600, false), false);
+  // Wide, then narrow again: peek was reset, so the log hides instead of floating unasked.
+  const peek = peekAfter(1200, true);
+  assert.equal(superLogMode(true, 600, peek), 'hidden');
+});
+
+test('the toggle and closes (nextLogState): a narrow pane only peeks; it never changes the remembered wide-pane choice', () => {
+  const wideW = SUPER_LOG_MIN_PANE;
+  const narrowW = 600;
+  let state = { open: true, peek: false };
+  const mode = (w: number) => superLogMode(state.open, w, state.peek);
+  const press = (w: number) => { state = nextLogState(mode(w), w, state.open, state.peek); };
+  // Wide: close it.
+  assert.equal(mode(wideW), 'beside');
+  press(wideW);
+  assert.deepEqual(state, { open: false, peek: false });
+  // Narrow: peek it over the conversation, then close it (Hide, Escape or a click outside).
+  press(narrowW);
+  assert.equal(mode(narrowW), 'over');
+  press(narrowW);
+  assert.equal(mode(narrowW), 'hidden');
+  // Widen: still closed, as you left it.
+  state = { ...state, peek: peekAfter(wideW, state.peek) };
+  assert.equal(mode(wideW), 'hidden');
+  assert.equal(state.open, false);
+  // And wide, opening flips the choice back on.
+  press(wideW);
+  assert.deepEqual(state, { open: true, peek: false });
+});
+
+test('the resize limit follows the pane: beside it leaves the conversation its room, over it stops at the pane', () => {
+  assert.equal(superLogMax(240, 1000, 'beside'), 1000 - SUPER_LOG_CONVERSATION_MIN);
+  assert.equal(superLogMax(240, 500, 'beside'), 240, 'never under the minimum');
+  assert.equal(superLogMax(240, 500, 'over'), 500);
+});
