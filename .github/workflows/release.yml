@@ -115,7 +115,9 @@ jobs:
     name: build ${{ matrix.name }}
     needs: [tag, check]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # Notarization waits on Apple, which usually takes minutes but can take hours (a new Developer
+    # ID team's first submissions especially), so the mac jobs get far longer than the build needs.
+    timeout-minutes: ${{ matrix.platform == 'darwin' && 180 || 45 }}
     strategy:
       fail-fast: false
       matrix:
