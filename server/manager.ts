@@ -1934,11 +1934,16 @@ export class AgentManager {
       const scope = this.eyesProjects(agent);
       const projects = parsed.data.project ? [this.eyesProject(agent, parsed.data.project)] : scope === 'all' ? [...this.store.projects.values()] : scope;
       // In parallel, so many projects stay within the tool's time.
+      // Each project on its own: one that fails (gh logged out, a timeout) is a note, not the end of the rest.
       const results = await Promise.all(projects.map(async project => {
         const repo = await this.projectRepo(project);
         if (!repo) return { project: project.name, note: 'No GitHub remote (origin): skipped.' };
-        const out = capJson(await run(tool === 'gh_prs' ? ghArgs.prs(repo) : ghArgs.issues(repo)));
-        return { project: project.name, repo, ...outside(tool === 'gh_prs' ? 'pullRequests' : 'issues', out) };
+        try {
+          const out = capJson(await run(tool === 'gh_prs' ? ghArgs.prs(repo) : ghArgs.issues(repo)));
+          return { project: project.name, repo, ...outside(tool === 'gh_prs' ? 'pullRequests' : 'issues', out) };
+        } catch (error) {
+          return { project: project.name, repo, error: (error as Error).message };
+        }
       }));
       return { about: GH_UNTRUSTED, results };
     }
@@ -1985,9 +1990,8 @@ export class AgentManager {
     let openAgent: string | undefined;
     if (input.agent) {
       const target = this.teammateOrSelf(input.agent);
-      if (!isSuper && target.id !== agent.id && !this.mailbox.teammates(agent.id).some(t => t.id === target.id)) {
-        throw new HttpError(403, `${target.name} is not visible to you under the team setting, so you cannot open its tab.`);
-      }
+      // Only the SuperAgent reads other agents' transcripts (read_transcript), so only it opens their tabs.
+      if (!isSuper && target.id !== agent.id) throw new HttpError(403, 'You can open only your own tab; other agents\' transcripts are for the SuperAgent.');
       openAgent = target.id;
     }
     let openChannel: string | undefined;

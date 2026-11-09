@@ -326,7 +326,7 @@ function registerEyesTools(server: McpServer, invoke: Invoke): void {
     inputSchema: runCheckInput.shape, ...readOnly,
   }, args => invoke('run_check', args));
   server.registerTool('app_screenshot', {
-    description: 'A PNG of the AgentsCode desktop window as the user sees it (window "main"), or of the floating quick window while it is open ("quick"); returns the file path and size, so you can read the image. Optionally opens an agent\'s tab (one visible to you) or a channel (one you are a member of) in the main window first: that changes what the user is looking at, so do it only when the user asked or is away. Desktop app only.',
+    description: 'A PNG of the AgentsCode desktop window as the user sees it (window "main"), or of the floating quick window while it is open ("quick"); returns the file path and size, so you can read the image. Optionally opens an agent\'s tab (your own; the SuperAgent may open any) or a channel (one you are a member of) in the main window first: that changes what the user is looking at, so do it only when the user asked or is away. Desktop app only.',
     inputSchema: appScreenshotInput.shape, ...readOnly,
   }, args => invoke('app_screenshot', args));
 }
