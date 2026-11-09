@@ -17,7 +17,7 @@ function fakeApi() {
     send: async (id, text) => { calls.push(['send', id, text]); },
     createSuper: async () => { calls.push(['createSuper']); return agent({ id: 'sup-new', name: 'SuperAgent', role: 'super' }); },
     createAgent: async (input: CreateAgentRequest) => { calls.push(['createAgent', input]); return agent({ id: 'new-1', name: input.name }); },
-    answerSuper: async (askId, body) => { calls.push(['answerSuper', askId, body]); return { agentId: null, asks: [], log: [] } satisfies SuperState; },
+    answerSuper: async (askId, body) => { calls.push(['answerSuper', askId, body]); return { agentId: null, asks: [], log: [], goals: [] } satisfies SuperState; },
   };
   return { api, calls };
 }

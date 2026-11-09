@@ -223,7 +223,9 @@ export type SuperUndo =
   | { kind: 'removeAgent'; agentId: string }
   | { kind: 'removeChannel'; channelId: string }
   | { kind: 'channel'; channelId: string; before: { name: string; topic: string; memberIds: string[] } }
-  | { kind: 'agent'; agentId: string; before: { name: string; role: AgentRole; model: string; effort: string } };
+  | { kind: 'agent'; agentId: string; before: { name: string; role: AgentRole; model: string; effort: string } }
+  /** A goal as it was before (null: the SuperAgent added it, so undo removes it). */
+  | { kind: 'goal'; goalId: string; before: SuperGoal | null };
 
 /** One thing the SuperAgent did on its own, for the decision log. */
 export interface SuperAction {
@@ -239,6 +241,29 @@ export interface SuperAction {
   undoneAt?: number;
 }
 
+/** queued: waiting its turn; in_progress: an agent is on it; blocked: waiting for the user; done. */
+export type GoalStatus = 'queued' | 'in_progress' | 'blocked' | 'done';
+
+/** One goal in the SuperAgent's backlog, which it works through on its own, in order. */
+export interface SuperGoal {
+  id: string;
+  text: string;
+  /** The project it is about; null for none in particular. */
+  projectId: string | null;
+  status: GoalStatus;
+  /** Position in the backlog, 0 first. */
+  order: number;
+  createdAt: number;
+  updatedAt: number;
+  /** Who added it. */
+  by: 'user' | 'super';
+  /** The agent working on it, and the delegation (peer message id) it was given. */
+  agentId?: string;
+  delegationId?: string;
+  notes?: string;
+  doneAt?: number;
+}
+
 export interface SuperState {
   /** The SuperAgent's agent id, or null before it is set up. */
   agentId: string | null;
@@ -246,6 +271,8 @@ export interface SuperState {
   asks: SuperAsk[];
   /** The latest decisions, newest first. */
   log: SuperAction[];
+  /** The goals backlog, in order. */
+  goals: SuperGoal[];
 }
 
 // ---- dreaming -----------------------------------------------------------------
@@ -644,6 +671,8 @@ export interface Settings {
   superNotify: boolean;
   /** Dollars the SuperAgent may spend a day before wake-ups wait for tomorrow; 0 means no cap. Your own messages always go. */
   superDailyBudgetUsd: number;
+  /** Agents the SuperAgent may create in a day. */
+  superMaxCreatesPerDay: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -658,6 +687,7 @@ export const DEFAULT_SETTINGS: Settings = {
   superQuietTo: '08:00',
   superNotify: true,
   superDailyBudgetUsd: 10,
+  superMaxCreatesPerDay: 25,
 };
 
 export interface ModelOption {
