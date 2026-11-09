@@ -1,8 +1,9 @@
 /**
- * Teammate messages in a transcript. A message leads with what it means (a report's summary and
- * outcome, a delegation's task, a message's first sentence), says who sent it and when, and heads
- * the turn it caused as one block. A delegation you sent is a card that follows its work to the
- * report; the report links back to it. The wording lives in web/peerText.ts.
+ * Teammate messages, in the transcript's own flow. A message from a teammate opens its turn the way
+ * your message does: a soft bubble, on the left and a shade lighter so it never reads as yours, with
+ * a line above it saying who sent it, what it is and how it came out. The agent's answer follows
+ * unboxed, as it does for you. What the agent sends while it works (a delegation, a note) is one
+ * line in its work trail, like a tool call. Wording lives in web/peerText.ts.
  */
 import { createContext, useContext, useId, useState, type ReactNode } from 'react';
 import type { PeerMessage } from '../../shared/types.ts';
@@ -22,12 +23,12 @@ import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 /** The transcript's teammate messages, indexed, so a report and its delegation find each other. */
 export const Comms = createContext<CommsIndex>({ byId: new Map(), reportFor: new Map() });
 
-const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+export const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
 const TONE_TEXT: Record<OutcomeTone, string> = { success: 'text-success', danger: 'text-danger', warning: 'text-warning' };
 const TONE_ICON = { success: CheckCircle, danger: CircleX, warning: AlertCircle } as const;
 
-/** An outcome in words, with the icon and colour the Comms pane uses for it. */
+/** An outcome in words, with the icon and colour the app uses for it. */
 export function OutcomeChip({ words, tone }: { words: string; tone: OutcomeTone }) {
   const Icon = TONE_ICON[tone];
   return (
@@ -38,25 +39,33 @@ export function OutcomeChip({ words, tone }: { words: string; tone: OutcomeTone 
   );
 }
 
-function Tag({ children }: { children: ReactNode }) {
-  return <span className="shrink-0 rounded bg-content/8 px-1.5 py-px text-[11px] font-medium leading-4 text-content/60">{children}</span>;
+/** A report's outcome as the work it answers reads it: a review that failed needs changes. */
+export function useOutcome(message: PeerMessage, answered?: PeerMessage): { words: string; tone: OutcomeTone } | null {
+  const { byId } = useContext(Comms);
+  if (!message.report) return null;
+  const asked = answered ?? (message.replyTo ? byId.get(message.replyTo) : undefined);
+  const kind = reportKind(message, asked);
+  return { words: outcomeWords(message.report.outcome, kind), tone: outcomeTone(message.report.outcome, kind) };
 }
 
-/** Who a teammate is at a glance: their engine mark, name and role. */
-function Sender({ id, name }: { id: string; name: string }) {
-  const agent = useApp(s => s.snapshot?.agents.find(a => a.id === id));
+function useAgent(id: string) {
+  return useApp(s => s.snapshot?.agents.find(a => a.id === id));
+}
+
+function useChannel(message: PeerMessage): string | undefined {
+  return useApp(s => (message.channelId ? s.snapshot?.channels.find(c => c.id === message.channelId)?.name ?? 'deleted-channel' : undefined));
+}
+
+/** Who a teammate is at a glance: engine mark, name and role. */
+function Who({ id, name, role = true }: { id: string; name: string; role?: boolean }) {
+  const agent = useAgent(id);
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      {agent ? <EngineIcon engine={agent.engine} className="size-4" /> : null}
-      <span className="min-w-0 truncate font-medium text-content/85">{name}</span>
-      {agent ? <span className="shrink-0 text-content/40">{rolePreset(agent.role).name}</span> : null}
+      {agent ? <EngineIcon engine={agent.engine} className="size-3.5" /> : null}
+      <span className="min-w-0 truncate font-medium text-content/75">{name}</span>
+      {agent && role ? <span className="shrink-0 text-content/40">{rolePreset(agent.role).name}</span> : null}
     </span>
   );
-}
-
-function channelName(message: PeerMessage, channels: { id: string; name: string }[] | undefined): string | undefined {
-  if (!message.channelId) return undefined;
-  return channels?.find(c => c.id === message.channelId)?.name ?? 'deleted-channel';
 }
 
 /** Opens where a teammate message lives: its channel, or its thread in Comms. */
@@ -77,195 +86,196 @@ function DeliveryNote({ message }: { message: PeerMessage }) {
 }
 
 /**
- * Go to the delegation a report answers: its card, scrolled into view and focused, when it is on
- * screen; otherwise (scrolled out of the loaded history, say) its thread in Comms.
+ * Go to the delegation a report answers: its row in the work trail, scrolled into view and focused,
+ * when it is on screen; otherwise its thread in Comms.
  */
-function showDelegation(asked: PeerMessage): void {
-  const card = document.querySelector<HTMLElement>(`[data-peer-card="${CSS.escape(asked.id)}"]`);
-  if (!card) {
+function showDelegation(asked: PeerMessage, from: HTMLElement): void {
+  // Inside a Comms thread the request is a message above in the same thread: go there, not to a transcript.
+  const thread = from.closest<HTMLElement>('[data-peer-thread]');
+  const row = thread
+    ? thread.querySelector<HTMLElement>(`[data-peer-message="${CSS.escape(asked.id)}"]`)
+    : document.querySelector<HTMLElement>(`[data-peer-card="${CSS.escape(asked.id)}"]`);
+  if (!row) {
     openToSide({ kind: 'comms', conversationId: asked.conversationId });
     return;
   }
-  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  card.focus({ preventScroll: true });
+  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  row.focus({ preventScroll: true });
 }
 
-/** The line under a report that says which delegation it answers. */
-function Answers({ report }: { report: PeerMessage }) {
+/** The quiet line under a report that names the delegation it answers, and goes to it. */
+function Answers({ report, answered }: { report: PeerMessage; answered?: PeerMessage }) {
   const { byId } = useContext(Comms);
-  const asked = report.replyTo ? byId.get(report.replyTo) : undefined;
+  const asked = answered ?? (report.replyTo ? byId.get(report.replyTo) : undefined);
   if (!asked?.delegation) return null;
   return (
-    <p className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] text-content/45">
+    <span className="flex min-w-0 items-center gap-1 text-content/45">
       <CornerDownRight aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
       <span className="shrink-0">Answers</span>
       <button
         type="button"
         title="Show the request this answers"
-        onClick={() => showDelegation(asked)}
-        className="min-w-0 truncate rounded text-left text-content/65 underline decoration-content/20 underline-offset-2 hover:text-content"
+        onClick={event => showDelegation(asked, event.currentTarget)}
+        className="min-w-0 truncate rounded text-left text-content/60 underline decoration-content/20 underline-offset-2 hover:text-content"
       >
         {taskTitle(asked.delegation.task)}
       </button>
-    </p>
+    </span>
   );
 }
 
-/** The outcome of a report as the work it answers reads it ("Changes needed" for a failed review). */
-function useOutcome(message: PeerMessage): { words: string; tone: OutcomeTone } | null {
-  const { byId } = useContext(Comms);
-  if (!message.report) return null;
-  const answered = message.replyTo ? byId.get(message.replyTo) : undefined;
-  return { words: outcomeWords(message.report.outcome, reportKind(message, answered)), tone: outcomeTone(message.report.outcome) };
-}
-
-/** The preview, and the whole message as Markdown once you ask for it. */
-function MessageBody({ message, channel, extra }: { message: PeerMessage; channel?: string; extra?: ReactNode }) {
+/**
+ * One teammate message as a bubble with its header line: in a transcript, who sent it to you; in
+ * Comms (`between`), who sent it to whom. The preview leads; Show more opens the whole message as
+ * Markdown, inert, since another agent wrote it.
+ */
+export function PeerBubble({ message, between = false, answered, arrivedAt, thread = true, trailing }: {
+  message: PeerMessage;
+  between?: boolean;
+  /** The delegation a report answers, when the caller already has it (Comms). */
+  answered?: PeerMessage;
+  /** When its turn started, to say it waited. */
+  arrivedAt?: number;
+  /** Offer Open thread (not inside Comms, which is the thread). */
+  thread?: boolean;
+  /** Under the actions: Comms' delivery error. */
+  trailing?: ReactNode;
+}) {
   const [expanded, setExpanded] = useState(false);
   const bodyId = useId();
+  const channel = useChannel(message);
+  const outcome = useOutcome(message, answered);
   const preview = messagePreview(message);
   const full = messageMarkdown(message);
   const more = full.replace(/\s+/g, ' ').trim() !== preview.replace(/…$/, '').trim();
+  const late = arrivalNote(message.ts, arrivedAt, clock);
+  const tag = channel ? (message.replyTo ? `Answer in #${channel}` : `Mention in #${channel}`) : messageTag(message);
   return (
-    <>
-      {expanded ? (
-        <div id={bodyId} className="mt-1.5 min-w-0 text-[13px]"><Markdown inert text={full} /></div>
-      ) : (
-        <p id={bodyId} className="mt-1 line-clamp-3 min-w-0 break-words font-sans text-[13.5px] leading-5.5 text-content/85">{preview}</p>
-      )}
-      {extra}
-      <div className="-ml-1 mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5 font-sans text-xs">
+    <div data-peer-message={message.id} tabIndex={-1} className="flex w-fit min-w-0 max-w-full flex-col items-start rounded font-sans outline-none focus-visible:ring-1 focus-visible:ring-content/30">
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 pb-1 text-[12px]">
+        {between ? (
+          <span className="flex min-w-0 items-center gap-1.5 text-content/45">
+            <Who id={message.fromAgentId} name={message.fromName} role={false} />
+            <span className="shrink-0">to</span>
+            <Who id={message.toAgentId} name={message.toName} role={false} />
+          </span>
+        ) : <Who id={message.fromAgentId} name={message.fromName} />}
+        <span className="shrink-0 text-content/45">{tag}</span>
+        {outcome ? <OutcomeChip words={outcome.words} tone={outcome.tone} /> : null}
+        <time dateTime={new Date(message.ts).toISOString()} title={`Sent ${new Date(message.ts).toLocaleString()}`} className="shrink-0 tabular-nums text-content/35">
+          {late ?? clock(message.ts)}
+        </time>
+      </div>
+      {/* Your messages sit on the right in a stronger fill; a teammate's on the left, a shade lighter. */}
+      <div className="w-fit min-w-0 max-w-[min(100%,40rem)] rounded-xl bg-content/[0.055] px-3 py-2 text-content">
+        {expanded ? (
+          <div id={bodyId} className="min-w-0"><Markdown inert text={full} /></div>
+        ) : (
+          <p id={bodyId} className="line-clamp-3 min-w-0 whitespace-pre-wrap break-words text-sm leading-5.5">{preview}</p>
+        )}
+      </div>
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-1 gap-y-0.5 pt-1 text-xs">
         {more ? (
           <TextButton aria-expanded={expanded} aria-controls={bodyId} onClick={() => setExpanded(v => !v)}>
             {expanded ? 'Show less' : 'Show more'}
           </TextButton>
         ) : null}
-        <OpenThread message={message} channel={channel} />
+        {thread ? <OpenThread message={message} channel={channel} /> : null}
+        {message.report ? <span className="ml-1 min-w-0"><Answers report={message} answered={answered} /></span> : null}
         <span className="ml-1"><DeliveryNote message={message} /></span>
       </div>
-    </>
+      {trailing}
+    </div>
   );
 }
 
 /**
- * A teammate's message at the head of the turn it caused: who sent it and when, what it is and how
- * it came out, then what it says. `repeat` is a second delivery of a message an earlier turn ran.
+ * A teammate's message opening the turn it caused, placed as your own prompt is (UserMessageBlock)
+ * but on the left. `firstAt` marks a second delivery of a message an earlier turn already ran: one
+ * quiet line instead.
  */
-export function PeerTurnHeader({ message, arrivedAt, repeat }: { message: PeerMessage; arrivedAt?: number; repeat: boolean }) {
-  const channels = useApp(s => s.snapshot?.channels);
-  const channel = channelName(message, channels);
-  const outcome = useOutcome(message);
-  const late = arrivalNote(message.ts, arrivedAt, clock);
-  const tag = channel ? (message.replyTo ? `Answer in #${channel}` : `Mention in #${channel}`) : messageTag(message);
+export function PeerPrompt({ message, arrivedAt, firstAt }: { message: PeerMessage; arrivedAt?: number; firstAt?: number }) {
+  if (firstAt !== undefined) {
+    return (
+      <p className="flex min-w-0 items-center gap-1.5 px-4 pb-2 pt-1 font-sans text-xs text-content/40">
+        <span className="shrink-0">Redelivered:</span>
+        <span className="min-w-0 truncate">same {messageTag(message).toLowerCase()} from {message.fromName} as {clock(firstAt)}</span>
+      </p>
+    );
+  }
   return (
-    <header className="px-3.5 pb-2.5 pt-3 font-sans" data-peer-message={message.id}>
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
-        <Sender id={message.fromAgentId} name={message.fromName} />
-        <Tag>{tag}</Tag>
-        {outcome ? <OutcomeChip words={outcome.words} tone={outcome.tone} /> : null}
-        {repeat ? <span className="text-content/45">Delivered again</span> : null}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 tabular-nums text-content/40">
-          <time dateTime={new Date(message.ts).toISOString()} title={`Sent ${new Date(message.ts).toLocaleString()}`}>{late ?? clock(message.ts)}</time>
-        </span>
-      </div>
-      {repeat ? (
-        <p className="mt-1 truncate text-[12.5px] text-content/50">{messagePreview(message)}</p>
-      ) : (
-        <MessageBody message={message} channel={channel} extra={message.report ? <Answers report={message} /> : null} />
-      )}
-    </header>
-  );
-}
-
-/** A turn that answers a teammate: the message and the work it caused, as one block. */
-export function PeerTurnBlock({ message, arrivedAt, repeat, children }: { message: PeerMessage; arrivedAt?: number; repeat: boolean; children?: ReactNode }) {
-  return (
-    <section
-      aria-label={`${messageTag(message)} from ${message.fromName}`}
-      className={cx('mx-3 my-3 rounded-xl border bg-content/[0.015]', message.report?.outcome === 'failed' ? 'border-danger/20' : 'border-content/10')}
-    >
-      <PeerTurnHeader message={message} arrivedAt={arrivedAt} repeat={repeat} />
-      {/* A message still waiting has no turn yet. */}
-      {children ? <div className="border-t border-content/8 pb-1.5 pt-1">{children}</div> : null}
+    <section aria-label={`${messageTag(message)} from ${message.fromName}`} className="flex flex-col items-start pb-5 pl-4 pr-14 pt-1.5">
+      <PeerBubble message={message} arrivedAt={arrivedAt} />
     </section>
   );
 }
 
 function StateChip({ state }: { state: DelegationState }) {
   if (state.tone === 'busy') {
-    return <span className="inline-flex shrink-0 items-center gap-1 text-content/60"><TerminalSpinner className="text-content/60" />{state.label}</span>;
+    return <span className="inline-flex shrink-0 items-center gap-1 text-content/55"><TerminalSpinner className="text-content/55" />{state.label}</span>;
   }
-  if (state.tone === 'neutral') return <span className="shrink-0 text-content/50">{state.label}</span>;
+  if (state.tone === 'neutral') return <span className="shrink-0 text-content/45">{state.label}</span>;
   return <OutcomeChip words={state.label} tone={state.tone} />;
 }
 
 /**
- * A delegation this agent sent, as a card that follows the work: who it went to, the kind and task,
- * and where it stands (sent, working, then the report's outcome, whose summary opens in place).
+ * A delegation this agent sent, as one line of its work like a tool call: the kind, to whom, the
+ * task, and where it stands (sent, working, then the report's outcome). Opening it shows the task
+ * and, once in, the report.
  */
-export function DelegationCard({ message }: { message: PeerMessage }) {
+export function DelegationRow({ message }: { message: PeerMessage }) {
   const { reportFor } = useContext(Comms);
   const report = reportFor.get(message.id);
   const state = delegationState(message, report);
   const [open, setOpen] = useState(false);
   const detailId = useId();
   const delegation = message.delegation!;
+  const title = taskTitle(delegation.task);
   return (
-    <article
-      tabIndex={-1}
-      data-peer-card={message.id}
-      aria-label={`${delegation.kind} delegated to ${message.toName}: ${state.label}`}
-      className="my-1 rounded-lg border border-content/10 bg-content/[0.025] px-3 py-2 font-sans outline-none focus-visible:ring-1 focus-visible:ring-content/30"
-    >
-      <div className="flex min-w-0 items-center gap-2 text-[12px]">
-        <Tag>{kindWords(delegation.kind)}</Tag>
-        <span className="flex min-w-0 items-center gap-1 text-content/45">
-          <span className="shrink-0">to</span>
-          <Sender id={message.toAgentId} name={message.toName} />
-        </span>
-        <span className="ml-auto flex shrink-0 items-center gap-2">
-          <StateChip state={state} />
-          <time dateTime={new Date(message.ts).toISOString()} title={new Date(message.ts).toLocaleString()} className="tabular-nums text-content/35">{clock(message.ts)}</time>
-        </span>
-      </div>
-      <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-content/85">{taskTitle(delegation.task)}</p>
+    <div data-peer-card={message.id} tabIndex={-1} className="flex min-w-0 flex-col rounded outline-none focus-visible:ring-1 focus-visible:ring-content/30">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={detailId}
+        aria-label={`${kindWords(delegation.kind)} delegated to ${message.toName}: ${title}. ${state.label}`}
+        onClick={() => setOpen(v => !v)}
+        className="group flex min-w-0 items-center gap-1.5 py-1 text-left font-sans text-sm"
+      >
+        <span className="shrink-0 text-content/50">Delegated {kindWords(delegation.kind).toLowerCase()} to</span>
+        <span className="shrink-0 text-content/70">{message.toName}</span>
+        <span className="min-w-0 flex-1 truncate text-content/50 transition-colors duration-200 group-hover:text-content/75">{title}</span>
+        <span className="ml-2 text-[12px]"><StateChip state={state} /></span>
+      </button>
       {open ? (
-        <div id={detailId} className="mt-1.5 min-w-0 text-[13px]">
+        <div id={detailId} className="min-w-0 pb-2 text-[13px]">
           <Markdown inert text={messageMarkdown(message)} />
           {report?.report ? (
-            <div className="mt-2 border-t border-content/8 pt-2">
-              <p className="mb-1 text-[12px] text-content/45">Report from {report.fromName}, {clock(report.ts)}</p>
+            <div className="mt-2">
+              <p className="mb-0.5 font-sans text-xs text-content/45">Report from {report.fromName}, {clock(report.ts)}</p>
               <Markdown inert text={messageMarkdown(report)} />
             </div>
           ) : null}
+          <div className="-ml-1 flex items-center gap-1 pt-1 font-sans text-xs">
+            <OpenThread message={message} />
+            <span className="ml-1"><DeliveryNote message={message} /></span>
+          </div>
         </div>
-      ) : report?.report ? (
-        <p className="mt-1 line-clamp-2 text-[12.5px] leading-5 text-content/55">{messagePreview(report)}</p>
       ) : null}
-      <div className="-ml-1 mt-1 flex flex-wrap items-center gap-x-1 text-xs">
-        <TextButton aria-expanded={open} aria-controls={detailId} onClick={() => setOpen(v => !v)}>
-          {open ? 'Show less' : report?.report ? 'Show task and report' : 'Show task'}
-        </TextButton>
-        <OpenThread message={message} />
-        {message.status === 'failed' || message.status === 'cancelled' ? <span className="ml-1"><DeliveryNote message={message} /></span> : null}
-      </div>
-    </article>
+    </div>
   );
 }
 
 /**
- * A teammate message inside the work trail, one line that opens in place: who, what kind, the
- * outcome and what it says. A delegation this agent sent is a card instead.
+ * Any other teammate message inside the work trail, one line that opens in place: to or from whom,
+ * the kind, the outcome and what it says.
  */
 export function PeerTrailRow({ message, selfId }: { message: PeerMessage; selfId: string }) {
   const [open, setOpen] = useState(false);
   const detailId = useId();
-  const channels = useApp(s => s.snapshot?.channels);
-  const channel = channelName(message, channels);
+  const channel = useChannel(message);
   const outcome = useOutcome(message);
-  if (message.delegation && message.fromAgentId === selfId) return <DelegationCard message={message} />;
-  const incoming = message.toAgentId === selfId;
-  const who = incoming ? `From ${message.fromName}` : `To ${message.toName}`;
+  if (message.delegation && message.fromAgentId === selfId) return <DelegationRow message={message} />;
+  const who = message.toAgentId === selfId ? `From ${message.fromName}` : `To ${message.toName}`;
   const tag = channel ? `#${channel}` : messageTag(message);
   const preview = messagePreview(message);
   return (
@@ -278,17 +288,17 @@ export function PeerTrailRow({ message, selfId }: { message: PeerMessage; selfId
         onClick={() => setOpen(v => !v)}
         className="group flex min-w-0 items-center gap-1.5 py-1 text-left font-sans text-sm"
       >
-        <span className="shrink-0 text-content/55">{who}</span>
-        <Tag>{tag}</Tag>
+        <span className="shrink-0 text-content/50">{who}</span>
+        <span className="shrink-0 text-content/40">{tag}</span>
         {outcome ? <span className="text-[12px]"><OutcomeChip words={outcome.words} tone={outcome.tone} /></span> : null}
         <span className="min-w-0 flex-1 truncate text-content/50 transition-colors duration-200 group-hover:text-content/75">{preview}</span>
       </button>
       {open ? (
         <div id={detailId} className="min-w-0 pb-2 text-[13px]">
           <Markdown inert text={messageMarkdown(message)} />
-          {message.report ? <Answers report={message} /> : null}
-          <div className="-ml-1 flex items-center gap-1 pt-1 text-xs">
+          <div className="-ml-1 flex flex-wrap items-center gap-1 pt-1 font-sans text-xs">
             <OpenThread message={message} channel={channel} />
+            {message.report ? <span className="ml-1 min-w-0"><Answers report={message} /></span> : null}
             <span className="ml-1"><DeliveryNote message={message} /></span>
           </div>
         </div>

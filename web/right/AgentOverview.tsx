@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { Agent, PeerMessage, Report, WalkthroughSummary } from '../../shared/types.ts';
+import { outcomeTone, outcomeWords } from '../peerText.ts';
+import type { Agent, PeerMessage, WalkthroughSummary } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { cost, duration, modelLabel, relativeTime, tokenCount } from '../format.ts';
@@ -9,7 +10,7 @@ import { memoryDate } from '../memory.ts';
 import { projectLabel } from '../projects.ts';
 import { loadMemory, useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
-import { StatusLabel, type Tone } from '../ui/common.tsx';
+import { StatusLabel } from '../ui/common.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { ArrowLeft, ArrowUp, Folder, GitBranch, Route } from '../mono/icons.tsx';
@@ -19,7 +20,6 @@ const HANDOFFS = 4;
 const PEERS = 4;
 const MEMORIES = 3;
 
-const OUTCOME_TONE: Record<Report['outcome'], Tone> = { passed: 'success', done: 'success', failed: 'danger', blocked: 'warning' };
 
 /**
  * The focused agent at a glance: what it is doing and for how long, how full its context is, the
@@ -97,7 +97,7 @@ export function AgentOverview({ agent, git }: { agent: Agent; git: GitStatus | n
                     <span className="shrink-0 text-content/50">{outgoing ? `To ${message.toName}` : `From ${message.fromName}`}</span>
                     <span className="ml-auto shrink-0">
                       {report
-                        ? <StatusLabel tone={OUTCOME_TONE[report.outcome]} className="text-[11px] capitalize">{report.outcome}</StatusLabel>
+                        ? <StatusLabel tone={outcomeTone(report.outcome, message.delegation?.kind)} className="text-[11px]">{outcomeWords(report.outcome, message.delegation?.kind)}</StatusLabel>
                         : <StatusLabel tone="muted" quiet className="text-[11px]">Open</StatusLabel>}
                     </span>
                   </span>

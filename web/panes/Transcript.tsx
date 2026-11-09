@@ -33,7 +33,7 @@ import { Popover } from '../mono/Popover.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { MessageImages } from './ImageViews.tsx';
-import { Comms, DelegationCard, PeerTrailRow, PeerTurnBlock } from './PeerMessages.tsx';
+import { Comms, DelegationRow, PeerPrompt, PeerTrailRow } from './PeerMessages.tsx';
 import { commsIndex, repeatedPromptTurns } from '../peerText.ts';
 
 /**
@@ -823,7 +823,7 @@ function TurnItemView({ item, active, selfId, underLine }: { item: TurnItem; act
   if (item.type === 'memory') return <div className="px-4"><MemoryLine entry={item.entry} /></div>;
   if (item.type === 'dream') return <div className="px-4"><DreamLine entry={item.entry} /></div>;
   if (item.type === 'walkthrough') return <div className="px-4"><WalkthroughCard entry={item.entry} agentId={selfId} /></div>;
-  if (item.type === 'delegation') return <div className="px-4"><DelegationCard message={item.entry.peer!} /></div>;
+  if (item.type === 'delegation') return <div className="px-4"><DelegationRow message={item.entry.peer!} /></div>;
   if (item.type === 'prose') {
     return (
       <div data-chat-message={item.entry.id} data-chat-message-role="assistant" className={`min-w-0 px-4 pb-1 text-content ${underLine ? 'pt-1' : 'pt-3'}`}>
@@ -849,15 +849,15 @@ function FoldItemView({ item, selfId }: { item: TurnItem; selfId: string }) {
   if (item.type === 'memory') return <MemoryLine entry={item.entry} />;
   if (item.type === 'dream') return <DreamLine entry={item.entry} />;
   if (item.type === 'walkthrough') return <WalkthroughCard entry={item.entry} agentId={selfId} />;
-  if (item.type === 'delegation') return <DelegationCard message={item.entry.peer!} />;
+  if (item.type === 'delegation') return <DelegationRow message={item.entry.peer!} />;
   if (item.type === 'prose') return <div className="py-1"><Markdown text={item.entry.text} /></div>;
   return <ActivityPhaseGroup entries={item.entries} active={false} selfId={selfId} />;
 }
 
-function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWork, caption, enter, repeat = false }: {
+function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWork, caption, enter, repeatOf }: {
   turn: Turn;
-  /** The same teammate message an earlier turn already ran, delivered again. */
-  repeat?: boolean;
+  /** The same teammate message an earlier turn already ran, delivered again: when that turn started. */
+  repeatOf?: number;
   agent: Agent;
   live: boolean;
   waiting: boolean;
@@ -955,10 +955,9 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
   return (
     <div data-transcript-turn={turn.id} className={`transcript-turn flex min-w-0 flex-col${entering ? ' transcript-turn-enter' : ''}`}>
       {prompt?.kind === 'user' ? <UserMessageBlock entry={prompt} caption={promptCaption} /> : null}
-      {prompt?.kind === 'peer' && prompt.peer ? (
-        // A teammate's message and the work it caused read as one block.
-        <PeerTurnBlock message={prompt.peer} arrivedAt={hasBody ? turn.startedAt : undefined} repeat={repeat}>{hasBody ? body : null}</PeerTurnBlock>
-      ) : body}
+      {/* A teammate's message opens its turn as yours does; the answer follows in the same flow. */}
+      {prompt?.kind === 'peer' && prompt.peer ? <PeerPrompt message={prompt.peer} arrivedAt={hasBody ? turn.startedAt : undefined} firstAt={repeatOf} /> : null}
+      {body}
     </div>
   );
 }
@@ -1318,7 +1317,7 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
           workOpen={workOpen}
           onToggleWork={() => setToggled(map => new Map(map).set(turn.id, !workOpen))}
           caption={options.caption}
-          repeat={repeats.has(turn.id)}
+          repeatOf={repeats.get(turn.id)}
           // Your own prompt rises instead.
           enter={arriving(key) && key !== ownLatest}
         />

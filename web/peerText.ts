@@ -32,8 +32,10 @@ export function outcomeWords(outcome: Report['outcome'], kind?: DelegationKind):
   return outcome === 'passed' ? 'Passed' : 'Failed';
 }
 
-export function outcomeTone(outcome: Report['outcome']): OutcomeTone {
-  return outcome === 'failed' ? 'danger' : outcome === 'blocked' ? 'warning' : 'success';
+/** A review that asks for changes is a warning, not a failure: the work goes on. */
+export function outcomeTone(outcome: Report['outcome'], kind?: DelegationKind): OutcomeTone {
+  if (outcome === 'failed') return kind === 'review' ? 'warning' : 'danger';
+  return outcome === 'blocked' ? 'warning' : 'success';
 }
 
 const KIND_WORDS: Record<DelegationKind, string> = {
@@ -95,7 +97,9 @@ export function messageTag(message: PeerMessage): string {
 export function messageMarkdown(message: PeerMessage): string {
   if (message.report) {
     const parts = [message.report.summary.trim()];
-    if (message.report.evidence.trim()) parts.push('**Evidence**', message.report.evidence.trim());
+    // Evidence is mostly command output: kept as code, so line breaks and *, _ or # stay as they are.
+    const evidence = message.report.evidence.trim();
+    if (evidence) parts.push('**Evidence**', evidence.includes('```') ? evidence : `\`\`\`text\n${evidence}\n\`\`\``);
     return parts.join('\n\n');
   }
   if (message.delegation) {
@@ -146,7 +150,10 @@ export interface DelegationState {
 
 /** Where a delegation stands, from its message and the report that answers it (if any). */
 export function delegationState(delegation: PeerMessage, report?: PeerMessage): DelegationState {
-  if (report?.report) return { label: outcomeWords(report.report.outcome, delegation.delegation?.kind), tone: outcomeTone(report.report.outcome) };
+  if (report?.report) {
+    const kind = delegation.delegation?.kind;
+    return { label: outcomeWords(report.report.outcome, kind), tone: outcomeTone(report.report.outcome, kind) };
+  }
   if (delegation.status === 'failed') return { label: 'Not delivered', tone: 'danger' };
   if (delegation.status === 'cancelled') return { label: 'Cancelled', tone: 'warning' };
   if (delegation.status === 'queued') return { label: 'Sent', tone: 'neutral' };
@@ -156,16 +163,18 @@ export function delegationState(delegation: PeerMessage, report?: PeerMessage): 
 
 /**
  * Turns whose prompt an earlier turn already ran: the same message delivered again (after a restart,
- * say). The first stays the message's turn; the ids returned are the repeats.
+ * say). The first stays the message's turn; each repeat maps to when that first turn started, for
+ * "Redelivered: same report as 12:24".
  */
-export function repeatedPromptTurns(turns: readonly { id: string; prompt?: Entry }[]): Set<string> {
-  const seen = new Set<string>();
-  const repeats = new Set<string>();
+export function repeatedPromptTurns(turns: readonly { id: string; prompt?: Entry; startedAt: number }[]): Map<string, number> {
+  const first = new Map<string, number>();
+  const repeats = new Map<string, number>();
   for (const turn of turns) {
     const prompt = turn.prompt;
     if (!prompt || prompt.kind !== 'peer') continue;
-    if (seen.has(prompt.id)) repeats.add(turn.id);
-    else seen.add(prompt.id);
+    const at = first.get(prompt.id);
+    if (at !== undefined) repeats.set(turn.id, at);
+    else first.set(prompt.id, turn.startedAt);
   }
   return repeats;
 }
