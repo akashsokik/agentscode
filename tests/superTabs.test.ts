@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SuperAction, SuperGoal, SuperRoutine } from '../shared/types.ts';
 import { decisionRows, superPanelView, superTabCounts, superTabDots, superTabLatest } from '../web/superText.ts';
+import { getLayout, setRightPanel, showPanelForSuperOnce, SUPER_VIEWS } from '../web/layout.ts';
 import { harness, settle } from './helpers.ts';
 
 test('the log lists decisions newest first; only those with an undo, not yet undone, can be undone', () => {
@@ -70,6 +71,21 @@ test('a dot shows on a tab with something newer than you last saw there, never o
   assert.deepEqual(superTabDots(latest, {}, 'decisions'), { decisions: false, goals: true, routines: false }, 'never seen: new, except on the open tab and on an empty one');
   assert.deepEqual(superTabDots(latest, { decisions: 50, goals: 30 }, 'goals'), { decisions: true, goals: false, routines: false });
   assert.deepEqual(superTabDots(latest, { decisions: 70, goals: 30 }, 'overview'), { decisions: false, goals: false, routines: false }, 'all seen');
+});
+
+test('opening the SuperAgent shows the right panel the first time only, on Decisions; after that the panel stays as you left it', () => {
+  setRightPanel(false);
+  assert.equal(getLayout().superPanelShown, undefined);
+  showPanelForSuperOnce();
+  assert.equal(getLayout().rightPanel, true, 'first open: the panel opens');
+  assert.equal(getLayout().superPanelShown, true);
+  assert.equal(superPanelView(getLayout().superView, SUPER_VIEWS), 'decisions');
+  setRightPanel(false);
+  showPanelForSuperOnce();
+  assert.equal(getLayout().rightPanel, false, 'closed by you: it stays closed');
+  setRightPanel(true);
+  showPanelForSuperOnce();
+  assert.equal(getLayout().rightPanel, true, 'open: it stays open');
 });
 
 function goal(id: string, status: SuperGoal['status'], createdAt: number): SuperGoal {

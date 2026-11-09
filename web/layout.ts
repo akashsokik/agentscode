@@ -48,6 +48,8 @@ export interface Layout {
   rightView: 'overview' | 'comms' | 'changes';
   /** The right panel's tab while the SuperAgent has focus, the last one picked; Decisions until then. */
   superView?: SuperView;
+  /** The right panel was shown for the SuperAgent once; after that, opening it leaves the panel as you left it. */
+  superPanelShown?: boolean;
   /** How side-by-side panes share the width, by pane id (web/paneSizes.ts); a pane without one weighs 1. */
   paneWeights?: Record<string, number>;
   /** The pane filling the whole width while the others wait, if one is maximized. */
@@ -296,7 +298,9 @@ export function setColumnWidth(key: ColumnKey, width: number | undefined): void 
 }
 export function setProject(projectId: string): void { if (layout.projectId !== projectId) set({ ...layout, projectId }); }
 export function setRightPanel(rightPanel: boolean): void { set({ ...layout, rightPanel }); }
-export function setSuperView(superView: SuperView): void { set({ ...layout, rightPanel: true, superView }); }
+export function setSuperView(superView: SuperView): void { set({ ...layout, rightPanel: true, superView, superPanelShown: true }); }
+/** The first time the SuperAgent opens, show the right panel (where its Decisions, Goals and Routines are); never again after. */
+export function showPanelForSuperOnce(): void { if (!layout.superPanelShown) set({ ...layout, rightPanel: true, superPanelShown: true }); }
 export function setRightView(rightView: Layout['rightView']): void { set({ ...layout, rightPanel: true, rightView }); }
 export function setTerminal(terminal: boolean): void { if (Boolean(layout.terminal) !== terminal) set({ ...layout, terminal }); }
 export function setTerminalHeight(terminalHeight: number | undefined): void { set({ ...layout, terminalHeight }); }
