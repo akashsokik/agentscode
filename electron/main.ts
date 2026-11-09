@@ -12,6 +12,7 @@ import { BrowserError, BrowserHost, type Rect } from './browser.ts';
 import { BrowserBridge } from './bridge.ts';
 import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSnapshot } from './updater.ts';
 import { startSuperBridge, stopSuperBridge } from './superTray.ts';
+import { QuickWindow } from './quickWindow.ts';
 
 const PORT = Number(process.env.PORT ?? 4320);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -24,6 +25,8 @@ const READY_LINE = 'AgentsCode is open at';
 
 let server: UtilityProcess | null = null;
 let window: BrowserWindow | null = null;
+/** The SuperAgent's floating quick composer, made once the app is ready. */
+let quick: QuickWindow | null = null;
 let ready = false;
 let quitting = false;
 const recentOutput: string[] = [];
@@ -64,6 +67,8 @@ function markReady(): void {
   if (ready) return;
   ready = true;
   showWindow();
+  // Its page needs the server, which answers now.
+  quick?.prepare();
 }
 
 function startServer(): void {
@@ -366,7 +371,8 @@ if (!app.requestSingleInstanceLock()) {
     else app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
     registerBrowserIpc();
     // The SuperAgent's menu bar item and system-wide quick bar shortcut.
-    startSuperBridge({ window: () => window, show: showWindow, fromApp });
+    quick = new QuickWindow({ url: `${ORIGIN}/quick.html`, preload: path.join(import.meta.dirname, 'preload.cjs') });
+    startSuperBridge({ window: () => window, show: showWindow, fromApp, quick });
     if (await serverAnswers()) {
       markReady();
       bridge.useSocket();

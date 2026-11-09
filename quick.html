@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" class="quick-composer">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      // The saved theme before the first paint, as index.html does.
+      (function () {
+        var pref = 'dark';
+        try { pref = localStorage.getItem('agentscode:theme') || pref; } catch (e) {}
+        var light = pref === 'light' || (pref === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
+        if (light) document.documentElement.classList.add('theme-light');
+        if (/Mac/.test(navigator.platform)) document.documentElement.classList.add('is-mac');
+      })();
+    </script>
+    <style>
+      /* The window is clear; the card draws the only surface. Content can grow before the native
+         window does, so nothing scrolls the field out of view during that resize. */
+      html.quick-composer,
+      html.quick-composer body,
+      html.quick-composer #root {
+        background: transparent !important;
+        overflow: clip;
+      }
+    </style>
+    <title>SuperAgent</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/web/quick/main.tsx"></script>
+  </body>
+</html>

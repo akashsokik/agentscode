@@ -8,13 +8,14 @@ import { open } from '../layout.ts';
 import { SOUL_MAX } from '../memory.ts';
 import { attempt, useApp } from '../store.ts';
 import { EngineIcon, ENGINE_NAMES as ENGINE_LABEL } from '../ui/EngineIcon.tsx';
+import { AGENT_NAMES } from '../quick/route.ts';
 import { INPUT, PRIMARY, TEXTAREA } from '../ui/common.tsx';
 import { Modal } from '../mono/Modal.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Group, Row, Select, Toggle } from '../mono/settings.tsx';
 import { submitKey } from './submitKey.ts';
 
-const NAMES = ['Ada', 'Bo', 'Cy', 'Dee', 'Eli', 'Fen', 'Gus', 'Hal', 'Ivy', 'Jun', 'Kai', 'Lux', 'Mo', 'Nia', 'Oz', 'Pia', 'Quin', 'Rae', 'Sol', 'Tam', 'Uma', 'Vic', 'Wren', 'Xan'];
+const NAMES = AGENT_NAMES;
 const ADD_PROJECT = '__add';
 /** The project choice for an agent with no project: it works from its own folder, across every project. */
 const NO_PROJECT = '__none';
