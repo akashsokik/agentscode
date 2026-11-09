@@ -43,7 +43,7 @@ export function Toggle({
       }`}
     >
       <span
-        className={`absolute top-0.5 size-4 rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.25)] transition-[left] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+        className={`absolute top-0.5 size-4 rounded-full bg-white transition-[left] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${
           on ? "left-4.5" : "left-0.5"
         }`}
       />

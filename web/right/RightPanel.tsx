@@ -309,7 +309,7 @@ export function RightPanel() {
     list.current?.querySelector<HTMLElement>(`#panel-tab-${tabs[to].view}`)?.focus();
   };
   return (
-    <aside aria-label="Panel" style={{ width: column.width }} className="body-glass relative flex shrink-0 flex-col max-xl:absolute max-xl:inset-y-0 max-xl:right-0 max-xl:z-20 max-xl:border-l max-xl:border-stroke max-xl:shadow-2xl">
+    <aside aria-label="Panel" style={{ width: column.width }} className="body-glass relative flex shrink-0 flex-col max-xl:absolute max-xl:inset-y-0 max-xl:right-0 max-xl:z-20 max-xl:border-l max-xl:border-stroke">
       <div className="flex h-9 shrink-0 items-stretch border-b border-stroke">
         <div ref={list} role="tablist" aria-label="Panel" onKeyDown={onKeyDown} className="flex min-w-0 flex-1 items-center gap-0.5 pl-2">
           {tabs.map(tab => {

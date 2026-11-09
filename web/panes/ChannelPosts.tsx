@@ -398,7 +398,7 @@ export function JumpToLatest({ count, onClick }: { count: number; onClick: () =>
         onClick={onClick}
         title={label}
         aria-label={label}
-        className="toast-in pointer-events-auto grid size-6 place-items-center rounded-md border border-content/15 bg-content/10 text-content shadow-md backdrop-blur-md hover:bg-content/5"
+        className="toast-in pointer-events-auto grid size-6 place-items-center rounded-md border border-content/15 bg-content/10 text-content backdrop-blur-md hover:bg-content/5"
       >
         <ChevronDown className="size-4" strokeWidth={1.75} />
       </button>

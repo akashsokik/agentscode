@@ -21,8 +21,8 @@ import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
-import { AGENT_GROUP_LABEL, agentsSummary, groupAgents, needsYou, railAgents, railAgentStatus, railAgentTask, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
-import { openAgent, openAsks, openSuper } from '../super.ts';
+import { AGENT_GROUP_LABEL, agentsSummary, groupAgents, railAgents, railAgentStatus, railAgentTask, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
+import { openAsks, openSuper } from '../super.ts';
 import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
 import { AvatarStack } from '../ui/AvatarStack.tsx';
 import { SUPER_LOOK } from '../../shared/avatar.ts';
@@ -581,45 +581,6 @@ function ProjectRailRow({ project, agents, pendingIds, selected, actions }: { pr
   );
 }
 
-/**
- * Everything waiting on you, right under the top actions: who and what in a few words, the longest
- * wait first. The one tinted area in the column (a soft warning wash, no border); it is not there at
- * all when nothing waits. A click opens that agent, where the question is.
- */
-function NeedsYouBlock() {
-  const agents = useApp(s => s.snapshot?.agents);
-  const approvals = useApp(s => s.snapshot?.approvals);
-  const asks = useApp(s => s.snapshot?.super.asks);
-  const superId = useApp(s => s.snapshot?.super.agentId ?? null);
-  const list = useMemo(() => needsYou({ agents: agents ?? [], approvals: approvals ?? [], asks: asks ?? [], superId }), [agents, approvals, asks, superId]);
-  if (!list.total) return null;
-  return (
-    <section aria-label={`Needs you, ${list.total}`} className="mx-2 mb-2 shrink-0 rounded-[10px] bg-warning/[0.07] pb-1 pt-1.5">
-      <h2 className="flex items-center gap-1.5 px-2.5 pb-1 text-[11px] font-semibold text-warning">
-        Needs you
-        <span className="font-medium tabular-nums opacity-65">{list.total}</span>
-      </h2>
-      {list.shown.map(item => {
-        const agent = agents?.find(a => a.id === item.agentId);
-        return (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => openAgent(item.agentId)}
-            title={`${item.who} ${item.what}`}
-            className="flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-[5px] text-left text-[12.5px] transition-colors duration-150 hover:bg-warning/[0.08]"
-          >
-            <AgentAvatar agent={agent ?? { id: item.agentId }} className="size-[18px]" />
-            <span className="shrink-0 font-semibold text-content/90">{item.who}</span>
-            <span className="min-w-0 truncate text-content/60">{item.what}</span>
-          </button>
-        );
-      })}
-      {list.more ? <p className="px-2.5 pb-0.5 pt-1 text-[11.5px] text-content/45">and {list.more} more</p> : null}
-    </section>
-  );
-}
-
 /** The navigation column: New agent and Comms, channels, agents with no project, projects, and Settings at the foot. */
 function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: string | undefined }) {
   const layout = useLayout();
@@ -682,7 +643,6 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
           {superWaiting ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${superWaiting} waiting for you`}>{superWaiting}</span> : null}
         </RailAction>
       </div>
-      <NeedsYouBlock />
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none pb-2">
         <RailSection
           id="channels"

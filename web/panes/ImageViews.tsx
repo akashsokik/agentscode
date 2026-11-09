@@ -33,7 +33,7 @@ export function ImageLightbox({ src, alt, onClose }: { src: string; alt: string;
       style={{ zIndex: LAYER.dialog }}
       className="fixed inset-0 grid cursor-zoom-out place-items-center bg-black/80 p-8"
     >
-      <img src={src} alt={alt} className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" />
+      <img src={src} alt={alt} className="max-h-full max-w-full rounded-lg object-contain" />
     </div>,
     document.body,
   );
@@ -54,7 +54,7 @@ export function AttachmentChip({ name, preview, uploading, error, onRemove }: {
         type="button"
         aria-label={`Open ${name} full screen`}
         onClick={() => setOpen(true)}
-        className={`block cursor-zoom-in rounded-lg outline-none ${error ? 'ring-1 ring-danger' : ''}`}
+        className={`block cursor-zoom-in rounded-lg ${error ? 'outline outline-1 -outline-offset-1 outline-danger' : 'outline-none'}`}
       >
         <img src={preview} alt="" draggable={false} className={`size-9 rounded-lg object-cover ${uploading || error ? 'opacity-50' : ''}`} />
       </button>
@@ -72,7 +72,7 @@ export function AttachmentChip({ name, preview, uploading, error, onRemove }: {
         title="Remove"
         aria-label={`Remove ${name}`}
         onClick={onRemove}
-        className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-content/20 text-content/70 shadow-sm backdrop-blur-sm hover:bg-content/30 hover:text-content"
+        className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-content/20 text-content/70 backdrop-blur-sm hover:bg-content/30 hover:text-content"
       >
         <X className="size-3" strokeWidth={2} />
       </button>

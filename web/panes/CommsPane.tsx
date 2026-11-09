@@ -421,7 +421,7 @@ function ThreadView({ thread, state, title, agents, now }: { thread: CommsThread
           <button
             type="button"
             onClick={jump}
-            className="absolute bottom-3 left-1/2 z-[2] flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-content/10 bg-background-base px-3 py-1 font-sans text-[12px] text-content shadow-lg transition-colors duration-150 hover:bg-selection"
+            className="absolute bottom-3 left-1/2 z-[2] flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-content/10 bg-background-base px-3 py-1 font-sans text-[12px] text-content transition-colors duration-150 hover:bg-selection"
           >
             <ChevronDown className="size-3.5" strokeWidth={1.75} />
             {newPosts === 1 ? '1 new message' : `${newPosts} new messages`}
