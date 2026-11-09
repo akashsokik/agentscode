@@ -382,7 +382,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
             ) : null}
           </div>
           <div className="composer-toolbar flex min-w-0 flex-1 items-center">
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex min-w-0 items-center gap-1">
               <ModelPicker agent={agent} models={models} onChange={(change) => void patch(agent, change)} onClose={() => field.current?.focus()} />
               <AccessPicker value={agent.autonomy} busy={busy} onChange={(autonomy) => void patch(agent, { autonomy })} onClose={() => field.current?.focus()} />
             </div>

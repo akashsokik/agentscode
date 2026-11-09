@@ -205,7 +205,7 @@ export function ModelPicker({ agent, models, onChange, onClose }: {
   const showSubmenu = open && submenu !== null && activeRow !== null && activeRow.dataset.modelControlIndex === String(active);
 
   return (
-    <div data-model-picker className="relative">
+    <div data-model-picker className="relative min-w-0">
       <button
         ref={button}
         type="button"
@@ -216,10 +216,10 @@ export function ModelPicker({ agent, models, onChange, onClose }: {
         aria-haspopup="menu"
         onMouseDown={event => event.preventDefault()}
         onClick={() => (open ? dismiss(true) : setOpen(true))}
-        className={`flex h-6.5 shrink-0 items-center gap-1 rounded-md px-1.5 transition-colors duration-150 ${open ? 'bg-selection text-content' : 'bg-selection text-content hover:bg-selection-hover'}`}
+        className={`flex h-6.5 min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 transition-colors duration-150 ${open ? 'bg-selection text-content' : 'bg-selection text-content hover:bg-selection-hover'}`}
       >
         <EngineIcon engine={agent.engine} className="size-4 shrink-0" />
-        <span className="whitespace-nowrap text-[11px]">{name}</span>
+        <span className="min-w-0 truncate whitespace-nowrap text-[11px]">{name}</span>
         {effortShown ? <span className="shrink-0 text-[11px] text-content/50">{effortShown}</span> : null}
         {tierShown ? <span className="shrink-0 text-[11px] text-content/50">{tierShown}</span> : null}
         <ChevronDown className={`size-3 shrink-0 text-content/50 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} strokeWidth={1.75} />
