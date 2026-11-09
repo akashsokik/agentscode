@@ -110,12 +110,10 @@ and the Help menu on Windows and Linux.
   answers on port 4320 (for example `npm run dev`), the window opens on that one instead, so two
   servers never share `~/.agentscode`.
 - Quitting the app stops its agents. Closing the window keeps them working.
-- **macOS:** releases are not signed with a Developer ID yet. The install command above opens the
-  app directly, because macOS only checks apps downloaded in a browser. A DMG downloaded in a browser
-  is blocked the first time with "Apple could not verify AgentsCode": click **Done**, open
-  **System Settings > Privacy & Security**, scroll down to **Security**, click **Open Anyway** and
-  enter your password. An unsigned Mac build doesn't install updates itself: it tells you about a
-  new version and gives you the install command to run.
+- **macOS:** releases are signed with a Developer ID and notarized by Apple, so the DMG opens like
+  any other downloaded app and installs its own updates. Versions up to 0.2.2 were not signed: they
+  can't install a signed update themselves, so update one of those once by downloading the DMG again
+  or running the install command above.
 - **Windows:** the installer is not code-signed yet, so SmartScreen may ask you to confirm
   (**More info > Run anyway**).
 - **Linux:** make the AppImage executable (`chmod +x AgentsCode-linux-x86_64.AppImage`) and run it.
@@ -390,7 +388,10 @@ prerelease. Only apps already on a prerelease are offered prereleases.
 **macOS signing.** Mac auto-update can only install in place when the app is signed with a Developer
 ID. Add these repository secrets and the workflow signs and notarizes the app: `MAC_CSC_LINK` (the
 Developer ID Application certificate as a base64 `.p12`), `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
-`APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`. Without them the Mac app is ad-hoc signed.
+`APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`. The app is signed with the hardened runtime and
+the exceptions in `build/entitlements.mac.plist`, which Electron and the Claude Agent SDK's bundled
+`claude` binary need to run. Without the secrets (for example in a fork) the Mac app is ad-hoc
+signed.
 
 ## Acknowledgements
 
