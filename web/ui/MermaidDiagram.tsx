@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { Check, Code, Copy, Maximize2, Minimize2 } from '../mono/icons.tsx';
+import { Check, Code, Copy, Maximize2 } from '../mono/icons.tsx';
+import { DiagramViewer } from './DiagramViewer.tsx';
 import { hasHue, mermaidTheme, overlappingPairs, parseRgb, themeGrey, type AppColours, type Rgb } from '../mermaidTheme.ts';
 
 type MermaidApi = typeof import('mermaid').default;
@@ -26,7 +27,7 @@ function resolved(token: string, fallback: Rgb): Rgb {
 }
 
 /** The app's current ink, background and font. */
-function appColours(): AppColours {
+export function appColours(): AppColours {
   const light = document.documentElement.classList.contains('theme-light');
   return {
     ink: resolved('--color-content', light ? [46, 46, 46] : [235, 235, 235]),
@@ -110,7 +111,7 @@ export function MermaidDiagram({ source, className = '' }: { source: string; cla
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [floating, setFloating] = useState(false);
   const drawn = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
 
@@ -161,8 +162,8 @@ export function MermaidDiagram({ source, className = '' }: { source: string; cla
           {copied ? <Check className="size-3.5" strokeWidth={1.75} /> : <Copy className="size-3.5" strokeWidth={1.75} />}
         </button>
         {svg && !showSource ? (
-          <button type="button" className={button} onClick={() => setExpanded(e => !e)} title={expanded ? 'Fit to width' : 'Actual size'} aria-label={expanded ? 'Fit to width' : 'Actual size'}>
-            {expanded ? <Minimize2 className="size-3.5" strokeWidth={1.75} /> : <Maximize2 className="size-3.5" strokeWidth={1.75} />}
+          <button type="button" className={button} onClick={() => setFloating(true)} title="Open in a window" aria-label="Open diagram in a window">
+            <Maximize2 className="size-3.5" strokeWidth={1.75} />
           </button>
         ) : null}
       </div>
@@ -171,7 +172,8 @@ export function MermaidDiagram({ source, className = '' }: { source: string; cla
       ) : svg ? (
         <div
           ref={drawn}
-          className={`mermaid-svg overflow-auto p-4 ${expanded ? '[&_svg]:!max-w-none' : '[&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full'}`}
+          className="mermaid-svg cursor-zoom-in overflow-auto p-4 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
+          onDoubleClick={() => setFloating(true)}
           // Mermaid's strict mode sanitizes labels and drops scripts and handlers from its SVG.
           dangerouslySetInnerHTML={{ __html: svg }}
         />
@@ -183,6 +185,7 @@ export function MermaidDiagram({ source, className = '' }: { source: string; cla
           Drawn on top of each other: {overlap}. Mermaid places architecture services by the sides their edges use; give each neighbour its own side (L, R, T, B).
         </figcaption>
       ) : null}
+      {floating && svg ? <DiagramViewer svg={svg} onClose={() => setFloating(false)} /> : null}
       {failed ? <figcaption className="border-t border-content/10 px-3.5 py-1.5 font-sans text-[11.5px] text-danger/90">Could not draw this diagram: {error!.split('\n')[0]}</figcaption> : null}
     </figure>
   );
