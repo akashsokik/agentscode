@@ -12,8 +12,9 @@ import type { ApprovalRequest, RunnerHooks, TurnResult } from '../server/agents/
 import {
   normalizeTool, ORCACODE_COMMS_NOTE, ORCACODE_MAX_STEPS, orcacodeArgs, orcacodeMcpConfig, OrcacodeRunner, orcacodeUsage,
 } from '../server/agents/orcacode.ts';
-import { harness, projectDir, tempDir } from './helpers.ts';
-import { engineProblem, ORCACODE_MIN_VERSION, orcacodeModelValue, splitOrcacodeModel, versionBelow } from '../shared/engines.ts';
+import { harness, projectDir, settle, tempDir } from './helpers.ts';
+import { helpListsAddDir, orcacodeAddDir } from '../server/config.ts';
+import { engineProblem, ORCACODE_MIN_VERSION, ORCACODE_NO_ADD_DIR, orcacodeModelValue, splitOrcacodeModel, versionBelow } from '../shared/engines.ts';
 
 const base: Agent = {
   id: 'a1', name: 'Ada', engine: 'orcacode', projectId: 'p1', worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: '', effort: '',
@@ -237,8 +238,8 @@ test('the manager creates OrcaCode agents and names the engine in errors', async
   const orc = await ok.manager.create({ name: 'Orc', engine: 'orcacode', projectId: app.id });
   assert.equal(orc.engine, 'orcacode');
   assert.equal(orc.useMcp, false);
-  // Its file tools stay inside the folder it runs in, so it needs a project.
-  await assert.rejects(ok.manager.create({ name: 'Roam', engine: 'orcacode', projectId: null }), /OrcaCode agents need a project/);
+  // Its file tools stay inside the folder it runs in, so without --add-dir it needs a project.
+  await assert.rejects(ok.manager.create({ name: 'Roam', engine: 'orcacode', projectId: null }), /cannot work across all projects.*orcacode update/);
 });
 
 test('engine versions compare numerically and only OrcaCode has a minimum', () => {
@@ -388,4 +389,109 @@ test('the manager keeps a service tier only while the model offers it', async ()
   const back = await h.manager.update(agent.id, { model: 'gpt-6-sol', serviceTier: 'priority' });
   assert.equal(back.serviceTier, 'priority');
   assert.equal((await h.manager.update(agent.id, { serviceTier: '' })).serviceTier, undefined);
+});
+
+test('--add-dir support comes from what orcacode --help lists, asked once per binary', async () => {
+  assert.equal(helpListsAddDir('OPTIONS:\n  --workspace DIR    tool workspace root\n  --add-dir DIR      also let file tools read and edit DIR\n'), true);
+  assert.equal(helpListsAddDir('OPTIONS:\n  --workspace DIR    tool workspace root\n  --max-steps N\n'), false, '0.11.0 has no --add-dir');
+  assert.equal(helpListsAddDir('error: unknown flag: --add-dir'), false, 'an error that names it is not support');
+  const dir = tempDir('orca-help');
+  const bin = path.join(dir, 'orcacode');
+  fs.writeFileSync(bin, '#!/bin/sh\n', { mode: 0o755 });
+  let asked = 0;
+  const help = (text: string) => async () => { asked += 1; return text; };
+  assert.equal(await orcacodeAddDir(bin, help('  --workspace DIR\n')), false);
+  assert.equal(await orcacodeAddDir(bin, help('  --add-dir DIR\n')), false, 'the same binary is not asked again');
+  assert.equal(asked, 1);
+  // An `orcacode update` writes a new file: asked again.
+  fs.writeFileSync(bin, '#!/bin/sh\n# 0.12.0\n', { mode: 0o755 });
+  assert.equal(await orcacodeAddDir(bin, help('  --add-dir DIR      also let file tools reach DIR\n')), true);
+  assert.equal(asked, 2);
+  assert.equal(await orcacodeAddDir(path.join(dir, 'missing'), help('  --add-dir DIR\n')), false, 'no binary, no support');
+});
+
+test('an All-projects OrcaCode agent is blocked without --add-dir and allowed with it', async () => {
+  const info = { available: true, path: '/x', version: '0.12.0' };
+  assert.equal(engineProblem('orcacode', { ...info, addDir: false }, true), ORCACODE_NO_ADD_DIR);
+  assert.equal(engineProblem('orcacode', info, true), ORCACODE_NO_ADD_DIR, 'unknown counts as no');
+  assert.equal(engineProblem('orcacode', { ...info, addDir: true }, true), null);
+  assert.equal(engineProblem('orcacode', { ...info, addDir: false }, false), null, 'a project agent never needs it');
+  assert.match(ORCACODE_NO_ADD_DIR, /orcacode update/);
+
+  const h = harness({ orcacode: { available: true, path: '/bin/orcacode', version: '0.12.0', addDir: true } });
+  const web = h.manager.addProject({ path: projectDir(h.dir, 'web') });
+  const roam = await h.manager.create({ name: 'Roam', engine: 'orcacode', projectId: null });
+  assert.equal(roam.projectId, null);
+  // Every project the user has added, read when asked, so a project added later is in the next turn.
+  h.manager.send(roam.id, 'Look around.');
+  await settle();
+  const ctx = h.runner(roam.id).ctx;
+  const real = (p: string) => fs.realpathSync(p);
+  assert.deepEqual(ctx.directories?.().map(real), [real(web.path)]);
+  const api = h.manager.addProject({ path: projectDir(h.dir, 'api') });
+  assert.deepEqual(ctx.directories?.().map(real), [real(web.path), real(api.path)]);
+});
+
+test('orcacode args carry one --add-dir per folder, on a resumed turn too', () => {
+  const dirs = ['/work/web', '/work/orca site'];
+  const fresh = orcacodeArgs({ ...base, projectId: null }, files, [], dirs);
+  const resumed = orcacodeArgs({ ...base, projectId: null, sessionId: 'sess-9' }, files, [], dirs);
+  for (const args of [fresh, resumed]) {
+    const added = args.flatMap((a, i) => (a === '--add-dir' ? [args[i + 1]] : []));
+    assert.deepEqual(added, dirs);
+  }
+  assert.equal(resumed[resumed.indexOf('--resume') + 1], 'sess-9');
+  assert.ok(!orcacodeArgs(base, files).includes('--add-dir'), 'none without folders');
+});
+
+test('the runner passes every project folder that exists, read again each turn', async () => {
+  const dir = tempDir('orca-dirs');
+  const log = path.join(dir, 'args.log');
+  const bin = path.join(dir, 'orcacode');
+  // Records its arguments, one per line, then fails the turn (no JSON summary).
+  fs.writeFileSync(bin, `#!/bin/sh\nfor a in "$@"; do echo "$a"; done > "${log}"\necho '{"type":"metadata","sessionId":"s1"}'\nexit 1\n`, { mode: 0o755 });
+  const web = path.join(dir, 'web');
+  fs.mkdirSync(web);
+  const folders = [web, path.join(dir, 'gone')];
+  const results: TurnResult[] = [];
+  const runner = new OrcacodeRunner({
+    agent: () => ({ ...base, projectId: null }),
+    project: null,
+    cwd: dir, binPath: bin,
+    directories: () => folders,
+    hooks: { session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, closed: () => {}, turnEnd: r => { results.push(r); }, approval: async () => ({ allow: false }) },
+  });
+  const added = () => { const args = fs.readFileSync(log, 'utf8').split('\n'); return args.flatMap((a, i) => (a === '--add-dir' ? [args[i + 1]] : [])); };
+  runner.send('Hi');
+  for (let i = 0; i < 1500 && runner.busy; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(added(), [web], 'a folder that is not there is left out');
+  // A project added since: the next turn reaches it.
+  const api = path.join(dir, 'api');
+  fs.mkdirSync(api);
+  folders.push(api);
+  runner.send('Again');
+  for (let i = 0; i < 1500 && runner.busy; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(added(), [web, api]);
+  assert.equal(results.length, 2);
+});
+
+test('an orcacode that rejects --add-dir ends the turn with the All-projects message, not a crash', async () => {
+  const dir = tempDir('orca-noadddir');
+  const bin = path.join(dir, 'orcacode');
+  fs.writeFileSync(bin, '#!/bin/sh\necho "error: unknown flag: --add-dir" >&2\necho "" >&2\necho "orcacode \u2014 terminal host" >&2\nexit 2\n', { mode: 0o755 });
+  fs.mkdirSync(path.join(dir, 'web'));
+  const results: TurnResult[] = [];
+  const runner = new OrcacodeRunner({
+    agent: () => ({ ...base, projectId: null }),
+    project: null,
+    cwd: dir, binPath: bin,
+    directories: () => [path.join(dir, 'web')],
+    hooks: { session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, closed: () => {}, turnEnd: r => { results.push(r); }, approval: async () => ({ allow: false }) },
+  });
+  runner.send('Hi');
+  for (let i = 0; i < 1500 && runner.busy; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(results.length, 1);
+  assert.equal(results[0].ok, false);
+  assert.equal(results[0].error, ORCACODE_NO_ADD_DIR);
+  assert.equal(runner.busy, false, 'ready for the next message');
 });

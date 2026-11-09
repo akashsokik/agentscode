@@ -12,7 +12,7 @@ import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, 
 import { commsMcpConfig, COMMS_INSTRUCTIONS, hasEyes } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
 import { orcacodeContextWindow } from '../models.ts';
-import { ORCACODE_MIN_VERSION, splitOrcacodeModel } from '../../shared/engines.ts';
+import { ORCACODE_MIN_VERSION, ORCACODE_NO_ADD_DIR, splitOrcacodeModel } from '../../shared/engines.ts';
 
 type Input = Record<string, unknown>;
 type Event = Record<string, unknown> & { type?: string };
@@ -43,6 +43,8 @@ const AUTH_PATTERN = /\b401\b|unauthori[sz]ed|api key|not (signed|logged) in|log
 function friendlyError(message: string): string {
   // An orcacode older than the headless contract rejects the flags and prints its whole --help.
   const flag = message.match(/unknown flag: (--?[\w-]+)/);
+  // An All-projects agent on an OrcaCode that cannot reach other folders: say what fixes that.
+  if (flag?.[1] === '--add-dir') return ORCACODE_NO_ADD_DIR;
   if (flag) return `This OrcaCode does not know ${flag[1]}. AgentsCode needs OrcaCode ${ORCACODE_MIN_VERSION} or newer: run \`orcacode update\`, then restart AgentsCode.`;
   if (AUTH_PATTERN.test(message)) {
     return `OrcaCode could not authenticate with its model provider. Run \`orcacode\` in a terminal and check /provider or /settings, then send the message again. (${clip(message, 200)})`;
@@ -50,9 +52,14 @@ function friendlyError(message: string): string {
   return message;
 }
 
-/** Arguments for one headless `orcacode` turn. The prompt and MCP config are files, never argv. */
-export function orcacodeArgs(agent: Agent, files: { prompt: string; mcp?: string }, images: readonly RunnerImage[] = []): string[] {
+/**
+ * Arguments for one headless `orcacode` turn. The prompt and MCP config are files, never argv.
+ * `directories`: folders beyond the one it runs in (every project, for an agent with no project),
+ * one --add-dir each, on every turn: OrcaCode does not keep them with a resumed session.
+ */
+export function orcacodeArgs(agent: Agent, files: { prompt: string; mcp?: string }, images: readonly RunnerImage[] = [], directories: readonly string[] = []): string[] {
   const args = ['--json', '--prompt-file', files.prompt, '--max-steps', String(ORCACODE_MAX_STEPS), ...MODE_FLAGS[agent.autonomy]];
+  for (const dir of directories) args.push('--add-dir', dir);
   if (files.mcp) args.push('--mcp-config', files.mcp);
   for (const image of images) args.push('--image', image.path);
   // `provider::model` picks both; a bare id keeps OrcaCode's saved provider.
@@ -83,6 +90,14 @@ export function orcacodeUsage(usage: unknown): TurnUsage | undefined {
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+function isDirectory(dir: string): boolean {
+  try {
+    return path.isAbsolute(dir) && fs.statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * OrcaCode's tool calls under the names the transcript already describes (Claude Code's), with
@@ -253,7 +268,10 @@ export class OrcacodeRunner implements Runner {
     fs.writeFileSync(files.prompt, prompt, { mode: 0o600 });
     if (files.mcp) fs.writeFileSync(files.mcp, orcacodeMcpConfig(this.ctx.commsToken!, this.ctx.agent().role === 'super', hasEyes(this.ctx.agent().role)), { mode: 0o600 });
     const images = (input.images ?? []).filter(image => fs.existsSync(image.path));
-    const args = orcacodeArgs(agent, files, images);
+    // Read each turn, so a project added or removed since the last one is reached or left. OrcaCode
+    // refuses a folder that is not there, so a project folder that was moved or deleted is left out.
+    const directories = (this.ctx.directories?.() ?? []).filter(isDirectory);
+    const args = orcacodeArgs(agent, files, images, directories);
     const asks = args.includes('stdio');
 
     const child = spawn(this.ctx.binPath, args, {

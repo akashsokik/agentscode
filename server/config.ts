@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { accessSync, constants } from 'node:fs';
+import { accessSync, constants, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { EngineInfo } from '../shared/types.ts';
@@ -76,5 +76,40 @@ export function versionOf(bin: string): Promise<string | null> {
 export async function detectEngine(binary: string): Promise<EngineInfo> {
   const found = findBinary(binary);
   if (!found) return { available: false, path: null, version: null };
-  return { available: true, path: found, version: await versionOf(found) };
+  const [version, addDir] = await Promise.all([versionOf(found), binary === 'orcacode' ? orcacodeAddDir(found) : Promise.resolve(undefined)]);
+  return { available: true, path: found, version, ...(addDir === undefined ? {} : { addDir }) };
+}
+
+/** Whether OrcaCode's --help lists --add-dir as an option (one per line, indented). */
+export function helpListsAddDir(help: string): boolean {
+  return /^\s*--add-dir\b/m.test(help);
+}
+
+/** A binary's --help, stdout and stderr together; '' when it cannot be run. */
+export function helpOf(bin: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(bin, ['--help'], { timeout: 15_000 }, (_err, stdout, stderr) => resolve(`${stdout ?? ''}\n${stderr ?? ''}`));
+  });
+}
+
+const addDirCache = new Map<string, boolean>();
+
+/**
+ * Whether this orcacode takes --add-dir, from what its --help lists, not from its version number.
+ * Asked once per binary: the answer is kept by path, size and modification time, so an
+ * `orcacode update` (a new file) is asked again.
+ */
+export async function orcacodeAddDir(bin: string, help: (bin: string) => Promise<string> = helpOf): Promise<boolean> {
+  let key: string;
+  try {
+    const stat = statSync(bin);
+    key = `${bin}:${stat.size}:${stat.mtimeMs}`;
+  } catch {
+    return false;
+  }
+  const known = addDirCache.get(key);
+  if (known !== undefined) return known;
+  const supported = helpListsAddDir(await help(bin));
+  addDirCache.set(key, supported);
+  return supported;
 }
