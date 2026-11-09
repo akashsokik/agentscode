@@ -40,9 +40,9 @@ test('a new agent gets a shape and colour no one else has while any is free', ()
   assert.ok(isLook(freshLook([...taken, { shape: 'pebble', color: 'green', eyes: 'round' }], () => 0.99)), 'all taken: still a valid look');
 });
 
-test('status maps to the eyes: calm, busy, waiting or down', () => {
+test('status maps to the face: content, lively, attentive, pleased or tired', () => {
   assert.equal(avatarMood('idle'), 'calm');
-  assert.equal(avatarMood('done'), 'calm');
+  assert.equal(avatarMood('done'), 'pleased');
   assert.equal(avatarMood('working'), 'busy');
   assert.equal(avatarMood('waiting'), 'waiting');
   assert.equal(avatarMood('error'), 'down');
@@ -75,5 +75,24 @@ test('the gallery (every shape, colour, eye style and mood) matches tests/fixtur
   // Regenerate on purpose with UPDATE_AVATAR_GALLERY=1; otherwise a change to the set must be seen.
   if (process.env.UPDATE_AVATAR_GALLERY === '1' || !fs.existsSync(file)) fs.writeFileSync(file, svg);
   assert.equal(svg, fs.readFileSync(file, 'utf8'));
-  assert.equal(svg.match(/<path /g)?.length, 2 * (8 * (5 + 3) + 10 + 4), 'both panels: every shape at 5 sizes and 3 eye styles, 10 colours, 4 moods');
+  assert.equal(svg.match(/<path d="M[^"]*" fill="#/g)?.length, 2 * (8 * (5 + 3) + 10 + 5 * 2), 'both panels: every shape at 5 sizes and 3 eye styles, 10 colours, 5 moods at 40 and 16 px');
+});
+
+test('a face is cheerful and stays legible small: catchlights, smile and blush only from 18px', async () => {
+  const { avatarParts, isSmallAvatar, AVATAR_EYE_Y, AVATAR_PATH } = await import('../shared/avatar.ts');
+  const kinds = (parts: { kind: string }[]) => parts.map(p => p.kind);
+  const round = { shape: 'circle', color: 'teal', eyes: 'round' } as const;
+  assert.deepEqual(kinds(avatarParts(round, 'calm', false)), ['body', 'eye', 'eye', 'glint', 'glint', 'smile']);
+  assert.deepEqual(kinds(avatarParts({ ...round, eyes: 'wide' }, 'calm', false)), ['body', 'blush', 'blush', 'eye', 'eye', 'glint', 'glint']);
+  assert.deepEqual(kinds(avatarParts(round, 'calm', true)), ['body', 'eye', 'eye'], 'small keeps only what survives at 14 to 16px');
+  const big = avatarParts(round, 'calm', false).find(p => p.kind === 'eye') as { rx: number };
+  const small = avatarParts(round, 'calm', true).find(p => p.kind === 'eye') as { rx: number };
+  assert.ok(small.rx > big.rx, 'small faces get bigger eyes');
+  assert.deepEqual(kinds(avatarParts(round, 'pleased', false)), ['body', 'happy', 'happy', 'smile'], 'pleased closes into happy arcs');
+  assert.deepEqual(kinds(avatarParts(round, 'pleased', true)), ['body', 'eye', 'eye'], 'too small for arcs: plain eyes');
+  assert.ok(!kinds(avatarParts(round, 'down', false)).some(k => k === 'smile' || k === 'glint' || k === 'blush'), 'tired, not smiling');
+  for (const y of Object.values(AVATAR_EYE_Y)) assert.ok(y < 19, 'eyes sit in the upper half of the face');
+  assert.equal(Object.keys(AVATAR_PATH).length, 8);
+  assert.equal(isSmallAvatar(16), true);
+  assert.equal(isSmallAvatar(18), false);
 });
