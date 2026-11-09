@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { findMentions, inCode, joinPath, mentionContext, mentionStart } from '../shared/mentions.ts';
+import { alignHints, channelRecipients, findMentions, inCode, joinPath, mentionContext, mentionStart, parseHints } from '../shared/mentions.ts';
 import { mentionTokenAt, pickGroup, pickValue, rankMentions, withFolders } from '../web/composer/tokens.ts';
-import { resolveMentions } from '../web/mentions.ts';
+import { hintFor } from '../web/composer/mentionHints.ts';
 import { harness, projectDir } from './helpers.ts';
 
 const agents = [
@@ -67,11 +67,75 @@ test('one picker ranks agents, projects and files in groups, an exact name first
   assert.equal(pickValue(rankMentions({ agents: [], projects: [], files, query: 'src' })[0]), 'src/', 'a folder ends with a slash');
 });
 
-test('channel delivery is unchanged: members by name, @all for everyone', () => {
-  const members = [{ id: 'a1', name: 'Ada' }, { id: 'a3', name: 'Rhea' }] as never;
-  assert.deepEqual(resolveMentions('@Ada take it', members), ['a1']);
-  assert.deepEqual(resolveMentions('@all go', members), ['a1', 'a3']);
-  assert.deepEqual(resolveMentions('mail ada@x.com', members), []);
+test('channel delivery: members by name, @all for everyone, from the same parse as the chips', () => {
+  const members = ['a1', 'a3'];
+  const recipients = (text: string) => channelRecipients(text, members, { agents, projects });
+  assert.deepEqual(recipients('@Ada take it'), ['a1']);
+  assert.deepEqual(recipients('@all go'), ['a1', 'a3']);
+  assert.deepEqual(recipients('mail ada@x.com'), []);
+  assert.deepEqual(recipients('@Rhea then @Ada, and @Rhea again'), ['a3', 'a1'], 'in order, once each');
+  assert.deepEqual(recipients('@Ada Lovelace, look'), [], 'the longest name wins, and Ada Lovelace is not a member');
+});
+
+test('a member named only in code starts nobody, and the chips agree', () => {
+  const members = ['a1', 'a3'];
+  const recipients = (text: string) => channelRecipients(text, members, { agents, projects });
+  for (const text of ['run `@Ada` later', 'see:\n```\n@Ada do it\n```\nthanks', '`@all` is the keyword']) {
+    assert.deepEqual(recipients(text), [], text);
+    assert.deepEqual(findMentions(text, { agents, projects, channel: true }), [], `no chip either: ${text}`);
+  }
+  // Named in code and outside it: started once, and one chip, the one outside.
+  const text = '`@Ada` means @Ada';
+  assert.deepEqual(recipients(text), ['a1']);
+  assert.deepEqual(findMentions(text, { agents, projects, channel: true }).map(m => m.start), [text.lastIndexOf('@')]);
+});
+
+test('names with spaces: the picker stays open while one is typed, and closes once a name is done', () => {
+  const names = [...agents, ...projects].map(n => n.name);
+  const at = (text: string, cursor = text.length) => mentionTokenAt(text, cursor, names);
+  assert.deepEqual(at('ask @Ada Lo'), { start: 4, end: 11, query: 'Ada Lo' });
+  assert.deepEqual(at('in @orca s'), { start: 3, end: 10, query: 'orca s' });
+  assert.deepEqual(at('in @orca '), { start: 3, end: 9, query: 'orca ' }, 'orca is only the start of a name');
+  assert.equal(at('ask @Ada '), null, 'Ada is a whole name: done');
+  assert.equal(at('ask @Ada please'), null, 'no name goes on like that');
+  assert.equal(at('`@Ada Lo'), null, 'not in code');
+  assert.deepEqual(at('ask @Ada Lo there', 11), { start: 4, end: 11, query: 'Ada Lo' }, 'caret in the middle');
+  assert.deepEqual(at('ask @Ad'), { start: 4, end: 7, query: 'Ad' }, 'one word, as before');
+  assert.equal(mentionTokenAt('ask @Ada Lo', 11), null, 'without names, a space ends the token as before');
+  // What the picker offers for a spaced query, and the pick writes the whole name.
+  const best = rankMentions({ agents, projects, files: [], query: 'Ada Lovelace' })[0];
+  assert.equal(best.best && pickValue(best), 'Ada Lovelace');
+  assert.equal(pickValue(rankMentions({ agents, projects, files: [], query: 'orca s' })[0]), 'orca site');
+});
+
+test('an agent and a project with the same name: each pick keeps its kind, in the chips, the note and channel delivery', () => {
+  const both = { agents: [...agents, { id: 'a9', name: 'orca', role: 'dev', projectId: null }], projects: [...projects, { id: 'p9', name: 'orca', path: '/work/orca' }] };
+  const text = 'ask @orca about @orca';
+  // Picked: the agent first, then the project.
+  const picked = [hintFor({ kind: 'agent', agent: { id: 'a9', name: 'orca' }, positions: [] }, 4)!, hintFor({ kind: 'project', project: { id: 'p9', name: 'orca', path: '/work/orca' }, positions: [] }, 16)!];
+  const refs = findMentions(text, { ...both, hints: picked });
+  assert.deepEqual(refs.map(r => [r.kind, 'id' in r ? r.id : '']), [['agent', 'a9'], ['project', 'p9']]);
+  const note = mentionContext(refs, both);
+  assert.match(note, /the agent orca \(agent id a9/);
+  assert.match(note, /the project orca at \/work\/orca\./);
+  // Unpicked (typed by hand), the agent wins as before.
+  assert.deepEqual(findMentions(text, both).map(r => r.kind), ['agent', 'agent']);
+  // In a channel, a picked project does not start the member who shares its name.
+  assert.deepEqual(channelRecipients('@orca has the bug', ['a9'], { ...both, hints: [{ kind: 'project', id: 'p9', name: 'orca', start: 0 }] }), []);
+  assert.deepEqual(channelRecipients('@orca has the bug', ['a9'], both), ['a9']);
+  // A hint for a name with no clash changes nothing, and a hint naming something else is ignored.
+  assert.deepEqual(findMentions('@Rhea', { ...both, hints: [{ kind: 'project', id: 'p1', name: 'Rhea', start: 0 }] }).map(r => r.kind), ['agent']);
+});
+
+test('picks follow their @ as the text changes, and the server takes only well-formed ones', () => {
+  const hint = { kind: 'project' as const, id: 'p9', name: 'orca', start: 4 };
+  assert.deepEqual(alignHints('so, ask @orca', [hint]).map(h => h.start), [8], 'typing before it moves it');
+  assert.deepEqual(alignHints('nothing here', [hint]), [], 'its @ was deleted');
+  assert.deepEqual(alignHints('`@orca` and @orca', [hint]).map(h => h.start), [12], 'never onto an @ in code');
+  const two = alignHints('@orca @orca', [{ ...hint, start: 0 }, { ...hint, kind: 'agent', id: 'a9', start: 6 }]);
+  assert.deepEqual(two.map(h => [h.kind, h.start]), [['project', 0], ['agent', 6]], 'one pick per @');
+  assert.deepEqual(parseHints([hint, { kind: 'file', id: 'x', name: 'x', start: 0 }, { kind: 'agent', id: 'a', name: 'a', start: -1 }, null, 'x']), [hint]);
+  assert.deepEqual(parseHints('nope'), []);
 });
 
 test('a message to an agent stores its mentions and tells the agent who and what they are', async () => {
@@ -107,4 +171,23 @@ test('a channel file path stays inside its project', () => {
   assert.equal(joinPath('/work/web', 'src/../lib/b.ts'), '/work/web/lib/b.ts');
   assert.equal(joinPath('/work/web', '../../etc/passwd'), null);
   assert.equal(mentionContext(findMentions('@web/../../x', { agents, projects, channel: true }), { agents, projects, channel: true }), '', 'a path leaving the project is not passed on');
+});
+
+test('the server keeps an agent and a project with the same name apart by the pick, in a message and a channel post', async () => {
+  const h = harness();
+  const web = h.manager.addProject({ path: projectDir(h.dir, 'web') });
+  const ada = await h.manager.create({ name: 'Ada', engine: 'claude', projectId: web.id });
+  const webAgent = await h.manager.create({ name: 'web', engine: 'claude', projectId: web.id });
+  // Typed, then sent with leading spaces: the server realigns the pick to its @.
+  h.manager.send(ada.id, '  look at @web with @web', undefined, [{ kind: 'project', id: web.id, name: 'web', start: 21 }, { kind: 'agent', id: webAgent.id, name: 'web', start: 10 }, { kind: 'nonsense' }]);
+  const entry = h.manager.entries(ada.id).find(e => e.kind === 'user')!;
+  assert.deepEqual(entry.mentions?.map(m => [m.kind, 'id' in m ? m.id : '']), [['agent', webAgent.id], ['project', web.id]]);
+  const sent = h.runner(ada.id).sent[0].text;
+  assert.match(sent, new RegExp(`- @web: the agent web \\(agent id ${webAgent.id}`));
+  assert.match(sent, /- @web: the project web at /);
+
+  const channel = h.manager.createChannel({ name: 'release', memberIds: [ada.id, webAgent.id] });
+  const post = h.manager.postToChannel(channel.id, '@Ada check @web', [ada.id], undefined, undefined, [{ kind: 'project', id: web.id, name: 'web', start: 11 }]);
+  assert.deepEqual(post.mentions?.map(m => m.kind), ['agent', 'project'], 'the chip is the project the user picked');
+  assert.deepEqual(post.to.map(d => d.agentId), [ada.id]);
 });

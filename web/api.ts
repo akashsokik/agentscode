@@ -35,6 +35,7 @@ import type {
   WorktreeCleanup,
 } from '../shared/types.ts';
 import type { ComposerCommand, ProjectFileList } from '../shared/composer.ts';
+import type { MentionHint } from '../shared/mentions.ts';
 
 /** Where files and git commands run: an agent's workspace, or a project folder. */
 export type Root = { agent: string } | { project: string };
@@ -106,8 +107,9 @@ export const api = {
   updateAgent: (id: string, patch: AgentPatch) => request<Agent>('PATCH', `/api/agents/${id}`, patch),
   removeAgent: (id: string, worktree: WorktreeCleanup = 'keep') => request<void>('DELETE', `/api/agents/${id}?worktree=${worktree}`),
   entries: (id: string) => request<Entry[]>('GET', `/api/agents/${id}/entries`),
-  send: (id: string, text: string, images?: ImageAttachment[]) =>
-    request<{ ok: true }>('POST', `/api/agents/${id}/messages`, { text, images: imageRefs(images) }),
+  /** `mentionHints`: which agent or project the user picked where two share a name. */
+  send: (id: string, text: string, images?: ImageAttachment[], mentionHints?: MentionHint[]) =>
+    request<{ ok: true }>('POST', `/api/agents/${id}/messages`, { text, images: imageRefs(images), ...(mentionHints?.length ? { mentionHints } : {}) }),
   /** Upload one image for the agent's next message. */
   attach: (id: string, image: Blob, name: string) => upload(`/api/agents/${id}/attachments`, image, name),
   stop: (id: string) => request<{ ok: true }>('POST', `/api/agents/${id}/stop`),
@@ -164,8 +166,8 @@ export const api = {
   removeChannel: (id: string) => request<void>('DELETE', `/api/channels/${id}`),
   channelPosts: (id: string) => request<ChannelPost[]>('GET', `/api/channels/${id}/posts`),
   /** `threadId` posts into the thread under that top-level post. */
-  post: (id: string, text: string, mentions: string[], threadId?: string, images?: ImageAttachment[]) =>
-    request<ChannelPost>('POST', `/api/channels/${id}/posts`, { text, mentions, threadId, images: imageRefs(images) }),
+  post: (id: string, text: string, mentions: string[], threadId?: string, images?: ImageAttachment[], mentionHints?: MentionHint[]) =>
+    request<ChannelPost>('POST', `/api/channels/${id}/posts`, { text, mentions, threadId, images: imageRefs(images), ...(mentionHints?.length ? { mentionHints } : {}) }),
   /** Upload one image for the user's next post in the channel. */
   attachToChannel: (id: string, image: Blob, name: string) => upload(`/api/channels/${id}/attachments`, image, name),
   channelSeen: (id: string) => request<{ ok: true }>('POST', `/api/channels/${id}/seen`),

@@ -112,7 +112,7 @@ export function createApp(
     res.json(manager.entries(param(req, 'id')));
   });
   app.post('/api/agents/:id/messages', (req, res) => {
-    manager.send(param(req, 'id'), req.body?.text, req.body?.images);
+    manager.send(param(req, 'id'), req.body?.text, req.body?.images, req.body?.mentionHints);
     res.status(202).json({ ok: true });
   });
   // An image pasted or attached in the composer: raw bytes in, an attachment the next message can name out.
@@ -263,7 +263,7 @@ export function createApp(
     res.json(manager.channelPosts(param(req, 'id')));
   });
   app.post('/api/channels/:id/posts', (req, res) => {
-    res.status(201).json(manager.postToChannel(param(req, 'id'), req.body?.text, req.body?.mentions, req.body?.threadId, req.body?.images));
+    res.status(201).json(manager.postToChannel(param(req, 'id'), req.body?.text, req.body?.mentions, req.body?.threadId, req.body?.images, req.body?.mentionHints));
   });
   // An image pasted or attached in a channel composer, for the user's next post there.
   app.post('/api/channels/:id/attachments', express.raw({ type: () => true, limit: '4mb' }), (req, res) => {
