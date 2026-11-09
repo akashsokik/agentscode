@@ -15,17 +15,10 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { app, clipboard, dialog, shell, type BrowserWindow } from 'electron';
 import electronUpdater, { type UpdateInfo } from 'electron-updater';
-import type { UpdateSnapshot } from '../shared/updates.ts';
+import { MAC_INSTALL_COMMAND, releaseNotesUrl, type UpdateSnapshot } from '../shared/updates.ts';
 
 const { autoUpdater } = electronUpdater;
 
-const RELEASES_URL = 'https://github.com/akashsokik/agentscode/releases';
-/**
- * The Mac installer (install.sh at the repo root). curl does not quarantine what it downloads, so
- * an unsigned build it installs opens without Gatekeeper's "Apple could not verify" refusal. A copy
- * downloaded in a browser is quarantined and needs Open Anyway in System Settings first.
- */
-const MAC_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/akashsokik/agentscode/main/install.sh | bash';
 /** How often a running app looks for a new release. */
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 /** Give the server and window a moment before the first check. */
@@ -77,10 +70,6 @@ async function showMessage(message: Electron.MessageBoxOptions): Promise<number>
   return result.response;
 }
 
-function releasePage(version: string): string {
-  return `${RELEASES_URL}/tag/v${version}`;
-}
-
 /** The unsigned Mac build's way to update: it cannot replace itself, so it explains how. */
 async function offerDownload(info: UpdateInfo): Promise<void> {
   const response = await showMessage({
@@ -92,7 +81,7 @@ async function offerDownload(info: UpdateInfo): Promise<void> {
     detail: `You have ${app.getVersion()}. To update, quit AgentsCode and run this in Terminal:\n\n${MAC_INSTALL_COMMAND}`,
   });
   if (response === 0) clipboard.writeText(MAC_INSTALL_COMMAND);
-  if (response === 1) void shell.openExternal(releasePage(info.version));
+  if (response === 1) void shell.openExternal(releaseNotesUrl(info.version));
 }
 
 /**
@@ -175,7 +164,7 @@ async function offerInstall(info: UpdateInfo): Promise<void> {
     message: `AgentsCode ${info.version} is available`,
     detail: `You have ${app.getVersion()}. Updating downloads it, stops running agents and restarts; they pick up where they left off. You can also update later from the sidebar.`,
   });
-  if (response === 2) void shell.openExternal(releasePage(info.version));
+  if (response === 2) void shell.openExternal(releaseNotesUrl(info.version));
   if (response === 0) await installUpdate();
 }
 

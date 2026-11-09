@@ -166,6 +166,18 @@ function onServerExit(code: number): void {
   });
 }
 
+/** About AgentsCode: Settings > About in the window (version, build, updates), else the native panel. */
+function showAbout(): void {
+  if (!window || window.isDestroyed()) {
+    app.showAboutPanel();
+    return;
+  }
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  window.webContents.send('updates:about');
+}
+
 /**
  * The app menu: the standard Edit, View and Window commands. Close Window moves to Shift+Cmd+W
  * so Cmd+W reaches the page, where it closes the current tab (web/shortcuts.ts) as in MonoCode.
@@ -177,7 +189,7 @@ function setMenu(): void {
           {
             label: app.name,
             submenu: [
-              { role: 'about' },
+              { label: `About ${app.name}`, click: showAbout },
               { label: 'Check for Updates…', click: () => void checkForUpdates(true) },
               { type: 'separator' },
               { role: 'services' },
@@ -214,6 +226,7 @@ function setMenu(): void {
         ...(process.platform === 'darwin'
           ? []
           : [{ label: 'Check for Updates…', click: () => void checkForUpdates(true) }, { type: 'separator' } as MenuItemConstructorOptions]),
+        ...(process.platform === 'darwin' ? [] : [{ label: `About ${app.name}`, click: showAbout }]),
         { label: `Release Notes (v${app.getVersion()})`, click: () => void shell.openExternal(`https://github.com/akashsokik/agentscode/releases/tag/v${app.getVersion()}`) },
         { label: 'All Releases', click: () => void shell.openExternal('https://github.com/akashsokik/agentscode/releases') },
       ],
@@ -343,6 +356,7 @@ function fromApp(event: IpcMainInvokeEvent | IpcMainEvent): boolean {
 function serveUpdates(): void {
   ipcMain.handle('updates:get', event => (fromApp(event) ? updateSnapshot() : null));
   ipcMain.handle('updates:install', event => (fromApp(event) ? installUpdate() : undefined));
+  ipcMain.handle('updates:check', event => (fromApp(event) ? checkForUpdates(true) : undefined));
   onUpdateChange(snapshot => window?.webContents.send('updates:changed', snapshot));
 }
 

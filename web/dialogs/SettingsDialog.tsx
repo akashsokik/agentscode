@@ -9,13 +9,16 @@ import { RefreshCw } from '../mono/icons.tsx';
 import { Modal } from '../mono/Modal.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Group, Row, Segmented, Toggle } from '../mono/settings.tsx';
+import { AboutGroup } from './AboutGroup.tsx';
 
 function save(change: Partial<Settings>) {
   return attempt(() => api.updateSettings(change));
 }
 
-/** `group` opens Settings scrolled to that group (an agent's settings link to the SuperAgent's limits). */
-export function SettingsDialog({ onClose, group }: { onClose: () => void; group?: 'super' }) {
+export type SettingsGroup = 'super' | 'about';
+
+/** `group` opens Settings scrolled to that group: the SuperAgent's limits from an agent's settings, About from the app menu. */
+export function SettingsDialog({ onClose, group }: { onClose: () => void; group?: SettingsGroup }) {
   const settings = useApp(s => s.snapshot?.settings);
   useEffect(() => {
     if (group) document.getElementById(`settings-${group}`)?.scrollIntoView({ block: 'start' });
@@ -133,6 +136,8 @@ export function SettingsDialog({ onClose, group }: { onClose: () => void; group?
             </Row>
           ))}
         </Group>
+
+        <AboutGroup />
       </div>
     </Modal>
   );
