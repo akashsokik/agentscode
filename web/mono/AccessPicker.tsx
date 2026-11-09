@@ -130,7 +130,7 @@ export function AccessPicker({
           strokeWidth={1.75}
         />
         <span
-          className={`min-w-0 truncate ${variant === "plain" ? "" : "text-[11px]"}`}
+          className={`min-w-0 truncate ${variant === "plain" ? "" : "text-[11px] @max-sm/composer:hidden"}`}
         >
           {RUNTIME_MODE_LABEL[value]}
         </span>

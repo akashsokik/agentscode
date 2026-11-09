@@ -219,9 +219,10 @@ export function ModelPicker({ agent, models, onChange, onClose }: {
         className={`flex h-6.5 min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 transition-colors duration-150 ${open ? 'bg-selection text-content' : 'bg-selection text-content hover:bg-selection-hover'}`}
       >
         <EngineIcon engine={agent.engine} className="size-4 shrink-0" />
-        <span className="min-w-0 truncate whitespace-nowrap text-[11px]">{name}</span>
-        {effortShown ? <span className="shrink-0 text-[11px] text-content/50">{effortShown}</span> : null}
-        {tierShown ? <span className="shrink-0 text-[11px] text-content/50">{tierShown}</span> : null}
+        {/* A narrow composer shows the icon only, rather than a name cut mid-word. */}
+        <span className="whitespace-nowrap text-[11px] @max-xs/composer:hidden">{name}</span>
+        {effortShown ? <span className="shrink-0 whitespace-nowrap text-[11px] text-content/50 @max-xs/composer:hidden">{effortShown}</span> : null}
+        {tierShown ? <span className="shrink-0 whitespace-nowrap text-[11px] text-content/50 @max-xs/composer:hidden">{tierShown}</span> : null}
         <ChevronDown className={`size-3 shrink-0 text-content/50 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} strokeWidth={1.75} />
       </button>
 
