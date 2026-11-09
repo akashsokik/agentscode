@@ -1,3 +1,4 @@
+import { agentLook, cleanLook, freshLook, isSuperPair } from '../shared/avatar.ts';
 import { alignHints, findMentions, mentionContext, parseHints, type MentionAgent, type MentionProject, type MentionRef } from '../shared/mentions.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -458,6 +459,8 @@ export class AgentManager {
       id,
       name,
       engine,
+      // A look no other agent has yet; the SuperAgent always looks like itself (shared/avatar.ts).
+      ...(options.super ? {} : { avatar: ((look => (look && !isSuperPair(look) ? look : null))(cleanLook(req.avatar))) ?? freshLook([...this.store.agents.values()].map(a => agentLook(a))) }),
       projectId: project?.id ?? null,
       worktree,
       home: this.homes.path(id),
@@ -521,6 +524,10 @@ export class AgentManager {
     if (agent.role === 'super' && patch.role !== undefined && patch.role !== 'super') throw new HttpError(400, 'The SuperAgent keeps its role. Remove it to stop using it.');
     if (agent.role === 'super' && patch.autonomy !== undefined && patch.autonomy !== 'readonly') throw new HttpError(400, 'The SuperAgent never edits, so it stays read-only.');
     if (patch.dreaming !== undefined && typeof patch.dreaming !== 'boolean') throw new HttpError(400, 'Dreaming is on or off: true or false.');
+    const avatar = patch.avatar === undefined ? undefined : cleanLook(patch.avatar);
+    if (avatar === null) throw new HttpError(400, 'Unknown avatar: pick a shape, colour and eyes from the list.');
+    if (avatar && agent.role === 'super') throw new HttpError(400, 'The SuperAgent keeps its own look.');
+    if (avatar && isSuperPair(avatar)) throw new HttpError(400, 'That shape and colour are the SuperAgent\'s. Pick another.');
     const model = patch.model === undefined ? undefined : clip(String(patch.model).trim(), MODEL_MAX);
     const effort = patch.effort === undefined ? undefined : validEffort(patch.effort);
     const tier = patch.serviceTier === undefined ? undefined : String(patch.serviceTier).trim().slice(0, 40);
@@ -540,6 +547,7 @@ export class AgentManager {
       this.dreamer.soulEdited(agent);
     }
     if (patch.role !== undefined) agent.role = patch.role;
+    if (avatar) agent.avatar = avatar;
     if (patch.dreaming !== undefined && patch.dreaming !== agent.dreaming) {
       agent.dreaming = patch.dreaming;
       this.dreamer.toggled(agent, patch.dreaming);

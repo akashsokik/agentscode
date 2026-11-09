@@ -10,7 +10,6 @@ import { focusedAgentId, focusedChannelId, open, openToSide, setRightPanel, setR
 import { ALL_PROJECTS } from '../projects.ts';
 import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
 import { Empty, HeaderButton, IconTab, Loading, TextButton } from '../ui/common.tsx';
 import { Bot, CheckCircle, CircleDot, Clock, DashboardSquare, FileDiff, Folder, GitBranch, ListBullet, MessageMultiple, PanelRight, RefreshCw, type IconComponent } from '../mono/icons.tsx';
@@ -19,6 +18,7 @@ import { MessageStatus } from '../panes/CommsPane.tsx';
 import { DecisionsView, GoalsView, RoutinesView, useSuperTabs } from '../panes/SuperPanel.tsx';
 import { superPanelView } from '../superText.ts';
 import { useNow } from '../ui/useNow.ts';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 /** Porcelain codes as MonoCode's Changes list shows them: M, A, D, R, U. */
 const STATUS_TONE: Record<string, string> = {
@@ -92,6 +92,7 @@ export function ChangesView({ agent }: { agent: Agent | undefined }) {
 function CommsFeed({ agent }: { agent: Agent | undefined }) {
   const messages = useApp(s => s.snapshot?.messages);
   const channels = useApp(s => s.snapshot?.channels);
+  const agents = useApp(s => s.snapshot?.agents);
   const [scope, setScope] = useState<'all' | 'agent'>('all');
   const now = useNow();
   const effective = scope === 'agent' && agent ? 'agent' : 'all';
@@ -123,6 +124,7 @@ function CommsFeed({ agent }: { agent: Agent | undefined }) {
               className="mb-0.5 block w-full rounded-lg px-2.5 py-2 text-left font-sans text-content transition-colors duration-100 hover:bg-content/5"
             >
               <div className="flex min-w-0 items-center gap-1.5 text-[12px]">
+                <AgentAvatar agent={agents?.find(a => a.id === message.fromAgentId) ?? { id: message.fromAgentId }} className="size-3.5" />
                 <span className="min-w-0 truncate font-medium">
                   {message.fromName} <span className="font-normal text-content/45">to</span> {message.toName}
                   {message.channelId ? <span className="font-normal text-content/45"> in #{channels?.find(c => c.id === message.channelId)?.name ?? 'deleted-channel'}</span> : null}
@@ -169,7 +171,7 @@ function TeamRow({ agent, pending }: { agent: Agent; pending: boolean }) {
       title={`Open ${agent.name}`}
       className="flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-150 hover:bg-content/5"
     >
-      <EngineIcon engine={agent.engine} className="size-4" />
+      <AgentAvatar agent={agent} className="size-4" />
       <span className="shrink-0 text-[13px] font-medium text-content">{agent.name}</span>
       <span className="shrink-0 text-[11px] text-content/40">{rolePreset(agent.role).name}</span>
       <AgentStatus agent={agent} pending={pending} className="ml-auto min-w-0 max-w-[55%] text-[12px]" />

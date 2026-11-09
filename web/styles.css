@@ -847,6 +847,15 @@ html.theme-light .activity-tile {
   --tile-lift: rgb(0 0 0 / 0.1);
 }
 
+/* A turn's tile is the agent's own avatar: no raised tile behind it, the chevron still slides in. */
+.activity-tile[data-face="bare"],
+html.theme-light .activity-tile[data-face="bare"] {
+  background: none;
+  box-shadow: none;
+  overflow: visible;
+  color: var(--color-content);
+}
+
 .activity-tile[data-face="edit"] {
   --tile-top: #f6b44b;
   --tile-bottom: #e08a12;
@@ -1941,5 +1950,54 @@ html.layout-inset.theme-light .dialog-scrim {
     animation: none;
     background-color: var(--codex-effort-color);
     will-change: auto;
+  }
+}
+
+/* ---- agent avatars (web/ui/Avatar.tsx): the eyes carry the mood, quietly ---- */
+.avatar .avatar-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 300ms ease;
+}
+.avatar .avatar-eyes {
+  transform-box: view-box;
+  transition: transform 300ms ease;
+}
+/* An occasional blink, out of step between avatars. */
+.avatar-live .avatar-eye {
+  animation: avatar-blink 7s infinite;
+  animation-delay: var(--avatar-delay, 0s);
+}
+/* Working: the eyes glance side to side, slowly. */
+.avatar-live[data-avatar-mood='busy'] .avatar-eyes {
+  animation: avatar-glance 4.8s ease-in-out infinite;
+  animation-delay: var(--avatar-delay, 0s);
+}
+/* Waiting on you: it looks up, eyes a touch wider. */
+.avatar[data-avatar-mood='waiting'] .avatar-eyes {
+  transform: translateY(-1.6px);
+}
+.avatar[data-avatar-mood='waiting'] .avatar-eye {
+  animation: none;
+  transform: scale(1.15);
+}
+/* The last turn failed: half-closed, no blinking. */
+.avatar[data-avatar-mood='down'] .avatar-eye {
+  animation: none;
+  transform: scaleY(0.4);
+}
+@keyframes avatar-blink {
+  0%, 95%, 100% { transform: scaleY(1); }
+  97% { transform: scaleY(0.12); }
+}
+@keyframes avatar-glance {
+  0%, 18%, 100% { transform: translateX(0); }
+  30%, 46% { transform: translateX(-1.4px); }
+  62%, 80% { transform: translateX(1.4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatar-live .avatar-eye,
+  .avatar-live .avatar-eyes {
+    animation: none;
   }
 }

@@ -14,7 +14,7 @@ import claudeMark from '../assets/claude.svg';
 import codexMark from '../assets/codex-glyph.svg';
 import { Bot, ChevronRight, MessageSquare, PenLine, Search, Wrench } from './icons.tsx';
 
-export type TileFace = 'run' | 'edit' | 'research' | 'agent' | 'neutral' | EngineKind;
+export type TileFace = 'run' | 'edit' | 'research' | 'agent' | 'neutral' | 'bare' | EngineKind;
 
 const MARKS: Partial<Record<string, string>> = { claude: claudeMark, codex: codexMark };
 
@@ -90,4 +90,9 @@ export function PhaseTile({ kind, folds = true, open = false, spinning = false }
 export function ProviderTile({ engine, folds, open }: { engine: EngineKind; folds: boolean; open: boolean }) {
   const face: TileFace = MARKS[engine] ? engine : 'neutral';
   return <Tile face={face} mark={<ProviderGlyph engine={engine} />} folds={folds} open={open} spinning={false} />;
+}
+
+/** A turn's tile as the agent's own avatar (`mark`), with no tile behind it; folds like the others. */
+export function MarkTile({ mark, folds, open }: { mark: ReactNode; folds: boolean; open: boolean }) {
+  return <Tile face="bare" mark={mark} folds={folds} open={open} spinning={false} />;
 }

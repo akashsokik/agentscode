@@ -22,6 +22,8 @@ import { Markdown } from '../ui/Markdown.tsx';
 import { ArrowUp, Check, ChevronDown, Folder, Plus, Search, Sparkles, X } from '../mono/icons.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { answerQuick, sendQuick, targetAgentId, teamStatus, type QuickTarget, type TeamMember, type TeamState } from './route.ts';
+import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
+import { SUPER_LOOK } from '../../shared/avatar.ts';
 
 type Picker = 'target' | 'project' | 'model' | null;
 
@@ -349,10 +351,10 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
               placeholder="Talk to…"
               onClose={() => { setPicker(null); focusField(); }}
               items={[
-                { key: 'super', label: 'SuperAgent', hint: superId ? 'Runs the team' : 'Set up when you send', icon: <Sparkles className="size-3.5" strokeWidth={1.75} />, checked: live.kind === 'super', onPick: () => pick({ kind: 'super' }) },
+                { key: 'super', label: 'SuperAgent', hint: superId ? 'Runs the team' : 'Set up when you send', icon: <AvatarGlyph look={SUPER_LOOK} seed="super" className="size-3.5" />, checked: live.kind === 'super', onPick: () => pick({ kind: 'super' }) },
                 ...[...agents].filter(a => a.role !== 'super').sort((a, b) => a.name.localeCompare(b.name)).map(a => ({
                   key: a.id, label: a.name, hint: `${snapshot?.projects.find(p => p.id === a.projectId)?.name ?? 'All projects'} · ${stateWord(a)}`,
-                  icon: <EngineIcon engine={a.engine} className="size-3.5" />, checked: live.kind === 'agent' && live.agentId === a.id, onPick: () => pick({ kind: 'agent', agentId: a.id }),
+                  icon: <AgentAvatar agent={a} className="size-3.5" />, checked: live.kind === 'agent' && live.agentId === a.id, onPick: () => pick({ kind: 'agent', agentId: a.id }),
                 })),
                 { key: 'new', label: 'New agent…', hint: `${MOD}P picks its project`, icon: <Plus className="size-3.5" strokeWidth={1.75} />, checked: live.kind === 'new', onPick: () => pick(asNew({})) },
               ]}
@@ -448,9 +450,9 @@ function Hint({ keys, children }: { keys: string; children: ReactNode }) {
 }
 
 function TargetIcon({ target, agent }: { target: QuickTarget; agent: Agent | undefined }) {
-  if (target.kind === 'super') return <Sparkles className="size-3.5 shrink-0 opacity-80" strokeWidth={1.75} />;
+  if (target.kind === 'super') return <AvatarGlyph look={SUPER_LOOK} seed="super" className="size-3.5" />;
   if (target.kind === 'new') return <Plus className="size-3.5 shrink-0 opacity-80" strokeWidth={1.75} />;
-  return agent ? <EngineIcon engine={agent.engine} className="size-3.5 shrink-0" /> : null;
+  return agent ? <AgentAvatar agent={agent} className="size-3.5" /> : null;
 }
 
 function targetName(target: QuickTarget, agent: Agent | undefined): string {
@@ -513,7 +515,8 @@ function TeamStrip({ agents, onOpen }: { agents: Agent[]; onOpen: (agentId: stri
           title={`${member.name}: ${STATE_LABEL[member.state]}. ${member.detail}`}
           className="flex h-6 max-w-44 items-center gap-1.5 rounded-md px-1.5 text-[12px] text-content/60 transition-colors hover:bg-selection-hover hover:text-content"
         >
-          <StateMark state={member.state} />
+          {/* Its avatar, its mood from its status; the state mark when the agent is not in the snapshot. */}
+          {agents.find(a => a.id === member.id) ? <AgentAvatar agent={agents.find(a => a.id === member.id)!} className="size-3.5" /> : <StateMark state={member.state} />}
           <span className="truncate">{member.name}</span>
           {member.state === 'needs-you' || member.state === 'stuck' || member.state === 'failed' ? <span className="shrink-0 text-content/40">{STATE_LABEL[member.state].toLowerCase()}</span> : null}
         </button>

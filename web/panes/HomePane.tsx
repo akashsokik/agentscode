@@ -8,10 +8,10 @@ import { SHORTCUTS } from '../shortcuts.ts';
 import type { SidebarActions } from '../sidebar/Sidebar.tsx';
 import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { Chatting, FolderPlus, Globe, MessageMultiple, Plus, Search, Settings, type IconComponent } from '../mono/icons.tsx';
 import { openBrowser } from '../browser.ts';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 const RECENT = 6;
 
@@ -137,7 +137,7 @@ function AgentRow({ agent, pending, project, when }: { agent: Agent; pending: bo
       onClick={e => (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'agent', agentId: agent.id })}
       className={ROW}
     >
-      <EngineIcon engine={agent.engine} className="size-3.5 shrink-0 opacity-70" />
+      <AgentAvatar agent={agent} className="size-3.5" />
       <span className="shrink-0 font-medium text-content/80">{agent.name}</span>
       <span className="min-w-0 truncate text-[11.5px] text-content/35">{project}</span>
       <span className="ml-auto flex min-w-0 shrink items-center justify-end gap-2 pl-2">

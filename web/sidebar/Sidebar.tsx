@@ -11,7 +11,6 @@ import { BrandMark } from '../ui/BrandMark.tsx';
 import { SidebarUpdateFooter, useDesktopUpdate } from './SidebarUpdate.tsx';
 import { isUpdateActionable, updateLabel } from '../../shared/updates.ts';
 import { DreamNowMenuRow } from '../ui/DreamNowMenuRow.tsx';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ResizeHandle, useColumnWidth, useWindowWidth } from '../ui/ResizeHandle.tsx';
 import { SHORTCUTS } from '../shortcuts.ts';
 import { showTerminal } from '../terminal/actions.ts';
@@ -24,6 +23,8 @@ import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
 import { openAsks, openSuper } from '../super.ts';
+import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
+import { SUPER_LOOK } from '../../shared/avatar.ts';
 
 export interface SidebarActions {
   /** null preselects No project; undefined starts from the current project. */
@@ -165,7 +166,7 @@ function AgentCard({ agent, selected, now, actions }: { agent: Agent; selected: 
         {/* MonoCode's session card: engine and model, then the name, then what it is on. */}
         <span className="flex items-center gap-2">
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
-            <EngineIcon engine={agent.engine} className="size-3.5" />
+            <AgentAvatar agent={agent} className="size-3.5" />
             <span className="min-w-0 truncate text-[11px] text-content/50">{modelLabel(agent, models)}</span>
           </span>
           {/* The ... button takes this spot on hover. */}
@@ -298,7 +299,7 @@ function FileTree({ projectId }: { projectId?: string }) {
 // ---- MonoCode's Classic shell: a navigation column, then the workspace column ----------------
 
 /** A row at the top or foot of the navigation column: MonoCode's RailAction. */
-function RailAction({ icon: Icon, label, hint, active = false, onClick, children }: { icon: IconComponent; label: string; hint?: string; active?: boolean; onClick: () => void; children?: ReactNode }) {
+function RailAction({ icon: Icon, mark, label, hint, active = false, onClick, children }: { icon: IconComponent; mark?: ReactNode; label: string; hint?: string; active?: boolean; onClick: () => void; children?: ReactNode }) {
   return (
     <button
       type="button"
@@ -306,7 +307,7 @@ function RailAction({ icon: Icon, label, hint, active = false, onClick, children
       aria-current={active ? 'page' : undefined}
       className={cx('relative flex h-8 w-full items-center gap-2 rounded-md px-2 text-left transition-colors duration-150', active ? 'bg-selection text-content' : 'text-content/75 hover:bg-content/10 hover:text-content')}
     >
-      <Icon className="size-4 shrink-0 opacity-70" strokeWidth={1.75} />
+      {mark ?? <Icon className="size-4 shrink-0 opacity-70" strokeWidth={1.75} />}
       <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight">{label}</span>
       {children}
       {/* MonoCode's shortcut hint at the end of the row, as in "Settings ⌘,". */}
@@ -426,7 +427,7 @@ function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: bo
         aria-current={selected ? 'page' : undefined}
         className={cx(railRow(status !== null || Boolean(menu)), railRowState(selected || Boolean(menu)))}
       >
-        <EngineIcon engine={agent.engine} className="size-4 shrink-0" />
+        <AgentAvatar agent={agent} className="size-4" />
         <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', agent.unread ? 'font-semibold text-content' : 'font-medium')}>{agent.name}</span>
       </button>
       <RowStatus hidden={Boolean(menu)}><AgentRailMark status={status} /></RowStatus>
@@ -532,7 +533,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
         <RailAction icon={MessageMultiple} label="Comms" active={commsOpen} onClick={() => open({ kind: 'comms' })}>
           {inFlight ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${inFlight} in flight`}>{inFlight}</span> : null}
         </RailAction>
-        <RailAction icon={Sparkles} label="SuperAgent" hint={SHORTCUTS.superQuick} active={Boolean(superId) && agentId === superId} onClick={() => void openSuper()}>
+        <RailAction icon={Sparkles} mark={<SuperMark superId={superId} />} label="SuperAgent" hint={SHORTCUTS.superQuick} active={Boolean(superId) && agentId === superId} onClick={() => void openSuper()}>
           {superWaiting ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${superWaiting} waiting for you`}>{superWaiting}</span> : null}
         </RailAction>
       </div>
@@ -757,7 +758,7 @@ function AgentRailIcon({ agent, selected, actions }: { agent: Agent; selected: b
         onClick={e => openRailAgent(agent, e)}
         onContextMenu={e => openContextMenu(e, setMenu)}
       >
-        <EngineIcon engine={agent.engine} className="size-4" />
+        <AgentAvatar agent={agent} className="size-4" />
       </RailIconButton>
       {menu ? <AgentMenu agent={agent} anchor={menu} actions={actions} onClose={() => setMenu(null)} /> : null}
     </>
@@ -797,6 +798,7 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
   const agents = useApp(s => s.snapshot?.agents);
   const inFlight = useApp(s => s.snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0);
   const superWaiting = useApp(s => openAsks(s.snapshot?.super.asks).length);
+  const superId = useApp(s => s.snapshot?.super.agentId ?? null);
   const update = useDesktopUpdate();
   const focusedPane = layout.panes.find(p => p.id === layout.focused);
   const commsOpen = layout.tabs.find(t => t.id === focusedPane?.tabId)?.content.kind === 'comms';
@@ -825,7 +827,7 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
           <MessageMultiple className="size-4" strokeWidth={1.75} />
         </RailIconButton>
         <RailIconButton label={superWaiting ? `SuperAgent, ${superWaiting} waiting for you` : 'SuperAgent'} dot={superWaiting ? <span className="size-1.5 rounded-full bg-accent" /> : null} onClick={() => void openSuper()}>
-          <Sparkles className="size-4" strokeWidth={1.75} />
+          <SuperMark superId={superId} />
         </RailIconButton>
       </div>
       <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto overscroll-none border-t border-stroke py-2">
@@ -879,4 +881,10 @@ export function Sidebars({ actions, titleBarAbove }: { actions: SidebarActions; 
       {showsWorkspace(agents ?? [], project?.id) ? <WorkspaceColumn actions={actions} project={project} titleBarAbove={titleBarAbove} /> : null}
     </div>
   );
+}
+
+/** The SuperAgent's own avatar, in its current mood once it exists. */
+function SuperMark({ superId }: { superId: string | null | undefined }) {
+  const agent = useApp(s => (superId ? s.snapshot?.agents.find(a => a.id === superId) : undefined));
+  return agent ? <AgentAvatar agent={agent} className="size-4" /> : <AvatarGlyph look={SUPER_LOOK} seed="super" className="size-4" />;
 }

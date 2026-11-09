@@ -15,10 +15,10 @@ import {
 } from '../peerText.ts';
 import { useApp } from '../store.ts';
 import { cx, TextButton } from '../ui/common.tsx';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
 import { AlertCircle, CheckCircle, CircleX, CornerDownRight } from '../mono/icons.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 /** The transcript's teammate messages, indexed, so a report and its delegation find each other. */
 export const Comms = createContext<CommsIndex>({ byId: new Map(), reportFor: new Map() });
@@ -61,7 +61,7 @@ function Who({ id, name, role = true }: { id: string; name: string; role?: boole
   const agent = useAgent(id);
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      {agent ? <EngineIcon engine={agent.engine} className="size-3.5" /> : null}
+      <AgentAvatar agent={agent ?? { id }} className="size-3.5" />
       <span className="min-w-0 truncate font-medium text-content/75">{name}</span>
       {agent && role ? <span className="shrink-0 text-content/40">{rolePreset(agent.role).name}</span> : null}
     </span>
@@ -231,6 +231,7 @@ export function DelegationRow({ message }: { message: PeerMessage }) {
   const detailId = useId();
   const delegation = message.delegation!;
   const title = taskTitle(delegation.task);
+  const recipient = useAgent(message.toAgentId);
   return (
     <div data-peer-card={message.id} tabIndex={-1} className="flex min-w-0 flex-col rounded outline-none focus-visible:ring-1 focus-visible:ring-content/30">
       <button
@@ -242,7 +243,7 @@ export function DelegationRow({ message }: { message: PeerMessage }) {
         className="group flex min-w-0 items-center gap-1.5 py-1 text-left font-sans text-sm"
       >
         <span className="shrink-0 text-content/50">Delegated {kindWords(delegation.kind).toLowerCase()} to</span>
-        <span className="shrink-0 text-content/70">{message.toName}</span>
+        <span className="flex shrink-0 items-center gap-1 text-content/70"><AgentAvatar agent={recipient ?? { id: message.toAgentId }} className="size-3.5" />{message.toName}</span>
         <span className="min-w-0 flex-1 truncate text-content/50 transition-colors duration-200 group-hover:text-content/75">{title}</span>
         <span className="ml-2 text-[12px]"><StateChip state={state} /></span>
       </button>

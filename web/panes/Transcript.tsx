@@ -22,19 +22,19 @@ import { browserScreenshot, presentTool } from '../toolPresentation.ts';
 import { groupTurns, type Turn } from '../turns.ts';
 import { isAnchoring, openingAnchor, rememberedView, rememberView, type Opening } from '../transcriptView.ts';
 import { distanceFromEnd, Follower, scrollsUp, WHEEL_HOLD_MS } from '../transcriptScroll.ts';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
 import { MentionText } from '../ui/MentionText.tsx';
 import { reducedMotion, staggerWordFades, WORD_FADE_MS } from '../ui/wordFade.ts';
 import { ChipButton, Empty, INPUT, Loading, StatusLabel, TextButton } from '../ui/common.tsx';
 import { AiIdea, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, CircleDashed, Copy, Eraser, File, Folder, MessageSquare, Route, Search, Sparkles, X } from '../mono/icons.tsx';
-import { PhaseTile, ProviderTile } from '../mono/ActivityTile.tsx';
+import { MarkTile, PhaseTile } from '../mono/ActivityTile.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { MessageImages } from './ImageViews.tsx';
 import { Comms, DelegationRow, PeerPrompt, PeerTrailRow } from './PeerMessages.tsx';
 import { commsIndex, repeatedPromptTurns } from '../peerText.ts';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 /**
  * Whether something with this id is landing now, as opposed to having been on screen already or
@@ -622,7 +622,8 @@ function WorkFoldLine({ title, agent, live, expandable, open, onToggle }: {
   onToggle: () => void;
 }) {
   // Only a fold that opens shows the chevron; a line over work that has not folded keeps the mark.
-  const icon = <ProviderTile engine={agent.engine} folds={expandable} open={open} />;
+  // Only the turn running now moves and shows the mood; past turns stay calm and still.
+  const icon = <MarkTile mark={<AgentAvatar agent={live ? agent : { id: agent.id, role: agent.role, avatar: agent.avatar }} animate={live} className="size-[18px]" />} folds={expandable} open={open} />;
   const label = live ? title : (
     <span className="min-w-0 flex-1 truncate font-sans text-sm text-content/50 transition-colors duration-200 group-hover:text-content/80">{title}</span>
   );
@@ -680,7 +681,7 @@ function TurnDuration({ elapsedMs, labelHidden, copyText, completedAt, meta, age
         <span className="flex min-w-0 items-center gap-2.5">
           {dot}
           <span className="flex min-w-0 items-center gap-1.5">
-            <EngineIcon engine={agent.engine} className="size-3.5 shrink-0" />
+            <AgentAvatar agent={agent} className="size-3.5" animate={false} />
             <span className="min-w-0 truncate" title={label}>{label}</span>
           </span>
         </span>

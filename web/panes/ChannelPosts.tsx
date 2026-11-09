@@ -11,7 +11,6 @@ import type { Agent, ChannelDelivery, ChannelPost } from '../../shared/types.ts'
 import { cost, duration, relativeTime, someNames } from '../format.ts';
 import { open, openToSide } from '../layout.ts';
 import { continuesGroup, seenBaseline, type Thread } from '../threads.ts';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
 import { ChipButton, cx } from '../ui/common.tsx';
 import { Bot, Chatting, ChevronDown, CircleAlert, Clock, Loader, MessageSquare } from '../mono/icons.tsx';
@@ -22,6 +21,7 @@ import { channelAttachmentUrl } from '../api.ts';
 import { PostImages } from './ComposerImages.tsx';
 import { MessageImages } from './ImageViews.tsx';
 import { CopyTurnButton, DaySeparator, UserMessageBlock } from './Transcript.tsx';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 export const SPINNER = 'inline-block w-3.5 shrink-0 select-none text-center text-[11px] leading-none';
 
@@ -78,7 +78,7 @@ export function Deliveries({ to, agents }: { to: ChannelDelivery[]; agents: Agen
             onClick={e => agent && openAgent(agent, e)}
             className="inline-flex items-center gap-1 rounded text-content/60 hover:text-content disabled:hover:text-content/60"
           >
-            {agent ? <EngineIcon engine={agent.engine} className="size-3.5" /> : null}
+            {agent ? <AgentAvatar agent={agent} className="size-3.5" /> : null}
             <span>{d.name}</span>
             {d.status === 'working' && !needsYou ? <TerminalSpinner className={SPINNER} /> : null}
             <span className={tone}>{needsYou ? 'Needs you' : DELIVERY_LABEL[d.status]}</span>
@@ -117,7 +117,7 @@ const PILL = 'flex min-w-0 items-center gap-1.5 rounded-full bg-content/[0.07] p
  */
 function SignaturePill({ name, agent, removed }: { name: string; agent: Agent | undefined; removed: boolean }) {
   const mark = agent
-    ? <EngineIcon engine={agent.engine} className="size-3.5 shrink-0" />
+    ? <AgentAvatar agent={agent} className="size-3.5" />
     : removed ? <Bot aria-hidden className="size-3.5 shrink-0 text-content/45" strokeWidth={1.75} /> : null;
   const label = <span className="min-w-0 truncate font-medium text-content/80">{name}</span>;
   if (!agent) return <span className={PILL}>{mark}{label}</span>;
@@ -187,7 +187,7 @@ function ThreadCard({ thread, agents, now, open: isOpen, onOpen }: { thread: Thr
   const last = relativeTime(thread.lastReplyAt, now);
   const repliers = thread.participants.filter(p => p.from === 'agent');
   const latest = repliers.at(-1)?.agentId;
-  const engine = agents.find(a => a.id === latest)?.engine;
+  const latestAgent = agents.find(a => a.id === latest);
   const state = waiting.length
     ? { label: `${someNames(waiting.map(a => a.name))} ${waiting.length > 1 ? 'need' : 'needs'} you`, icon: <Clock className="size-4 shrink-0 text-warning" strokeWidth={1.75} /> }
     : working.length
@@ -210,7 +210,7 @@ function ThreadCard({ thread, agents, now, open: isOpen, onOpen }: { thread: Thr
       </span>
       {repliers.length ? (
         <span className="flex min-w-0 max-w-[45%] shrink-0 items-center gap-1 rounded-full border border-content/10 bg-content/5 px-2 py-0.5 text-[12px] text-content/65">
-          {engine ? <EngineIcon engine={engine} className="size-3.5 shrink-0" /> : <Bot aria-hidden className="size-3.5 shrink-0 text-content/45" strokeWidth={1.75} />}
+          {latestAgent ? <AgentAvatar agent={latestAgent} className="size-3.5" /> : <Bot aria-hidden className="size-3.5 shrink-0 text-content/45" strokeWidth={1.75} />}
           <span className="min-w-0 truncate">{someNames(repliers.map(p => agents.find(a => a.id === p.agentId)?.name ?? p.name))}</span>
         </span>
       ) : null}

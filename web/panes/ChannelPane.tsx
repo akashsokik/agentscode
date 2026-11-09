@@ -12,7 +12,6 @@ import { projectLabel } from '../projects.ts';
 import { attempt, loadPosts, useApp } from '../store.ts';
 import { buildThreads } from '../threads.ts';
 import { ChannelDialog } from '../dialogs/ChannelDialog.tsx';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ChipButton, Empty, HeaderButton, MenuLabel, MenuRow } from '../ui/common.tsx';
 import { Bot, ChevronDown, Search, Settings } from '../mono/icons.tsx';
 import { DiscussionMark } from '../mono/DiscussionMark.tsx';
@@ -24,6 +23,7 @@ import { ChannelComposer } from './ChannelComposer.tsx';
 import { ActivityLine, JumpToLatest, PostList, SPINNER, useFollowLatest } from './ChannelPosts.tsx';
 import { ChannelThread } from './ChannelThread.tsx';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 /** The thread open in each channel, so it is still open when you come back to the tab. */
 const openThreads = new Map<string, string>();
@@ -62,7 +62,7 @@ function Members({ channel, members, onEdit }: { channel: Channel; members: Agen
           {listed.slice(0, 100).map(agent => (
             <MenuRow
               key={agent.id}
-              title={<span className="flex items-center gap-1.5"><EngineIcon engine={agent.engine} className="size-3.5" />{agent.name}</span>}
+              title={<span className="flex items-center gap-1.5"><AgentAvatar agent={agent} className="size-3.5" />{agent.name}</span>}
               hint={[projectName(agent.projectId), rolePreset(agent.role).name, agent.status === 'working' ? agent.activity || 'Working' : agent.status === 'waiting' ? 'Needs you' : ''].filter(Boolean).join(', ')}
               onSelect={() => { setShown(false); open({ kind: 'agent', agentId: agent.id }); }}
             />
