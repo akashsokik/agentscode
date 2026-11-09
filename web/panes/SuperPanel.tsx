@@ -8,7 +8,7 @@ import type { GoalStatus, SuperAsk, SuperGoal } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { memoryDate } from '../memory.ts';
 import { openAsks } from '../super.ts';
-import { decisionRows, GOAL_STATUS_LABEL, goalSections, superLogMax, superLogWidth, type DecisionRow } from '../superText.ts';
+import { decisionRows, GOAL_STATUS_LABEL, goalSections, heldText, superLogMax, superLogWidth, type DecisionRow } from '../superText.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { cx, HeaderButton, IconTab, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
@@ -278,11 +278,17 @@ function GoalItem({ goal, index, last, onRemoved }: { goal: SuperGoal; index: nu
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(goal.text);
   const [busy, setBusy] = useState(false);
-  // Remove asks once: the first press arms it for a few seconds, the second removes.
+  // Remove asks once: the first press arms it for a few seconds, the second removes. If it runs out
+  // while the confirm has focus, focus goes back to the Remove button rather than to the page.
   const [confirming, setConfirming] = useState(false);
+  const trash = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!confirming) return;
-    const timer = setTimeout(() => setConfirming(false), 4000);
+    const timer = setTimeout(() => {
+      const had = document.activeElement instanceof Element && document.activeElement.closest('[data-goal-confirm]');
+      setConfirming(false);
+      if (had) requestAnimationFrame(() => trash.current?.focus({ preventScroll: true }));
+    }, 4000);
     return () => clearTimeout(timer);
   }, [confirming]);
   // After Save or Cancel, focus goes back to the Edit button, not to the page.
@@ -332,12 +338,13 @@ function GoalItem({ goal, index, last, onRemoved }: { goal: SuperGoal; index: nu
               type="button"
               // The confirm takes focus, so a keyboard press of Remove can be confirmed with Enter.
               autoFocus
+              data-goal-confirm
               aria-label={`Confirm removing ${named}`}
               disabled={busy}
               onClick={async () => { if (await run(() => api.removeGoal(goal.id))) onRemoved?.(); }} className="h-5 rounded px-1.5 text-[11px] font-medium text-danger transition-colors hover:bg-selection-hover disabled:opacity-30">
               Remove?
             </button>
-          ) : <IconButton icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => setConfirming(true)} />}
+          ) : <IconButton ref={trash} icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => setConfirming(true)} />}
         </span>
       </div>
       {editing ? (
@@ -427,9 +434,4 @@ function useParentWidth(ref: React.RefObject<HTMLElement | null>): number {
     return () => observer.disconnect();
   }, [ref]);
   return width;
-}
-
-/** "2 messages waiting: quiet hours". */
-function heldText(held: { count: number; reason: string }): string {
-  return `${held.count} ${held.count === 1 ? 'message' : 'messages'} to the SuperAgent waiting: ${held.reason}. ${held.reason === 'the daily budget is used' ? 'Raise the budget in Settings, or they go tomorrow.' : 'They go when it may take a turn again; work you asked it for does not wait on these limits.'}`;
 }

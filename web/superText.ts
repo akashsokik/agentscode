@@ -88,3 +88,10 @@ export function goalSections(goals: readonly SuperGoal[] | undefined): { open: S
     done: all.filter(g => g.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)),
   };
 }
+
+/** "2 messages to the SuperAgent waiting: quiet hours. ..." The same words in its pane and the quick window. */
+export function heldText(held: { count: number; reason: string }): string {
+  const what = `${held.count} ${held.count === 1 ? 'message' : 'messages'} to the SuperAgent waiting: ${held.reason}.`;
+  const then = held.reason === 'the daily budget is used' ? 'Raise the budget in Settings, or they go tomorrow.' : 'They go when it may take a turn again.';
+  return `${what} ${then} Only work it started on its own waits; your messages and the work you asked for always go.`;
+}

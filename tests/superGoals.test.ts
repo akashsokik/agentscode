@@ -297,21 +297,28 @@ test('mail about work it began on its own waits on the wake-up limits, is shown 
   t.runner.complete();
   await settle();
   assert.equal(report.status, 'queued');
-  // Wake-ups on: it goes once, counted.
+  // Wake-ups on, as the minute tick sees it: the update goes first, and says the report waited.
+  t.watcher.note({ agentId: t.bo.id, key: 'y', text: 'Bo is free' });
   t.manager.updateSettings({ superWake: true });
+  assert.equal(t.watcher.flush(), true);
+  assert.match(t.runner.sent.at(-1)!.text, /While you could not take a turn \(wake-ups are off\), 1 message to you waited/);
+  t.runner.complete();
   await settle();
   assert.equal(report.status, 'delivering');
   assert.equal(t.runner.sent.filter(x => x.task?.messageId === report.id).length, 1);
-  assert.equal(new SuperStore(t.store.dataDir).wakesSince(Date.now() - 60_000), 2, 'the update and the report');
+  assert.equal(new SuperStore(t.store.dataDir).wakesSince(Date.now() - 60_000), 3, 'two updates and the report');
   t.runner.complete();
   await settle();
-  // The next update says it waited, and why.
-  t.watcher.note({ agentId: t.bo.id, key: 'y', text: 'Bo is free' });
+  // Held again and then delivered before the next update: that update does not count it.
+  t.manager.updateSettings({ superWake: false });
+  t.watcher.noteHeld(report.id, 'wake-ups are off');
+  t.manager.updateSettings({ superWake: true });
+  t.watcher.note({ agentId: t.bo.id, key: 'z', text: 'Bo again' });
   assert.equal(t.watcher.flush(), true);
-  assert.match(t.runner.sent.at(-1)!.text, /While you could not take a turn \(wake-ups are off\), 1 message to you waited/);
+  assert.doesNotMatch(t.runner.sent.at(-1)!.text, /waited/, 'delivered since, so no longer waiting');
 });
 
-test('the daily budget holds mail of both kinds and says so; held mail survives a restart', async () => {
+test('the daily budget holds only what it starts on its own, and says so; work you asked for goes past it; held mail survives a restart', async () => {
   const t = await team();
   t.runner.complete();
   // Your turn delegates to Ada; an update turn delegates to Bo.
@@ -329,22 +336,67 @@ test('the daily budget holds mail of both kinds and says so; held mail survives 
   t.manager.updateSettings({ superDailyBudgetUsd: 1 });
   t.watcher.held();
   t.store.agents.get(t.sup.id)!.costUsd += 5;
-  for (const [runner, id] of [[t.runners.get(t.ada.id)!.at(-1)!, mine.id], [t.runners.get(t.bo.id)!.at(-1)!, its.id]] as const) {
+  // Bo (its own work) reports first, then Ada (yours).
+  for (const [runner, id] of [[t.runners.get(t.bo.id)!.at(-1)!, its.id], [t.runners.get(t.ada.id)!.at(-1)!, mine.id]] as const) {
     await t.manager.commsTool(runner.ctx.commsToken!, 'report_result', { message_id: id, outcome: 'done', summary: 'Done.', evidence: 'x' });
     runner.complete(true, 'Reported.');
   }
   await settle();
-  assert.deepEqual(t.manager.superView().held, { count: 2, reason: 'the daily budget is used' });
-  // A restart keeps them queued, in open conversations, instead of failing them.
+  const fromBo = reportTo(t, t.sup.id, t.bo.id)!;
+  const fromAda = reportTo(t, t.sup.id, t.ada.id)!;
+  assert.notEqual(fromAda.status, 'queued', 'your work goes past the daily budget, ahead of held mail');
+  assert.equal(fromBo.status, 'queued');
+  assert.deepEqual(t.manager.superView().held, { count: 1, reason: 'the daily budget is used' });
+  t.runner.complete();
+  await settle();
+  // A restart keeps the held one queued, in an open conversation, instead of failing it.
   const mailbox = (t.manager as unknown as { mailbox: { recover(): void } }).mailbox;
   mailbox.recover();
-  const held = t.store.messages.filter(m => m.toAgentId === t.sup.id && m.report);
-  assert.deepEqual(held.map(m => m.status), ['queued', 'queued']);
-  assert.ok(held.every(m => !t.store.conversations.find(c => c.id === m.conversationId)!.stopped));
-  // A bigger budget lets them through, one turn at a time.
+  assert.equal(fromBo.status, 'queued');
+  assert.equal(t.store.conversations.find(c => c.id === fromBo.conversationId)!.stopped, false);
+  // A bigger budget lets it through.
   t.manager.updateSettings({ superDailyBudgetUsd: 100 });
   await settle();
-  assert.equal(held.filter(m => m.status === 'delivering').length, 1);
+  assert.equal(fromBo.status, 'delivering');
+});
+
+test('goals are handed out only in update turns, never from mail about work you asked for', async () => {
+  const t = await team();
+  const { added } = await t.call('add_goal', { text: 'Tidy the docs', why: 'x' }) as { added: { id: string } };
+  t.runner.complete();
+  // Your turn delegates to Ada; her report comes back as a mail turn on your work.
+  t.manager.send(t.sup.id, 'Write the notes.');
+  await settle();
+  const mine = await t.call('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'Notes.', acceptance_criteria: 'Done.' }) as { id: string };
+  t.runner.complete();
+  await settle();
+  const ada = t.runners.get(t.ada.id)!.at(-1)!;
+  await t.manager.commsTool(ada.ctx.commsToken!, 'report_result', { message_id: mine.id, outcome: 'done', summary: 'Done.', evidence: 'x' });
+  ada.complete(true, 'Reported.');
+  await settle();
+  assert.equal(t.runner.sent.at(-1)!.task?.source, 'agent');
+  await assert.rejects(t.call('update_goal', { goal_id: added.id, status: 'in_progress', agent_id: 'Bo', why: 'Bo is free.' }), e => status(e) === 409 && /update turns/.test((e as Error).message));
+  await assert.rejects(t.call('update_goal', { goal_id: added.id, agent_id: 'Bo', why: 'x' }), e => status(e) === 409);
+  // Notes and completing are fine there; starting a goal is fine in an update turn.
+  await t.call('update_goal', { goal_id: added.id, notes: 'Waiting for a free agent.', why: 'x' });
+  t.runner.complete();
+  await settle();
+  t.watcher.note({ agentId: t.bo.id, key: 'free', text: 'Bo is free' });
+  assert.ok(t.watcher.flush());
+  await t.call('update_goal', { goal_id: added.id, status: 'in_progress', agent_id: 'Bo', why: 'Bo is free.' });
+  assert.equal(t.manager.superView().goals[0].status, 'in_progress');
+});
+
+test('the app hears about the SuperAgent only when something changed', async () => {
+  const t = await team();
+  const tick = () => (t.manager as unknown as { superTick(): void }).superTick();
+  tick();
+  const before = t.events.filter(e => e.type === 'super').length;
+  tick();
+  tick();
+  assert.equal(t.events.filter(e => e.type === 'super').length, before, 'an unchanged view is not sent again');
+  t.manager.addGoal({ text: 'Something new' });
+  assert.equal(t.events.filter(e => e.type === 'super').length, before + 1);
 });
 
 test('goal undo refuses when the goal is gone or would repeat an open one; update_goal needs something to change', async () => {

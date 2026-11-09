@@ -11,7 +11,7 @@ import { ENGINES, type Agent, type EngineKind, type Entry, type SuperAsk } from 
 import { api } from '../api.ts';
 import { IS_MAC } from '../platform.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
-import { openAsks } from '../superText.ts';
+import { heldText, openAsks } from '../superText.ts';
 import { cx } from '../ui/common.tsx';
 import { EngineIcon, ENGINE_NAMES } from '../ui/EngineIcon.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
@@ -208,6 +208,10 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
       ) : (
         <>
           <TeamStrip agents={agents} onOpen={onOpenAgent} />
+          {/* Mail held for the SuperAgent, as its pane shows it. */}
+          {snapshot.super.held ? (
+            <p role="status" data-quick-held className="mx-3.5 mt-2.5 shrink-0 rounded-[10px] bg-content/[0.03] px-3 py-2 text-[12px] leading-relaxed text-content/60">{heldText(snapshot.super.held)}</p>
+          ) : null}
           <Asks asks={openAsks(snapshot.super.asks)} />
           <Reply target={live} agent={replier} entries={entries} />
         </>

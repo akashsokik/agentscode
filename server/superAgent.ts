@@ -343,6 +343,8 @@ export interface WatcherHost {
   settings(): Settings;
   /** The SuperAgent's running cost in dollars, for the daily budget. */
   cost(): number;
+  /** Whether a message is still queued (held mail the next update reports). */
+  mailQueued?(messageId: string): boolean;
   store: SuperStore;
   /** Start the update turn: the prompt it reads, and the events behind it (for the transcript's line). */
   deliver(prompt: string, events: SuperEvent[]): void;
@@ -409,7 +411,7 @@ export class SuperWatcher {
     return null;
   }
 
-  /** The daily dollar budget: it holds every turn but the ones you start yourself. */
+  /** The daily dollar budget: it holds what the SuperAgent starts on its own, never your turns or work you asked for. */
   dailyHeld(): string | null {
     const settings = this.host.settings();
     if (settings.superDailyBudgetUsd > 0 && this.host.store.spentToday(this.host.cost(), new Date(this.now())) >= settings.superDailyBudgetUsd) return 'the daily budget is used';
@@ -437,7 +439,9 @@ export class SuperWatcher {
     if (!this.pending.length || this.blocked()) return false;
     const events = this.pending;
     this.pending = [];
-    const held = this.heldMail.size ? { count: this.heldMail.size, reasons: [...new Set(this.heldMail.values())] } : undefined;
+    // Only mail still waiting counts: what went or was cancelled since it was noted is no news.
+    const still = [...this.heldMail].filter(([id]) => this.host.mailQueued?.(id) ?? true);
+    const held = still.length ? { count: still.length, reasons: [...new Set(still.map(([, reason]) => reason))] } : undefined;
     this.heldMail.clear();
     this.host.store.noteWake(this.now());
     this.host.deliver(updatePrompt(events, this.host.store.openAsks(), this.now(), this.host.store.goals(), held), events);
