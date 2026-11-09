@@ -132,10 +132,12 @@ notes.
   answers on port 4320 (for example `npm run dev`), the window opens on that one instead, so two
   servers never share `~/.agentscode`.
 - Quitting the app stops its agents. Closing the window keeps them working.
-- **macOS:** releases are signed with a Developer ID and notarized by Apple, so the DMG opens like
-  any other downloaded app and installs its own updates. Versions up to 0.2.2 were not signed: they
-  can't install a signed update themselves, so update one of those once by downloading the DMG again
-  or running the install command above.
+- **macOS:** from 0.2.3, releases are signed with a Developer ID and notarized by Apple, so the DMG
+  opens like any other downloaded app and installs its own updates. Versions up to 0.2.2 were not
+  signed: a DMG of one of those downloaded in a browser is blocked the first time ("Apple could not
+  verify AgentsCode"; System Settings > Privacy & Security > Open Anyway), and they can't install a
+  signed update themselves, so update one of those once by downloading the DMG again or running the
+  install command above.
 - **Windows:** the installer is not code-signed yet, so SmartScreen may ask you to confirm
   (**More info > Run anyway**).
 - **Linux:** make the AppImage executable (`chmod +x AgentsCode-linux-x86_64.AppImage`) and run it.
