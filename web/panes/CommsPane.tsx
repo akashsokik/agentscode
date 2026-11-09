@@ -13,6 +13,7 @@ import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { cx, Empty, HeaderButton, StatusLabel, type Tone } from '../ui/common.tsx';
+import { outcomeWords, reportKind } from '../peerText.ts';
 import {
   AlertCircle, ArrowLeft, Bot, CheckCheck, CheckCircle, ChevronDown, CircleX, Clock, MessageMultiple, Search, Square, X,
   type IconComponent,
@@ -421,7 +422,7 @@ function ThreadView({ thread, state, title, agents, now }: { thread: CommsThread
                   last={i === stops - 1}
                   node={<AgentMark agent={agents.find(a => a.id === message.fromAgentId)} className="size-4" />}
                 >
-                  <MessageCard message={message} agents={agents} now={now} />
+                  <MessageCard message={message} answered={message.replyTo ? thread.messages.find(m => m.id === message.replyTo) : undefined} agents={agents} now={now} />
                 </TimelineStop>
               ))}
               {tail.map((stop, i) => (
@@ -525,7 +526,7 @@ function TailStop({ stop, agents, fresh, first, last }: { stop: TimelineTail; ag
 }
 
 /** InboxComment for a peer message: a header of who, what and when, over its body. */
-function MessageCard({ message, agents, now }: { message: PeerMessage; agents: Agent[]; now: number }) {
+function MessageCard({ message, answered, agents, now }: { message: PeerMessage; answered?: PeerMessage; agents: Agent[]; now: number }) {
   const outcome = message.report ? OUTCOME[message.report.outcome] : undefined;
   return (
     <article className={cx('overflow-hidden rounded-md border bg-content/5', message.status === 'failed' ? 'border-danger/25' : 'border-content/10')}>
@@ -543,7 +544,8 @@ function MessageCard({ message, agents, now }: { message: PeerMessage; agents: A
             <span aria-hidden>·</span>
             <span className={cx('inline-flex shrink-0 items-center gap-1', outcome.className)}>
               <outcome.icon className="size-3.5" strokeWidth={1.75} />
-              {message.report.outcome}
+              {/* As the work it answers reads it: a failed review needs changes (web/peerText.ts). */}
+              {outcomeWords(message.report.outcome, reportKind(message, answered))}
             </span>
           </>
         ) : null}
