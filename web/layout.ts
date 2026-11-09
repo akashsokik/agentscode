@@ -42,6 +42,8 @@ export interface Layout {
    * the user picks, so the default follows the window: folded below 1280px.
    */
   rail?: boolean;
+  /** The SuperAgent's decision log beside its conversation: open unless you closed it. */
+  superLog?: boolean;
   /** Column widths the user dragged to, in px; a column without one uses its default. */
   widths?: Partial<Record<ColumnKey, number>>;
   rightPanel: boolean;
@@ -61,7 +63,7 @@ export interface Layout {
   terminalZoom?: Record<string, string>;
 }
 
-export type ColumnKey = 'nav' | 'workspace' | 'panel';
+export type ColumnKey = 'nav' | 'workspace' | 'panel' | 'superLog';
 
 const STORAGE_KEY = 'agentscode:layout';
 const MAX_PANES = 3;
@@ -287,6 +289,7 @@ export function setColumnWidth(key: ColumnKey, width: number | undefined): void 
 }
 export function setProject(projectId: string): void { if (layout.projectId !== projectId) set({ ...layout, projectId }); }
 export function setRightPanel(rightPanel: boolean): void { set({ ...layout, rightPanel }); }
+export function setSuperLog(superLog: boolean): void { if ((layout.superLog !== false) !== superLog) set({ ...layout, superLog }); }
 export function setRightView(rightView: Layout['rightView']): void { set({ ...layout, rightPanel: true, rightView }); }
 export function setTerminal(terminal: boolean): void { if (Boolean(layout.terminal) !== terminal) set({ ...layout, terminal }); }
 export function setTerminalHeight(terminalHeight: number | undefined): void { set({ ...layout, terminalHeight }); }

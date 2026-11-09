@@ -1,17 +1,19 @@
 /**
  * The SuperAgent's own parts of its pane: the questions it waits on you for, as cards with the
- * choices to click, and its decision log, where anything it did on its own can be undone.
+ * choices to click, and its decision log on the right of the pane, where anything it did on its own
+ * can be undone.
  */
 import { useState } from 'react';
-import type { SuperAction, SuperAsk } from '../../shared/types.ts';
+import type { SuperAsk } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { memoryDate } from '../memory.ts';
 import { openAsks } from '../super.ts';
+import { decisionRows, type DecisionRow } from '../superText.ts';
 import { attempt, useApp } from '../store.ts';
-import { PRIMARY, TextButton } from '../ui/common.tsx';
-import { Modal } from '../mono/Modal.tsx';
+import { cx, HeaderButton, PRIMARY, TextButton } from '../ui/common.tsx';
+import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
+import { ListBullet, PanelRight } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
-import { Group } from '../mono/settings.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
 export function SuperInbox() {
@@ -52,50 +54,89 @@ function AskCard({ ask }: { ask: SuperAsk }) {
 
 const time = (ts: number) => `${memoryDate(ts)} ${new Date(ts).toTimeString().slice(0, 5)}`;
 
-/** Everything the SuperAgent did on its own, newest first, and what it asked you. */
-export function SuperLogDialog({ onClose }: { onClose: () => void }) {
-  const log = useApp(s => s.snapshot?.super.log) ?? [];
-  const asks = useApp(s => s.snapshot?.super.asks) ?? [];
-  const answered = asks.filter(a => a.answeredAt !== undefined);
+/**
+ * The SuperAgent's decision log, on the right of its pane: what it did on its own, newest first,
+ * each with why and Undo, then what you answered it. Kept live by `super` events. `over` floats it
+ * above the conversation in a narrow pane; otherwise it sits beside it, resizable from its left edge.
+ */
+export function SuperLogSidebar({ over, onClose }: { over: boolean; onClose: () => void }) {
+  const log = useApp(s => s.snapshot?.super.log);
+  const asks = useApp(s => s.snapshot?.super.asks);
+  const rows = decisionRows(log);
+  const answered = (asks ?? []).filter(a => a.answeredAt !== undefined);
+  const column = useColumnWidth('superLog', 300, 240, 0.4);
+  const undoable = rows.filter(r => r.undoable).length;
   return (
-    <Modal title="What the SuperAgent did" size="md" fitViewport onClose={onClose}>
-      <div className="px-4 pb-4 pt-4">
-        <Group title="Decisions" description="What it did on its own, and why. Undo puts it back, and the SuperAgent hears that you undid it.">
-          {log.length ? log.map(action => <ActionRow key={action.id} action={action} />) : (
-            <p className="px-4 py-3.5 text-[12px] text-content/45">Nothing yet. Its decisions show here as it makes them.</p>
-          )}
-        </Group>
+    <aside
+      aria-label="Decision log"
+      data-super-log
+      style={{ width: column.width }}
+      className={cx('relative flex shrink-0 flex-col border-l border-stroke font-sans', over ? 'body-glass absolute inset-y-0 right-0 z-20 shadow-2xl' : '')}
+    >
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-stroke pl-3.5 pr-1.5">
+        <h2 className="min-w-0 flex-1 truncate text-[12px] font-medium text-content/80">
+          Decisions
+          {rows.length ? <span className="ml-1.5 font-normal tabular-nums text-content/40">{rows.length}</span> : null}
+        </h2>
+        <HeaderButton icon={PanelRight} label="Hide the decision log" active onClick={onClose} />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {rows.length ? (
+          <>
+            <p className="px-3.5 pb-1 pt-2.5 text-[11px] leading-relaxed text-content/40">
+              What it did on its own.{undoable ? ' Undo puts it back, and the SuperAgent hears that you did.' : ''}
+            </p>
+            <ol>{rows.map(row => <DecisionItem key={row.id} row={row} />)}</ol>
+          </>
+        ) : (
+          <div className="flex flex-col items-center px-6 pb-6 pt-10 text-center">
+            <ListBullet className="size-5 text-content/25" strokeWidth={1.5} />
+            <p className="mt-2.5 text-[13px] text-content/60">No decisions yet</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-content/40">When the SuperAgent creates agents or channels, delegates or nudges, it shows here with why, and you can undo it.</p>
+          </div>
+        )}
         {answered.length ? (
-          <Group title="Your answers">
-            {answered.map(ask => (
-              <div key={ask.id} className="border-b border-content/5 px-4 py-3 last:border-b-0">
-                <p className="text-[13px] leading-5 text-content">{ask.question}</p>
-                <p className="mt-0.5 text-[12px] text-content/55">{ask.dismissed ? 'Put aside' : `You answered: ${ask.answer}`}</p>
-                <p className="mt-0.5 text-[11px] text-content/35">{time(ask.answeredAt!)}</p>
-              </div>
-            ))}
-          </Group>
+          <section aria-label="Your answers" className="mt-2 border-t border-stroke">
+            <h3 className="px-3.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-content/40">Your answers</h3>
+            <ol>
+              {answered.map(ask => (
+                <li key={ask.id} className="px-3.5 py-2">
+                  <p className="text-[12px] leading-5 text-content/75">{ask.question}</p>
+                  <p className="text-[12px] leading-5 text-content/45">{ask.dismissed ? 'Put aside' : ask.answer}</p>
+                  <p className="text-[11px] text-content/30">{time(ask.answeredAt!)}</p>
+                </li>
+              ))}
+            </ol>
+          </section>
         ) : null}
       </div>
-    </Modal>
+      <ResizeHandle column={column} edge="left" label="Resize the decision log" />
+    </aside>
   );
 }
 
-function ActionRow({ action }: { action: SuperAction }) {
+function DecisionItem({ row }: { row: DecisionRow }) {
   const [busy, setBusy] = useState(false);
   const undo = async () => {
     setBusy(true);
-    await attempt(() => api.undoSuper(action.id));
+    await attempt(() => api.undoSuper(row.id));
     setBusy(false);
   };
+  const undone = row.undoneAt !== undefined;
   return (
-    <div data-super-action={action.id} className="flex items-start gap-3 border-b border-content/5 px-4 py-3 last:border-b-0">
-      <div className="min-w-0 flex-1">
-        <p className={`text-[13px] leading-5 ${action.undoneAt ? 'text-content/45 line-through decoration-content/25' : 'text-content'}`}>{action.summary}</p>
-        {action.why ? <p className="mt-0.5 text-[12px] leading-relaxed text-content/45">Why: {action.why}</p> : null}
-        <p className="mt-0.5 text-[11px] text-content/35">{time(action.at)}{action.undoneAt ? ` · undone ${time(action.undoneAt)}` : ''}</p>
+    <li data-super-action={row.id} className="group/decision border-b border-content/5 px-3.5 py-2.5 last:border-b-0">
+      <div className="flex items-baseline gap-2">
+        <time dateTime={new Date(row.at).toISOString()} title={new Date(row.at).toLocaleString()} className="min-w-0 flex-1 truncate text-[11px] tabular-nums text-content/35">
+          {time(row.at)}{undone ? ' · undone' : ''}
+        </time>
+        {row.undoable ? (
+          <TextButton disabled={busy} onClick={() => void undo()} className="shrink-0 opacity-70 transition-opacity group-hover/decision:opacity-100 focus-visible:opacity-100">
+            {busy ? 'Undoing…' : 'Undo'}
+          </TextButton>
+        ) : null}
       </div>
-      {action.undo && !action.undoneAt ? <SecondaryButton disabled={busy} onClick={() => void undo()}>Undo</SecondaryButton> : null}
-    </div>
+      <p className={cx('mt-0.5 text-[13px] leading-5', undone ? 'text-content/40 line-through decoration-content/25' : 'text-content/85')}>{row.summary}</p>
+      {row.why ? <p className="mt-0.5 text-[12px] leading-relaxed text-content/45">{row.why}</p> : null}
+    </li>
   );
 }
