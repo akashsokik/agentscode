@@ -622,7 +622,8 @@ function WorkFoldLine({ title, agent, live, expandable, open, onToggle }: {
   onToggle: () => void;
 }) {
   // Only a fold that opens shows the chevron; a line over work that has not folded keeps the mark.
-  const icon = <MarkTile mark={<AgentAvatar agent={agent} className="size-[18px]" />} folds={expandable} open={open} />;
+  // Only the turn running now moves and shows the mood; past turns stay calm and still.
+  const icon = <MarkTile mark={<AgentAvatar agent={live ? agent : { id: agent.id, role: agent.role, avatar: agent.avatar }} animate={live} className="size-[18px]" />} folds={expandable} open={open} />;
   const label = live ? title : (
     <span className="min-w-0 flex-1 truncate font-sans text-sm text-content/50 transition-colors duration-200 group-hover:text-content/80">{title}</span>
   );
