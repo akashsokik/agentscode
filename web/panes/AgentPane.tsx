@@ -24,7 +24,8 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
   const allApprovals = useApp(s => s.snapshot?.approvals);
   const approvals = useMemo(() => (allApprovals ?? []).filter(a => a.agentId === agentId), [allApprovals, agentId]);
   const question = approvals.find(a => a.type === 'question');
-  const [settings, setSettings] = useState<AgentSettingsSection | null>(null);
+  // Open, and on which section: undefined opens the one you had last for this agent.
+  const [settings, setSettings] = useState<{ section?: AgentSettingsSection } | null>(null);
   const logOpen = useLayout().superLog !== false;
   // In a narrow pane the log opens over the conversation, and only when you ask for it.
   const [peek, setPeek] = useState(false);
@@ -86,7 +87,7 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
               data-super-log-toggle
             />
           ) : null}
-          <HeaderButton icon={Settings} label="Agent settings" onClick={() => setSettings('general')} />
+          <HeaderButton icon={Settings} label="Agent settings" onClick={() => setSettings({})} />
         </>
       )}
     >
@@ -100,12 +101,12 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
           <Transcript agent={agent} entries={entries} approvals={approvals} />
         </OpenUIActionContext.Provider>
         {/* A soul change a dream proposed waits here until you accept or reject it in the settings. */}
-        <SoulProposalNotice agent={agent} onReview={() => setSettings('soul')} />
+        <SoulProposalNotice agent={agent} onReview={() => setSettings({ section: 'soul' })} />
         {/* The SuperAgent's questions wait above its composer until you answer them. */}
         {agent.role === 'super' ? <SuperInbox /> : null}
-        <Composer agent={agent} project={project} question={question} onSettings={() => setSettings('general')} />
+        <Composer agent={agent} project={project} question={question} onSettings={() => setSettings({})} />
       </WithLog>
-      {settings ? <AgentSettingsDialog agent={agent} section={settings} onClose={() => setSettings(null)} /> : null}
+      {settings ? <AgentSettingsDialog agent={agent} section={settings.section} onClose={() => setSettings(null)} /> : null}
     </PaneFrame>
   );
 }
