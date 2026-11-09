@@ -6,7 +6,7 @@ import { useEffect, useRef } from 'react';
 import { inQuietHours, type DesktopSuper, type SuperCommand } from '../shared/superAgent.ts';
 import type { Agent } from '../shared/types.ts';
 import { api } from './api.ts';
-import { getLayout, open, setRightPanel } from './layout.ts';
+import { open, showPanelForSuperOnce } from './layout.ts';
 import { attempt, getState, useApp } from './store.ts';
 import { openAsks, superLabel } from './superText.ts';
 
@@ -20,17 +20,17 @@ export function useSuperAgent(): Agent | undefined {
 }
 
 /**
- * Open the SuperAgent's tab, setting it up first if there is none, with the right panel shown: its
- * Decisions, Goals and Routines live there.
+ * Open the SuperAgent's tab, setting it up first if there is none. The first time, the right panel
+ * opens too (its Decisions, Goals and Routines live there); after that it stays as you left it.
  */
 export async function openSuper(): Promise<void> {
   const id = getState().snapshot?.super.agentId ?? (await attempt(() => api.createSuper()))?.id;
   if (!id) return;
   open({ kind: 'agent', agentId: id });
-  if (!getLayout().rightPanel) setRightPanel(true);
+  showPanelForSuperOnce();
 }
 
-/** Open an agent's tab; the SuperAgent's opens as openSuper does, with the right panel. */
+/** Open an agent's tab; the SuperAgent's opens as openSuper does. */
 export function openAgent(agentId: string): void {
   if (agentId === getState().snapshot?.super.agentId) void openSuper();
   else open({ kind: 'agent', agentId });
