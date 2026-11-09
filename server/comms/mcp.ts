@@ -7,16 +7,19 @@ const token = process.env.AGENTSCODE_TOKEN;
 const endpoint = process.env.AGENTSCODE_TOOLS_URL;
 if (!token || !endpoint) throw new Error('AgentsCode comms credentials are missing.');
 
+const executive = process.env.AGENTSCODE_EXECUTIVE === '1';
+
 const server = createCommsMcpServer(async (tool, args) => {
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ tool, args }),
-    // Browser ops wait on page loads (up to 45s on the server); everything else answers quickly.
-    signal: AbortSignal.timeout(tool.startsWith('browser_') ? 50_000 : 10_000),
+    // Browser ops wait on page loads (up to 45s on the server), and creating an agent may build a
+    // git worktree: a short timeout there would make the model retry a command that went through.
+    signal: AbortSignal.timeout(tool.startsWith('browser_') || tool === 'create_agent' ? 50_000 : 10_000),
   });
   const result = await response.json() as { error?: string };
   if (!response.ok) throw new Error(result.error ?? `AgentsCode request failed (${response.status}).`);
   return result;
-});
+}, { executive });
 await server.connect(new StdioServerTransport());

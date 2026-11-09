@@ -7,7 +7,8 @@ export const ENGINES: EngineKind[] = ['claude', 'codex', 'orcacode'];
 export const ENGINE_LABELS: Record<EngineKind, string> = { claude: 'Claude Code', codex: 'Codex', orcacode: 'OrcaCode' };
 
 /** What an agent is for. Only a lead may delegate structured tasks to teammates. */
-export type AgentRole = 'dev' | 'lead' | 'reviewer' | 'tester' | 'planner' | 'scout' | 'custom';
+/** super: the one SuperAgent, which runs the team for the user and never edits (server/superAgent.ts). */
+export type AgentRole = 'dev' | 'lead' | 'reviewer' | 'tester' | 'planner' | 'scout' | 'custom' | 'super';
 
 /**
  * How much an agent may do without asking.
@@ -40,7 +41,8 @@ export type WorktreeCleanup = 'keep' | 'remove' | 'discard';
 
 export interface AgentTask {
   summary: string;
-  source: 'user' | 'agent';
+  /** system: AgentsCode itself, such as the SuperAgent's wake-up updates; never the user's words. */
+  source: 'user' | 'agent' | 'system';
   fromAgentId?: string;
   /** The peer message this turn handles, when source is 'agent'. */
   messageId?: string;
@@ -197,6 +199,53 @@ export interface ProfileOp {
   entryId?: string;
   /** The proposal it made. */
   proposalId?: string;
+}
+
+// ---- the SuperAgent -------------------------------------------------------------
+
+/** A question the SuperAgent put to the user, with the choices to click. */
+export interface SuperAsk {
+  id: string;
+  question: string;
+  /** Why it asks, or what the user should know first. */
+  detail?: string;
+  /** One to four choices; the user may also type their own answer. */
+  options: string[];
+  createdAt: number;
+  answeredAt?: number;
+  answer?: string;
+  /** The user put it aside without answering. */
+  dismissed?: boolean;
+}
+
+/** How to take back something the SuperAgent did on its own. */
+export type SuperUndo =
+  | { kind: 'removeAgent'; agentId: string }
+  | { kind: 'removeChannel'; channelId: string }
+  | { kind: 'channel'; channelId: string; before: { name: string; topic: string; memberIds: string[] } }
+  | { kind: 'agent'; agentId: string; before: { name: string; role: AgentRole; model: string; effort: string } };
+
+/** One thing the SuperAgent did on its own, for the decision log. */
+export interface SuperAction {
+  id: string;
+  at: number;
+  /** The command it ran: create_agent, delegate_task, ... */
+  tool: string;
+  /** What it did, in a line. */
+  summary: string;
+  /** Why, in its words: the preference or situation behind it. */
+  why: string;
+  undo?: SuperUndo;
+  undoneAt?: number;
+}
+
+export interface SuperState {
+  /** The SuperAgent's agent id, or null before it is set up. */
+  agentId: string | null;
+  /** Open asks, then the latest answered ones, newest first. */
+  asks: SuperAsk[];
+  /** The latest decisions, newest first. */
+  log: SuperAction[];
 }
 
 // ---- dreaming -----------------------------------------------------------------
@@ -499,7 +548,7 @@ export type EntryKind = 'user' | 'agent' | 'tool' | 'system' | 'done' | 'error' 
  * queued behind a running turn lands inside it; the marker says which prompt this turn runs.
  */
 export interface TurnMarker {
-  source: 'user' | 'agent';
+  source: 'user' | 'agent' | 'system';
   /** The user entry this turn answers. */
   entryId?: string;
   /** The peer message this turn handles; its entry id is `peer:<messageId>`. */
@@ -584,6 +633,15 @@ export interface Settings {
   autoTeamContext: boolean;
   /** Let agents run their own JavaScript in browser tabs (browser_eval). Off by default. */
   browserEval: boolean;
+  /** Wake the SuperAgent when agents finish, fail, get stuck or wait for the user. */
+  superWake: boolean;
+  /** The most wake-ups an hour; past it, updates wait for the next hour. */
+  superMaxWakesPerHour: number;
+  /** Quiet hours, "HH:MM" local time: no wake-ups and no notifications in between. Equal times mean none. */
+  superQuietFrom: string;
+  superQuietTo: string;
+  /** Desktop notifications when the SuperAgent asks something. */
+  superNotify: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -592,6 +650,11 @@ export const DEFAULT_SETTINGS: Settings = {
   shareActivity: true,
   autoTeamContext: true,
   browserEval: false,
+  superWake: true,
+  superMaxWakesPerHour: 6,
+  superQuietFrom: '22:00',
+  superQuietTo: '08:00',
+  superNotify: true,
 };
 
 export interface ModelOption {
@@ -677,6 +740,8 @@ export interface Snapshot {
   platform: string;
   /** What AgentsCode knows about the user (user.md), and what waits for approval. */
   profile: UserProfile;
+  /** The SuperAgent: which agent it is, what it asks the user, and what it did. */
+  super: SuperState;
 }
 
 /**
@@ -713,6 +778,8 @@ export type ServerEvent =
   | { type: 'soulProposal'; agentId: string; proposal: SoulProposal | null }
   /** user.md or its waiting proposals changed. */
   | { type: 'profile'; profile: UserProfile }
+  /** The SuperAgent's asks or decision log changed, or it was set up. */
+  | { type: 'super'; super: SuperState }
   | { type: 'project'; project: Project }
   | { type: 'projectRemoved'; id: string }
   | { type: 'entry'; entry: Entry }

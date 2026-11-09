@@ -144,7 +144,9 @@ export class Mailbox {
 
   delegate(fromId: string, toId: string, delegation: Delegation): PeerMessage {
     this.requireLead(fromId);
-    if (this.agent(fromId).autonomy === 'readonly') throw new HttpError(403, 'Plan-only agents need the user\'s approval before delegating work.');
+    // The SuperAgent is read-only so it can never edit; delegating is how its work gets done.
+    const from = this.agent(fromId);
+    if (from.autonomy === 'readonly' && from.role !== 'super') throw new HttpError(403, 'Plan-only agents need the user\'s approval before delegating work.');
     const text = [
       `${delegation.kind.toUpperCase()}: ${delegation.task}`,
       `Acceptance criteria:\n${delegation.acceptanceCriteria}`,
@@ -329,7 +331,8 @@ export class Mailbox {
 
   private requireLead(id: string): Agent {
     const agent = this.agent(id);
-    if (agent.role !== 'lead') throw new HttpError(403, 'Only agents with the Lead role can delegate and track tasks.');
+    // The SuperAgent leads the whole team.
+    if (agent.role !== 'lead' && agent.role !== 'super') throw new HttpError(403, 'Only agents with the Lead role, and the SuperAgent, can delegate and track tasks.');
     return agent;
   }
 

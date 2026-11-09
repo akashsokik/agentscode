@@ -11,12 +11,12 @@ import {
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentTask, Autonomy, Question, ToolCall, TurnUsage } from '../../shared/types.ts';
+import type { Agent, AgentTask, Autonomy, Question, ToolCall, TurnUsage } from '../../shared/types.ts';
 import { reservedHomeFile } from '../agentHome.ts';
 import { approvalTitle, clip, resultSummary, toolActivity, toolDetail, toolResultText, toolSummary } from './describe.ts';
 import { toolPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
-import { commsMcpConfig, COMMS_TOOLS } from '../comms/tools.ts';
+import { commsMcpConfig, COMMS_TOOLS, SUPER_BROWSER_TOOLS, SUPER_TOOLS, BROWSER_TOOLS } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
 import { parseCommand } from '../../shared/commands.ts';
 
@@ -26,6 +26,36 @@ const MODE: Record<Autonomy, PermissionMode> = {
   edits: 'acceptEdits',
   full: 'bypassPermissions',
 };
+
+/**
+ * The only built-in tools the SuperAgent has: reading and looking things up. No Edit, Write, Bash,
+ * NotebookEdit or Agent/Task (a subagent would have them all), whatever the user's settings allow.
+ */
+export const SUPER_CLAUDE_TOOLS = ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch'];
+
+/**
+ * The tools and permission mode of a Claude session. Every agent gets its comms tools without a
+ * prompt; the SuperAgent gets only SUPER_CLAUDE_TOOLS built in, its own commands, the look-only
+ * browser tools, no MCP servers of the user's, and Claude's normal mode rather than plan mode
+ * (it has nothing to edit, so it has no plan to leave).
+ */
+export function claudeToolPolicy(agent: Pick<Agent, 'role' | 'autonomy' | 'useMcp'>, comms: boolean): {
+  tools?: string[]; allowedTools?: string[]; permissionMode: PermissionMode; strictMcpConfig: boolean;
+} {
+  const mcp = (names: string[]) => names.map(name => `mcp__${COMMS_SERVER}__${name}`);
+  if (agent.role === 'super') {
+    const own = [...COMMS_TOOLS.filter(t => !BROWSER_TOOLS.includes(t as never)), ...SUPER_BROWSER_TOOLS, ...SUPER_TOOLS];
+    return { tools: [...SUPER_CLAUDE_TOOLS], allowedTools: comms ? mcp(own) : undefined, permissionMode: 'default', strictMcpConfig: true };
+  }
+  return { allowedTools: comms ? mcp(COMMS_TOOLS) : undefined, permissionMode: MODE[agent.autonomy], strictMcpConfig: !agent.useMcp };
+}
+
+/** Whether the SuperAgent may use this tool at all: its read tools and its own MCP tools, nothing else. */
+export function superMayUse(toolName: string): boolean {
+  if (SUPER_CLAUDE_TOOLS.includes(toolName)) return true;
+  const prefix = `mcp__${COMMS_SERVER}__`;
+  return toolName.startsWith(prefix) && Boolean(claudeToolPolicy({ role: 'super', autonomy: 'readonly', useMcp: false }, true).allowedTools?.includes(toolName));
+}
 
 /** Claude Code's file-editing tools, and the input that names the file. */
 const EDIT_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' };
@@ -215,6 +245,7 @@ export class ClaudeRunner implements Runner {
 
   async setAutonomy(autonomy: Autonomy): Promise<void> {
     if (!this.q) return; // the next start() reads the new value
+    if (this.ctx.agent().role === 'super') return; // its mode never changes
     if (autonomy === 'full' && !this.startedWithBypass) {
       // Bypass has to be enabled when the process starts, so restart it (the session resumes).
       if (this.turnActive) this.restartWhenIdle = true;
@@ -286,7 +317,8 @@ export class ClaudeRunner implements Runner {
     const input = new InputQueue();
     const directories = this.directories();
     this.startedDirs = JSON.stringify(directories);
-    this.startedWithBypass = agent.autonomy === 'full';
+    this.startedWithBypass = agent.autonomy === 'full' && agent.role !== 'super';
+    const policy = claudeToolPolicy(agent, Boolean(this.ctx.commsToken));
     this.stderrTail = '';
     const q = this.query({
       prompt: input,
@@ -296,7 +328,8 @@ export class ClaudeRunner implements Runner {
         model: agent.model || undefined,
         effort: (agent.effort || undefined) as EffortLevel | undefined,
         settings: agent.serviceTier === 'fast' ? { fastMode: true } : undefined,
-        permissionMode: MODE[agent.autonomy],
+        permissionMode: policy.permissionMode,
+        ...(policy.tools ? { tools: policy.tools } : {}),
         allowDangerouslySkipPermissions: this.startedWithBypass || undefined,
         canUseTool: this.canUseTool,
         // soul.md, memory.md and the dream records are off limits to edit tools in every mode.
@@ -304,10 +337,10 @@ export class ClaudeRunner implements Runner {
         // Load CLAUDE.md, settings and plugins like a normal Claude Code session...
         settingSources: ['user', 'project', 'local'],
         // ...but skip MCP servers unless asked: they can add ~200k tokens of tool definitions.
-        strictMcpConfig: !agent.useMcp,
+        strictMcpConfig: policy.strictMcpConfig,
         // The comms tools only reach the IDE, so they run without a permission prompt.
-        mcpServers: this.ctx.commsToken ? { [COMMS_SERVER]: commsMcpConfig(this.ctx.commsToken) } : undefined,
-        allowedTools: this.ctx.commsToken ? COMMS_TOOLS.map(name => `mcp__${COMMS_SERVER}__${name}`) : undefined,
+        mcpServers: this.ctx.commsToken ? { [COMMS_SERVER]: commsMcpConfig(this.ctx.commsToken, agent.role === 'super') } : undefined,
+        allowedTools: policy.allowedTools,
         resume: agent.sessionId ?? undefined,
         pathToClaudeCodeExecutable: this.ctx.binPath ?? undefined,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: this.ctx.instructions?.() ?? systemInstructions(agent, project) },
@@ -458,6 +491,10 @@ export class ClaudeRunner implements Runner {
 
   private canUseTool: CanUseTool = async (toolName, input, options) => {
     const hooks = this.ctx.hooks;
+    // A second lock behind the tool list: the SuperAgent never edits, whatever reaches here.
+    if (this.ctx.agent().role === 'super' && !superMayUse(toolName)) {
+      return { behavior: 'deny', message: 'The SuperAgent never edits or runs commands. Delegate the work to an agent.' };
+    }
 
     if (toolName === 'AskUserQuestion') {
       const questions = (Array.isArray(input.questions) ? input.questions : []) as Question[];
