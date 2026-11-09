@@ -275,8 +275,10 @@ export function PeerTrailRow({ message, selfId }: { message: PeerMessage; selfId
   const detailId = useId();
   const channel = useChannel(message);
   const outcome = useOutcome(message);
+  const other = useAgent(message.toAgentId === selfId ? message.fromAgentId : message.toAgentId);
   if (message.delegation && message.fromAgentId === selfId) return <DelegationRow message={message} />;
   const who = message.toAgentId === selfId ? `From ${message.fromName}` : `To ${message.toName}`;
+  const otherId = message.toAgentId === selfId ? message.fromAgentId : message.toAgentId;
   const tag = channel ? `#${channel}` : messageTag(message);
   const preview = messagePreview(message);
   return (
@@ -289,7 +291,8 @@ export function PeerTrailRow({ message, selfId }: { message: PeerMessage; selfId
         onClick={() => setOpen(v => !v)}
         className="group flex min-w-0 items-center gap-1.5 py-1 text-left font-sans text-sm"
       >
-        <span className="shrink-0 text-content/50">{who}</span>
+        {/* The other agent's avatar: the recipient for what this agent sent, the sender for what it got. */}
+        <span className="flex shrink-0 items-center gap-1 text-content/50"><AgentAvatar agent={other ?? { id: otherId }} animate={false} className="size-3.5" />{who}</span>
         <span className="shrink-0 text-content/40">{tag}</span>
         {outcome ? <span className="text-[12px]"><OutcomeChip words={outcome.words} tone={outcome.tone} /></span> : null}
         <span className="min-w-0 flex-1 truncate text-content/50 transition-colors duration-200 group-hover:text-content/75">{preview}</span>
