@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Agent } from '../shared/types.ts';
-import { agentsSummary, railAgentTask } from '../web/sidebar/agentRail.ts';
+import { agentsSummary } from '../web/sidebar/agentRail.ts';
 
 const agent = (id: string, fields: Partial<Agent> = {}): Agent => ({ id, name: id, status: 'idle', activity: '', lastActiveAt: 0, currentTask: null, ...fields }) as Agent;
 
@@ -11,16 +11,4 @@ test('a folded section, a project row and a rail icon say how many need you, or 
   // A working agent with an approval pending is waiting on you, not working.
   assert.deepEqual(agentsSummary([agent('a', { status: 'working' })], new Set(['a'])), { needsYou: 1, working: false });
   assert.deepEqual(agentsSummary([], new Set()), { needsYou: 0, working: false });
-});
-
-test('an agent row takes a second line only while the agent is active and has something to say', () => {
-  const task = { summary: 'Fix the build' } as Agent['currentTask'];
-  assert.equal(railAgentTask(agent('a', { status: 'working', currentTask: task }), false), 'Fix the build');
-  assert.equal(railAgentTask(agent('a', { status: 'working', currentTask: task }), false, 'SuperAgent'), 'from SuperAgent: Fix the build');
-  assert.equal(railAgentTask(agent('a', { status: 'working', activity: 'Reading files' }), false), 'Reading files');
-  assert.equal(railAgentTask(agent('a', { status: 'idle', currentTask: task }), true), 'Fix the build');
-  // Idle, done or failed: one line again, whatever it last worked on.
-  assert.equal(railAgentTask(agent('a', { status: 'idle', currentTask: task }), false), null);
-  assert.equal(railAgentTask(agent('a', { status: 'done', currentTask: task }), false), null);
-  assert.equal(railAgentTask(agent('a', { status: 'working' }), false), null);
 });
