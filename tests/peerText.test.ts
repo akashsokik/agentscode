@@ -49,7 +49,9 @@ test('a message leads with its meaning: a report its summary, a delegation its t
   const report = msg({ text: 'REVIEW RESULT: FAILED\n\nVerdict: changes needed.', report: { outcome: 'failed', summary: 'Verdict: changes needed. Two layout bugs.', evidence: '- typecheck ok' } });
   assert.equal(messagePreview(report), 'Verdict: changes needed.');
   assert.equal(messageTag(report), 'Report');
-  assert.match(messageMarkdown(report), /\*\*Evidence\*\*\n\n- typecheck ok/);
+  assert.equal(messageMarkdown(report), 'Verdict: changes needed. Two layout bugs.\n\n**Evidence**\n\n```text\n- typecheck ok\n```', 'evidence stays code');
+  const fenced = msg({ report: { outcome: 'done', summary: 'Done.', evidence: 'Ran:\n```\nnpm test\n```' } });
+  assert.match(messageMarkdown(fenced), /\*\*Evidence\*\*\n\nRan:\n```\nnpm test\n```$/, 'evidence with its own fences is left as written');
   const delegation = msg({ text: 'IMPLEMENTATION: ...', delegation: { kind: 'implementation', task: 'IMPLEMENTATION: Fix the four findings. Then rebase.', acceptanceCriteria: '1. Floats' } });
   assert.equal(messagePreview(delegation), 'Fix the four findings.');
   assert.equal(messageTag(delegation), 'Implementation');

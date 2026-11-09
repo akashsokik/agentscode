@@ -396,7 +396,7 @@ function ThreadView({ thread, state, title, agents, now }: { thread: CommsThread
               <h2 className="text-content/70">Activity</h2>
               <span>{count(thread.messages.length, 'message', limit)}</span>
             </div>
-            <ol className="flex flex-col">
+            <ol data-peer-thread className="flex flex-col">
               {thread.messages.map((message, i) => (
                 <TimelineStop
                   key={message.id}
@@ -406,7 +406,7 @@ function ThreadView({ thread, state, title, agents, now }: { thread: CommsThread
                   last={i === stops - 1}
                   node={<AgentMark agent={agents.find(a => a.id === message.fromAgentId)} className="size-4" />}
                 >
-                  <MessageCard message={message} answered={message.replyTo ? thread.messages.find(m => m.id === message.replyTo) : undefined} agents={agents} now={now} />
+                  <MessageCard message={message} answered={message.replyTo ? thread.messages.find(m => m.id === message.replyTo) : undefined} />
                 </TimelineStop>
               ))}
               {tail.map((stop, i) => (
@@ -513,7 +513,7 @@ function TailStop({ stop, agents, fresh, first, last }: { stop: TimelineTail; ag
  * A message in the conversation, in the same borderless bubble a transcript shows it in (PeerBubble):
  * who sent it to whom, the kind and outcome, the gist, and the whole of it on Show more.
  */
-function MessageCard({ message, answered }: { message: PeerMessage; answered?: PeerMessage; agents: Agent[]; now: number }) {
+function MessageCard({ message, answered }: { message: PeerMessage; answered?: PeerMessage }) {
   return <PeerBubble message={message} between answered={answered} thread={false} />;
 }
 

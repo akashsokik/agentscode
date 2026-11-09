@@ -97,7 +97,9 @@ export function messageTag(message: PeerMessage): string {
 export function messageMarkdown(message: PeerMessage): string {
   if (message.report) {
     const parts = [message.report.summary.trim()];
-    if (message.report.evidence.trim()) parts.push('**Evidence**', message.report.evidence.trim());
+    // Evidence is mostly command output: kept as code, so line breaks and *, _ or # stay as they are.
+    const evidence = message.report.evidence.trim();
+    if (evidence) parts.push('**Evidence**', evidence.includes('```') ? evidence : `\`\`\`text\n${evidence}\n\`\`\``);
     return parts.join('\n\n');
   }
   if (message.delegation) {

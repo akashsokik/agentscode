@@ -89,8 +89,12 @@ function DeliveryNote({ message }: { message: PeerMessage }) {
  * Go to the delegation a report answers: its row in the work trail, scrolled into view and focused,
  * when it is on screen; otherwise its thread in Comms.
  */
-function showDelegation(asked: PeerMessage): void {
-  const row = document.querySelector<HTMLElement>(`[data-peer-card="${CSS.escape(asked.id)}"]`);
+function showDelegation(asked: PeerMessage, from: HTMLElement): void {
+  // Inside a Comms thread the request is a message above in the same thread: go there, not to a transcript.
+  const thread = from.closest<HTMLElement>('[data-peer-thread]');
+  const row = thread
+    ? thread.querySelector<HTMLElement>(`[data-peer-message="${CSS.escape(asked.id)}"]`)
+    : document.querySelector<HTMLElement>(`[data-peer-card="${CSS.escape(asked.id)}"]`);
   if (!row) {
     openToSide({ kind: 'comms', conversationId: asked.conversationId });
     return;
@@ -111,7 +115,7 @@ function Answers({ report, answered }: { report: PeerMessage; answered?: PeerMes
       <button
         type="button"
         title="Show the request this answers"
-        onClick={() => showDelegation(asked)}
+        onClick={event => showDelegation(asked, event.currentTarget)}
         className="min-w-0 truncate rounded text-left text-content/60 underline decoration-content/20 underline-offset-2 hover:text-content"
       >
         {taskTitle(asked.delegation.task)}
@@ -147,7 +151,7 @@ export function PeerBubble({ message, between = false, answered, arrivedAt, thre
   const late = arrivalNote(message.ts, arrivedAt, clock);
   const tag = channel ? (message.replyTo ? `Answer in #${channel}` : `Mention in #${channel}`) : messageTag(message);
   return (
-    <div data-peer-message={message.id} className="flex w-fit min-w-0 max-w-full flex-col items-start font-sans">
+    <div data-peer-message={message.id} tabIndex={-1} className="flex w-fit min-w-0 max-w-full flex-col items-start rounded font-sans outline-none focus-visible:ring-1 focus-visible:ring-content/30">
       <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 pb-1 text-[12px]">
         {between ? (
           <span className="flex min-w-0 items-center gap-1.5 text-content/45">
