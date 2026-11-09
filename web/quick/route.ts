@@ -2,6 +2,7 @@
  * Where a quick message goes and what the team is doing, for the quick composer. Pure, apart from
  * the api it is handed, so it is tested directly.
  */
+import { alignHints, type MentionHint } from '../../shared/mentions.ts';
 import type { Agent, Approval, CreateAgentRequest, EngineKind, SuperState } from '../../shared/types.ts';
 
 /** The SuperAgent (the default), an agent you already have, or a new agent in a project (null: all projects). */
@@ -12,7 +13,7 @@ export type QuickTarget =
 
 /** What the composer needs from the server; the page passes `api`, tests a fake. */
 export interface QuickApi {
-  send(agentId: string, text: string): Promise<unknown>;
+  send(agentId: string, text: string, images?: undefined, mentionHints?: MentionHint[]): Promise<unknown>;
   createSuper(): Promise<Agent>;
   createAgent(input: CreateAgentRequest): Promise<Agent>;
   answerSuper(askId: string, body: { answer: string } | { dismiss: true }): Promise<SuperState>;
@@ -33,24 +34,27 @@ export function newAgentName(agents: readonly Pick<Agent, 'name'>[]): string {
 
 /**
  * Send a quick message to its target and return the agent that has it: the SuperAgent (set up on
- * the way if there is none), an existing agent, or a new agent whose first task it is.
+ * the way if there is none), an existing agent, or a new agent whose first task it is. `picks`: what
+ * was picked from the @ picker, so a name shared by an agent and a project keeps the kind picked.
  */
-export async function sendQuick(target: QuickTarget, rawText: string, team: { agents: readonly Agent[]; superId: string | null }, api: QuickApi): Promise<{ agentId: string; created: boolean }> {
+export async function sendQuick(target: QuickTarget, rawText: string, team: { agents: readonly Agent[]; superId: string | null }, api: QuickApi, picks: readonly MentionHint[] = []): Promise<{ agentId: string; created: boolean }> {
   const text = rawText.trim();
   if (!text) throw new Error('Write something first.');
+  const hints = alignHints(text, picks);
+  const mentionHints = hints.length ? hints : undefined;
   if (target.kind === 'super') {
     const id = team.superId ?? (await api.createSuper()).id;
-    await api.send(id, text);
+    await api.send(id, text, undefined, mentionHints);
     return { agentId: id, created: !team.superId };
   }
   if (target.kind === 'agent') {
     if (!team.agents.some(a => a.id === target.agentId)) throw new Error('That agent is gone. Pick another.');
-    await api.send(target.agentId, text);
+    await api.send(target.agentId, text, undefined, mentionHints);
     return { agentId: target.agentId, created: false };
   }
   const agent = await api.createAgent({
     name: newAgentName(team.agents), engine: target.engine, projectId: target.projectId, role: 'dev',
-    ...(target.model ? { model: target.model } : {}), task: text,
+    ...(target.model ? { model: target.model } : {}), task: text, ...(mentionHints ? { mentionHints } : {}),
   });
   return { agentId: agent.id, created: true };
 }
