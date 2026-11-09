@@ -26,6 +26,25 @@ export function superLogMode(open: boolean, paneWidth: number, peek: boolean): '
   return peek ? 'over' : 'hidden';
 }
 
+/** The narrowest the conversation gets while the log sits beside it, in px. */
+export const SUPER_LOG_CONVERSATION_MIN = 420;
+
+/**
+ * The log's width in a pane `paneWidth` wide, from the width you chose: beside the conversation it
+ * leaves that SUPER_LOG_CONVERSATION_MIN (never going under `min`); over it, it never runs past the
+ * pane's left edge.
+ */
+export function superLogWidth(chosen: number, min: number, paneWidth: number, mode: 'beside' | 'over'): number {
+  if (paneWidth <= 0) return Math.round(chosen);
+  const max = mode === 'beside' ? Math.max(min, paneWidth - SUPER_LOG_CONVERSATION_MIN) : paneWidth;
+  return Math.round(Math.min(chosen, max));
+}
+
+/** Once the log sits beside the conversation, asking to see it over a narrow pane is spent: narrowing again does not reopen it over the conversation. */
+export function peekAfter(mode: 'beside' | 'over' | 'hidden', peek: boolean): boolean {
+  return mode === 'beside' ? false : peek;
+}
+
 export interface DecisionRow {
   id: string;
   summary: string;

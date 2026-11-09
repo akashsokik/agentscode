@@ -3,12 +3,12 @@
  * choices to click, and its decision log on the right of the pane, where anything it did on its own
  * can be undone.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SuperAsk } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { memoryDate } from '../memory.ts';
 import { openAsks } from '../super.ts';
-import { decisionRows, type DecisionRow } from '../superText.ts';
+import { decisionRows, superLogWidth, type DecisionRow } from '../superText.ts';
 import { attempt, useApp } from '../store.ts';
 import { cx, HeaderButton, PRIMARY, TextButton } from '../ui/common.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
@@ -59,19 +59,50 @@ const time = (ts: number) => `${memoryDate(ts)} ${new Date(ts).toTimeString().sl
  * each with why and Undo, then what you answered it. Kept live by `super` events. `over` floats it
  * above the conversation in a narrow pane; otherwise it sits beside it, resizable from its left edge.
  */
-export function SuperLogSidebar({ over, onClose }: { over: boolean; onClose: () => void }) {
+export function SuperLogSidebar({ over, paneWidth, onClose }: { over: boolean; paneWidth: number; onClose: () => void }) {
   const log = useApp(s => s.snapshot?.super.log);
   const asks = useApp(s => s.snapshot?.super.asks);
   const rows = decisionRows(log);
   const answered = (asks ?? []).filter(a => a.answeredAt !== undefined);
   const column = useColumnWidth('superLog', 300, 240, 0.4);
+  // The width you chose, cut to the pane it is in: the window-based cap alone lets it fill a split pane.
+  const width = superLogWidth(column.width, column.min, paneWidth, over ? 'over' : 'beside');
+  const root = useRef<HTMLElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+
+  // Over the conversation it is a popover: Escape or a click outside it closes it.
+  useEffect(() => {
+    if (!over) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      // Handled here, so a dialog or thread underneath does not also close.
+      event.preventDefault();
+      event.stopPropagation();
+      close.current();
+    };
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      // The header's toggle does its own closing; closing here too would reopen it on its click.
+      if (!target || root.current?.contains(target) || target.closest('[data-super-log-toggle]')) return;
+      close.current();
+    };
+    window.addEventListener('keydown', onKey, true);
+    document.addEventListener('pointerdown', onPointer, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('pointerdown', onPointer, true);
+    };
+  }, [over]);
   const undoable = rows.filter(r => r.undoable).length;
   return (
     <aside
       aria-label="Decision log"
       data-super-log
-      style={{ width: column.width }}
-      className={cx('relative flex shrink-0 flex-col border-l border-stroke font-sans', over ? 'body-glass absolute inset-y-0 right-0 z-20 shadow-2xl' : '')}
+      ref={root}
+      style={{ width }}
+      // One position utility only: with both, .relative (later in the CSS) wins and it never floats.
+      className={cx('flex shrink-0 flex-col border-l border-stroke font-sans', over ? 'body-glass absolute inset-y-0 right-0 z-20 shadow-2xl' : 'relative')}
     >
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-stroke pl-3.5 pr-1.5">
         <h2 className="min-w-0 flex-1 truncate text-[12px] font-medium text-content/80">
@@ -110,7 +141,8 @@ export function SuperLogSidebar({ over, onClose }: { over: boolean; onClose: () 
           </section>
         ) : null}
       </div>
-      <ResizeHandle column={column} edge="left" label="Resize the decision log" />
+      {/* From the width on screen, so a drag never jumps from a wider saved width. */}
+      <ResizeHandle column={{ ...column, width }} edge="left" label="Resize the decision log" />
     </aside>
   );
 }

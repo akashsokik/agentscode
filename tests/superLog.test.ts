@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SuperAction } from '../shared/types.ts';
-import { decisionRows, SUPER_LOG_MIN_PANE, superLogMode } from '../web/superText.ts';
+import { decisionRows, peekAfter, SUPER_LOG_CONVERSATION_MIN, SUPER_LOG_MIN_PANE, superLogMode, superLogWidth } from '../web/superText.ts';
 import { harness, settle } from './helpers.ts';
 
 test('the decision log sits beside the conversation in a wide pane, over it in a narrow one only when asked, and not when closed', () => {
@@ -40,4 +40,24 @@ test('undo from the log: the row turns undone and its action is put back', async
   assert.equal(undone.undoable, false);
   assert.ok(undone.undoneAt);
   assert.equal(h.manager.snapshot().channels.length, 0);
+});
+
+test('the log width follows the pane: the conversation keeps its minimum beside it, and over it the log stays inside the pane', () => {
+  // Beside: a wide choice in a 760px pane leaves the conversation 420px.
+  assert.equal(superLogWidth(700, 240, 760, 'beside'), 760 - SUPER_LOG_CONVERSATION_MIN);
+  assert.equal(superLogWidth(300, 240, 1600, 'beside'), 300, 'room enough: as chosen');
+  assert.equal(superLogWidth(300, 240, 600, 'beside'), 240, 'never under its minimum');
+  // Over: never past the pane's left edge.
+  assert.equal(superLogWidth(700, 240, 500, 'over'), 500);
+  assert.equal(superLogWidth(300, 240, 500, 'over'), 300);
+  assert.equal(superLogWidth(300, 240, 0, 'over'), 300, 'before the pane is measured');
+});
+
+test('once the log sits beside the conversation, a narrow pane does not reopen it over it', () => {
+  assert.equal(peekAfter('beside', true), false);
+  assert.equal(peekAfter('over', true), true);
+  assert.equal(peekAfter('hidden', false), false);
+  // Wide, then narrow again: peek was reset, so the log hides instead of floating unasked.
+  const peek = peekAfter(superLogMode(true, 1200, true), true);
+  assert.equal(superLogMode(true, 600, peek), 'hidden');
 });
