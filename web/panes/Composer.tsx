@@ -268,7 +268,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
 
   const where = agent.worktree?.cwd ?? project?.path ?? (agent.projectId === null ? noProjectFolder(agent.home) : '');
   return (
-    <div data-composer className="relative mx-auto w-full max-w-3xl shrink-0 p-1.5 pt-0">
+    <div data-composer className="@container/composer relative mx-auto w-full max-w-3xl shrink-0 p-1.5 pt-0">
       {question ? <div className="px-1.5 pb-1.5"><QuestionPrompt approval={question} /></div> : null}
       <div
         data-composer-box
