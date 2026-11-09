@@ -42,12 +42,12 @@ export interface Layout {
    * the user picks, so the default follows the window: folded below 1280px.
    */
   rail?: boolean;
-  /** The SuperAgent's decision log beside its conversation: open unless you closed it. */
-  superLog?: boolean;
   /** Column widths the user dragged to, in px; a column without one uses its default. */
   widths?: Partial<Record<ColumnKey, number>>;
   rightPanel: boolean;
   rightView: 'overview' | 'comms' | 'changes';
+  /** The right panel's tab while the SuperAgent has focus, the last one picked; Decisions until then. */
+  superView?: SuperView;
   /** How side-by-side panes share the width, by pane id (web/paneSizes.ts); a pane without one weighs 1. */
   paneWeights?: Record<string, number>;
   /** The pane filling the whole width while the others wait, if one is maximized. */
@@ -63,7 +63,11 @@ export interface Layout {
   terminalZoom?: Record<string, string>;
 }
 
-export type ColumnKey = 'nav' | 'workspace' | 'panel' | 'superLog';
+export type ColumnKey = 'nav' | 'workspace' | 'panel';
+
+/** The right panel's tabs for the SuperAgent: its Overview, its own Decisions, Goals and Routines, and Comms. */
+export const SUPER_VIEWS = ['overview', 'decisions', 'goals', 'routines', 'comms'] as const;
+export type SuperView = (typeof SUPER_VIEWS)[number];
 
 const STORAGE_KEY = 'agentscode:layout';
 const MAX_PANES = 3;
@@ -89,7 +93,10 @@ function initial(): Layout {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Layout | null;
     if (!saved || !Array.isArray(saved.tabs) || !Array.isArray(saved.panes) || !saved.panes.length) return fallback;
-    const restored = { ...fallback, ...saved };
+    // The SuperAgent's old in-pane sidebar kept its own open state and width; the right panel has its own now.
+    const { superLog: _log, ...kept } = saved as Layout & { superLog?: unknown };
+    const { superLog: _width, ...widths } = (kept.widths ?? {}) as Record<string, number>;
+    const restored: Layout = { ...fallback, ...kept, ...(kept.widths ? { widths } : {}) };
     const ids = restored.panes.map(p => p.id);
     return { ...restored, paneWeights: prunedWeights(restored.paneWeights, ids), maximized: restored.maximized && ids.includes(restored.maximized) && ids.length > 1 ? restored.maximized : null };
   } catch {
@@ -289,7 +296,7 @@ export function setColumnWidth(key: ColumnKey, width: number | undefined): void 
 }
 export function setProject(projectId: string): void { if (layout.projectId !== projectId) set({ ...layout, projectId }); }
 export function setRightPanel(rightPanel: boolean): void { set({ ...layout, rightPanel }); }
-export function setSuperLog(superLog: boolean): void { if ((layout.superLog !== false) !== superLog) set({ ...layout, superLog }); }
+export function setSuperView(superView: SuperView): void { set({ ...layout, rightPanel: true, superView }); }
 export function setRightView(rightView: Layout['rightView']): void { set({ ...layout, rightPanel: true, rightView }); }
 export function setTerminal(terminal: boolean): void { if (Boolean(layout.terminal) !== terminal) set({ ...layout, terminal }); }
 export function setTerminalHeight(terminalHeight: number | undefined): void { set({ ...layout, terminalHeight }); }

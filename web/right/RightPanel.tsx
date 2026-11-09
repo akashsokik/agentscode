@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { kindWords, messagePreview, outcomeWords, reportKind, taskTitle } from '../peerText.ts';
 import type { Agent, ChangedFile, GitStatus } from '../../shared/types.ts';
 import { AgentOverview } from './AgentOverview.tsx';
@@ -6,16 +6,18 @@ import type { Root } from '../api.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { cost, relativeTime } from '../format.ts';
 import { refreshGit, useGitStatus } from '../git.ts';
-import { focusedAgentId, focusedChannelId, open, openToSide, setRightPanel, setRightView, useLayout, type Layout } from '../layout.ts';
+import { focusedAgentId, focusedChannelId, open, openToSide, setRightPanel, setRightView, setSuperView, SUPER_VIEWS, useLayout, type Layout, type SuperView } from '../layout.ts';
 import { ALL_PROJECTS } from '../projects.ts';
 import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
 import { Empty, HeaderButton, IconTab, Loading, TextButton } from '../ui/common.tsx';
-import { Bot, CheckCircle, DashboardSquare, FileDiff, Folder, GitBranch, MessageMultiple, PanelRight, RefreshCw, type IconComponent } from '../mono/icons.tsx';
+import { Bot, CheckCircle, CircleDot, Clock, DashboardSquare, FileDiff, Folder, GitBranch, ListBullet, MessageMultiple, PanelRight, RefreshCw, type IconComponent } from '../mono/icons.tsx';
 import { Segmented } from '../mono/settings.tsx';
 import { MessageStatus } from '../panes/CommsPane.tsx';
+import { DecisionsView, GoalsView, RoutinesView, useSuperTabs } from '../panes/SuperPanel.tsx';
+import { superPanelView } from '../superText.ts';
 import { useNow } from '../ui/useNow.ts';
 
 /** Porcelain codes as MonoCode's Changes list shows them: M, A, D, R, U. */
@@ -232,13 +234,39 @@ function OverviewView({ agent, git }: { agent: Agent | undefined; git: GitStatus
   return agent ? <AgentOverview key={agent.id} agent={agent} git={git} /> : <TeamOverview />;
 }
 
+type PanelView = Layout['rightView'] | SuperView;
+
 const PANEL_TABS: { view: Layout['rightView']; label: string; icon: IconComponent }[] = [
   { view: 'overview', label: 'Overview', icon: DashboardSquare },
   { view: 'comms', label: 'Comms', icon: MessageMultiple },
   { view: 'changes', label: 'Changes', icon: FileDiff },
 ];
 
-/** The right panel, with MonoCode's icon tabs: Overview, Comms and Changes for the focused agent. */
+/**
+ * The SuperAgent's tabs: its Overview, then its own Decisions, Goals and Routines, then Comms. No
+ * Changes: it works across all projects and never edits, so it has no working tree of its own.
+ */
+const SUPER_PANEL_TABS: { view: SuperView; label: string; icon: IconComponent }[] = [
+  { view: 'overview', label: 'Overview', icon: DashboardSquare },
+  { view: 'decisions', label: 'Decisions', icon: ListBullet },
+  { view: 'goals', label: 'Goals', icon: CircleDot },
+  { view: 'routines', label: 'Routines', icon: Clock },
+  { view: 'comms', label: 'Comms', icon: MessageMultiple },
+];
+
+/** What a tab's count means, for its tooltip and a screen reader. */
+const COUNT_WORDS: Partial<Record<PanelView, (n: number) => string>> = {
+  comms: n => `${n} on the way`,
+  decisions: n => `${n} you can undo today`,
+  goals: n => `${n} open`,
+  routines: n => `${n} waiting for you`,
+};
+
+/**
+ * The right panel, with MonoCode's icon tabs: Overview, Comms and Changes for the focused agent; for
+ * the SuperAgent, Overview, Decisions, Goals, Routines and Comms. The tabs follow the ARIA tabs
+ * pattern: one tab stop, the arrow keys (and Home and End) move between them and open the one reached.
+ */
 export function RightPanel() {
   const layout = useLayout();
   const agentId = focusedAgentId(layout);
@@ -246,31 +274,74 @@ export function RightPanel() {
   const inFlight = useApp(s => s.snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0);
   const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectId]);
   const { status: git } = useGitStatus(root, agent ? `${agent.status}:${agent.turns}` : undefined);
-  const view = PANEL_TABS.some(t => t.view === layout.rightView) ? layout.rightView : 'overview';
+  const isSuper = agent?.role === 'super';
+  const tabs: { view: PanelView; label: string; icon: IconComponent }[] = isSuper ? SUPER_PANEL_TABS : PANEL_TABS;
+  const view: PanelView = isSuper
+    ? superPanelView(layout.superView, SUPER_VIEWS)
+    : PANEL_TABS.some(t => t.view === layout.rightView) ? layout.rightView : 'overview';
+  const pick = (next: PanelView) => (isSuper ? setSuperView(next as SuperView) : setRightView(next as Layout['rightView']));
+  const superTabs = useSuperTabs(isSuper ? view : '');
   const column = useColumnWidth('panel', 320, 260, 0.4);
+  const list = useRef<HTMLDivElement>(null);
+  const count = (tab: PanelView): number | undefined => {
+    if (tab === 'comms') return inFlight || undefined;
+    if (isSuper && (tab === 'decisions' || tab === 'goals' || tab === 'routines')) return superTabs.counts[tab] || undefined;
+    return undefined;
+  };
+  const dot = (tab: PanelView): boolean => {
+    if (tab === 'changes') return view !== 'changes' && Boolean(git?.files.length);
+    return isSuper && (tab === 'decisions' || tab === 'goals' || tab === 'routines') && superTabs.dots[tab];
+  };
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    const at = tabs.findIndex(t => t.view === view);
+    const to = event.key === 'ArrowRight' ? (at + 1) % tabs.length
+      : event.key === 'ArrowLeft' ? (at - 1 + tabs.length) % tabs.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+    if (to < 0) return;
+    event.preventDefault();
+    pick(tabs[to].view);
+    list.current?.querySelector<HTMLElement>(`#panel-tab-${tabs[to].view}`)?.focus();
+  };
   return (
     <aside aria-label="Panel" style={{ width: column.width }} className="body-glass relative flex shrink-0 flex-col max-xl:absolute max-xl:inset-y-0 max-xl:right-0 max-xl:z-20 max-xl:border-l max-xl:border-stroke max-xl:shadow-2xl">
       <div className="flex h-9 shrink-0 items-stretch border-b border-stroke">
-        <div role="tablist" aria-label="Panel" className="flex min-w-0 flex-1 items-center gap-0.5 pl-2">
-          {PANEL_TABS.map(tab => (
-            <IconTab
-              key={tab.view}
-              role="tab"
-              aria-selected={view === tab.view}
-              icon={tab.icon}
-              label={tab.label}
-              selected={view === tab.view}
-              count={tab.view === 'comms' ? inFlight : undefined}
-              dot={tab.view === 'changes' && view !== 'changes' && Boolean(git?.files.length)}
-              onClick={() => setRightView(tab.view)}
-            />
-          ))}
+        <div ref={list} role="tablist" aria-label="Panel" onKeyDown={onKeyDown} className="flex min-w-0 flex-1 items-center gap-0.5 pl-2">
+          {tabs.map(tab => {
+            const n = count(tab.view);
+            const fresh = dot(tab.view);
+            const words = [tab.label, n ? COUNT_WORDS[tab.view]?.(n) : null, fresh ? 'new' : null].filter(Boolean).join(', ');
+            return (
+              <IconTab
+                key={tab.view}
+                id={`panel-tab-${tab.view}`}
+                role="tab"
+                aria-selected={view === tab.view}
+                aria-controls="panel-view"
+                tabIndex={view === tab.view ? 0 : -1}
+                icon={tab.icon}
+                label={tab.label}
+                aria-label={words}
+                title={words}
+                selected={view === tab.view}
+                count={n}
+                dot={fresh}
+                onClick={() => pick(tab.view)}
+              />
+            );
+          })}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 px-1.5">
           <HeaderButton icon={PanelRight} label="Hide panel" onClick={() => setRightPanel(false)} />
         </div>
       </div>
-      {view === 'overview' ? <OverviewView agent={agent} git={git} /> : view === 'changes' ? <ChangesView agent={agent} /> : <CommsFeed agent={agent} />}
+      <div id="panel-view" role="tabpanel" aria-labelledby={`panel-tab-${view}`} className="flex min-h-0 flex-1 flex-col">
+        {view === 'overview' ? <OverviewView agent={agent} git={git} />
+          : view === 'changes' ? <ChangesView agent={agent} />
+          : view === 'decisions' ? <DecisionsView />
+          : view === 'goals' ? <GoalsView />
+          : view === 'routines' ? <RoutinesView />
+          : <CommsFeed agent={agent} />}
+      </div>
       <ResizeHandle column={column} edge="left" label="Resize panel" />
     </aside>
   );

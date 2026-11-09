@@ -3,7 +3,7 @@
  * window). The desktop app opens the same composer in its own window over any app instead
  * (electron/quickWindow.ts, web/quick/main.tsx).
  */
-import { open } from '../layout.ts';
+import { openAgent } from '../super.ts';
 import { QuickComposer } from '../quick/QuickComposer.tsx';
 import { Modal } from '../mono/Modal.tsx';
 
@@ -13,7 +13,7 @@ export function SuperQuickBar({ onClose }: { onClose: () => void }) {
       <QuickComposer
         mode="modal"
         onDismiss={onClose}
-        onOpenAgent={agentId => { onClose(); open({ kind: 'agent', agentId }); }}
+        onOpenAgent={agentId => { onClose(); openAgent(agentId); }}
       />
     </Modal>
   );
