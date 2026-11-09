@@ -13,9 +13,13 @@ export function versionBelow(a: string, b: string): boolean {
   return false;
 }
 
+/** Why an OrcaCode without --add-dir cannot be an All-projects agent, and what fixes it. */
+export const ORCACODE_NO_ADD_DIR = 'This OrcaCode cannot work across all projects: its file tools only reach the folder it runs in. Give the agent a project, or once an OrcaCode with --add-dir is out, run `orcacode update` and restart AgentsCode.';
+
 /**
  * Why a new agent cannot use this engine, or null when it can. OrcaCode's file tools only take
- * paths inside the folder it runs in, so an agent with no project could not edit any project.
+ * paths inside the folder it runs in, so an agent with no project needs an OrcaCode that takes
+ * --add-dir (one per project); an older one cannot edit any project.
  */
 export function engineProblem(engine: EngineKind, info: EngineInfo | undefined, noProject: boolean): string | null {
   if (!info?.available) return `${ENGINE_LABELS[engine]} is not installed on this machine.`;
@@ -23,7 +27,7 @@ export function engineProblem(engine: EngineKind, info: EngineInfo | undefined, 
   if (info.version && versionBelow(info.version, ORCACODE_MIN_VERSION)) {
     return `OrcaCode ${ORCACODE_MIN_VERSION} or newer is needed (found ${info.version}). Run \`orcacode update\`, then restart AgentsCode.`;
   }
-  if (noProject) return 'OrcaCode agents need a project: its file tools only work inside the folder it runs in.';
+  if (noProject && !info.addDir) return ORCACODE_NO_ADD_DIR;
   return null;
 }
 

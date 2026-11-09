@@ -775,6 +775,8 @@ export interface EngineInfo {
   available: boolean;
   path: string | null;
   version: string | null;
+  /** OrcaCode only: this binary takes --add-dir, so an agent with no project can reach every project. */
+  addDir?: boolean;
 }
 
 /** One subscription limit window of an engine's account: its 5-hour limit, say, or its weekly one. */
