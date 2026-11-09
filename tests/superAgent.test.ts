@@ -121,7 +121,13 @@ test('create_agent: the role\'s own permissions, a project by name, a daily cap,
   assert.ok(t.view().log[0].undoneAt);
   await assert.rejects(t.manager.undoSuper(entry.id), e => status(e) === 409);
 
-  for (let i = 1; i < MAX_CREATES_PER_DAY; i++) await t.call('create_agent', { name: `Extra${i}`, why: 'Load.' });
+  // The cap counts agents it makes on its own, in an update turn; Tess was made in your turn.
+  t.runner.complete();
+  await settle();
+  const watcher = (t.manager as unknown as { watcher: SuperWatcher }).watcher;
+  watcher.note({ agentId: t.ada.id, key: 'k', text: 'Ada is free' });
+  assert.ok(watcher.flush());
+  for (let i = 0; i < MAX_CREATES_PER_DAY; i++) await t.call('create_agent', { name: `Extra${i}`, why: 'Load.' });
   await assert.rejects(t.call('create_agent', { name: 'OneTooMany', why: 'Load.' }), e => status(e) === 429);
 });
 

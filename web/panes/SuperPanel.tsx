@@ -282,12 +282,17 @@ function GoalItem({ goal, index, last, onRemoved }: { goal: SuperGoal; index: nu
   // while the confirm has focus, focus goes back to the Remove button rather than to the page.
   const [confirming, setConfirming] = useState(false);
   const trash = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
   useEffect(() => {
-    if (!confirming) return;
+    if (!confirming) {
+      // After React has put the Remove button back: focus it if the confirm had focus when it ran out.
+      if (refocus.current) trash.current?.focus({ preventScroll: true });
+      refocus.current = false;
+      return;
+    }
     const timer = setTimeout(() => {
-      const had = document.activeElement instanceof Element && document.activeElement.closest('[data-goal-confirm]');
+      refocus.current = document.activeElement instanceof Element && Boolean(document.activeElement.closest('[data-goal-confirm]'));
       setConfirming(false);
-      if (had) requestAnimationFrame(() => trash.current?.focus({ preventScroll: true }));
     }, 4000);
     return () => clearTimeout(timer);
   }, [confirming]);

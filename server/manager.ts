@@ -1291,14 +1291,17 @@ export class AgentManager {
       const parsed = createAgentInput.safeParse(args);
       if (!parsed.success) return fail('Give a name, engine, role, an optional project, model, worktree and first task, and a why.');
       const input = parsed.data;
+      // The cap stops only agents it creates on its own: in a turn you gave it, or on mail about work
+      // you asked for, it creates what the work needs.
+      const forUser = caller.currentTask?.source === 'user' || this.inUserWorkMail(caller.id);
       const cap = this.store.settings.superMaxCreatesPerDay;
-      if (this.superStore.createdSince(Date.now() - 86_400_000) >= cap) {
+      if (!forUser && this.superStore.createdSince(Date.now() - 86_400_000) >= cap) {
         throw new HttpError(429, `You created ${cap} agents in the last day, the most the user allows (Settings, SuperAgent). Ask the user before creating more.`);
       }
       const projectId = input.project ? this.projectRef(input.project).id : null;
       const agent = await this.create({ name: input.name, engine: input.engine, projectId, role: input.role, model: input.model, worktree: input.worktree, task: input.task });
       this.recordSuper({
-        tool, why: input.why, undo: { kind: 'removeAgent', agentId: agent.id },
+        tool, why: input.why, undo: { kind: 'removeAgent', agentId: agent.id }, ...(forUser ? { forUser: true } : {}),
         summary: `Created ${agent.name} (${rolePreset(agent.role).name}, ${ENGINE_LABELS[agent.engine]}) ${projectId ? `on ${this.store.projects.get(projectId)?.name}` : 'across all projects'}${input.task ? `, first task: ${clip(input.task.replace(/\s+/g, ' '), 120)}` : ''}`,
       });
       return { created: { id: agent.id, name: agent.name, role: agent.role, autonomy: agent.autonomy, projectId: agent.projectId } };

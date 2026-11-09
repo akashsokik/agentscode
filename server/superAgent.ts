@@ -235,8 +235,9 @@ export class SuperStore {
   }
 
   /** Agents it created since `since`, for the daily cap. */
+  /** Agents it created on its own since `since`; ones made for work the user asked for are not counted. */
   createdSince(since: number): number {
-    return this.read().log.filter(a => a.tool === 'create_agent' && a.at >= since).length;
+    return this.read().log.filter(a => a.tool === 'create_agent' && a.at >= since && !a.forUser).length;
   }
 
   wakesSince(since: number): number {
