@@ -1,21 +1,63 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { noProjectFolder, type Agent, type AgentRole, type MemoryEntry } from '../../shared/types.ts';
 import { ROLES } from '../../shared/roles.ts';
 import { api } from '../api.ts';
 import { shortPath } from '../format.ts';
 import { MEMORY_TEXT_MAX, MEMORY_WHY_MAX, memoryDate, SOUL_MAX, soulPath } from '../memory.ts';
 import { ALL_PROJECTS, projectLabel } from '../projects.ts';
-import { attempt, loadMemory, useApp } from '../store.ts';
+import { attempt, loadDreams, loadMemory, useApp } from '../store.ts';
 import { HeaderButton, INPUT, PRIMARY, TEXTAREA } from '../ui/common.tsx';
 import { Pencil, Trash2 } from '../mono/icons.tsx';
 import { Modal } from '../mono/Modal.tsx';
+import { useLockOverscroll } from '../mono/useLockOverscroll.ts';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Group, Row, Select } from '../mono/settings.tsx';
 import { DreamingSection, SoulProposalGroup } from './Dreaming.tsx';
 import { RemoveAgentDialog } from './RemoveAgentDialog.tsx';
 import { submitKey } from './submitKey.ts';
+import { IS_MAC } from '../platform.ts';
+import { openingSection, rememberedSection, rememberSection, SECTIONS, sectionForKey, type AgentSettingsSection } from '../settingsSections.ts';
 
-export function AgentSettingsDialog({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+export type { AgentSettingsSection };
+
+/** Ask the app to open Settings at a group (the SuperAgent's limits live there, once, for every agent). */
+export function openSettingsAt(group: 'super'): void {
+  window.dispatchEvent(new CustomEvent('agentscode:open-settings', { detail: { group } }));
+}
+
+/**
+ * An agent's settings, one section at a time (General, Soul, Memory, Dreaming) beside a section nav.
+ * It opens on the section asked for (a deep link), else the last one you had open for this agent.
+ */
+export function AgentSettingsDialog({ agent, onClose, section: requested }: { agent: Agent; onClose: () => void; section?: AgentSettingsSection }) {
+  const [section, setSectionState] = useState<AgentSettingsSection>(() => openingSection(requested, rememberedSection(agent.id)));
+  const setSection = (next: AgentSettingsSection) => {
+    setSectionState(next);
+    rememberSection(agent.id, next);
+  };
+  const tabs = useRef(new Map<AgentSettingsSection, HTMLButtonElement>());
+  const ids = `agent-settings-${agent.id}`;
+  /** Arrow keys in the nav move and focus; Cmd or Ctrl with 1 to 4 picks a section from anywhere in the dialog. */
+  const onKey = (event: KeyboardEvent<HTMLElement>, inNav: boolean) => {
+    const next = sectionForKey(section, event, inNav);
+    if (!next) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSection(next);
+    if (inNav) tabs.current.get(next)?.focus();
+  };
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const lockOverscroll = useLockOverscroll<HTMLDivElement>();
+  // Each section opens at its top, not wherever the last one was scrolled to.
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: 0 });
+  }, [section]);
+  const memoryCount = useApp(s => s.memory[agent.id]?.length);
+  const proposal = useApp(s => Boolean(s.dreams[agent.id]?.proposal));
+  useEffect(() => {
+    void loadMemory(agent.id);
+    void loadDreams(agent.id);
+  }, [agent.id]);
   const home = useApp(s => s.snapshot?.home);
   const projects = useApp(s => s.snapshot?.projects);
   const project = projects?.find(p => p.id === agent.projectId);
@@ -50,8 +92,9 @@ export function AgentSettingsDialog({ agent, onClose }: { agent: Agent; onClose:
     <Modal
       title={agent.name}
       description={projectLabel(agent.projectId, projects) || undefined}
-      size="md"
+      size="lg"
       fitViewport
+      className="h-[min(680px,calc(100dvh-32px))]"
       onClose={onClose}
       footer={
         <>
@@ -60,57 +103,113 @@ export function AgentSettingsDialog({ agent, onClose }: { agent: Agent; onClose:
         </>
       }
     >
-      <div className="px-4 pb-5 pt-4">
-        <Group title="Workspace">
-          <Row label="Folder" description={shortPath(agent.worktree?.cwd ?? project?.path ?? (noProject ? noProjectFolder(agent.home) : ''), home)} />
-          {noProject ? <Row label="Projects" description={`${ALL_PROJECTS}: it can work in any project you have added.`} /> : null}
-          {agent.worktree ? <Row label="Branch" description={`${agent.worktree.branch}, from ${agent.worktree.base}`} /> : null}
-          <Row label="Usage" description={`${usage}${agent.sessionId ? `. Session ${agent.sessionId.slice(0, 8)}.` : '.'}`} />
-        </Group>
+      <div className="h-full pt-3" onKeyDownCapture={event => onKey(event, false)}>
+      {/* Beside the section in a wide window; a compact row above it in a narrow one. Hairlines only. */}
+      <div className="flex h-full min-h-0 flex-col border-t border-content/7 sm:flex-row">
+        <div
+          role="tablist"
+          aria-label="Agent settings sections"
+          onKeyDown={event => onKey(event, true)}
+          className="flex shrink-0 gap-0.5 overflow-x-auto border-b border-content/7 p-2 sm:w-36 sm:flex-col sm:overflow-visible sm:border-b-0 sm:border-r"
+        >
+          {SECTIONS.map((item, index) => (
+            <button
+              key={item.id}
+              ref={el => { if (el) tabs.current.set(item.id, el); else tabs.current.delete(item.id); }}
+              type="button"
+              role="tab"
+              id={`${ids}-tab-${item.id}`}
+              aria-selected={section === item.id}
+              aria-controls={`${ids}-panel`}
+              tabIndex={section === item.id ? 0 : -1}
+              title={`${item.label} (${IS_MAC ? 'Cmd' : 'Ctrl'}+${index + 1})`}
+              onClick={() => setSection(item.id)}
+              className={`flex shrink-0 items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors ${section === item.id ? 'bg-selection text-content' : 'text-content/60 hover:bg-content/5 hover:text-content'}`}
+            >
+              <span>{item.label}</span>
+              {item.id === 'memory' && memoryCount ? <span className="text-[11px] tabular-nums text-content/40">{memoryCount}</span> : null}
+              {item.id === 'soul' && proposal ? <><span aria-hidden className="size-1.5 rounded-full bg-accent" /><span className="sr-only">, a soul change is waiting</span></> : null}
+            </button>
+          ))}
+        </div>
+        <div
+          role="tabpanel"
+          id={`${ids}-panel`}
+          aria-labelledby={`${ids}-tab-${section}`}
+          ref={el => {
+            scroller.current = el;
+            lockOverscroll(el);
+          }}
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-none px-4 pb-5 pt-4"
+        >
+          {section === 'general' ? (
+            <>
+              <Group title="Workspace">
+                <Row label="Folder" description={shortPath(agent.worktree?.cwd ?? project?.path ?? (noProject ? noProjectFolder(agent.home) : ''), home)} />
+                {noProject ? <Row label="Projects" description={`${ALL_PROJECTS}: it can work in any project you have added.`} /> : null}
+                {agent.worktree ? <Row label="Branch" description={`${agent.worktree.branch}, from ${agent.worktree.base}`} /> : null}
+                <Row label="Usage" description={`${usage}${agent.sessionId ? `. Session ${agent.sessionId.slice(0, 8)}.` : '.'}`} />
+              </Group>
 
-        <Group title="Identity">
-          <Row label="Name" description="Teammates address it by this name.">
-            <input value={name} maxLength={24} onChange={e => setName(e.target.value)} onKeyDown={onSubmitKey} className={`${INPUT} w-44`} />
-          </Row>
-          {agent.role === 'super' ? (
-            <Row label="Role" description="SuperAgent: it runs the team across every project and never edits. Remove it to stop using it." />
-          ) : (
-            <Row label="Role" description={role === 'lead' ? 'Leads can delegate tasks and track reports.' : undefined}>
-              <Select label="Role" value={role} options={ROLES.map(r => ({ value: r.id, label: r.name }))} onChange={value => setRole(value as AgentRole)} />
-            </Row>
-          )}
-        </Group>
+              <Group title="Identity">
+                <Row label="Name" description="Teammates address it by this name.">
+                  <input value={name} maxLength={24} onChange={e => setName(e.target.value)} onKeyDown={onSubmitKey} className={`${INPUT} w-44`} />
+                </Row>
+                {agent.role === 'super' ? (
+                  <Row label="Role" description="SuperAgent: it runs the team across every project and never edits. Remove it to stop using it." />
+                ) : (
+                  <Row label="Role" description={role === 'lead' ? 'Leads can delegate tasks and track reports.' : undefined}>
+                    <Select label="Role" value={role} options={ROLES.map(r => ({ value: r.id, label: r.name }))} onChange={value => setRole(value as AgentRole)} />
+                  </Row>
+                )}
+              </Group>
 
-        <Group title="Soul" description={`Who ${agent.name} is and how it works. Only you edit it; changes reach it on its next turn.`}>
-          <div className="px-4 py-3.5">
-            <p className="truncate font-mono text-[11px] text-content/40" title={soulPath(agent.home)}>{shortPath(soulPath(agent.home), home)}</p>
-            <textarea
-              aria-label="Soul"
-              value={instructions}
-              maxLength={SOUL_MAX}
-              onChange={e => setInstructions(e.target.value)}
-              onKeyDown={onSubmitKey}
-              rows={10}
-              className={`${TEXTAREA} mt-2`}
-              placeholder="Anything this agent should always keep in mind"
-            />
-            {instructions.length > SOUL_MAX * 0.9 ? (
-              <p className="mt-1 text-right text-[11px] text-content/40">{instructions.length.toLocaleString()} of {SOUL_MAX.toLocaleString()} characters</p>
-            ) : null}
-          </div>
-        </Group>
+              {agent.role === 'super' ? (
+                <Group title="Limits">
+                  <Row label="Wake-ups, quiet hours, budgets and the creation cap" description="Kept once, in Settings, for everything it starts on its own.">
+                    <SecondaryButton onClick={() => { onClose(); openSettingsAt('super'); }}>Open in Settings</SecondaryButton>
+                  </Row>
+                </Group>
+              ) : null}
 
-        <SoulProposalGroup agent={agent} />
+              <Group title="Remove">
+                <Row label={`Remove ${agent.name}`} description="Stops it, deletes its transcript and cancels its queued messages.">
+                  <SecondaryButton danger disabled={busy} onClick={() => setRemoving(true)}>Remove agent…</SecondaryButton>
+                </Row>
+              </Group>
+            </>
+          ) : null}
 
-        <MemorySection agent={agent} />
+          {section === 'soul' ? (
+            <>
+              <SoulProposalGroup agent={agent} />
 
-        <DreamingSection agent={agent} />
+              <Group title="Soul" description={`Who ${agent.name} is and how it works. Only you edit it; changes reach it on its next turn.`}>
+                <div className="px-4 py-3.5">
+                  <p className="truncate font-mono text-[11px] text-content/40" title={soulPath(agent.home)}>{shortPath(soulPath(agent.home), home)}</p>
+                  <textarea
+                    aria-label="Soul"
+                    value={instructions}
+                    maxLength={SOUL_MAX}
+                    onChange={e => setInstructions(e.target.value)}
+                    onKeyDown={onSubmitKey}
+                    rows={12}
+                    className={`${TEXTAREA} mt-2`}
+                    placeholder="Anything this agent should always keep in mind"
+                  />
+                  {instructions.length > SOUL_MAX * 0.9 ? (
+                    <p className="mt-1 text-right text-[11px] text-content/40">{instructions.length.toLocaleString()} of {SOUL_MAX.toLocaleString()} characters</p>
+                  ) : null}
+                </div>
+              </Group>
+            </>
+          ) : null}
 
-        <Group title="Remove">
-          <Row label={`Remove ${agent.name}`} description="Stops it, deletes its transcript and cancels its queued messages.">
-            <SecondaryButton danger disabled={busy} onClick={() => setRemoving(true)}>Remove agent…</SecondaryButton>
-          </Row>
-        </Group>
+          {section === 'memory' ? <MemorySection agent={agent} /> : null}
+
+          {section === 'dreaming' ? <DreamingSection agent={agent} /> : null}
+        </div>
+      </div>
       </div>
     </Modal>
   );

@@ -340,7 +340,7 @@ function Toasts() {
 type Dialog =
   | { kind: 'newAgent'; projectId?: string | null }
   | { kind: 'addProject'; thenNewAgent?: boolean }
-  | { kind: 'settings' }
+  | { kind: 'settings'; group?: 'super' }
   | { kind: 'profile' }
   | { kind: 'agentSettings' | 'removeAgent'; agentId: string }
   | { kind: 'newChannel' }
@@ -382,6 +382,13 @@ export function App() {
   useEffect(() => {
     document.title = waiting ? `(${waiting}) AgentsCode` : 'AgentsCode';
   }, [waiting]);
+
+  // An agent's settings link to Settings at a group (the SuperAgent's limits); see openSettingsAt.
+  useEffect(() => {
+    const onOpen = (event: Event) => setDialog({ kind: 'settings', group: (event as CustomEvent<{ group?: 'super' }>).detail?.group });
+    window.addEventListener('agentscode:open-settings', onOpen);
+    return () => window.removeEventListener('agentscode:open-settings', onOpen);
+  }, []);
 
   const actions: SidebarActions = {
     newAgent: projectId => setDialog({ kind: 'newAgent', projectId }),
@@ -467,7 +474,7 @@ export function App() {
           onAdded={projectId => { if (dialog.thenNewAgent) setTimeout(() => setDialog({ kind: 'newAgent', projectId })); }}
         />
       ) : null}
-      {dialog?.kind === 'settings' ? <SettingsDialog onClose={() => setDialog(null)} /> : null}
+      {dialog?.kind === 'settings' ? <SettingsDialog group={dialog.group} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'profile' ? <ProfileDialog onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'agentSettings' && dialogAgent ? <AgentSettingsDialog agent={dialogAgent} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'removeAgent' && dialogAgent ? <RemoveAgentDialog agent={dialogAgent} onClose={() => setDialog(null)} /> : null}

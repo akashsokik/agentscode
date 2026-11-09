@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ENGINE_LABELS, ENGINES, type Settings } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { attempt, useApp } from '../store.ts';
@@ -14,8 +14,12 @@ function save(change: Partial<Settings>) {
   return attempt(() => api.updateSettings(change));
 }
 
-export function SettingsDialog({ onClose }: { onClose: () => void }) {
+/** `group` opens Settings scrolled to that group (an agent's settings link to the SuperAgent's limits). */
+export function SettingsDialog({ onClose, group }: { onClose: () => void; group?: 'super' }) {
   const settings = useApp(s => s.snapshot?.settings);
+  useEffect(() => {
+    if (group) document.getElementById(`settings-${group}`)?.scrollIntoView({ block: 'start' });
+  }, [group, Boolean(settings)]);
   const engines = useApp(s => s.snapshot?.engines);
   const models = useApp(s => s.snapshot?.models);
   const theme = useTheme();
@@ -64,7 +68,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </Row>
         </Group>
 
-        <Group title="SuperAgent" description="It runs your team across every project. It never edits code; agents do the work. The limits below stop only what it starts on its own: your own messages to it, and the work you asked it for, always go.">
+        <Group id="settings-super" title="SuperAgent" description="It runs your team across every project. It never edits code; agents do the work. The limits below stop only what it starts on its own: your own messages to it, and the work you asked it for, always go.">
           <Row label="Wake it when agents finish, fail or get stuck" description="Updates are batched into one turn, and only sent while it is idle.">
             <Toggle label="Wake the SuperAgent" on={settings.superWake} onChange={superWake => void save({ superWake })} />
           </Row>
