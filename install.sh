@@ -3,11 +3,12 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/akashsokik/agentscode/main/install.sh | bash
 #
-# The Mac build is not signed with a Developer ID yet. A copy downloaded in a browser is marked
-# as downloaded (quarantined), and macOS refuses its first launch with "Apple could not verify
-# AgentsCode". curl does not mark what it downloads, so the app this script installs opens
-# directly. The script checks the download against the release's SHA256SUMS and the app's code
-# signature before it replaces anything.
+# Releases are signed with a Developer ID and notarized, so the DMG from the website works too; this
+# script is the terminal route, and the way to update a version up to 0.2.2, which was not signed and
+# cannot install a signed update itself. It also installs an ad-hoc signed build (from a fork without
+# the signing secrets): curl does not quarantine what it downloads, so that app opens directly too.
+# The script checks the download against the release's SHA256SUMS and the app's code signature
+# before it replaces anything.
 #
 # Run it again to update. Quit AgentsCode first.
 #
