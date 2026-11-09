@@ -609,10 +609,8 @@ export function applyProfile(profile: ProfileStore, agent: Agent, reply: DreamRe
     if (!mentions(trusted, raw.text)) return reject('cited evidence does not mention it');
     try {
       if (trusted.every(outright)) {
-        const problem = profile.proposalProblem(raw.text.replace(/\s+/g, ' ').trim());
-        if (problem === 'the profile already says it' || problem === 'the user rejected it before') return reject(problem);
-        const { entry, added } = profile.add(raw.text, raw.why, { agentId: agent.id, from: agent.name, dreamId });
-        if (!added) return reject('duplicate');
+        const { entry, added } = profile.learn(raw.text, raw.why, { agentId: agent.id, from: agent.name, dreamId });
+        if (!added) return reject('the profile already says it');
         op.entryId = entry.id;
         op.result = 'applied';
       } else {
@@ -620,7 +618,7 @@ export function applyProfile(profile: ProfileStore, agent: Agent, reply: DreamRe
         op.result = 'proposed';
       }
     } catch (err) {
-      return reject(err instanceof HttpError ? err.message.replace(/^Not proposed: |\.$/g, '') : `failed: ${(err as Error).message}`);
+      return reject(err instanceof HttpError ? err.message.replace(/^Not (?:proposed|saved): |\.$/g, '') : `failed: ${(err as Error).message}`);
     }
     ops.push(op);
   });

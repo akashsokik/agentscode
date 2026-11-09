@@ -35,7 +35,7 @@ export function renderProfile(entries: ProfileEntry[]): string {
   const lines = [
     '# About the user',
     '',
-    'AgentsCode keeps this file and gives it to every agent. Agents add what they learn about you; you can edit or delete entries in the app (Settings, About you) or here.',
+    'AgentsCode keeps this file and gives it to every agent. Agents add what they learn about you; edit or delete entries in the app (Settings, About you). A hand edit here must keep each entry under its "## <id> (<time>)" heading: lines outside an entry are dropped on the next write.',
   ];
   for (const entry of entries) {
     const when = new Date(entry.createdAt).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -168,6 +168,24 @@ export class ProfileStore {
     const next = [...entries, entry];
     this.write(next, 'The user profile is full');
     return { entry, added: true, entries: next };
+  }
+
+  /**
+   * Save something an agent or a dream learned, not the user: like add, but refused (409) when the
+   * profile already says it in other words or the user rejected it before, and a waiting proposal
+   * that says the same thing is resolved by it, so accepting that later adds no near-duplicate.
+   */
+  learn(rawText: unknown, rawWhy: unknown, meta: { agentId?: string; from?: string; dreamId?: string } = {}): { entry: ProfileEntry; added: boolean; entries: ProfileEntry[] } {
+    const { text } = checkEntry(rawText, rawWhy);
+    const same = this.entries().find(e => e.text === text);
+    if (same) return { entry: same, added: false, entries: this.entries() };
+    const problem = this.proposalProblem(text);
+    if (problem === 'the profile already says it' || problem === 'the user rejected it before') throw new HttpError(409, `Not saved: ${problem}.`);
+    const result = this.add(rawText, rawWhy, meta);
+    const stored = this.stored();
+    const pending = stored.pending.filter(p => p.text !== text && !sameFact(p.text, text));
+    if (pending.length !== stored.pending.length) this.save({ ...stored, pending });
+    return result;
   }
 
   /** Rewrite an entry (the user, in the app). Leaving `why` out keeps the old reason; an empty one clears it. */

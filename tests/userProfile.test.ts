@@ -394,3 +394,17 @@ test('the app offers Undo for a dream that only changed the profile, and counts 
   assert.equal(profileCountsText(learned.profile), 'learned 1 about you, 1 to review');
   assert.equal(profileCountsText([]), '');
 });
+
+test('remember scope "user" is refused for what the user rejected or the profile already says, and resolves a matching proposal', async () => {
+  const t = await team();
+  const store = new ProfileStore(t.store.dataDir);
+  const rejected = store.propose({ kind: 'dream', text: 'Always add emojis to commit messages.' });
+  store.decide(rejected.id, 'reject');
+  await assert.rejects(t.call(t.adaRunner, 'remember', { text: 'Add emojis to every commit message.', scope: 'user' }), e => status(e) === 409 && /rejected it before/.test((e as Error).message));
+  store.add('Never use emojis.', '', {});
+  await assert.rejects(t.call(t.adaRunner, 'remember', { text: 'The user does not want emojis anywhere.', scope: 'user' }), e => status(e) === 409 && /already says it/.test((e as Error).message));
+
+  store.propose({ kind: 'dream', text: 'Keep replies short.' });
+  await t.call(t.adaRunner, 'remember', { text: 'Keep the replies short.', scope: 'user' });
+  assert.equal(store.proposals().length, 0, 'the waiting proposal is resolved, so accepting it cannot add a near-duplicate');
+});

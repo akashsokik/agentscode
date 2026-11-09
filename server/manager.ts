@@ -754,7 +754,8 @@ export class AgentManager {
       if (!parsed.success) throw new HttpError(400, `Say what to remember in 1 to ${MEMORY_TEXT_LIMIT} characters, with an optional why of up to ${MEMORY_WHY_LIMIT}, and scope "agent" or "user".`);
       if (parsed.data.scope === 'user') {
         const before = this.profile.entries();
-        const { entry, added, entries } = this.profile.add(parsed.data.text, parsed.data.why, { agentId: agent.id, from: agent.name });
+        // Checked like a dream's: nothing the profile already says, nothing the user rejected.
+        const { entry, added, entries } = this.profile.learn(parsed.data.text, parsed.data.why, { agentId: agent.id, from: agent.name });
         if (added) {
           this.publishProfile();
           this.sawOwnProfile(agent, before, entries);
