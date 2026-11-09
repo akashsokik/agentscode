@@ -253,7 +253,7 @@ test('an agent finishing wakes the SuperAgent with a system update, never a user
   assert.equal(sent.task?.source, 'system');
   assert.match(sent.text, /Ada finished a turn: <untrusted>Task: Fix the header\. Result: Fixed the header\./);
   const entries = t.store.readEntries(t.sup.id);
-  assert.equal(entries.filter(e => e.kind === 'system' && e.text.startsWith('Update from AgentsCode')).length, 1);
+  assert.equal(entries.filter(e => e.kind === 'system' && e.text === 'Update: Ada finished a turn').length, 1);
   assert.ok(!buildDigest(entries).items.some(i => i.source === 'user' && i.text.includes('emojis')), 'agent text never becomes user evidence');
 
   // Work the SuperAgent asked for itself is not news: the reply or report reaches it anyway.
@@ -298,4 +298,20 @@ test('the app sets it up, answers it and undoes its decisions over HTTP', async 
   } finally {
     server.close();
   }
+});
+
+// ---- the page ---------------------------------------------------------------------------------------------
+
+test('the page: the SuperAgent has its own row, not one among the agents; its line says what it does and what waits', async () => {
+  const { railAgents } = await import('../web/sidebar/agentRail.ts');
+  const { openAsks, superLabel } = await import('../web/superText.ts');
+  const listed = railAgents([
+    { name: 'SuperAgent', projectId: null, createdAt: 1, role: 'super' as const },
+    { name: 'Ada', projectId: null, createdAt: 2, role: 'dev' as const },
+  ]);
+  assert.deepEqual(listed.map(a => a.name), ['Ada']);
+  assert.equal(superLabel(undefined, 0), 'Set up the SuperAgent');
+  assert.equal(superLabel({ status: 'idle', activity: '' }, 0), 'Watching your agents');
+  assert.equal(superLabel({ status: 'working', activity: 'Reading Ada\'s transcript' }, 2), 'Reading Ada\'s transcript · 2 waiting for you');
+  assert.deepEqual(openAsks([{ id: 'a', question: 'q', options: ['x'], createdAt: 1 }, { id: 'b', question: 'q2', options: ['x'], createdAt: 2, answeredAt: 3, answer: 'x' }]).map(a => a.id), ['a']);
 });

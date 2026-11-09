@@ -7,11 +7,12 @@ import { SoulProposalNotice } from '../dialogs/Dreaming.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { Empty, HeaderButton } from '../ui/common.tsx';
-import { Bot, Settings } from '../mono/icons.tsx';
+import { Bot, ListBullet, Settings } from '../mono/icons.tsx';
 import { Composer } from './Composer.tsx';
 import { Transcript } from './Transcript.tsx';
 import { OpenUIActionContext } from '../openui/context.ts';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
+import { SuperInbox, SuperLogDialog } from './SuperPanel.tsx';
 
 /** One agent's session: transcript, inline approvals and the composer. */
 export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneChrome }) {
@@ -22,6 +23,7 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
   const approvals = useMemo(() => (allApprovals ?? []).filter(a => a.agentId === agentId), [allApprovals, agentId]);
   const question = approvals.find(a => a.type === 'question');
   const [settings, setSettings] = useState(false);
+  const [log, setLog] = useState(false);
   const answer = useMemo(() => (text: string) => void attempt(() => api.send(agentId, text)), [agentId]);
 
   useEffect(() => {
@@ -50,7 +52,12 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
           <AgentStatus agent={agent} pending={approvals.length > 0} className="min-w-0 font-normal" />
         </span>
       }
-      actions={<HeaderButton icon={Settings} label="Agent settings" onClick={() => setSettings(true)} />}
+      actions={(
+        <>
+          {agent.role === 'super' ? <HeaderButton icon={ListBullet} label="What the SuperAgent did" onClick={() => setLog(true)} /> : null}
+          <HeaderButton icon={Settings} label="Agent settings" onClick={() => setSettings(true)} />
+        </>
+      )}
     >
       {/* Buttons in the agent's ```openui-lang blocks answer it as if you had typed their message. */}
       <OpenUIActionContext.Provider value={answer}>
@@ -58,8 +65,11 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
       </OpenUIActionContext.Provider>
       {/* A soul change a dream proposed waits here until you accept or reject it in the settings. */}
       <SoulProposalNotice agent={agent} onReview={() => setSettings(true)} />
+      {/* The SuperAgent's questions wait above its composer until you answer them. */}
+      {agent.role === 'super' ? <SuperInbox /> : null}
       <Composer agent={agent} project={project} question={question} onSettings={() => setSettings(true)} />
       {settings ? <AgentSettingsDialog agent={agent} onClose={() => setSettings(false)} /> : null}
+      {log ? <SuperLogDialog onClose={() => setLog(false)} /> : null}
     </PaneFrame>
   );
 }

@@ -25,6 +25,7 @@ import type {
   Settings,
   Snapshot,
   TerminalInfo,
+  SuperState,
   TreeListing,
   UserProfile,
   Walkthrough,
@@ -131,6 +132,12 @@ export const api = {
   forgetProfile: (entryId: string) => request<UserProfile>('DELETE', `/api/profile/${entryId}`),
   /** Accept (add to user.md) or reject a proposal about the user. */
   decideProfile: (proposalId: string, action: 'accept' | 'reject') => request<UserProfile>('POST', `/api/profile/proposals/${proposalId}`, { action }),
+  /** Set up the SuperAgent (409 when there is one). Changes also arrive as `super` events. */
+  createSuper: () => request<Agent>('POST', '/api/super', {}),
+  /** Answer one of its questions with a choice or your own words, or put it aside. */
+  answerSuper: (askId: string, body: { answer: string } | { dismiss: true }) => request<SuperState>('POST', `/api/super/asks/${askId}`, body),
+  /** Take back one of its decisions. */
+  undoSuper: (actionId: string) => request<SuperState>('POST', `/api/super/log/${actionId}/undo`),
   /** The agent's walkthroughs, newest first. */
   walkthroughs: (id: string) => request<WalkthroughSummary[]>('GET', `/api/agents/${id}/walkthroughs`),
   walkthrough: (id: string, walkthroughId: string) => request<Walkthrough>('GET', `/api/agents/${id}/walkthroughs/${walkthroughId}`),

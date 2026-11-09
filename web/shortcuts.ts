@@ -21,6 +21,8 @@ export const SHORTCUTS = {
   terminal: `${MOD}J`,
   browser: IS_MAC ? '⇧⌘B' : 'Ctrl+Shift+B',
   maximize: IS_MAC ? '⇧⌘↩' : 'Ctrl+Shift+Enter',
+  /** The SuperAgent's quick bar; the desktop app also takes it system-wide. Never Cmd+J, the terminal's. */
+  superQuick: IS_MAC ? '⇧⌘Space' : 'Ctrl+Shift+Space',
 } as const;
 
 function cycleTab(step: number): void {
@@ -36,6 +38,7 @@ interface Handlers {
   newAgent: () => void;
   settings: () => void;
   palette: () => void;
+  superQuick: () => void;
   /** Holds the shortcuts off while a dialog is open. */
   blocked: boolean;
 }
@@ -64,6 +67,7 @@ export function runShortcut(e: KeyboardEvent): boolean {
   // e.code, not e.key: Option changes the character a key types on macOS.
   if (e.code === 'KeyB' && e.altKey && !e.shiftKey) setRightPanel(!layout.rightPanel);
   else if (e.altKey) handled = false;
+  else if (e.code === 'Space' && e.shiftKey) handlers.superQuick();
   else if (e.code === 'KeyB' && e.shiftKey) openBrowser();
   else if ((e.code === 'Enter' || e.code === 'NumpadEnter') && e.shiftKey) toggleMaximize(layout.focused);
   else if (e.code === 'KeyB' && !e.shiftKey) setSidebar(!layout.sidebar);

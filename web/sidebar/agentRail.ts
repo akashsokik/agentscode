@@ -9,9 +9,10 @@ export { ALL_PROJECTS };
  * The agents with no project, by name; agents with the same name keep the order they were made in.
  * A project's agents live in that project's workspace column instead.
  */
-export function railAgents<A extends Pick<Agent, 'name' | 'projectId' | 'createdAt'>>(agents: readonly A[]): A[] {
+export function railAgents<A extends Pick<Agent, 'name' | 'projectId' | 'createdAt'> & { role?: Agent['role'] }>(agents: readonly A[]): A[] {
   return agents
-    .filter(agent => !agent.projectId)
+    // The SuperAgent has its own row at the top of the navigation column.
+    .filter(agent => !agent.projectId && agent.role !== 'super')
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }) || a.createdAt - b.createdAt);
 }
 

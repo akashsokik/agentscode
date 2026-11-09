@@ -205,7 +205,7 @@ export class AgentManager {
       },
       settings: () => this.store.settings,
       store: this.superStore,
-      deliver: prompt => this.wakeSuper(prompt),
+      deliver: (prompt, events) => this.wakeSuper(prompt, `Update: ${events.map(e => e.text).join('; ')}`),
     });
     this.createRunner = options.createRunner ?? (ctx => createEngineRunner(ctx));
     this.idleProcessMs = options.idleProcessMs ?? IDLE_PROCESS_MS;
@@ -1299,13 +1299,16 @@ export class AgentManager {
     return names.length ? names.join(', ') : 'no members';
   }
 
-  /** Start an update turn: AgentsCode's own words (a system entry), never a user message. */
-  private wakeSuper(prompt: string): void {
+  /**
+   * Start an update turn: AgentsCode's own words, never a user message. The transcript gets a short
+   * system line; the SuperAgent reads the whole update.
+   */
+  private wakeSuper(prompt: string, line: string): void {
     const id = this.superId();
     if (!id) return;
     const agent = this.agent(id);
     this.clearIdleTimer(id);
-    this.addEntry(id, { id: randomUUID(), kind: 'system', text: prompt });
+    this.addEntry(id, { id: randomUUID(), kind: 'system', text: clip(line, 300) });
     const runner = this.runnerFor(agent);
     agent.lastActiveAt = Date.now();
     runner.send(prompt, { summary: 'Update from AgentsCode', source: 'system' });

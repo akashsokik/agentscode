@@ -16,13 +16,14 @@ import { ResizeHandle, useColumnWidth, useWindowWidth } from '../ui/ResizeHandle
 import { SHORTCUTS } from '../shortcuts.ts';
 import { showTerminal } from '../terminal/actions.ts';
 import { cx, Empty, HeaderButton, Loading, MenuDivider, MenuLabel, MenuRow, StatusLabel } from '../ui/common.tsx';
-import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, SplitColumns, Square, StickyNote, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
+import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, Sparkles, SplitColumns, Square, StickyNote, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
+import { openAsks, openSuper } from '../super.ts';
 
 export interface SidebarActions {
   /** null preselects No project; undefined starts from the current project. */
@@ -512,6 +513,8 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
   const sorted = useMemo(() => [...(channels ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [channels]);
   const listed = useMemo(() => railAgents(agents ?? []), [agents]);
   const agentId = focusedAgentId(layout);
+  const superId = useApp(s => s.snapshot?.super.agentId ?? null);
+  const superWaiting = useApp(s => openAsks(s.snapshot?.super.asks).length);
   const column = useColumnWidth('nav', 200, 168, 0.3);
   return (
     <nav aria-label="AgentsCode" style={{ width: column.width }} className="sidebar-glass relative flex shrink-0 flex-col border-r border-stroke font-sans">
@@ -528,6 +531,9 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
         <RailAction icon={Search} label="Search" hint={SHORTCUTS.palette} onClick={actions.palette} />
         <RailAction icon={MessageMultiple} label="Comms" active={commsOpen} onClick={() => open({ kind: 'comms' })}>
           {inFlight ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${inFlight} in flight`}>{inFlight}</span> : null}
+        </RailAction>
+        <RailAction icon={Sparkles} label="SuperAgent" hint={SHORTCUTS.superQuick} active={Boolean(superId) && agentId === superId} onClick={() => void openSuper()}>
+          {superWaiting ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${superWaiting} waiting for you`}>{superWaiting}</span> : null}
         </RailAction>
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none pb-2">
@@ -790,6 +796,7 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
   const projects = useApp(s => s.snapshot?.projects);
   const agents = useApp(s => s.snapshot?.agents);
   const inFlight = useApp(s => s.snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0);
+  const superWaiting = useApp(s => openAsks(s.snapshot?.super.asks).length);
   const update = useDesktopUpdate();
   const focusedPane = layout.panes.find(p => p.id === layout.focused);
   const commsOpen = layout.tabs.find(t => t.id === focusedPane?.tabId)?.content.kind === 'comms';
@@ -816,6 +823,9 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
         <RailIconButton label={`Search (${SHORTCUTS.palette})`} onClick={actions.palette}><Search className="size-4" strokeWidth={1.75} /></RailIconButton>
         <RailIconButton label={inFlight ? `Comms, ${inFlight} in flight` : 'Comms'} active={commsOpen} dot={inFlight ? <span className="size-1.5 rounded-full bg-accent" /> : null} onClick={() => open({ kind: 'comms' })}>
           <MessageMultiple className="size-4" strokeWidth={1.75} />
+        </RailIconButton>
+        <RailIconButton label={superWaiting ? `SuperAgent, ${superWaiting} waiting for you` : 'SuperAgent'} dot={superWaiting ? <span className="size-1.5 rounded-full bg-accent" /> : null} onClick={() => void openSuper()}>
+          <Sparkles className="size-4" strokeWidth={1.75} />
         </RailIconButton>
       </div>
       <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto overscroll-none border-t border-stroke py-2">

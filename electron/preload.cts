@@ -1,12 +1,14 @@
 /**
  * The desktop app's bridge to the page, as `window.agentscodeDesktop`:
  * - `updates`, which the sidebar's update row reads (web/sidebar/SidebarUpdate.tsx);
- * - `browser`, the integrated browser's controls and events (web/browser.ts).
+ * - `browser`, the integrated browser's controls and events (web/browser.ts);
+ * - `super`, the SuperAgent's menu bar item and system-wide shortcut (web/super.ts, electron/superTray.ts).
  * The page is the AgentsCode server's own UI on 127.0.0.1; main.ts answers only that origin, and
  * browser tabs run without any preload. CommonJS because sandboxed preload scripts cannot be ES
  * modules; tsc compiles this .cts to preload.cjs.
  */
 import type { DesktopBrowser } from '../shared/browser.ts';
+import type { DesktopSuper, SuperCommand } from '../shared/superAgent.ts';
 import type { DesktopUpdates, UpdateSnapshot } from '../shared/updates.ts';
 
 const { contextBridge, ipcRenderer } = require('electron') as typeof import('electron');
@@ -34,4 +36,16 @@ const browser: DesktopBrowser = {
   },
 };
 
-contextBridge.exposeInMainWorld('agentscodeDesktop', { updates, browser });
+const superAgent: DesktopSuper = {
+  status: state => ipcRenderer.send('super:status', state),
+  focus: () => ipcRenderer.send('super:focus'),
+  onCommand(callback) {
+    const listener = (_event: unknown, command: SuperCommand) => callback(command);
+    ipcRenderer.on('super:command', listener);
+    return () => {
+      ipcRenderer.removeListener('super:command', listener);
+    };
+  },
+};
+
+contextBridge.exposeInMainWorld('agentscodeDesktop', { updates, browser, super: superAgent });

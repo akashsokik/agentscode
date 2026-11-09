@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Settings, SuperAction, SuperAsk, SuperState } from '../shared/types.ts';
 import { HttpError } from './errors.ts';
+import { inQuietHours, validQuietTime } from '../shared/superAgent.ts';
+
+export { inQuietHours, validQuietTime };
 
 // The SuperAgent: one agent (role "super") that runs the team for the user. It works through
 // commands only (server/comms/tools.ts SUPER_TOOLS) and never edits: it has no edit tools or shell
@@ -136,28 +139,6 @@ export class SuperStore {
 
 const isOpen = (ask: SuperAsk) => ask.answeredAt === undefined;
 
-/** "HH:MM" as minutes past midnight, or null when it is not a time. */
-function minutes(text: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(text ?? '').trim());
-  if (!m) return null;
-  const h = Number(m[1]);
-  const min = Number(m[2]);
-  return h < 24 && min < 60 ? h * 60 + min : null;
-}
-
-export function validQuietTime(text: unknown): boolean {
-  return typeof text === 'string' && minutes(text) !== null;
-}
-
-/** Whether `now` (local time) falls in quiet hours. From after To spans midnight; equal times mean none. */
-export function inQuietHours(settings: Pick<Settings, 'superQuietFrom' | 'superQuietTo'>, now: Date): boolean {
-  const from = minutes(settings.superQuietFrom);
-  const to = minutes(settings.superQuietTo);
-  if (from === null || to === null || from === to) return false;
-  const at = now.getHours() * 60 + now.getMinutes();
-  return from < to ? at >= from && at < to : at >= from || at < to;
-}
-
 /** One thing that happened, for the next update. `text` is AgentsCode's words; `untrusted` is an agent's. */
 export interface SuperEvent {
   agentId: string;
@@ -196,8 +177,8 @@ export interface WatcherHost {
   idle(): boolean;
   settings(): Settings;
   store: SuperStore;
-  /** Start the update turn. */
-  deliver(prompt: string): void;
+  /** Start the update turn: the prompt it reads, and the events behind it (for the transcript's line). */
+  deliver(prompt: string, events: SuperEvent[]): void;
   now?(): number;
 }
 
@@ -249,7 +230,7 @@ export class SuperWatcher {
     const events = this.pending;
     this.pending = [];
     this.host.store.noteWake(this.now());
-    this.host.deliver(updatePrompt(events, this.host.store.openAsks(), this.now()));
+    this.host.deliver(updatePrompt(events, this.host.store.openAsks(), this.now()), events);
     return true;
   }
 

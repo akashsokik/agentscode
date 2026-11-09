@@ -6,11 +6,12 @@
  */
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
 import { isLocalUrl } from '../shared/browser.ts';
 import { BrowserError, BrowserHost, type Rect } from './browser.ts';
 import { BrowserBridge } from './bridge.ts';
 import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSnapshot } from './updater.ts';
+import { startSuperBridge, stopSuperBridge } from './superTray.ts';
 
 const PORT = Number(process.env.PORT ?? 4320);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -324,7 +325,7 @@ function showWindow(): void {
 }
 
 /** Only the AgentsCode page itself may use the desktop bridge. */
-function fromApp(event: IpcMainInvokeEvent): boolean {
+function fromApp(event: IpcMainInvokeEvent | IpcMainEvent): boolean {
   try {
     return new URL(event.senderFrame?.url ?? '').origin === ORIGIN;
   } catch {
@@ -348,6 +349,7 @@ if (!app.requestSingleInstanceLock()) {
     // On macOS the agents keep working with the window closed, like other Mac apps.
     if (process.platform !== 'darwin') app.quit();
   });
+  app.on('will-quit', stopSuperBridge);
   app.on('before-quit', (event) => {
     if (!server) return;
     event.preventDefault();
@@ -363,6 +365,8 @@ if (!app.requestSingleInstanceLock()) {
     // A packaged app gets its icon from the bundle; running from source would show Electron's.
     else app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
     registerBrowserIpc();
+    // The SuperAgent's menu bar item and system-wide quick bar shortcut.
+    startSuperBridge({ window: () => window, show: showWindow, fromApp });
     if (await serverAnswers()) {
       markReady();
       bridge.useSocket();

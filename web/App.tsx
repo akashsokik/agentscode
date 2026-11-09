@@ -7,6 +7,8 @@ import { NewAgentDialog } from './dialogs/NewAgentDialog.tsx';
 import { RemoveAgentDialog } from './dialogs/RemoveAgentDialog.tsx';
 import { SettingsDialog } from './dialogs/SettingsDialog.tsx';
 import { ProfileDialog } from './dialogs/UserProfile.tsx';
+import { SuperQuickBar } from './ui/SuperQuickBar.tsx';
+import { openAsks, openSuper, superLabel, useSuperAgent, useSuperBridge } from './super.ts';
 import { useGitStatus } from './git.ts';
 import { closeTab, focusedAgentId, open, pruneTabs, setProject, setRightPanel, setSidebar, setSidebarView, useLayout, type Pane, type Tab } from './layout.ts';
 import { AgentPane } from './panes/AgentPane.tsx';
@@ -32,7 +34,7 @@ import { dismissToast, useApp } from './store.ts';
 import { EngineIcon } from './ui/EngineIcon.tsx';
 import { UsageFooter } from './ui/UsageFooter.tsx';
 import { HeaderButton, StatusLabel } from './ui/common.tsx';
-import { AlertCircle, CheckCircle, Route, File, FileDiff, Globe, MessageMultiple, PanelLeft, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
+import { AlertCircle, CheckCircle, Route, File, FileDiff, Globe, MessageMultiple, PanelLeft, Sparkles, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
 import { LAYER } from './mono/layers.ts';
 import { Shimmer } from './mono/Shimmer.tsx';
 import { TabLabel } from './mono/TabLabel.tsx';
@@ -232,6 +234,24 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
  * MonoCode's footer under the main column: each engine's subscription usage (or the connection,
  * while it is down), who is busy, the terminal and Comms.
  */
+/** The SuperAgent in the status bar: what it is doing and what waits for you; a click opens it. */
+function SuperDock() {
+  const agent = useSuperAgent();
+  const waiting = useApp(s => openAsks(s.snapshot?.super.asks).length);
+  if (!agent) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => void openSuper()}
+      title={`SuperAgent (${SHORTCUTS.superQuick} for the quick bar)`}
+      className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 transition-colors duration-150 hover:bg-content/10 hover:text-content ${waiting ? 'text-content/75' : 'text-content/40'}`}
+    >
+      {agent.status === 'working' ? <TerminalSpinner className="text-content/45" /> : <Sparkles className="size-3" strokeWidth={1.75} />}
+      {superLabel(agent, waiting)}
+    </button>
+  );
+}
+
 function StatusFooter() {
   const connection = useApp(s => s.connection);
   const terminalOpen = Boolean(useLayout().terminal);
@@ -256,6 +276,7 @@ function StatusFooter() {
       {working ? <span className="flex shrink-0 items-center gap-1 text-content/45"><TerminalSpinner className="text-content/45" />{working} working</span> : null}
       {waiting ? <span className="shrink-0 text-warning">{waiting} {waiting === 1 ? 'needs' : 'need'} you</span> : null}
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        <SuperDock />
         <button
           type="button"
           onClick={toggleTerminal}
@@ -325,6 +346,7 @@ type Dialog =
   | { kind: 'newChannel' }
   | { kind: 'channelSettings'; channelId: string }
   | { kind: 'palette' }
+  | { kind: 'superQuick' }
   | null;
 
 export function App() {
@@ -372,7 +394,10 @@ export function App() {
     channelSettings: channelId => setDialog({ kind: 'channelSettings', channelId }),
     palette: () => setDialog({ kind: 'palette' }),
   };
-  useShortcuts({ newAgent: () => actions.newAgent(layout.projectId ?? undefined), settings: actions.settings, palette: actions.palette, blocked: dialog !== null });
+  const superQuick = () => setDialog(d => (d?.kind === 'superQuick' ? null : { kind: 'superQuick' }));
+  useShortcuts({ newAgent: () => actions.newAgent(layout.projectId ?? undefined), settings: actions.settings, palette: actions.palette, superQuick, blocked: dialog !== null });
+  // The menu bar and the system-wide shortcut (desktop app), and notifications when it asks you something.
+  useSuperBridge(() => setDialog({ kind: 'superQuick' }));
   const navFull = useNavFull();
 
   if (!snapshot) {
@@ -448,6 +473,7 @@ export function App() {
       {dialog?.kind === 'removeAgent' && dialogAgent ? <RemoveAgentDialog agent={dialogAgent} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'newChannel' ? <ChannelDialog onClose={() => setDialog(null)} onNewAgent={() => setTimeout(() => setDialog({ kind: 'newAgent' }))} /> : null}
       {dialog?.kind === 'channelSettings' && dialogChannel ? <ChannelDialog key={dialogChannel.id} channel={dialogChannel} onClose={() => setDialog(null)} /> : null}
+      {dialog?.kind === 'superQuick' ? <SuperQuickBar onClose={() => setDialog(d => (d?.kind === 'superQuick' ? null : d))} /> : null}
       {dialog?.kind === 'palette' ? <CommandPalette actions={actions} onClose={() => setDialog(d => (d?.kind === 'palette' ? null : d))} /> : null}
       <Toasts />
     </div>
