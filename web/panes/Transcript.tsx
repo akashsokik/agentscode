@@ -11,7 +11,7 @@
  * rises into place at the top of the view before the rest of its turn fades in under it.
  */
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import type { Agent, Approval, Entry, PeerMessage, ToolCall, TurnMeta } from '../../shared/types.ts';
+import type { Agent, Approval, Entry, ToolCall, TurnMeta } from '../../shared/types.ts';
 import { turnMetricsText } from '../../shared/turnUsage.ts';
 import { foldableWork, groupTurnItems, isDreamLine, keptInView, memoryLine, turnItemKey, walkthroughResult, workKind, workSummaryLine, type TurnItem } from '../activity.ts';
 import { api } from '../api.ts';
@@ -33,6 +33,8 @@ import { Popover } from '../mono/Popover.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { MessageImages } from './ImageViews.tsx';
+import { Comms, DelegationCard, PeerTrailRow, PeerTurnBlock } from './PeerMessages.tsx';
+import { commsIndex, repeatedPromptTurns } from '../peerText.ts';
 
 /**
  * Whether something with this id is landing now, as opposed to having been on screen already or
@@ -210,114 +212,6 @@ function ChannelCaption({ channelId, queued }: { channelId: string; queued?: boo
   );
 }
 
-function useChannelName(message: PeerMessage): string | undefined {
-  return useApp(s => (message.channelId ? s.snapshot?.channels.find(c => c.id === message.channelId)?.name ?? 'deleted-channel' : undefined));
-}
-
-function peerLabel(message: PeerMessage, selfId: string, channel?: string): { label: string; severityText?: string; severityClass: string } {
-  const incoming = message.toAgentId === selfId;
-  const label = channel
-    ? incoming
-      ? message.replyTo ? `${message.fromName} answered in #${channel}` : `${message.fromName} mentioned you in #${channel}`
-      : message.replyTo ? `Answered ${message.toName} in #${channel}` : `Mentioned ${message.toName} in #${channel}`
-    : incoming
-    ? message.report ? `${message.fromName} reported ${message.report.outcome}`
-      : message.delegation ? `${message.fromName} delegated ${message.delegation.kind}`
-      : message.replyTo ? `${message.fromName} replied`
-      : message.expectsReply ? `${message.fromName} asks` : `${message.fromName} notes`
-    : message.report ? `Reported ${message.report.outcome} to ${message.toName}`
-      : message.delegation ? `Delegated ${message.delegation.kind} to ${message.toName}`
-      : message.replyTo ? `Replied to ${message.toName}`
-      : message.expectsReply ? `Asked ${message.toName}` : `Note to ${message.toName}`;
-  const failed = message.status === 'failed' || message.status === 'cancelled';
-  const severityText = failed ? (message.status === 'failed' ? 'Failed' : 'Cancelled')
-    : message.status === 'queued' ? 'Queued' : message.status === 'delivering' ? 'Working' : undefined;
-  const outcome = message.report?.outcome;
-  const severityClass = failed || outcome === 'failed' ? 'text-danger' : outcome === 'blocked' ? 'text-warning' : 'text-content/55';
-  return { label, severityText, severityClass };
-}
-
-const INTERJECTION_BODY = 'min-w-0 whitespace-pre-wrap break-words font-sans text-[12.5px] leading-5 text-content/70';
-
-/** MonoCode's InterjectionDivider: a teammate's message that opens a turn, or waits for one. */
-function PeerPrompt({ message, selfId }: { message: PeerMessage; selfId: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  const textRef = useRef<HTMLPreElement>(null);
-  useLayoutEffect(() => {
-    const el = textRef.current;
-    if (!el) return;
-    const measure = () => { if (!expanded) setOverflows(el.scrollHeight > el.clientHeight + 1); };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [message.text, expanded]);
-  const channel = useChannelName(message);
-  const { label, severityText, severityClass } = peerLabel(message, selfId, channel);
-  return (
-    <div className="px-4 py-4">
-      <div className="flex items-center gap-3">
-        <div className="h-px min-w-4 flex-1 bg-content/12" />
-        <div role="separator" aria-label={`Teammate message: ${label}`} className="flex items-center gap-2 px-1.5 font-sans text-[12px] text-content/55">
-          <span>{label}</span>
-          {severityText ? <span className={`text-[11px] ${severityClass}`}>{severityText}</span> : null}
-        </div>
-        <div className="h-px min-w-4 flex-1 bg-content/12" />
-      </div>
-      <div className="mt-2 px-2">
-        <pre ref={textRef} className={`${INTERJECTION_BODY} ${expanded ? '' : 'line-clamp-2'}`}>{message.text}</pre>
-        <div className="flex items-center gap-2 pt-1">
-          {overflows ? (
-            <TextButton aria-expanded={expanded} onClick={() => setExpanded(v => !v)} className="-ml-1">
-              {expanded ? 'Show less' : 'Show more'}
-            </TextButton>
-          ) : null}
-          <OpenThread message={message} channel={channel} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Opens where a teammate message lives: its channel, or its thread in Comms. */
-function OpenThread({ message, channel }: { message: PeerMessage; channel?: string }) {
-  return (
-    <TextButton
-      onClick={() => openToSide(message.channelId ? { kind: 'channel', channelId: message.channelId } : { kind: 'comms', conversationId: message.conversationId })}
-      className="first:-ml-1"
-    >
-      {channel ? `Open #${channel}` : 'Open thread'}
-    </TextButton>
-  );
-}
-
-/** MonoCode's ActivityInterjectionRow: a teammate message inside the work trail. */
-function ActivityPeerRow({ message, selfId }: { message: PeerMessage; selfId: string }) {
-  const [open, setOpen] = useState(false);
-  const channel = useChannelName(message);
-  const { label, severityText, severityClass } = peerLabel(message, selfId, channel);
-  const summary = message.text.replace(/\s+/g, ' ').trim();
-  return (
-    <div className="flex min-w-0 flex-col">
-      <button type="button" aria-expanded={open} aria-label={open ? `Hide the message: ${label}` : `${label}: ${summary}`} onClick={() => setOpen(v => !v)} className="group flex min-w-0 items-center gap-1.5 py-1 text-left">
-        <span className="min-w-0 flex-1 truncate font-sans text-sm">
-          <span className="text-content/55">{label}</span>
-          {severityText ? <span className={`text-[11px] ${severityClass}`}> {severityText}</span> : null}
-          {summary ? <span className="text-content/50 transition-colors duration-200 group-hover:text-content/75">{' · '}{summary}</span> : null}
-        </span>
-      </button>
-      {open ? (
-        <div className="min-w-0 pb-2">
-          <pre className={INTERJECTION_BODY}>{message.text}</pre>
-          {message.error ? <p className="mt-1 font-sans text-xs text-danger">{message.error}</p> : null}
-          <div className="pt-1"><OpenThread message={message} channel={channel} /></div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 /** MonoCode's pill: a search pattern or one step of a chained command, 24px tall. */
 function Pill({ children, title, onOpen, className = '' }: { children: ReactNode; title?: string; onOpen?: () => void; className?: string }) {
   const base = `flex h-6 min-w-0 max-w-[200px] shrink items-center gap-1 rounded-md bg-content/6 font-mono text-[12px] ${className}`;
@@ -473,7 +367,7 @@ function ActivityStatusRow({ text }: { text: string }) {
 /** One step of a turn's work: a tool call, a teammate message or a status line. */
 function WorkRow({ entry, selfId }: { entry: Entry; selfId: string }) {
   if (entry.kind === 'tool') return <ActivityToolRow entry={entry} agentId={selfId} />;
-  if (entry.kind === 'peer' && entry.peer) return <ActivityPeerRow message={entry.peer} selfId={selfId} />;
+  if (entry.kind === 'peer' && entry.peer) return <PeerTrailRow message={entry.peer} selfId={selfId} />;
   return <ActivityStatusRow text={entry.text} />;
 }
 
@@ -929,6 +823,7 @@ function TurnItemView({ item, active, selfId, underLine }: { item: TurnItem; act
   if (item.type === 'memory') return <div className="px-4"><MemoryLine entry={item.entry} /></div>;
   if (item.type === 'dream') return <div className="px-4"><DreamLine entry={item.entry} /></div>;
   if (item.type === 'walkthrough') return <div className="px-4"><WalkthroughCard entry={item.entry} agentId={selfId} /></div>;
+  if (item.type === 'delegation') return <div className="px-4"><DelegationCard message={item.entry.peer!} /></div>;
   if (item.type === 'prose') {
     return (
       <div data-chat-message={item.entry.id} data-chat-message-role="assistant" className={`min-w-0 px-4 pb-1 text-content ${underLine ? 'pt-1' : 'pt-3'}`}>
@@ -954,12 +849,15 @@ function FoldItemView({ item, selfId }: { item: TurnItem; selfId: string }) {
   if (item.type === 'memory') return <MemoryLine entry={item.entry} />;
   if (item.type === 'dream') return <DreamLine entry={item.entry} />;
   if (item.type === 'walkthrough') return <WalkthroughCard entry={item.entry} agentId={selfId} />;
+  if (item.type === 'delegation') return <DelegationCard message={item.entry.peer!} />;
   if (item.type === 'prose') return <div className="py-1"><Markdown text={item.entry.text} /></div>;
   return <ActivityPhaseGroup entries={item.entries} active={false} selfId={selfId} />;
 }
 
-function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWork, caption, enter }: {
+function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWork, caption, enter, repeat = false }: {
   turn: Turn;
+  /** The same teammate message an earlier turn already ran, delivered again. */
+  repeat?: boolean;
   agent: Agent;
   live: boolean;
   waiting: boolean;
@@ -990,10 +888,8 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
 
   const prompt = turn.prompt;
   const promptCaption = caption ?? (prompt?.kind === 'user' && prompt.channel ? <ChannelCaption channelId={prompt.channel.id} /> : undefined);
-  return (
-    <div data-transcript-turn={turn.id} className={`transcript-turn flex min-w-0 flex-col${entering ? ' transcript-turn-enter' : ''}`}>
-      {prompt?.kind === 'user' ? <UserMessageBlock entry={prompt} caption={promptCaption} /> : null}
-      {prompt?.kind === 'peer' && prompt.peer ? <PeerPrompt message={prompt.peer} selfId={agent.id} /> : null}
+  const body = (
+    <>
       <TurnRow folded={!showFoldLine}>
         <WorkFoldLine
           agent={agent}
@@ -1052,6 +948,17 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
           meta={done?.meta ?? errors.at(-1)?.meta}
         />
       ) : null}
+    </>
+  );
+  // A turn not started yet (a message waiting its turn) has nothing under its prompt.
+  const hasBody = showFoldLine || errors.length > 0 || approvals.length > 0 || rest.length > 0;
+  return (
+    <div data-transcript-turn={turn.id} className={`transcript-turn flex min-w-0 flex-col${entering ? ' transcript-turn-enter' : ''}`}>
+      {prompt?.kind === 'user' ? <UserMessageBlock entry={prompt} caption={promptCaption} /> : null}
+      {prompt?.kind === 'peer' && prompt.peer ? (
+        // A teammate's message and the work it caused read as one block.
+        <PeerTurnBlock message={prompt.peer} arrivedAt={hasBody ? turn.startedAt : undefined} repeat={repeat}>{hasBody ? body : null}</PeerTurnBlock>
+      ) : body}
     </div>
   );
 }
@@ -1158,6 +1065,8 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
   });
 
   const { sections, queued } = useMemo(() => groupTurns(entries ?? [], agent.id), [entries, agent.id]);
+  const comms = useMemo(() => commsIndex(entries ?? []), [entries]);
+  const repeats = useMemo(() => repeatedPromptTurns(sections.flatMap(s => (s.type === 'turn' ? [s.turn] : []))), [sections]);
   const { visible, hidden } = useMemo(() => {
     if (showAll) return { visible: sections, hidden: 0 };
     let start = 0;
@@ -1409,6 +1318,7 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
           workOpen={workOpen}
           onToggleWork={() => setToggled(map => new Map(map).set(turn.id, !workOpen))}
           caption={options.caption}
+          repeat={repeats.has(turn.id)}
           // Your own prompt rises instead.
           enter={arriving(key) && key !== ownLatest}
         />
@@ -1492,6 +1402,7 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
         className="agent-transcript min-h-0 flex-1 overflow-y-auto"
       >
         <Arrivals.Provider value={arriving}>
+        <Comms.Provider value={comms}>
           <div ref={content} className="mx-auto w-full max-w-3xl pb-4 pt-2">
             {entries === undefined ? <Loading /> : null}
             {hidden > 0 ? (
@@ -1503,6 +1414,7 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
             ) : null}
             {rows}
           </div>
+        </Comms.Provider>
         </Arrivals.Provider>
       </div>
       {missed ? (
