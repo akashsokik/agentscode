@@ -852,8 +852,25 @@ html.theme-light .activity-tile {
 html.theme-light .activity-tile[data-face="bare"] {
   background: none;
   box-shadow: none;
-  overflow: visible;
   color: var(--color-content);
+}
+/* The avatar and the chevron trade places where they stand (a fade), so neither slides over the label. */
+.activity-tile[data-face="bare"] .activity-tile-mark,
+.activity-tile[data-face="bare"] .activity-tile-chevron {
+  transform: none;
+  transition: opacity 180ms ease;
+}
+.activity-tile[data-face="bare"] .activity-tile-chevron {
+  opacity: 0;
+}
+.activity-tile[data-face="bare"][data-open] .activity-tile-mark,
+.tile-host:is(:hover, :focus-visible) .activity-tile[data-face="bare"][data-folds] .activity-tile-mark {
+  transform: none;
+  opacity: 0;
+}
+.activity-tile[data-face="bare"][data-open] .activity-tile-chevron,
+.tile-host:is(:hover, :focus-visible) .activity-tile[data-face="bare"][data-folds] .activity-tile-chevron {
+  opacity: 1;
 }
 
 .activity-tile[data-face="edit"] {
@@ -1953,50 +1970,62 @@ html.layout-inset.theme-light .dialog-scrim {
   }
 }
 
-/* ---- agent avatars (web/ui/Avatar.tsx): the eyes carry the mood, quietly ---- */
-.avatar .avatar-eye {
+/* ---- agent avatars (web/ui/Avatar.tsx): the face carries the mood, quietly ---- */
+.avatar .avatar-eye,
+.avatar .avatar-glint {
   transform-box: fill-box;
   transform-origin: center;
   transition: transform 300ms ease;
 }
 .avatar .avatar-eyes {
   transform-box: view-box;
+  /* Content: the gaze rests a little up, never down. */
+  transform: translateY(-0.6px);
   transition: transform 300ms ease;
 }
-/* An occasional blink, out of step between avatars. */
-.avatar-live .avatar-eye {
+/* An occasional blink, out of step between avatars; the catchlights blink with the eyes. */
+.avatar-live .avatar-eye,
+.avatar-live .avatar-glint {
   animation: avatar-blink 7s infinite;
   animation-delay: var(--avatar-delay, 0s);
 }
-/* Working: the eyes glance side to side, slowly. */
+/* Working: lively, the eyes glance side to side, slowly. */
+.avatar[data-avatar-mood='busy'] .avatar-eyes {
+  transform: translateY(-0.3px);
+}
 .avatar-live[data-avatar-mood='busy'] .avatar-eyes {
   animation: avatar-glance 4.8s ease-in-out infinite;
   animation-delay: var(--avatar-delay, 0s);
 }
-/* Waiting on you: it looks up, eyes a touch wider. */
+/* Waiting on you: attentive, it looks up with eyes a touch wider. */
 .avatar[data-avatar-mood='waiting'] .avatar-eyes {
   transform: translateY(-1.6px);
 }
-.avatar[data-avatar-mood='waiting'] .avatar-eye {
+.avatar[data-avatar-mood='waiting'] .avatar-eye,
+.avatar[data-avatar-mood='waiting'] .avatar-glint {
   animation: none;
-  transform: scale(1.15);
+  transform: scale(1.12);
 }
-/* The last turn failed: half-closed, no blinking. */
+/* The last turn failed: tired, eyes half-closed, no blinking. Not tragic: no frown. */
+.avatar[data-avatar-mood='down'] .avatar-eyes {
+  transform: translateY(0.4px);
+}
 .avatar[data-avatar-mood='down'] .avatar-eye {
   animation: none;
-  transform: scaleY(0.4);
+  transform: scaleY(0.45);
 }
 @keyframes avatar-blink {
   0%, 95%, 100% { transform: scaleY(1); }
   97% { transform: scaleY(0.12); }
 }
 @keyframes avatar-glance {
-  0%, 18%, 100% { transform: translateX(0); }
-  30%, 46% { transform: translateX(-1.4px); }
-  62%, 80% { transform: translateX(1.4px); }
+  0%, 18%, 100% { transform: translate(0, -0.3px); }
+  30%, 46% { transform: translate(-1.4px, -0.3px); }
+  62%, 80% { transform: translate(1.4px, -0.3px); }
 }
 @media (prefers-reduced-motion: reduce) {
   .avatar-live .avatar-eye,
+  .avatar-live .avatar-glint,
   .avatar-live .avatar-eyes {
     animation: none;
   }
