@@ -13,6 +13,7 @@ import { BrowserBridge } from './bridge.ts';
 import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSnapshot } from './updater.ts';
 import { startSuperBridge, stopSuperBridge } from './superTray.ts';
 import { QuickWindow } from './quickWindow.ts';
+import { captureApp } from './appShot.ts';
 
 const PORT = Number(process.env.PORT ?? 4320);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -373,6 +374,8 @@ if (!app.requestSingleInstanceLock()) {
     // The SuperAgent's menu bar item and system-wide quick bar shortcut.
     quick = new QuickWindow({ url: `${ORIGIN}/quick.html`, preload: path.join(import.meta.dirname, 'preload.cjs') });
     startSuperBridge({ window: () => window, show: showWindow, fromApp, quick });
+    // app_screenshot: the window as the user sees it, never focused or raised for it.
+    bridge.onAppShot(args => captureApp({ main: () => window, quick: () => quick?.visible() ?? null }, args));
     if (await serverAnswers()) {
       markReady();
       bridge.useSocket();

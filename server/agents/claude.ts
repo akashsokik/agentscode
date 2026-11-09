@@ -16,7 +16,7 @@ import { reservedHomeFile } from '../agentHome.ts';
 import { approvalTitle, clip, resultSummary, toolActivity, toolDetail, toolResultText, toolSummary } from './describe.ts';
 import { toolPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
-import { commsMcpConfig, COMMS_TOOLS, SUPER_BROWSER_TOOLS, SUPER_TOOLS, BROWSER_TOOLS } from '../comms/tools.ts';
+import { commsMcpConfig, COMMS_TOOLS, EYES_TOOLS, hasEyes, SUPER_BROWSER_TOOLS, SUPER_TOOLS, BROWSER_TOOLS } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
 import { parseCommand } from '../../shared/commands.ts';
 
@@ -46,10 +46,10 @@ export function claudeToolPolicy(agent: Pick<Agent, 'role' | 'autonomy' | 'useMc
 } {
   const mcp = (names: string[]) => names.map(name => `mcp__${COMMS_SERVER}__${name}`);
   if (agent.role === 'super') {
-    const own = [...COMMS_TOOLS.filter(t => !BROWSER_TOOLS.includes(t as never)), ...SUPER_BROWSER_TOOLS, ...SUPER_TOOLS];
+    const own = [...COMMS_TOOLS.filter(t => !BROWSER_TOOLS.includes(t as never)), ...SUPER_BROWSER_TOOLS, ...SUPER_TOOLS, ...EYES_TOOLS];
     return { tools: [...SUPER_CLAUDE_TOOLS], disallowedTools: [...SUPER_DISALLOWED_TOOLS], allowedTools: comms ? mcp(own) : undefined, permissionMode: 'default', strictMcpConfig: true };
   }
-  return { allowedTools: comms ? mcp(COMMS_TOOLS) : undefined, permissionMode: MODE[agent.autonomy], strictMcpConfig: !agent.useMcp };
+  return { allowedTools: comms ? mcp([...COMMS_TOOLS, ...(hasEyes(agent.role) ? EYES_TOOLS : [])]) : undefined, permissionMode: MODE[agent.autonomy], strictMcpConfig: !agent.useMcp };
 }
 
 /** Whether the SuperAgent may use this tool at all: its read tools and its own MCP tools, nothing else. */
@@ -341,7 +341,7 @@ export class ClaudeRunner implements Runner {
         // ...but skip MCP servers unless asked: they can add ~200k tokens of tool definitions.
         strictMcpConfig: policy.strictMcpConfig,
         // The comms tools only reach the IDE, so they run without a permission prompt.
-        mcpServers: this.ctx.commsToken ? { [COMMS_SERVER]: commsMcpConfig(this.ctx.commsToken, agent.role === 'super') } : undefined,
+        mcpServers: this.ctx.commsToken ? { [COMMS_SERVER]: commsMcpConfig(this.ctx.commsToken, agent.role === 'super', hasEyes(agent.role)) } : undefined,
         allowedTools: policy.allowedTools,
         resume: agent.sessionId ?? undefined,
         pathToClaudeCodeExecutable: this.ctx.binPath ?? undefined,

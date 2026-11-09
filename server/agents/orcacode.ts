@@ -9,7 +9,7 @@ import { usageTotal } from '../../shared/turnUsage.ts';
 import { approvalTitle, clip, toolActivity, toolDetail, toolSummary } from './describe.ts';
 import { toolPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, type RunnerInput, type TurnResult } from './runner.ts';
-import { commsMcpConfig, COMMS_INSTRUCTIONS } from '../comms/tools.ts';
+import { commsMcpConfig, COMMS_INSTRUCTIONS, hasEyes } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
 import { orcacodeContextWindow } from '../models.ts';
 import { ORCACODE_MIN_VERSION, splitOrcacodeModel } from '../../shared/engines.ts';
@@ -65,8 +65,8 @@ export function orcacodeArgs(agent: Agent, files: { prompt: string; mcp?: string
 }
 
 /** The comms server for one OrcaCode process, in --mcp-config's shape. */
-export function orcacodeMcpConfig(token: string, executive = false): string {
-  return JSON.stringify({ [COMMS_SERVER]: commsMcpConfig(token, executive) });
+export function orcacodeMcpConfig(token: string, executive = false, eyes = false): string {
+  return JSON.stringify({ [COMMS_SERVER]: commsMcpConfig(token, executive, eyes) });
 }
 
 /** A turn's usage from OrcaCode's camelCase totals (its summary covers this process, so this turn). */
@@ -251,7 +251,7 @@ export class OrcacodeRunner implements Runner {
     this.tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentscode-orcacode-'));
     const files = { prompt: path.join(this.tempDir, 'prompt.md'), mcp: this.ctx.commsToken ? path.join(this.tempDir, 'mcp.json') : undefined };
     fs.writeFileSync(files.prompt, prompt, { mode: 0o600 });
-    if (files.mcp) fs.writeFileSync(files.mcp, orcacodeMcpConfig(this.ctx.commsToken!, this.ctx.agent().role === 'super'), { mode: 0o600 });
+    if (files.mcp) fs.writeFileSync(files.mcp, orcacodeMcpConfig(this.ctx.commsToken!, this.ctx.agent().role === 'super', hasEyes(this.ctx.agent().role)), { mode: 0o600 });
     const images = (input.images ?? []).filter(image => fs.existsSync(image.path));
     const args = orcacodeArgs(agent, files, images);
     const asks = args.includes('stdio');

@@ -40,6 +40,12 @@ export class BrowserBridge {
 
   private host: BrowserHost;
   private port: number;
+  private appShot: ((args: Record<string, unknown>) => Promise<unknown>) | null = null;
+
+  /** How app_screenshot captures the app's windows; set by main once it can. */
+  onAppShot(capture: (args: Record<string, unknown>) => Promise<unknown>): void {
+    this.appShot = capture;
+  }
 
   constructor(host: BrowserHost, port: number) {
     this.host = host;
@@ -61,7 +67,11 @@ export class BrowserBridge {
     if (message.type !== 'browser:request' || typeof message.id !== 'string' || typeof message.agentId !== 'string' || typeof message.op !== 'string') return;
     const { id, agentId, op } = message;
     const args = message.args && typeof message.args === 'object' ? message.args : {};
-    this.host.agent(agentId, op, args).then(
+    // A capture of AgentsCode's own window rides the same bridge (electron/appShot.ts).
+    const work = op === 'app_screenshot'
+      ? (this.appShot ? this.appShot(args) : Promise.reject(new BrowserError('Screenshots of the app need the AgentsCode desktop app.')))
+      : this.host.agent(agentId, op, args);
+    work.then(
       result => reply({ type: 'browser:response', id, ok: true, result }),
       (err: unknown) => {
         const error = err instanceof BrowserError ? err.message : `The browser failed: ${err instanceof Error ? err.message : String(err)}`;

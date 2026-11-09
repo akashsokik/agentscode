@@ -29,7 +29,16 @@ export const SUPER_TOOLS: SuperTool[] = [
 ];
 /** Browser tools that only look: the SuperAgent may read a page, never click, type or run scripts in one. */
 export const SUPER_BROWSER_TOOLS: BrowserTool[] = ['browser_open', 'browser_list', 'browser_close', 'browser_snapshot', 'browser_screenshot', 'browser_console'];
-export type CommsHandler = (tool: CommsTool | SuperTool, args: Record<string, unknown>) => unknown | Promise<unknown>;
+/**
+ * Tools that only look: read-only GitHub and CI, and a screenshot of the AgentsCode window. For the
+ * roles that check work: the SuperAgent, reviewers and testers (hasEyes).
+ */
+export type EyesTool = 'gh_prs' | 'gh_pr' | 'gh_runs' | 'gh_run' | 'gh_issues' | 'app_screenshot';
+export const EYES_TOOLS: EyesTool[] = ['gh_prs', 'gh_pr', 'gh_runs', 'gh_run', 'gh_issues', 'app_screenshot'];
+export function hasEyes(role: string): boolean {
+  return role === 'super' || role === 'reviewer' || role === 'tester';
+}
+export type CommsHandler = (tool: CommsTool | SuperTool | EyesTool, args: Record<string, unknown>) => unknown | Promise<unknown>;
 
 const text = z.string().trim().min(1).max(10_000);
 
@@ -114,6 +123,19 @@ export const updateGoalInput = z.object({
   why,
 });
 export const completeGoalInput = z.object({ goal_id: goalRef, notes: z.string().trim().max(1000).optional(), why });
+const projectRef = z.string().trim().min(1).max(200);
+export const ghPrsInput = z.object({ project: projectRef.optional() });
+export const ghPrInput = z.object({ project: projectRef, number: z.number().int().min(1) });
+export const ghRunsInput = z.object({ project: projectRef, branch: z.string().trim().min(1).max(200).optional(), workflow: z.string().trim().min(1).max(200).optional() });
+export const ghRunInput = z.object({ project: projectRef, run_id: z.union([z.string().trim().regex(/^\d{1,20}$/), z.number().int().min(1)]), failed_log: z.boolean().default(true) });
+export const ghIssuesInput = z.object({ project: projectRef.optional() });
+export const appScreenshotInput = z.object({
+  window: z.enum(['main', 'quick']).default('main'),
+  /** Open this agent's tab (id or name) in the main window first. */
+  agent: z.string().trim().min(1).max(100).optional(),
+  /** Open this channel (id or name) in the main window first. */
+  channel: z.string().trim().min(1).max(100).optional(),
+});
 export const readTranscriptInput = z.object({ agent_id: agentRef, limit: z.number().int().min(1).max(50).default(20) });
 
 export const readChannelInput = z.object({
@@ -188,9 +210,9 @@ const BROWSER_DESCRIPTIONS: Record<BrowserTool, string> = {
  * The MCP surface every agent sees. Each call is forwarded to the IDE, which knows the caller from its
  * token. `executive` adds the SuperAgent's commands (the IDE still refuses them from anyone else).
  */
-export function createCommsMcpServer(call: CommsHandler, options: { executive?: boolean } = {}): McpServer {
+export function createCommsMcpServer(call: CommsHandler, options: { executive?: boolean; eyes?: boolean } = {}): McpServer {
   const server = new McpServer({ name: COMMS_SERVER, version: '1.0.0' });
-  const invoke = async (tool: CommsTool | SuperTool, args: Record<string, unknown>) => {
+  const invoke = async (tool: CommsTool | SuperTool | EyesTool, args: Record<string, unknown>) => {
     try {
       return { content: [{ type: 'text' as const, text: JSON.stringify(await call(tool, args)) }] };
     } catch (error) {
@@ -262,6 +284,7 @@ export function createCommsMcpServer(call: CommsHandler, options: { executive?: 
     inputSchema: {}, annotations: { readOnlyHint: true },
   }, args => invoke('openui_guide', args));
   if (options.executive) registerSuperTools(server, invoke);
+  if (options.executive || options.eyes) registerEyesTools(server, invoke);
   for (const tool of options.executive ? SUPER_BROWSER_TOOLS : BROWSER_TOOLS) {
     const readOnly = tool === 'browser_list' || tool === 'browser_snapshot' || tool === 'browser_console';
     server.registerTool(tool, {
@@ -273,7 +296,21 @@ export function createCommsMcpServer(call: CommsHandler, options: { executive?: 
   return server;
 }
 
-type Invoke = (tool: SuperTool, args: Record<string, unknown>) => Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }>;
+type Invoke = (tool: SuperTool | EyesTool, args: Record<string, unknown>) => Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }>;
+
+function registerEyesTools(server: McpServer, invoke: Invoke): void {
+  const readOnly = { annotations: { readOnlyHint: true } };
+  const gh = 'Read-only, through the gh CLI; projects map to GitHub repos by their git remote, and one without a GitHub remote is skipped with a note.';
+  server.registerTool('gh_prs', { description: `Open pull requests for a project (id or name), or for every project. ${gh}`, inputSchema: ghPrsInput.shape, ...readOnly }, args => invoke('gh_prs', args));
+  server.registerTool('gh_pr', { description: `One pull request: state, mergeable, reviews and checks. ${gh}`, inputSchema: ghPrInput.shape, ...readOnly }, args => invoke('gh_pr', args));
+  server.registerTool('gh_runs', { description: `Recent CI runs for a project, optionally for one branch or workflow. ${gh}`, inputSchema: ghRunsInput.shape, ...readOnly }, args => invoke('gh_runs', args));
+  server.registerTool('gh_run', { description: `One CI run: its jobs and steps, and the tail of the failed steps' log. ${gh}`, inputSchema: ghRunInput.shape, ...readOnly }, args => invoke('gh_run', args));
+  server.registerTool('gh_issues', { description: `Open issues for a project, or for every project. ${gh}`, inputSchema: ghIssuesInput.shape, ...readOnly }, args => invoke('gh_issues', args));
+  server.registerTool('app_screenshot', {
+    description: 'A PNG of the AgentsCode desktop window as the user sees it (window "main"), or of the floating quick window while it is open ("quick"); returns the file path and size, so you can read the image. Optionally opens an agent\'s tab or a channel in the main window first: that changes what the user is looking at, so do it only when the user asked or is away. Desktop app only.',
+    inputSchema: appScreenshotInput.shape, ...readOnly,
+  }, args => invoke('app_screenshot', args));
+}
 
 function registerSuperTools(server: McpServer, invoke: Invoke): void {
   const note = 'SuperAgent only. Give a short why: the user sees it in your decision log and can undo it.';
@@ -331,17 +368,20 @@ function registerSuperTools(server: McpServer, invoke: Invoke): void {
  * Launch config for the stdio MCP server, scoped to one agent process by its token. `executive`
  * marks the SuperAgent's, which also registers its commands.
  */
-export function commsMcpConfig(token: string, executive = false) {
+export function commsMcpConfig(token: string, executive = false, eyes = false) {
   return {
     command: NODE_RUNTIME.command,
     args: [COMMS_MCP_ENTRY],
-    env: { ...NODE_RUNTIME.env, AGENTSCODE_TOKEN: token, AGENTSCODE_TOOLS_URL: `http://127.0.0.1:${PORT}/api/comms`, ...(executive ? { AGENTSCODE_EXECUTIVE: '1' } : {}) },
+    env: {
+      ...NODE_RUNTIME.env, AGENTSCODE_TOKEN: token, AGENTSCODE_TOOLS_URL: `http://127.0.0.1:${PORT}/api/comms`,
+      ...(executive ? { AGENTSCODE_EXECUTIVE: '1' } : {}), ...(eyes ? { AGENTSCODE_EYES: '1' } : {}),
+    },
   };
 }
 
 /** TOML inline table for one Codex child process; never edits the user's global Codex config. */
-export function codexCommsConfig(token: string, executive = false): string {
-  const config = commsMcpConfig(token, executive);
+export function codexCommsConfig(token: string, executive = false, eyes = false): string {
+  const config = commsMcpConfig(token, executive, eyes);
   const quote = JSON.stringify;
   const env = Object.entries(config.env).map(([key, value]) => `${key}=${quote(value)}`).join(',');
   return `mcp_servers.${COMMS_SERVER}={command=${quote(config.command)},args=[${config.args.map(v => quote(v)).join(',')}],env={${env}},enabled=true}`;

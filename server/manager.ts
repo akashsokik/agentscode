@@ -63,7 +63,9 @@ import {
   addGoalInput, agentCommandInput, askUserInput, completeGoalInput, updateGoalInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
   SUPER_TOOLS, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool,
+  appScreenshotInput, EYES_TOOLS, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
 } from './comms/tools.ts';
+import { capJson, GhError, ghArgs, logTail, repoFromRemote, runGh, type Exec } from './github.ts';
 import { IDLE_PROCESS_MS, PORT } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { capProfile, findPromotions, ProfileStore } from './userProfile.ts';
@@ -130,6 +132,9 @@ export interface ManagerOptions {
   idleProcessMs?: number;
   /** The bridge to the desktop app's browser; tests pass one wired to a fake. */
   browser?: BrowserBridge;
+  /** How gh runs (tests pass a fake), and how a project's git remote is read. */
+  ghExec?: Exec;
+  gitRemote?: (projectPath: string) => Promise<string | null>;
 }
 
 /** Longest model id kept; OrcaCode's `provider::vendor/model:variant` ids run long. */
@@ -186,6 +191,8 @@ export class AgentManager {
 
   /** The desktop app's browser, for agents' browser_* tools (server/browserBridge.ts). */
   readonly browser: BrowserBridge;
+  private ghExec: Exec | undefined;
+  private gitRemote: (projectPath: string) => Promise<string | null>;
 
   constructor(store: Store, hub: Broadcaster, engines: Record<EngineKind, EngineInfo>, options: ManagerOptions = {}) {
     this.store = store;
@@ -212,6 +219,11 @@ export class AgentManager {
     this.createRunner = options.createRunner ?? (ctx => createEngineRunner(ctx));
     this.idleProcessMs = options.idleProcessMs ?? IDLE_PROCESS_MS;
     this.browser = options.browser ?? new BrowserBridge();
+    this.ghExec = options.ghExec;
+    this.gitRemote = options.gitRemote ?? (async dir => {
+      const result = await gitRun(dir, ['remote', 'get-url', 'origin'], 5000);
+      return result.ok ? result.stdout.trim() : null;
+    });
     this.dreamer = new Dreamer({
       homes: this.homes,
       agent: id => this.store.agents.get(id),
@@ -781,7 +793,7 @@ export class AgentManager {
   async commsTool(token: string, tool: unknown, rawArgs: unknown): Promise<unknown> {
     const id = token ? [...this.tokens].find(([, value]) => value === token)?.[0] : undefined;
     if (!id) throw new HttpError(401, 'Agent credentials expired.');
-    if (typeof tool !== 'string' || !(COMMS_TOOLS.includes(tool as CommsTool) || SUPER_TOOLS.includes(tool as SuperTool))) throw new HttpError(400, 'Unknown comms tool.');
+    if (typeof tool !== 'string' || !(COMMS_TOOLS.includes(tool as CommsTool) || SUPER_TOOLS.includes(tool as SuperTool) || EYES_TOOLS.includes(tool as EyesTool))) throw new HttpError(400, 'Unknown comms tool.');
     const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs as Record<string, unknown> : {};
     const caller = this.agent(id);
     const isSuper = caller.role === 'super';
@@ -791,6 +803,11 @@ export class AgentManager {
       throw new HttpError(403, 'The SuperAgent only looks at pages; it never clicks, types or runs scripts in them.');
     }
     if (tool === 'read_transcript') return this.readTranscript(args);
+    // Looking only (GitHub, CI, the app's window): the SuperAgent, reviewers and testers.
+    if (EYES_TOOLS.includes(tool as EyesTool)) {
+      if (!hasEyes(caller.role)) throw new HttpError(403, 'Only the SuperAgent, reviewers and testers have the GitHub, CI and screenshot tools.');
+      return this.eyesTool(caller, tool as EyesTool, args);
+    }
     if (tool === 'list_agents') return this.mailbox.teammates(id);
     if (tool === 'read_messages') return this.mailbox.history(id);
     if (tool === 'list_delegations') return this.mailbox.delegations(id);
@@ -1806,6 +1823,91 @@ export class AgentManager {
     try {
       const result = await this.browser.request(agent.id, op, input);
       return op === 'console' ? compactConsole(result) : result;
+    } catch (error) {
+      throw new HttpError(409, (error as Error).message);
+    }
+  }
+
+  // ---- eyes: read-only GitHub and CI, and the app's window ------------------
+
+  /** The GitHub repo of a project, from its origin remote; null when it has none on GitHub. */
+  private async projectRepo(project: Project): Promise<string | null> {
+    const remote = await this.gitRemote(project.path).catch(() => null);
+    return remote ? repoFromRemote(remote) : null;
+  }
+
+  private async eyesTool(agent: Agent, tool: EyesTool, args: Record<string, unknown>): Promise<unknown> {
+    const bad = (message: string) => { throw new HttpError(400, message); };
+    if (tool === 'app_screenshot') return this.appScreenshot(agent, args);
+    const run = async (gh: string[]) => {
+      try {
+        return await runGh(gh, this.ghExec);
+      } catch (error) {
+        throw new HttpError(error instanceof GhError ? 409 : 500, (error as Error).message);
+      }
+    };
+    /** The repo for one named project, or a 409 that says why there is none. */
+    const oneRepo = async (ref: string) => {
+      const project = this.projectRef(ref);
+      const repo = await this.projectRepo(project);
+      if (!repo) throw new HttpError(409, `${project.name} has no GitHub remote (origin), so there is nothing to look up on GitHub.`);
+      return { project, repo };
+    };
+    if (tool === 'gh_prs' || tool === 'gh_issues') {
+      const parsed = (tool === 'gh_prs' ? ghPrsInput : ghIssuesInput).safeParse(args);
+      if (!parsed.success) return bad('Give a project id or name, or nothing for every project.');
+      const projects = parsed.data.project ? [this.projectRef(parsed.data.project)] : [...this.store.projects.values()];
+      const results = [];
+      for (const project of projects) {
+        const repo = await this.projectRepo(project);
+        if (!repo) { results.push({ project: project.name, note: 'No GitHub remote (origin): skipped.' }); continue; }
+        const out = capJson(await run(tool === 'gh_prs' ? ghArgs.prs(repo) : ghArgs.issues(repo)));
+        results.push({ project: project.name, repo, [tool === 'gh_prs' ? 'pullRequests' : 'issues']: out.data, ...(out.note ? { note: out.note } : {}) });
+      }
+      return { results };
+    }
+    if (tool === 'gh_pr') {
+      const parsed = ghPrInput.safeParse(args);
+      if (!parsed.success) return bad('Give the project and the pull request number.');
+      const { project, repo } = await oneRepo(parsed.data.project);
+      const out = capJson(await run(ghArgs.pr(repo, parsed.data.number)));
+      return { project: project.name, repo, pullRequest: out.data, ...(out.note ? { note: out.note } : {}) };
+    }
+    if (tool === 'gh_runs') {
+      const parsed = ghRunsInput.safeParse(args);
+      if (!parsed.success) return bad('Give the project, and optionally a branch or workflow.');
+      const { project, repo } = await oneRepo(parsed.data.project);
+      let gh: string[];
+      try { gh = ghArgs.runs(repo, { branch: parsed.data.branch, workflow: parsed.data.workflow }); } catch (error) { return bad((error as Error).message); }
+      const out = capJson(await run(gh));
+      return { project: project.name, repo, runs: out.data, ...(out.note ? { note: out.note } : {}) };
+    }
+    const parsed = ghRunInput.safeParse(args);
+    if (!parsed.success) return bad('Give the project and the run id.');
+    const { project, repo } = await oneRepo(parsed.data.project);
+    const id = String(parsed.data.run_id);
+    const out = capJson(await run(ghArgs.run(repo, id)));
+    const failed = parsed.data.failed_log && (out.data as { conclusion?: string } | null)?.conclusion === 'failure';
+    const log = failed ? logTail(await run(ghArgs.runLog(repo, id)).catch(e => `(The failed log could not be read: ${(e as Error).message})`)) : undefined;
+    return { project: project.name, repo, run: out.data, ...(out.note ? { note: out.note } : {}), ...(log ? { failedLog: log.log, ...(log.note ? { logNote: log.note } : {}) } : {}) };
+  }
+
+  /**
+   * A PNG of the desktop app's main window, or of the quick window while it shows, saved in the
+   * agent's home (screens/), never in a project. Opening a tab first changes what the user sees.
+   */
+  private async appScreenshot(agent: Agent, args: Record<string, unknown>): Promise<unknown> {
+    const parsed = appScreenshotInput.safeParse(args);
+    if (!parsed.success) throw new HttpError(400, 'Choose window main or quick, and optionally an agent or channel to open first.');
+    if (!this.browser.available) throw new HttpError(409, 'app_screenshot works only in the AgentsCode desktop app; this AgentsCode runs in a browser.');
+    const input = parsed.data;
+    const openAgent = input.agent ? this.teammateOrSelf(input.agent).id : undefined;
+    const openChannel = input.channel ? this.channelByRef(input.channel).id : undefined;
+    const dir = path.join(this.homes.path(agent.id), 'screens');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${input.window}.png`);
+    try {
+      return await this.browser.request(agent.id, 'app_screenshot', { path: file, window: input.window, ...(openAgent ? { openAgent } : {}), ...(openChannel ? { openChannel } : {}) });
     } catch (error) {
       throw new HttpError(409, (error as Error).message);
     }

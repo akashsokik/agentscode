@@ -70,6 +70,7 @@ export function useSuperBridge(onQuick: () => void): void {
   useEffect(() => desktop?.onCommand((command: SuperCommand) => {
     if (command.type === 'quick') quick.current();
     else if (command.type === 'openAgent') open({ kind: 'agent', agentId: command.agentId });
+    else if (command.type === 'openChannel') open({ kind: 'channel', channelId: command.channelId });
     else void openSuper();
   }), []);
 }
