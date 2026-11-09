@@ -49,8 +49,8 @@ export interface DesktopSuper {
 }
 
 /** The width of the floating quick composer window, and the room around its card for the shadow. */
-export const QUICK_WIDTH = 680;
-export const QUICK_MARGIN = 16;
+export const QUICK_WIDTH = 720;
+export const QUICK_MARGIN = 40;
 
 /** The floating quick composer's bridge (`window.agentscodeDesktop.quick`), only in its own window. */
 export interface DesktopQuick {

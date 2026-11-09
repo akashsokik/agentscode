@@ -48,7 +48,9 @@ export class QuickWindow {
       webPreferences: { preload: this.preload },
     });
     win.setAlwaysOnTop(true, 'floating');
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // A macOS panel already shows on every Space and over full-screen apps; setVisibleOnAllWorkspaces
+    // there would switch the process type and blink AgentsCode's windows and Dock icon.
+    if (!mac) win.setVisibleOnAllWorkspaces(true);
     // Clicking anywhere else puts it away; the draft stays in the page.
     win.on('blur', () => {
       if (!win.webContents.isDevToolsOpened()) win.hide();
@@ -60,16 +62,17 @@ export class QuickWindow {
     return win;
   }
 
-  /** Centred near the top of the screen the pointer is on, as Spotlight sits. */
+  /** Centred near the top of the screen the pointer is on, as Spotlight sits, and never past its bottom. */
   private place(win: BrowserWindow): void {
     const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-    const [, height] = win.getSize();
-    win.setBounds({
-      x: Math.round(area.x + (area.width - QUICK_WIDTH) / 2),
-      y: Math.round(area.y + area.height * 0.18),
-      width: QUICK_WIDTH,
-      height,
-    });
+    const height = Math.min(win.getSize()[1], area.height);
+    const y = Math.min(area.y + area.height * 0.18, area.y + area.height - Math.min(MAX_HEIGHT, area.height));
+    win.setBounds({ x: Math.round(area.x + (area.width - QUICK_WIDTH) / 2), y: Math.round(Math.max(area.y, y)), width: QUICK_WIDTH, height });
+  }
+
+  /** Make the window hidden ahead of time, so the first press opens it at once, already connected. */
+  prepare(): void {
+    if (!this.win || this.win.isDestroyed()) this.win = this.create();
   }
 
   show(): void {
