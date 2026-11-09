@@ -11,7 +11,7 @@ import { orcacodeArgs, orcacodeMcpConfig } from '../server/agents/orcacode.ts';
 import { createApp } from '../server/app.ts';
 import { buildDigest } from '../server/dream.ts';
 import { HttpError } from '../server/errors.ts';
-import { inQuietHours, MAX_CREATES_PER_DAY, MAX_OPEN_ASKS, SuperStore, SuperWatcher, updatePrompt, type WatcherHost } from '../server/superAgent.ts';
+import { inQuietHours, MAX_OPEN_ASKS, SuperStore, SuperWatcher, updatePrompt, type WatcherHost } from '../server/superAgent.ts';
 import { harness, projectDir, settle, tempDir } from './helpers.ts';
 
 function status(error: unknown): number {
@@ -97,6 +97,8 @@ test('its commands are its alone, and it only looks at pages', async () => {
 
 test('create_agent: the role\'s own permissions, a project by name, a daily cap, logged with an undo', async () => {
   const t = await team();
+  const MAX_CREATES_PER_DAY = 3;
+  t.manager.updateSettings({ superMaxCreatesPerDay: MAX_CREATES_PER_DAY });
   const result = await t.call('create_agent', { name: 'Tess', role: 'tester', project: 'WEB', task: 'Run the tests.', why: 'The user wants tests before merging.' }) as { created: { id: string; autonomy: string; projectId: string } };
   assert.equal(result.created.autonomy, 'edits', 'a tester\'s default, never Full access');
   assert.equal(result.created.projectId, t.web.id);
@@ -231,7 +233,7 @@ test('the watcher batches, waits while busy, in quiet hours or over budget, and 
   watcher.note({ agentId: 'a2', key: 'turn:a2', text: 'Bo hit a problem' });
   assert.equal(watcher.flush(), true);
   watcher.note({ agentId: 'a2', key: 'turn:a2b', text: 'Bo hit another problem' });
-  assert.equal(watcher.blocked(), 'the hourly budget is used');
+  assert.equal(watcher.blocked(), 'the hourly wake budget is used');
   now += 3_600_001;
   assert.equal(watcher.flush(), true, 'a new hour, a new budget');
   // Over the day's budget, updates wait for tomorrow.
@@ -306,7 +308,7 @@ test('the app sets it up, answers it and undoes its decisions over HTTP', async 
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/super`;
   const post = (url: string, body: unknown = {}) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   try {
-    assert.deepEqual(await (await fetch(base)).json(), { agentId: null, asks: [], log: [] });
+    assert.deepEqual(await (await fetch(base)).json(), { agentId: null, asks: [], log: [], goals: [], held: null });
     const created = await (await post(base)).json() as Agent;
     assert.equal(created.role, 'super');
     assert.equal((await post(base)).status, 409);

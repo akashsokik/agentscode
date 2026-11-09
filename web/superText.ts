@@ -1,5 +1,5 @@
 /** The SuperAgent's words for the page. Pure, so it is tested directly. */
-import type { Agent, SuperAction, SuperAsk } from '../shared/types.ts';
+import type { Agent, GoalStatus, SuperAction, SuperAsk, SuperGoal } from '../shared/types.ts';
 
 /** Questions the SuperAgent asked that wait for the user, newest first. */
 export function openAsks(asks: readonly SuperAsk[] | undefined): SuperAsk[] {
@@ -76,4 +76,15 @@ export function decisionRows(log: readonly SuperAction[] | undefined): DecisionR
   return [...(log ?? [])]
     .sort((a, b) => b.at - a.at)
     .map(a => ({ id: a.id, summary: a.summary, why: a.why, at: a.at, undoable: Boolean(a.undo) && !a.undoneAt, ...(a.undoneAt ? { undoneAt: a.undoneAt } : {}) }));
+}
+
+export const GOAL_STATUS_LABEL: Record<GoalStatus, string> = { queued: 'Queued', in_progress: 'In progress', blocked: 'Needs you', done: 'Done' };
+
+/** The backlog as the Goals tab shows it: open goals in order, then done ones, newest first. */
+export function goalSections(goals: readonly SuperGoal[] | undefined): { open: SuperGoal[]; done: SuperGoal[] } {
+  const all = goals ?? [];
+  return {
+    open: all.filter(g => g.status !== 'done').sort((a, b) => a.order - b.order),
+    done: all.filter(g => g.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)),
+  };
 }

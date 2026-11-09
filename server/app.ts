@@ -206,6 +206,19 @@ export function createApp(
   app.post('/api/super/asks/:askId', (req, res) => {
     res.json(manager.answerSuper(param(req, 'askId'), req.body ?? {}));
   });
+  // The goals backlog: the user adds, edits, reorders and removes goals.
+  app.post('/api/super/goals', (req, res) => {
+    res.json(manager.addGoal(req.body ?? {}));
+  });
+  app.patch('/api/super/goals/:goalId', (req, res) => {
+    res.json(manager.updateGoal(param(req, 'goalId'), req.body ?? {}));
+  });
+  app.delete('/api/super/goals/:goalId', (req, res) => {
+    res.json(manager.removeGoal(param(req, 'goalId')));
+  });
+  app.post('/api/super/goals/:goalId/move', (req, res) => {
+    res.json(manager.moveGoal(param(req, 'goalId'), req.body?.to));
+  });
   app.post('/api/super/log/:actionId/undo', async (req, res) => {
     res.json(await manager.undoSuper(param(req, 'actionId')));
   });

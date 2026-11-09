@@ -33,6 +33,7 @@ import {
   type Snapshot,
   type SuperAction,
   type SuperAsk,
+  type SuperGoal,
   type SuperState,
   type TurnMeta,
   type UserProfile,
@@ -59,14 +60,14 @@ import { ScopedRunner, type ExecutionContext } from './agents/scoped.ts';
 import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
 import {
-  agentCommandInput, askUserInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
+  addGoalInput, agentCommandInput, askUserInput, completeGoalInput, updateGoalInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
   SUPER_TOOLS, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool,
 } from './comms/tools.ts';
 import { IDLE_PROCESS_MS, PORT } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { capProfile, findPromotions, ProfileStore } from './userProfile.ts';
-import { MAX_CREATES_PER_DAY, STUCK_WAITING_MS, STUCK_WORKING_MS, SUPER_NAME, SuperStore, SuperWatcher, validQuietTime } from './superAgent.ts';
+import { STUCK_WAITING_MS, STUCK_WORKING_MS, SUPER_NAME, SuperStore, SuperWatcher, validQuietTime } from './superAgent.ts';
 import { HttpError } from './errors.ts';
 import type { Broadcaster } from './hub.ts';
 import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, emptyModels } from './models.ts';
@@ -238,8 +239,22 @@ export class AgentManager {
       ready: id => this.store.agents.has(id) && !this.runners.get(id)?.busy,
       send: (id, text, task) => {
         this.clearIdleTimer(id);
+        // A turn started by mail about work the SuperAgent began on its own counts against its wake
+        // budget like an update; mail about work you asked for does not.
+        if (id === this.superId() && !this.userWork(task.messageId)) this.superStore.noteWake();
         this.runnerFor(this.agent(id)).send(text, task);
       },
+      // Mail to the SuperAgent waits while it may not take a turn. Work you asked for (a conversation it
+      // began in a turn you gave it) waits only on the daily budget; the rest on every wake-up limit.
+      // Your own messages never go through here, so they never wait.
+      hold: (id, message, conversation) => {
+        if (id !== this.superId()) return null;
+        const reason = this.mailHold(conversation);
+        if (reason) this.watcher.noteHeld(message.id, reason);
+        return reason;
+      },
+      userTurn: id => this.store.agents.get(id)?.role === 'super' && this.store.agents.get(id)?.currentTask?.source === 'user',
+      keepOnRestart: message => message.toAgentId === this.superId(),
       changed: message => this.publishMessage(message),
       conversationChanged: conversation => this.hub.broadcast({ type: 'conversation', conversation }),
       inChannel: (channelId, agentId) => this.channels.isMember(channelId, agentId),
@@ -903,6 +918,8 @@ export class AgentManager {
   }
 
   private publishMessage(message: PeerMessage): void {
+    // Mail to or from the SuperAgent changes what waits for it.
+    if (message.toAgentId === this.superId()) setImmediate(() => this.publishSuper());
     this.channels.messageChanged(message);
     // Channel messages show in the channel; the sender's transcript has its post_to_channel call.
     const parties = message.channelId ? [message.toAgentId] : [message.fromAgentId, message.toAgentId];
@@ -1146,7 +1163,7 @@ export class AgentManager {
   }
 
   superView(): SuperState {
-    return this.superStore.view(this.superId());
+    return { ...this.superStore.view(this.superId()), held: this.heldMail() };
   }
 
   private publishSuper(): SuperState {
@@ -1216,7 +1233,7 @@ export class AgentManager {
   /**
    * The SuperAgent's commands, each checked here whatever its MCP server offered: agents it creates
    * get their role's default permissions (never Full access) and no instructions of its own, it
-   * changes no one's permissions or soul, and it creates at most MAX_CREATES_PER_DAY agents a day.
+   * changes no one's permissions or soul, and it creates at most superMaxCreatesPerDay agents a day.
    * Each lands in the decision log with how to undo it.
    */
   private async superCommand(caller: Agent, tool: SuperTool, args: Record<string, unknown>): Promise<unknown> {
@@ -1228,20 +1245,45 @@ export class AgentManager {
       this.publishSuper();
       return { asked: ask, note: 'The user sees it in AgentsCode; their answer arrives as a later turn. Do not wait or ask again.' };
     }
+    if (tool === 'list_goals') return { goals: this.superStore.goals() };
+    if (tool === 'add_goal') {
+      const parsed = addGoalInput.safeParse(args);
+      if (!parsed.success) return fail('Give the goal in up to 500 characters, an optional project, and a why.');
+      const goal = this.superStore.addGoal({ text: parsed.data.text, projectId: parsed.data.project ? this.projectRef(parsed.data.project).id : null, by: 'super' });
+      this.recordSuper({ tool, why: parsed.data.why, undo: { kind: 'goal', goalId: goal.id, before: null }, summary: `Added the goal "${clip(goal.text, 120)}"` });
+      return { added: goal };
+    }
+    if (tool === 'update_goal' || tool === 'complete_goal') {
+      const parsed = tool === 'update_goal' ? updateGoalInput.safeParse(args) : completeGoalInput.safeParse(args);
+      if (!parsed.success) return fail('Give the goal id, what to change (status, text, agent_id, delegation_id or notes), and a why.');
+      const input = parsed.data as { goal_id: string; status?: SuperGoal['status']; text?: string; agent_id?: string; delegation_id?: string; notes?: string; why: string };
+      if (tool === 'update_goal' && [input.status, input.text, input.agent_id, input.delegation_id, input.notes].every(v => v === undefined)) {
+        return fail('Say what to change: status, text, agent_id, delegation_id or notes.');
+      }
+      const before = this.superStore.goal(input.goal_id);
+      const agentId = input.agent_id === undefined ? undefined : input.agent_id === '' ? '' : this.teammate(input.agent_id).id;
+      const goal = this.superStore.updateGoal(before.id, {
+        ...(tool === 'complete_goal' ? { status: 'done' as const } : input.status ? { status: input.status } : {}),
+        ...(input.text !== undefined ? { text: input.text } : {}),
+        ...(agentId !== undefined ? { agentId } : {}),
+        ...(input.delegation_id !== undefined ? { delegationId: input.delegation_id } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes } : {}),
+      });
+      const who = goal.agentId ? this.store.agents.get(goal.agentId)?.name : undefined;
+      const summary = tool === 'complete_goal' ? `Completed the goal "${clip(goal.text, 120)}"`
+        : `Goal "${clip(goal.text, 100)}": ${[goal.status !== before.status && goal.status.replace('_', ' '), who && goal.agentId !== before.agentId && `given to ${who}`, input.text !== undefined && 'reworded', input.notes !== undefined && 'notes'].filter(Boolean).join(', ') || 'updated'}`;
+      this.recordSuper({ tool, why: input.why, undo: { kind: 'goal', goalId: goal.id, before }, summary });
+      return { updated: goal };
+    }
     if (tool === 'create_agent') {
       const parsed = createAgentInput.safeParse(args);
       if (!parsed.success) return fail('Give a name, engine, role, an optional project, model, worktree and first task, and a why.');
       const input = parsed.data;
-      if (this.superStore.createdSince(Date.now() - 86_400_000) >= MAX_CREATES_PER_DAY) {
-        throw new HttpError(429, `You created ${MAX_CREATES_PER_DAY} agents in the last day. Ask the user before creating more.`);
+      const cap = this.store.settings.superMaxCreatesPerDay;
+      if (this.superStore.createdSince(Date.now() - 86_400_000) >= cap) {
+        throw new HttpError(429, `You created ${cap} agents in the last day, the most the user allows (Settings, SuperAgent). Ask the user before creating more.`);
       }
-      let projectId: string | null = null;
-      if (input.project) {
-        const key = input.project.toLowerCase();
-        const project = [...this.store.projects.values()].find(p => p.id === input.project || p.name.toLowerCase() === key);
-        if (!project) throw new HttpError(404, `No project called ${input.project}. Adding a project needs the user: ask them.`);
-        projectId = project.id;
-      }
+      const projectId = input.project ? this.projectRef(input.project).id : null;
       const agent = await this.create({ name: input.name, engine: input.engine, projectId, role: input.role, model: input.model, worktree: input.worktree, task: input.task });
       this.recordSuper({
         tool, why: input.why, undo: { kind: 'removeAgent', agentId: agent.id },
@@ -1264,6 +1306,10 @@ export class AgentManager {
       const parsed = agentCommandInput.safeParse(args);
       if (!parsed.success) return fail('Give the agent id or name, and a why.');
       const agent = this.teammate(parsed.data.agent_id);
+      // A fresh session would lift a Stop the user pressed: only the user restarts a stopped agent.
+      if (tool === 'new_session' && this.mailbox.stopped(agent.id)) {
+        throw new HttpError(409, `The user stopped ${agent.name}. Only the user restarts it: ask them with ask_user instead.`);
+      }
       if (tool === 'new_session') await this.newSession(agent.id);
       else await this.stop(agent.id);
       this.recordSuper({ tool, why: parsed.data.why, summary: tool === 'new_session' ? `Started a fresh session for ${agent.name}` : `Stopped ${agent.name}'s turn` });
@@ -1295,6 +1341,14 @@ export class AgentManager {
     return { updated };
   }
 
+  /** A project the SuperAgent names by id or name. */
+  private projectRef(ref: string): Project {
+    const key = ref.trim().toLowerCase();
+    const project = [...this.store.projects.values()].find(p => p.id === ref.trim() || p.name.toLowerCase() === key);
+    if (!project) throw new HttpError(404, `No project called ${ref}. Adding a project needs the user: ask them.`);
+    return project;
+  }
+
   private names(ids: string[]): string {
     const names = ids.map(id => this.store.agents.get(id)?.name ?? 'a removed agent');
     return names.length ? names.join(', ') : 'no members';
@@ -1314,6 +1368,45 @@ export class AgentManager {
     agent.lastActiveAt = Date.now();
     runner.send(prompt, { summary: 'Update from AgentsCode', source: 'system' });
     this.emitAgent(agent);
+  }
+
+  // The user's own changes to the backlog. A new goal is news for the SuperAgent; the rest it sees
+  // in its next update's goal list.
+
+  addGoal(body: { text?: unknown; projectId?: unknown }): SuperState {
+    if (typeof body?.text !== 'string') throw new HttpError(400, 'Say what the goal is.');
+    const goal = this.superStore.addGoal({ text: body.text, projectId: this.goalProject(body.projectId), by: 'user' });
+    this.watcher.note({ agentId: 'user', key: `goal:${goal.id}`, text: `The user added a goal: "${goal.text}"` });
+    return this.publishSuper();
+  }
+
+  updateGoal(id: string, body: { text?: unknown; projectId?: unknown; status?: unknown }): SuperState {
+    if (body?.text !== undefined && typeof body.text !== 'string') throw new HttpError(400, 'A goal is text.');
+    if (body?.status !== undefined && typeof body.status !== 'string') throw new HttpError(400, 'A goal is queued, in_progress, blocked or done.');
+    this.superStore.updateGoal(id, {
+      ...(typeof body?.text === 'string' ? { text: body.text } : {}),
+      ...(body?.projectId !== undefined ? { projectId: this.goalProject(body.projectId) } : {}),
+      ...(typeof body?.status === 'string' ? { status: body.status as SuperGoal['status'] } : {}),
+    });
+    return this.publishSuper();
+  }
+
+  /** A goal's project from the app: a project id, or null (or nothing) for none. */
+  private goalProject(raw: unknown): string | null {
+    if (raw === undefined || raw === null || raw === '') return null;
+    if (typeof raw !== 'string') throw new HttpError(400, 'A project is given by its id.');
+    return this.project(raw).id;
+  }
+
+  removeGoal(id: string): SuperState {
+    this.superStore.removeGoal(id);
+    return this.publishSuper();
+  }
+
+  moveGoal(id: string, to: unknown): SuperState {
+    if (typeof to !== 'number' || !Number.isFinite(to)) throw new HttpError(400, 'Give the place to move it to, 0 first.');
+    this.superStore.moveGoal(id, to);
+    return this.publishSuper();
   }
 
   /**
@@ -1350,6 +1443,8 @@ export class AgentManager {
     } else if (undo.kind === 'channel') {
       if (!this.store.channels.has(undo.channelId)) throw new HttpError(409, 'That channel is gone.');
       this.updateChannel(undo.channelId, { ...undo.before, memberIds: undo.before.memberIds.filter(m => this.store.agents.has(m)) });
+    } else if (undo.kind === 'goal') {
+      this.superStore.restoreGoal(undo.goalId, undo.before);
     } else {
       if (!this.store.agents.has(undo.agentId)) throw new HttpError(409, 'That agent is gone.');
       await this.update(undo.agentId, undo.before);
@@ -1367,14 +1462,48 @@ export class AgentManager {
     const superId = this.superId();
     if (!superId || agent.id === superId || result.stopped) return;
     if (task?.source === 'agent' && task.fromAgentId === superId) return;
+    // An agent came free (nothing queued for it) while goals wait: the SuperAgent picks the next one.
+    // Not after a turn you started, which is yours, and only through the watcher, so the wake switch,
+    // quiet hours, budgets and the idle check all apply.
+    const free = (result.pending ?? 0) === 0 && this.mailbox.pending(agent.id) === 0;
+    const queued = this.superStore.goals().filter(g => g.status === 'queued').length;
+    if (queued && free && task?.source !== 'user') this.watcher.note({ agentId: agent.id, key: 'goals', text: `${agent.name} is free and ${queued} queued ${queued === 1 ? 'goal waits' : 'goals wait'}` });
     const asked = task?.summary ? `Task: ${clip(task.summary, 160).replace(/\.$/, '')}. ` : '';
     if (result.ok) this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} finished a turn`, untrusted: `${asked}Result: ${clip(summarize(result.summary) || 'Finished.', 400)}` });
     else this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} hit a problem`, untrusted: `${asked}Error: ${clip(result.error ?? 'Something went wrong.', 400)}` });
   }
 
+  /** Why mail in this conversation may not start a SuperAgent turn now, or null. */
+  private mailHold(conversation: Conversation | undefined): string | null {
+    return conversation?.userStarted ? this.watcher.dailyHeld() : this.watcher.held();
+  }
+
+  /** Whether a peer message belongs to work the user asked the SuperAgent for. */
+  private userWork(messageId: string | undefined): boolean {
+    const message = messageId ? this.store.messages.find(m => m.id === messageId) : undefined;
+    return Boolean(message && this.store.conversations.find(c => c.id === message.conversationId)?.userStarted);
+  }
+
+  /** Mail to the SuperAgent waiting now, and why (the first reason), for the app. */
+  private heldMail(): SuperState['held'] {
+    const superId = this.superId();
+    if (!superId) return null;
+    let count = 0;
+    let reason = '';
+    for (const m of this.store.messages) {
+      if (m.toAgentId !== superId || m.status !== 'queued') continue;
+      const why = this.mailHold(this.store.conversations.find(c => c.id === m.conversationId));
+      if (!why) continue;
+      count++;
+      reason ||= why;
+    }
+    return count ? { count, reason } : null;
+  }
+
   /** Every minute: send what waits if it may go now, and report agents stuck in a turn or on the user. */
   private superTick(): void {
-    if (!this.superId()) return;
+    const superId = this.superId();
+    if (!superId) return;
     this.watcher.morning();
     const now = Date.now();
     for (const agent of this.store.agents.values()) {
@@ -1395,7 +1524,10 @@ export class AgentManager {
         if (agent) this.watcher.note({ agentId: agent.id, key, text: `${agent.name} has waited ${Math.round((now - approval.createdAt) / 60_000)} minutes for the user to answer`, untrusted: approval.title });
       }
     }
-    this.watcher.flush();
+    // An update takes the wake slot first; held mail follows once that turn ends (its ready()
+    // drain), or here on a later minute, so a mail backlog never crowds out the update about it.
+    if (!this.watcher.flush()) this.mailbox.drain(superId);
+    this.publishSuper();
   }
 
   // ---- the user profile ----------------------------------------------------
@@ -1977,6 +2109,9 @@ export class AgentManager {
     for (const key of ['superWake', 'superNotify'] as const) {
       if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new HttpError(400, 'Toggles must be true or false.');
     }
+    if (input.superMaxCreatesPerDay !== undefined && (!Number.isSafeInteger(input.superMaxCreatesPerDay) || input.superMaxCreatesPerDay < 0 || input.superMaxCreatesPerDay > 200)) {
+      throw new HttpError(400, 'Agents a day must be a whole number from 0 to 200.');
+    }
     if (input.superDailyBudgetUsd !== undefined && (typeof input.superDailyBudgetUsd !== 'number' || !Number.isFinite(input.superDailyBudgetUsd) || input.superDailyBudgetUsd < 0 || input.superDailyBudgetUsd > 1000)) {
       throw new HttpError(400, 'The daily budget is dollars from 0 (no cap) to 1000.');
     }
@@ -1995,9 +2130,13 @@ export class AgentManager {
     for (const key of ['superWake', 'superNotify'] as const) if (input[key] !== undefined) settings[key] = input[key]!;
     if (input.superMaxWakesPerHour !== undefined) settings.superMaxWakesPerHour = input.superMaxWakesPerHour;
     if (input.superDailyBudgetUsd !== undefined) settings.superDailyBudgetUsd = input.superDailyBudgetUsd;
+    if (input.superMaxCreatesPerDay !== undefined) settings.superMaxCreatesPerDay = input.superMaxCreatesPerDay;
     for (const key of ['superQuietFrom', 'superQuietTo'] as const) if (input[key] !== undefined) settings[key] = input[key]!.trim();
     this.store.save();
     this.hub.broadcast({ type: 'settings', settings });
+    // Mail held for the SuperAgent may go now (wake-ups back on, a bigger budget).
+    const superId = this.superId();
+    if (superId) setImmediate(() => this.mailbox.drain(superId));
     return settings;
   }
 }

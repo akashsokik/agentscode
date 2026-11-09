@@ -25,6 +25,7 @@ import type {
   Settings,
   Snapshot,
   TerminalInfo,
+  GoalStatus,
   SuperState,
   TreeListing,
   UserProfile,
@@ -136,6 +137,11 @@ export const api = {
   createSuper: () => request<Agent>('POST', '/api/super', {}),
   /** Answer one of its questions with a choice or your own words, or put it aside. */
   answerSuper: (askId: string, body: { answer: string } | { dismiss: true }) => request<SuperState>('POST', `/api/super/asks/${askId}`, body),
+  /** The goals backlog: add, change, remove and reorder (0 first). Changes also arrive as `super` events. */
+  addGoal: (body: { text: string; projectId: string | null }) => request<SuperState>('POST', '/api/super/goals', body),
+  updateGoal: (goalId: string, body: { text?: string; projectId?: string | null; status?: GoalStatus }) => request<SuperState>('PATCH', `/api/super/goals/${goalId}`, body),
+  removeGoal: (goalId: string) => request<SuperState>('DELETE', `/api/super/goals/${goalId}`),
+  moveGoal: (goalId: string, to: number) => request<SuperState>('POST', `/api/super/goals/${goalId}/move`, { to }),
   /** Take back one of its decisions. */
   undoSuper: (actionId: string) => request<SuperState>('POST', `/api/super/log/${actionId}/undo`),
   /** The agent's walkthroughs, newest first. */

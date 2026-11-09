@@ -22,6 +22,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [limit, setLimit] = useState(String(settings?.messageLimit ?? 12));
   const [wakes, setWakes] = useState(String(settings?.superMaxWakesPerHour ?? 6));
   const [budget, setBudget] = useState(String(settings?.superDailyBudgetUsd ?? 10));
+  const [creates, setCreates] = useState(String(settings?.superMaxCreatesPerDay ?? 25));
   const [refreshing, setRefreshing] = useState(false);
   if (!settings) return null;
   return (
@@ -86,6 +87,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               value={budget}
               onChange={e => setBudget(e.target.value)}
               onBlur={() => { const value = Number(budget); if (Number.isFinite(value) && value >= 0 && value !== settings.superDailyBudgetUsd) void save({ superDailyBudgetUsd: value }); }}
+              className={`${INPUT} w-20`}
+            />
+          </Row>
+          <Row label="Agents it may create a day" description="Past this, it asks you before creating more.">
+            <input
+              type="number"
+              min={0}
+              max={200}
+              value={creates}
+              onChange={e => setCreates(e.target.value)}
+              onBlur={() => { const value = Number(creates); if (Number.isInteger(value) && value >= 0 && value <= 200 && value !== settings.superMaxCreatesPerDay) void save({ superMaxCreatesPerDay: value }); }}
               className={`${INPUT} w-20`}
             />
           </Row>

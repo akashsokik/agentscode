@@ -4,24 +4,32 @@
  * can be undone.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { SuperAsk } from '../../shared/types.ts';
+import type { GoalStatus, SuperAsk, SuperGoal } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { memoryDate } from '../memory.ts';
 import { openAsks } from '../super.ts';
-import { decisionRows, superLogMax, superLogWidth, type DecisionRow } from '../superText.ts';
+import { decisionRows, GOAL_STATUS_LABEL, goalSections, superLogMax, superLogWidth, type DecisionRow } from '../superText.ts';
+import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
-import { cx, HeaderButton, PRIMARY, TextButton } from '../ui/common.tsx';
+import { cx, HeaderButton, IconTab, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
-import { ListBullet, PanelRight } from '../mono/icons.tsx';
+import { ChevronDown, ChevronUp, CircleDot, ListBullet, PanelRight, Pencil, Trash2 } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
 export function SuperInbox() {
   const asks = useApp(s => s.snapshot?.super.asks);
+  const held = useApp(s => s.snapshot?.super.held);
   const waiting = openAsks(asks);
-  if (!waiting.length) return null;
+  if (!waiting.length && !held) return null;
   return (
     <div data-super-inbox className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-3 pb-2">
+      {/* Mail it may not take a turn for yet: never silent, so work you asked for never stalls unseen. */}
+      {held ? (
+        <p role="status" data-super-held className="rounded-lg border border-content/10 bg-content/3 px-3 py-2 font-sans text-[12px] text-content/65">
+          {heldText(held)}
+        </p>
+      ) : null}
       {waiting.map(ask => <AskCard key={ask.id} ask={ask} />)}
     </div>
   );
@@ -62,6 +70,7 @@ const time = (ts: number) => `${memoryDate(ts)} ${new Date(ts).toTimeString().sl
 export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; over: boolean; focused: boolean; onClose: () => void }) {
   const log = useApp(s => s.snapshot?.super.log);
   const asks = useApp(s => s.snapshot?.super.asks);
+  const goals = useApp(s => s.snapshot?.super.goals);
   const rows = decisionRows(log);
   const answered = (asks ?? []).filter(a => a.answeredAt !== undefined);
   const column = useColumnWidth('superLog', 300, 240, 0.4);
@@ -78,18 +87,20 @@ export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; ov
   const close = useRef(onClose);
   close.current = onClose;
 
-  // Over the conversation it is a popover: focus moves into it when it opens, and goes back to the
-  // header's toggle when it closes, however it closes (Hide, Escape, a click outside).
+  // Over the conversation it is a popover: focus moves into it when it opens.
   useEffect(() => {
-    if (!over) return;
-    root.current?.querySelector<HTMLElement>('[data-super-log-hide]')?.focus({ preventScroll: true });
+    if (over) root.current?.querySelector<HTMLElement>('[data-super-log-hide]')?.focus({ preventScroll: true });
+  }, [over]);
+  // However it closes, in either mode (Hide, Escape, a click outside), focus that fell to the page
+  // goes back to the header's toggle.
+  useEffect(() => {
     const panel = root.current;
     return () => {
       if (panel?.isConnected) return;
       const toggle = document.querySelector<HTMLElement>('[data-super-log-toggle]');
       if (toggle && (document.activeElement === document.body || !document.activeElement)) toggle.focus({ preventScroll: true });
     };
-  }, [over]);
+  }, []);
 
   // Escape or a click outside closes it. Escape is heard as it bubbles (as ChannelThread's), only
   // while this pane has focus, never when something inside it already handled Escape (an edit box
@@ -118,23 +129,30 @@ export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; ov
     };
   }, [over, focused]);
   const undoable = rows.filter(r => r.undoable).length;
+  const [view, setView] = useState<SideView>(readView);
+  const pickView = (next: SideView) => {
+    setView(next);
+    try { localStorage.setItem(VIEW_KEY, next); } catch { /* private mode */ }
+  };
+  const openGoals = goalSections(goals).open.length;
   return (
     <aside
       id={id}
-      aria-label="Decision log"
+      aria-label="SuperAgent sidebar"
       data-super-log
       ref={root}
       style={{ width }}
       // One position utility only: with both, .relative (later in the CSS) wins and it never floats.
       className={cx('flex shrink-0 flex-col border-l border-stroke font-sans', over ? 'body-glass absolute inset-y-0 right-0 z-20 shadow-2xl' : 'relative')}
     >
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-stroke pl-3.5 pr-1.5">
-        <h2 className="min-w-0 flex-1 truncate text-[12px] font-medium text-content/80">
-          Decisions
-          {rows.length ? <span className="ml-1.5 font-normal tabular-nums text-content/40">{rows.length}</span> : null}
-        </h2>
-        <HeaderButton data-super-log-hide icon={PanelRight} label="Hide the decision log" active onClick={onClose} />
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke pl-2 pr-1.5">
+        <div role="tablist" aria-label="SuperAgent sidebar" className="flex min-w-0 flex-1 items-center gap-0.5">
+          <IconTab role="tab" aria-selected={view === 'decisions'} icon={ListBullet} label="Decisions" selected={view === 'decisions'} onClick={() => pickView('decisions')} />
+          <IconTab role="tab" aria-selected={view === 'goals'} icon={CircleDot} label="Goals" count={openGoals || undefined} selected={view === 'goals'} onClick={() => pickView('goals')} />
+        </div>
+        <HeaderButton data-super-log-hide icon={PanelRight} label="Hide the sidebar" active onClick={onClose} />
       </div>
+      {view === 'goals' ? <GoalsView /> : (
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {rows.length ? (
           <>
@@ -165,9 +183,209 @@ export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; ov
           </section>
         ) : null}
       </div>
+      )}
       {/* From the width on screen, so a drag never jumps from a wider saved width. */}
-      <ResizeHandle column={handle} edge="left" label="Resize the decision log" />
+      <ResizeHandle column={handle} edge="left" label="Resize the sidebar" />
     </aside>
+  );
+}
+
+type SideView = 'decisions' | 'goals';
+const VIEW_KEY = 'agentscode:super-sidebar-view';
+function readView(): SideView {
+  try { return localStorage.getItem(VIEW_KEY) === 'goals' ? 'goals' : 'decisions'; } catch { return 'decisions'; }
+}
+
+/**
+ * The goals backlog: what you want done, in order. The SuperAgent works it top down, giving each
+ * goal to a free agent; you add, edit, reorder and remove goals here, and see who is on each.
+ */
+function GoalsView() {
+  const goals = useApp(s => s.snapshot?.super.goals);
+  const projects = useApp(s => s.snapshot?.projects) ?? [];
+  const { open, done } = goalSections(goals);
+  const list = useRef<HTMLOListElement>(null);
+  const addBox = useRef<HTMLTextAreaElement>(null);
+  // After a goal is removed, focus moves to the row now in its place, or the add box when none is.
+  const focusAfterRemove = (index: number) => requestAnimationFrame(() => requestAnimationFrame(() => {
+    const rows = list.current?.querySelectorAll<HTMLElement>('[data-goal]');
+    const next = rows?.[Math.min(index, rows.length - 1)]?.querySelector<HTMLElement>('select, button');
+    (next ?? addBox.current)?.focus({ preventScroll: true });
+  }));
+  const [text, setText] = useState('');
+  const [projectId, setProjectId] = useState<string>('');
+  const [busy, setBusy] = useState(false);
+  const [showDone, setShowDone] = useState(false);
+  const add = async () => {
+    if (!text.trim() || busy) return;
+    setBusy(true);
+    const ok = await attempt(() => api.addGoal({ text: text.trim(), projectId: projectId || null }));
+    setBusy(false);
+    if (ok) setText('');
+  };
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 border-b border-stroke px-3 py-2.5">
+        <textarea
+          ref={addBox}
+          aria-label="New goal"
+          value={text}
+          rows={2}
+          maxLength={500}
+          // A goal is one line: Enter adds it, and pasted line breaks become spaces.
+          onChange={e => setText(oneLine(e.target.value))}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void add(); } }}
+          placeholder="Add a goal for the SuperAgent"
+          className={`${TEXTAREA} text-[13px]`}
+        />
+        <div className="mt-1.5 flex items-center gap-2">
+          <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} className="h-6 min-w-0 flex-1 truncate rounded-md border border-content/12 bg-transparent px-1.5 text-[12px] text-content/70 outline-none">
+            <option value="">Any project</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <button type="button" className={PRIMARY} disabled={busy || !text.trim()} onClick={() => void add()}>{busy ? 'Adding…' : 'Add'}</button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {open.length ? (
+          <ol ref={list} aria-label="Open goals">
+            {open.map((goal, i) => <GoalItem key={goal.id} goal={goal} index={i} last={i === open.length - 1} onRemoved={() => focusAfterRemove(i)} />)}
+          </ol>
+        ) : (
+          <div className="flex flex-col items-center px-6 pb-6 pt-10 text-center">
+            <CircleDot className="size-5 text-content/25" strokeWidth={1.5} />
+            <p className="mt-2.5 text-[13px] text-content/60">No goals yet</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-content/40">Add what you want done. The SuperAgent works through them top down, giving each to a free agent, and asks you when it needs to.</p>
+          </div>
+        )}
+        {done.length ? (
+          <section aria-label="Done goals" className="border-t border-stroke">
+            <button type="button" onClick={() => setShowDone(v => !v)} className="flex w-full items-center gap-1.5 px-3.5 py-2.5 text-left text-[11px] font-medium uppercase tracking-wide text-content/40 hover:text-content/70">
+              <ChevronDown className={cx('size-3 transition-transform', showDone ? '' : '-rotate-90')} strokeWidth={2} />
+              Done <span className="font-normal tabular-nums">{done.length}</span>
+            </button>
+            {showDone ? <ol>{done.map((goal, i) => <GoalItem key={goal.id} goal={goal} index={i} last />)}</ol> : null}
+          </section>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function GoalItem({ goal, index, last, onRemoved }: { goal: SuperGoal; index: number; last: boolean; onRemoved?: () => void }) {
+  const project = useApp(s => s.snapshot?.projects.find(p => p.id === goal.projectId));
+  const agent = useApp(s => (goal.agentId ? s.snapshot?.agents.find(a => a.id === goal.agentId) : undefined));
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(goal.text);
+  const [busy, setBusy] = useState(false);
+  // Remove asks once: the first press arms it for a few seconds, the second removes.
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = setTimeout(() => setConfirming(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirming]);
+  // After Save or Cancel, focus goes back to the Edit button, not to the page.
+  const editButton = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (wasEditing.current && !editing) editButton.current?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
+  // Every control names its goal, so a screen reader can tell the rows apart.
+  const named = `"${goal.text.length > 60 ? `${goal.text.slice(0, 59)}…` : goal.text}"`;
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    const ok = await attempt(action);
+    setBusy(false);
+    return ok;
+  };
+  const save = async () => {
+    if (!text.trim()) return;
+    if (await run(() => api.updateGoal(goal.id, { text: text.trim() }))) setEditing(false);
+  };
+  const done = goal.status === 'done';
+  return (
+    <li data-goal={goal.id} data-goal-status={goal.status} className="group/goal border-b border-content/5 px-3.5 py-2.5 last:border-b-0">
+      <div className="flex items-center gap-1">
+        <select
+          aria-label={`Status of ${named}`}
+          value={goal.status}
+          disabled={busy}
+          onChange={e => void run(() => api.updateGoal(goal.id, { status: e.target.value as GoalStatus }))}
+          className={cx('h-5 shrink-0 rounded bg-transparent text-[11px] outline-none hover:bg-selection-hover', goal.status === 'blocked' ? 'text-warning' : goal.status === 'in_progress' ? 'text-content/80' : 'text-content/45')}
+        >
+          {(Object.keys(GOAL_STATUS_LABEL) as GoalStatus[]).map(s => <option key={s} value={s}>{GOAL_STATUS_LABEL[s]}</option>)}
+        </select>
+        {project ? <span className="min-w-0 truncate text-[11px] text-content/35">· {project.name}</span> : null}
+        <span className="flex-1" />
+        <span className={cx('flex shrink-0 items-center transition-opacity group-hover/goal:opacity-100 focus-within:opacity-100', confirming ? 'opacity-100' : 'opacity-0')}>
+          {!done ? (
+            <>
+              <IconButton icon={ChevronUp} label={`Move ${named} up`} disabled={busy || index === 0} onClick={() => void run(() => api.moveGoal(goal.id, index - 1))} />
+              <IconButton icon={ChevronDown} label={`Move ${named} down`} disabled={busy || last} onClick={() => void run(() => api.moveGoal(goal.id, index + 1))} />
+            </>
+          ) : null}
+          <IconButton ref={editButton} icon={Pencil} label={`Edit ${named}`} disabled={busy} onClick={() => { setText(goal.text); setEditing(true); }} />
+          {confirming ? (
+            <button
+              type="button"
+              // The confirm takes focus, so a keyboard press of Remove can be confirmed with Enter.
+              autoFocus
+              aria-label={`Confirm removing ${named}`}
+              disabled={busy}
+              onClick={async () => { if (await run(() => api.removeGoal(goal.id))) onRemoved?.(); }} className="h-5 rounded px-1.5 text-[11px] font-medium text-danger transition-colors hover:bg-selection-hover disabled:opacity-30">
+              Remove?
+            </button>
+          ) : <IconButton icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => setConfirming(true)} />}
+        </span>
+      </div>
+      {editing ? (
+        <div className="mt-1 flex flex-col gap-1.5">
+          <textarea
+            autoFocus
+            aria-label={`Edit ${named}`}
+            value={text}
+            rows={2}
+            maxLength={500}
+            onChange={e => setText(oneLine(e.target.value))}
+            onKeyDown={e => {
+              // Escape cancels the edit and stops here, so a panel around it does not also close.
+              if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(false); }
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void save(); }
+            }}
+            className={`${TEXTAREA} text-[13px]`}
+          />
+          <div className="flex justify-end gap-1.5">
+            <TextButton onClick={() => setEditing(false)}>Cancel</TextButton>
+            <button type="button" className={PRIMARY} disabled={busy || !text.trim()} onClick={() => void save()}>Save</button>
+          </div>
+        </div>
+      ) : (
+        <p className={cx('mt-0.5 whitespace-pre-wrap break-words text-[13px] leading-5', done ? 'text-content/40 line-through decoration-content/25' : 'text-content/85')}>{goal.text}</p>
+      )}
+      {agent || goal.notes ? (
+        <div className="mt-1 flex flex-col gap-0.5">
+          {agent ? (
+            <button type="button" onClick={() => open({ kind: 'agent', agentId: agent.id })} className="self-start rounded text-[12px] text-content/55 underline decoration-content/20 underline-offset-2 hover:text-content">
+              {done ? 'Done by' : 'With'} {agent.name}
+            </button>
+          ) : null}
+          {goal.notes ? <p className="text-[12px] leading-relaxed text-content/40">{goal.notes}</p> : null}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+/** Goals are one line; line breaks typed or pasted become spaces. */
+const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ');
+
+function IconButton({ icon: Icon, label, disabled, onClick, ref }: { icon: typeof Pencil; label: string; disabled?: boolean; onClick: () => void; ref?: React.Ref<HTMLButtonElement> }) {
+  return (
+    <button ref={ref} type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick} className="grid size-5 place-items-center rounded text-content/40 transition-colors hover:bg-selection-hover hover:text-content disabled:pointer-events-none disabled:opacity-30">
+      <Icon className="size-3" strokeWidth={1.75} />
+    </button>
   );
 }
 
@@ -209,4 +427,9 @@ function useParentWidth(ref: React.RefObject<HTMLElement | null>): number {
     return () => observer.disconnect();
   }, [ref]);
   return width;
+}
+
+/** "2 messages waiting: quiet hours". */
+function heldText(held: { count: number; reason: string }): string {
+  return `${held.count} ${held.count === 1 ? 'message' : 'messages'} to the SuperAgent waiting: ${held.reason}. ${held.reason === 'the daily budget is used' ? 'Raise the budget in Settings, or they go tomorrow.' : 'They go when it may take a turn again; work you asked it for does not wait on these limits.'}`;
 }
