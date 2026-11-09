@@ -63,9 +63,10 @@ import {
   addGoalInput, agentCommandInput, askUserInput, completeGoalInput, updateGoalInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
   SUPER_TOOLS, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool,
-  appScreenshotInput, EYES_TOOLS, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
+  appScreenshotInput, EYES_TOOLS, runCheckInput, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
 } from './comms/tools.ts';
 import { capJson, GH_UNTRUSTED, GhError, ghArgs, logTail, repoFromRemote, runGh, type Exec } from './github.ts';
+import { CheckError, runCheck, type CheckExec } from './checks.ts';
 import { IDLE_PROCESS_MS, PORT } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { capProfile, findPromotions, ProfileStore } from './userProfile.ts';
@@ -135,6 +136,8 @@ export interface ManagerOptions {
   /** How gh runs (tests pass a fake), and how a project's git remote is read. */
   ghExec?: Exec;
   gitRemote?: (projectPath: string) => Promise<string | null>;
+  /** How run_check runs its commands; tests pass a fake. */
+  checkExec?: CheckExec;
 }
 
 /** Longest model id kept; OrcaCode's `provider::vendor/model:variant` ids run long. */
@@ -192,6 +195,7 @@ export class AgentManager {
   /** The desktop app's browser, for agents' browser_* tools (server/browserBridge.ts). */
   readonly browser: BrowserBridge;
   private ghExec: Exec | undefined;
+  private checkExec: CheckExec | undefined;
   private gitRemote: (projectPath: string) => Promise<string | null>;
 
   constructor(store: Store, hub: Broadcaster, engines: Record<EngineKind, EngineInfo>, options: ManagerOptions = {}) {
@@ -220,6 +224,7 @@ export class AgentManager {
     this.idleProcessMs = options.idleProcessMs ?? IDLE_PROCESS_MS;
     this.browser = options.browser ?? new BrowserBridge();
     this.ghExec = options.ghExec;
+    this.checkExec = options.checkExec;
     this.gitRemote = options.gitRemote ?? (async dir => {
       const result = await gitRun(dir, ['remote', 'get-url', 'origin'], 5000);
       return result.ok ? result.stdout.trim() : null;
@@ -1858,6 +1863,17 @@ export class AgentManager {
   private async eyesTool(agent: Agent, tool: EyesTool, args: Record<string, unknown>): Promise<unknown> {
     const bad = (message: string) => { throw new HttpError(400, message); };
     if (tool === 'app_screenshot') return this.appScreenshot(agent, args);
+    if (tool === 'run_check') {
+      const parsed = runCheckInput.safeParse(args);
+      if (!parsed.success) return bad(`Give a project and one of the checks: ${parsed.error.issues.slice(0, 2).map(i => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
+      const { project: ref, command, ...options } = parsed.data;
+      const project = this.eyesProject(agent, ref); // the same scope as the GitHub tools
+      try {
+        return { project: project.name, ...(await runCheck(project.path, command, options, this.checkExec)) };
+      } catch (error) {
+        throw new HttpError(error instanceof CheckError ? 400 : 500, (error as Error).message);
+      }
+    }
     const run = async (gh: string[]) => {
       try {
         return await runGh(gh, this.ghExec);

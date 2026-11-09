@@ -33,8 +33,8 @@ export const SUPER_BROWSER_TOOLS: BrowserTool[] = ['browser_open', 'browser_list
  * Tools that only look: read-only GitHub and CI, and a screenshot of the AgentsCode window. For the
  * roles that check work: the SuperAgent, reviewers and testers (hasEyes).
  */
-export type EyesTool = 'gh_prs' | 'gh_pr' | 'gh_runs' | 'gh_run' | 'gh_issues' | 'app_screenshot';
-export const EYES_TOOLS: EyesTool[] = ['gh_prs', 'gh_pr', 'gh_runs', 'gh_run', 'gh_issues', 'app_screenshot'];
+export type EyesTool = 'gh_prs' | 'gh_pr' | 'gh_runs' | 'gh_run' | 'gh_issues' | 'app_screenshot' | 'run_check';
+export const EYES_TOOLS: EyesTool[] = ['gh_prs', 'gh_pr', 'gh_runs', 'gh_run', 'gh_issues', 'app_screenshot', 'run_check'];
 export function hasEyes(role: string): boolean {
   return role === 'super' || role === 'reviewer' || role === 'tester';
 }
@@ -135,6 +135,13 @@ export const appScreenshotInput = z.object({
   agent: z.string().trim().min(1).max(100).optional(),
   /** Open this channel (id or name) in the main window first. */
   channel: z.string().trim().min(1).max(100).optional(),
+});
+export const runCheckInput = z.object({
+  project: projectRef,
+  command: z.enum(['git status', 'git log', 'git diff', 'git show', 'git branch', 'git rev-parse', 'git worktree list', 'npm test', 'npm run typecheck', 'npm run lint']),
+  ref: z.string().trim().min(1).max(200).optional(),
+  count: z.number().int().min(1).max(100).optional(),
+  stat: z.boolean().optional(),
 });
 export const readTranscriptInput = z.object({ agent_id: agentRef, limit: z.number().int().min(1).max(50).default(20) });
 
@@ -306,6 +313,10 @@ function registerEyesTools(server: McpServer, invoke: Invoke): void {
   server.registerTool('gh_runs', { description: `Recent CI runs for a project, optionally for one branch or workflow. ${gh}`, inputSchema: ghRunsInput.shape, ...readOnly }, args => invoke('gh_runs', args));
   server.registerTool('gh_run', { description: `One CI run: its jobs and steps, and the tail of the failed steps' log. ${gh}`, inputSchema: ghRunInput.shape, ...readOnly }, args => invoke('gh_run', args));
   server.registerTool('gh_issues', { description: `Open issues for a project, or for every project. ${gh}`, inputSchema: ghIssuesInput.shape, ...readOnly }, args => invoke('gh_issues', args));
+  server.registerTool('run_check', {
+    description: 'Run one read-only check in a project (id or name): git status, log, diff, show, branch, rev-parse or worktree list, or the project\'s own npm test, typecheck or lint script when it has one. ref is a revision or range (main..feature) for log, diff, show and rev-parse; count limits log; stat gives a diff summary. Nothing else runs, and nothing is changed. Returns the exit code and the end of the output.',
+    inputSchema: runCheckInput.shape, ...readOnly,
+  }, args => invoke('run_check', args));
   server.registerTool('app_screenshot', {
     description: 'A PNG of the AgentsCode desktop window as the user sees it (window "main"), or of the floating quick window while it is open ("quick"); returns the file path and size, so you can read the image. Optionally opens an agent\'s tab (one visible to you) or a channel (one you are a member of) in the main window first: that changes what the user is looking at, so do it only when the user asked or is away. Desktop app only.',
     inputSchema: appScreenshotInput.shape, ...readOnly,
