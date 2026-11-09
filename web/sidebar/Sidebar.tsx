@@ -3,7 +3,7 @@ import type { Agent, Channel, Project, TreeEntry } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { api, type Root } from '../api.ts';
 import { modelLabel, relativeTime, shortPath } from '../format.ts';
-import { closeTab, focusedAgentId, focusedChannelId, open, openToSide, setProject, setRail, setSidebarView, useLayout, type Layout } from '../layout.ts';
+import { closeTab, focusedAgentId, focusedChannelId, open, openToSide, setProject, setRail, setSectionFolded, setSidebarView, useLayout, type Layout, type RailSectionKey } from '../layout.ts';
 import { ChangesView } from '../right/RightPanel.tsx';
 import { attempt, useApp } from '../store.ts';
 import { whereabouts } from '../whereabouts.ts';
@@ -21,9 +21,10 @@ import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
-import { AGENT_GROUP_LABEL, groupAgents, railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
-import { openAsks, openSuper } from '../super.ts';
+import { AGENT_GROUP_LABEL, agentsSummary, groupAgents, needsYou, railAgents, railAgentStatus, railAgentTask, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
+import { openAgent, openAsks, openSuper } from '../super.ts';
 import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
+import { AvatarStack } from '../ui/AvatarStack.tsx';
 import { SUPER_LOOK } from '../../shared/avatar.ts';
 
 export interface SidebarActions {
@@ -129,6 +130,11 @@ function useChannelActivity(channelId: string): { working: boolean; waiting: boo
   const working = useApp(s => Boolean(s.snapshot?.agents.some(a => a.currentTask?.channelId === channelId && a.status === 'working')));
   const waiting = useApp(s => Boolean(s.snapshot?.agents.some(a => a.currentTask?.channelId === channelId && a.status === 'waiting')));
   return { working, waiting };
+}
+
+/** A channel with posts you have not opened: the accent pill a count would sit in. The server keeps no count, so it says "new". */
+function UnreadPill() {
+  return <span className="rounded bg-accent px-1 text-[10px] font-medium leading-4 text-white" title="Unread posts">new</span>;
 }
 
 /** The accent dot for news you have not opened yet. */
@@ -343,29 +349,46 @@ function RailAction({ icon: Icon, mark, label, hint, active = false, onClick, ch
   );
 }
 
-/** A titled list in the navigation column, with MonoCode's quiet + beside the title. */
-function RailSection({ title, addLabel, onAdd, children }: { title: string; addLabel: string; onAdd: () => void; children: ReactNode }) {
+/**
+ * A titled list in the navigation column, with MonoCode's quiet + beside the title. The title folds
+ * the list away (remembered in the layout) and carries its count; folded, it still says whether
+ * something inside needs you or is working (`mark`). An empty section is its header alone: the +
+ * is the one way to add.
+ */
+function RailSection({ id, title, count, mark, addLabel, onAdd, children }: { id: RailSectionKey; title: string; count: number; mark?: ReactNode; addLabel: string; onAdd: () => void; children: ReactNode }) {
+  const folded = Boolean(useLayout().folded?.[id]);
+  const Chevron = folded ? ChevronRight : ChevronDown;
   return (
     <section aria-label={title} className="mb-2 shrink-0">
-      <div className="flex items-center gap-1 px-3 pb-1.5 pt-1">
-        <h2 className="min-w-0 flex-1 truncate px-1 text-xs font-normal leading-5 text-content/50">{title}</h2>
+      <div className="group/section flex items-center gap-1 px-3 pb-1.5 pt-1">
+        <h2 className="flex min-w-0 flex-1">
+          <button
+            type="button"
+            aria-expanded={!folded}
+            onClick={() => setSectionFolded(id, !folded)}
+            title={folded ? `Show ${title.toLowerCase()}` : `Hide ${title.toLowerCase()}`}
+            className="-ml-0.5 flex h-5 min-w-0 items-center gap-1.5 rounded px-1 text-xs font-normal leading-5 text-content/50 transition-colors duration-150 hover:text-content"
+          >
+            {/* The chevron keeps its place so titles never shift; it shows when pointed at, and stays while folded. */}
+            <Chevron className={cx('-ml-0.5 size-2.5 shrink-0 transition-opacity duration-150', folded ? 'opacity-70' : 'opacity-0 group-hover/section:opacity-70 group-focus-within/section:opacity-70')} strokeWidth={2} />
+            <span className="min-w-0 truncate">{title}</span>
+            {count ? <span className="shrink-0 tabular-nums text-content/30">{count}</span> : null}
+            {folded && mark ? <span className="ml-0.5 flex shrink-0 items-center">{mark}</span> : null}
+          </button>
+        </h2>
         <button type="button" title={addLabel} aria-label={addLabel} onClick={onAdd} className="grid size-5 shrink-0 place-items-center rounded-md text-content/50 transition-colors duration-150 hover:bg-content/8 hover:text-content">
           <Plus className="size-3.5" strokeWidth={1.75} />
         </button>
       </div>
-      <div className="flex flex-col gap-px px-2">{children}</div>
+      {folded ? null : <div className="flex flex-col gap-px px-2">{children}</div>}
     </section>
   );
 }
 
-/** The single row of an empty rail section: a quiet way to add the first one. */
-function RailEmptyRow({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm text-content/45 transition-colors duration-150 hover:bg-content/5 hover:text-content">
-      <Plus className="size-4 shrink-0 opacity-70" strokeWidth={1.75} />
-      <span className="min-w-0 flex-1 truncate leading-tight">{label}</span>
-    </button>
-  );
+/** What a folded section or a project says about its agents: how many need you, or that one is working. */
+function SummaryMark({ needs, working }: { needs: number; working: boolean }) {
+  if (needs) return <span className="text-[11px] font-medium tabular-nums text-warning" title={`${needs} ${needs === 1 ? 'needs' : 'need'} you`}>{needs}</span>;
+  return working ? <TerminalSpinner className="text-content/55" /> : null;
 }
 
 /** A rail row makes room at its end only for a status mark, or for the ... button while hovered (MonoCode's group-hover:pr-6). */
@@ -392,7 +415,7 @@ function RowMore({ label, open: isOpen, onClick }: { label: string; open: boolea
       aria-expanded={isOpen}
       onClick={onClick}
       className={cx(
-        'absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-md text-content/55 transition-opacity duration-150 hover:bg-content/8 hover:text-content focus-visible:opacity-100',
+        'absolute right-1 top-1 grid size-6 place-items-center rounded-md text-content/55 transition-opacity duration-150 hover:bg-content/8 hover:text-content focus-visible:opacity-100',
         isOpen ? 'bg-content/8 opacity-100' : 'opacity-0 group-hover:opacity-100',
       )}
     >
@@ -441,11 +464,23 @@ function AgentRailMark({ status, compact = false }: { status: RailAgentStatus; c
   }
 }
 
-/** An agent with no project in the navigation column: its engine and name; it works across all projects. */
+/**
+ * An agent with no project in the navigation column; it works across all projects. One line while it
+ * is idle: avatar, name, how long ago. While it works or waits on you the row takes a second quiet
+ * line with what it is on, and gives it back when it is done.
+ */
 function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: boolean; actions: SidebarActions }) {
   const pending = usePendingApproval(agent.id);
+  const from = useApp(s => (agent.currentTask?.source === 'agent' ? s.snapshot?.agents.find(a => a.id === agent.currentTask?.fromAgentId)?.name : undefined));
   const now = useNow();
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
+  const task = railAgentTask(agent, pending, from);
+  const state = (
+    <span className={cx('flex shrink-0 items-center group-hover:hidden group-has-[[data-card-more]:focus-visible]:hidden', menu && 'hidden')}>
+      <AgentStateMark agent={agent} pending={pending} now={now} />
+    </span>
+  );
+  const name = <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', agent.unread ? 'font-semibold text-content' : 'font-medium')}>{agent.name}</span>;
   return (
     <div className="group relative" onContextMenu={e => openContextMenu(e, setMenu)}>
       <button
@@ -453,14 +488,21 @@ function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: bo
         onClick={e => openRailAgent(agent, e)}
         title={`${agent.name}, works across all projects. Click to open, Cmd+click to open beside, right-click for more.`}
         aria-current={selected ? 'page' : undefined}
-        className={cx(railRow(Boolean(menu)), railRowState(selected || Boolean(menu)))}
+        className={cx(
+          task
+            ? 'grid w-full min-w-0 grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 rounded-md px-2 py-1.5 text-left transition-[background-color,color,padding] duration-150 group-hover:pr-7 group-focus-within:pr-7'
+            : railRow(Boolean(menu)),
+          task && menu && 'pr-7',
+          railRowState(selected || Boolean(menu)),
+        )}
       >
         <AgentAvatar agent={agent} className="size-5" />
-        <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', agent.unread ? 'font-semibold text-content' : 'font-medium')}>{agent.name}</span>
-        {/* How it is doing, in the same place on every row; the ... button takes the spot on hover. */}
-        <span className={cx('flex shrink-0 items-center group-hover:hidden group-has-[[data-card-more]:focus-visible]:hidden', menu && 'hidden')}>
-          <AgentStateMark agent={agent} pending={pending} now={now} />
-        </span>
+        {task ? (
+          <span className="flex min-w-0 flex-col">
+            <span className="flex h-5 min-w-0 items-center gap-2 text-content/90">{name}{state}</span>
+            <span className="min-w-0 truncate text-[11.5px] font-normal leading-4 text-content/45">{task}</span>
+          </span>
+        ) : <>{name}{state}</>}
       </button>
       <RowMore label={`${agent.name} actions`} open={Boolean(menu)} onClick={e => toggleMenu(e, setMenu)} />
       {menu ? <AgentMenu agent={agent} anchor={menu} actions={actions} onClose={() => setMenu(null)} /> : null}
@@ -479,13 +521,13 @@ function ChannelRailRow({ channel, selected, actions }: { channel: Channel; sele
         onClick={e => (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'channel', channelId: channel.id })}
         title={`${channel.topic || `#${channel.name}`}. Click to open, Cmd+click to open beside, right-click for more.`}
         aria-current={selected ? 'page' : undefined}
-        className={cx(railRow(waiting || working || channel.unread || Boolean(menu)), railRowState(selected || Boolean(menu)))}
+        className={cx(railRow(waiting || working || channel.unread || Boolean(menu)), channel.unread && !waiting && !working && !menu && 'pr-10', railRowState(selected || Boolean(menu)))}
       >
         <span aria-hidden className="grid size-4 shrink-0 place-items-center text-[14px] leading-none opacity-70">#</span>
         <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', channel.unread ? 'font-semibold text-content' : 'font-medium')}>{channel.name}</span>
       </button>
       <RowStatus hidden={Boolean(menu)}>
-        {waiting ? <NeedsYouDot /> : working ? <TerminalSpinner className="text-content/55" /> : channel.unread ? <UnreadDot /> : null}
+        {waiting ? <NeedsYouDot /> : working ? <TerminalSpinner className="text-content/55" /> : channel.unread ? <UnreadPill /> : null}
       </RowStatus>
       <RowMore label={`#${channel.name} actions`} open={Boolean(menu)} onClick={e => toggleMenu(e, setMenu)} />
       {menu ? <ChannelMenu channel={channel} anchor={menu} actions={actions} onClose={() => setMenu(null)} /> : null}
@@ -502,32 +544,79 @@ function selectProject(project: Project, agentCount: number, actions: SidebarAct
   if (!agentCount && project.exists) actions.newAgent(project.id);
 }
 
-/** A project in the navigation column: selecting it fills the workspace column with its agents. */
-function ProjectRailRow({ project, agents, selected, actions }: { project: Project; agents: Agent[]; selected: boolean; actions: SidebarActions }) {
+/**
+ * A project in the navigation column: selecting it fills the workspace column with its agents. The
+ * current project is marked by brighter text and an open folder, never by the fill, which means
+ * "open in front of you" and belongs to tabs. The row carries its agents' avatars, so you can see
+ * where the team is without selecting each project; one with no agents is quieter.
+ */
+function ProjectRailRow({ project, agents, pendingIds, selected, actions }: { project: Project; agents: Agent[]; pendingIds: ReadonlySet<string>; selected: boolean; actions: SidebarActions }) {
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
-  const waiting = agents.some(a => a.status === 'waiting');
-  const working = agents.some(a => a.status === 'working');
+  const summary = agentsSummary(agents, pendingIds);
   const Icon = selected ? FolderOpen : Folder;
+  const quiet = !selected && (!agents.length || !project.exists);
   return (
     <div className="group relative" onContextMenu={e => openContextMenu(e, setMenu)}>
       <button
         type="button"
         onClick={() => selectProject(project, agents.length, actions)}
-        title={project.path}
+        title={`${project.path}${agents.length ? `. ${agents.map(a => a.name).join(', ')}` : ''}`}
         aria-current={selected ? 'true' : undefined}
-        className={cx(railRow(!project.exists || waiting || working || Boolean(menu)), railRowState(selected || Boolean(menu)))}
+        className={cx(
+          railRow(Boolean(menu)),
+          menu ? 'bg-selection-strong text-content' : selected ? 'text-content hover:bg-content/5' : quiet ? 'text-content/45 hover:bg-content/5 hover:text-content' : 'text-content/65 hover:bg-content/5 hover:text-content',
+        )}
       >
         <Icon className="size-4 shrink-0 opacity-70" strokeWidth={1.75} />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight">{project.name}</span>
+        <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', quiet ? 'font-normal' : 'font-medium')}>{project.name}</span>
+        {/* Marks first, then who is inside; the ... button takes the spot on hover. */}
+        <span className={cx('flex shrink-0 items-center gap-1.5 group-hover:hidden group-has-[[data-card-more]:focus-visible]:hidden', menu && 'hidden')}>
+          {!project.exists ? <span className="text-[11px] text-danger">missing</span> : <SummaryMark needs={summary.needsYou} working={summary.working} />}
+          {agents.length ? <AvatarStack agents={agents} max={3} size="size-4" ring="bg-transparent" /> : null}
+        </span>
       </button>
-      <RowStatus hidden={Boolean(menu)}>
-        {!project.exists ? <span className="text-[11px] text-danger">missing</span>
-          : waiting ? <NeedsYouDot />
-          : working ? <TerminalSpinner className="text-content/55" /> : null}
-      </RowStatus>
       <RowMore label={`${project.name} actions`} open={Boolean(menu)} onClick={e => toggleMenu(e, setMenu)} />
       {menu ? <ProjectMenu project={project} agentCount={agents.length} anchor={menu} actions={actions} onClose={() => setMenu(null)} /> : null}
     </div>
+  );
+}
+
+/**
+ * Everything waiting on you, right under the top actions: who and what in a few words, the longest
+ * wait first. The one tinted area in the column (a soft warning wash, no border); it is not there at
+ * all when nothing waits. A click opens that agent, where the question is.
+ */
+function NeedsYouBlock() {
+  const agents = useApp(s => s.snapshot?.agents);
+  const approvals = useApp(s => s.snapshot?.approvals);
+  const asks = useApp(s => s.snapshot?.super.asks);
+  const superId = useApp(s => s.snapshot?.super.agentId ?? null);
+  const list = useMemo(() => needsYou({ agents: agents ?? [], approvals: approvals ?? [], asks: asks ?? [], superId }), [agents, approvals, asks, superId]);
+  if (!list.total) return null;
+  return (
+    <section aria-label={`Needs you, ${list.total}`} className="mx-2 mb-2 shrink-0 rounded-[10px] bg-warning/[0.07] pb-1 pt-1.5">
+      <h2 className="flex items-center gap-1.5 px-2.5 pb-1 text-[11px] font-semibold text-warning">
+        Needs you
+        <span className="font-medium tabular-nums opacity-65">{list.total}</span>
+      </h2>
+      {list.shown.map(item => {
+        const agent = agents?.find(a => a.id === item.agentId);
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => openAgent(item.agentId)}
+            title={`${item.who} ${item.what}`}
+            className="flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-[5px] text-left text-[12.5px] transition-colors duration-150 hover:bg-warning/[0.08]"
+          >
+            <AgentAvatar agent={agent ?? { id: item.agentId }} className="size-[18px]" />
+            <span className="shrink-0 font-semibold text-content/90">{item.who}</span>
+            <span className="min-w-0 truncate text-content/60">{item.what}</span>
+          </button>
+        );
+      })}
+      {list.more ? <p className="px-2.5 pb-0.5 pt-1 text-[11.5px] text-content/45">and {list.more} more</p> : null}
+    </section>
   );
 }
 
@@ -548,6 +637,13 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
   const superId = useApp(s => s.snapshot?.super.agentId ?? null);
   const superWaiting = useApp(s => openAsks(s.snapshot?.super.asks).length);
   const column = useColumnWidth('nav', 200, 168, 0.3);
+  const approvals = useApp(s => s.snapshot?.approvals);
+  const pendingIds = useMemo(() => new Set((approvals ?? []).map(a => a.agentId)), [approvals]);
+  // What each section says about itself while it is folded.
+  const listedSummary = agentsSummary(listed, pendingIds);
+  const projectSummary = agentsSummary((agents ?? []).filter(a => a.projectId), pendingIds);
+  const channelsWaiting = (agents ?? []).some(a => a.currentTask?.channelId && a.status === 'waiting');
+  const channelsWorking = (agents ?? []).some(a => a.currentTask?.channelId && a.status === 'working');
   return (
     <nav aria-label="AgentsCode" style={{ width: column.width }} className="sidebar-glass relative flex shrink-0 flex-col border-r border-stroke font-sans">
       {/* In the desktop app the traffic lights take the brand's place, as in MonoCode. */}
@@ -556,11 +652,29 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
           <BrandMark />
           <span className="min-w-0 truncate text-[13px] font-semibold text-content/85">AgentsCode</span>
         </span>
-        <HeaderButton icon={PanelLeft} label="Collapse navigation" onClick={() => setRail(false)} />
       </div>
-      <div className="flex shrink-0 flex-col gap-px px-2 pb-2 pt-0.5">
-        <RailAction icon={Plus} label="New agent" hint={SHORTCUTS.newAgent} onClick={() => actions.newAgent(projectId)} />
-        <RailAction icon={Search} label="Search" hint={SHORTCUTS.palette} onClick={actions.palette} />
+      {/* New agent is the one raised control; Search sits beside it as an icon. */}
+      <div className="flex shrink-0 items-center gap-1.5 px-2 pb-2 pt-0.5">
+        <button
+          type="button"
+          onClick={() => actions.newAgent(projectId)}
+          className="flex h-[30px] min-w-0 flex-1 items-center gap-2 rounded-lg bg-content/[0.09] px-2.5 text-left text-[13px] font-medium text-content transition-colors duration-150 hover:bg-content/[0.14]"
+        >
+          <Plus className="size-4 shrink-0 opacity-70" strokeWidth={1.75} />
+          <span className="min-w-0 flex-1 truncate">New agent</span>
+          <kbd className="shrink-0 font-sans text-[11px] font-normal text-content/40">{SHORTCUTS.newAgent}</kbd>
+        </button>
+        <button
+          type="button"
+          title={`Search (${SHORTCUTS.palette})`}
+          aria-label={`Search (${SHORTCUTS.palette})`}
+          onClick={actions.palette}
+          className="grid size-[30px] shrink-0 place-items-center rounded-lg text-content/70 transition-colors duration-150 hover:bg-content/10 hover:text-content"
+        >
+          <Search className="size-4" strokeWidth={1.75} />
+        </button>
+      </div>
+      <div className="flex shrink-0 flex-col gap-px px-2 pb-2">
         <RailAction icon={MessageMultiple} label="Comms" active={commsOpen} onClick={() => open({ kind: 'comms' })}>
           {inFlight ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${inFlight} in flight`}>{inFlight}</span> : null}
         </RailAction>
@@ -568,29 +682,42 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
           {superWaiting ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${superWaiting} waiting for you`}>{superWaiting}</span> : null}
         </RailAction>
       </div>
+      <NeedsYouBlock />
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none pb-2">
-        <RailSection title="Channels" addLabel="New channel" onAdd={actions.newChannel}>
+        <RailSection
+          id="channels"
+          title="Channels"
+          count={sorted.length}
+          mark={channelsWaiting ? <NeedsYouDot /> : channelsWorking ? <TerminalSpinner className="text-content/55" /> : sorted.some(c => c.unread) ? <UnreadDot /> : null}
+          addLabel="New channel"
+          onAdd={actions.newChannel}
+        >
           {sorted.map(channel => <ChannelRailRow key={channel.id} channel={channel} selected={channel.id === channelId} actions={actions} />)}
-          {channels && !channels.length ? <RailEmptyRow label="New channel" onClick={actions.newChannel} /> : null}
         </RailSection>
         {/* Agents with no project, which work across all of them; a project's agents are in its workspace column. */}
-        <RailSection title="Agents" addLabel="New agent with no project" onAdd={() => actions.newAgent(null)}>
+        <RailSection id="agents" title="Agents" count={listed.length} mark={<SummaryMark needs={listedSummary.needsYou} working={listedSummary.working} />} addLabel="New agent with no project" onAdd={() => actions.newAgent(null)}>
           {listed.map(agent => <AgentRailRow key={agent.id} agent={agent} selected={agent.id === agentId} actions={actions} />)}
-          {agents && !listed.length ? <RailEmptyRow label="New agent" onClick={() => actions.newAgent(null)} /> : null}
         </RailSection>
-        <RailSection title="Projects" addLabel="Add project" onAdd={actions.addProject}>
+        <RailSection id="projects" title="Projects" count={projects?.length ?? 0} mark={<SummaryMark needs={projectSummary.needsYou} working={projectSummary.working} />} addLabel="Add project" onAdd={actions.addProject}>
           {(projects ?? []).map(project => (
-            <ProjectRailRow key={project.id} project={project} agents={(agents ?? []).filter(a => a.projectId === project.id)} selected={project.id === projectId} actions={actions} />
+            <ProjectRailRow key={project.id} project={project} agents={(agents ?? []).filter(a => a.projectId === project.id)} pendingIds={pendingIds} selected={project.id === projectId} actions={actions} />
           ))}
-          {projects && !projects.length ? <RailEmptyRow label="Add project" onClick={actions.addProject} /> : null}
         </RailSection>
       </div>
       <SidebarUpdateFooter />
-      <div className="flex shrink-0 flex-col gap-px p-2">
-        <RailAction icon={StickyNote} label="About you" onClick={actions.profile}>
-          {waiting ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${waiting} waiting for your approval`}>{waiting}</span> : null}
-        </RailAction>
-        <RailAction icon={Settings} label="Settings" hint={SHORTCUTS.settings} onClick={actions.settings} />
+      {/* One row at the foot: About you with what waits there, then Settings and Collapse as icons. */}
+      <div className="flex shrink-0 items-center gap-0.5 px-2 pb-2 pt-1.5">
+        <button
+          type="button"
+          onClick={actions.profile}
+          className="flex h-[30px] min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-[13px] font-medium text-content/70 transition-colors duration-150 hover:bg-content/10 hover:text-content"
+        >
+          <StickyNote className="size-4 shrink-0 opacity-70" strokeWidth={1.75} />
+          <span className="min-w-0 flex-1 truncate">About you</span>
+          {waiting ? <span className="min-w-4 shrink-0 rounded bg-content/[0.14] px-1 text-center text-[10px] font-medium leading-4 tabular-nums text-content/80" title={`${waiting} waiting for your approval`}>{waiting}</span> : null}
+        </button>
+        <HeaderButton icon={Settings} label={`Settings (${SHORTCUTS.settings})`} onClick={actions.settings} className="size-[30px]" />
+        <HeaderButton icon={PanelLeft} label="Collapse navigation" onClick={() => setRail(false)} className="size-[30px]" />
       </div>
       <ResizeHandle column={column} edge="right" label="Resize navigation" />
     </nav>
@@ -740,10 +867,12 @@ function WorkspaceColumn({ actions, project, titleBarAbove }: { actions: Sidebar
 }
 
 /** A button in the folded navigation rail: an icon, its name as the tooltip, and a status dot in the corner. */
-function RailIconButton({ label, active = false, dot, onClick, onContextMenu, children }: {
+function RailIconButton({ label, active = false, dot, badge = 0, onClick, onContextMenu, children }: {
   label: string;
   active?: boolean;
   dot?: ReactNode;
+  /** How many things behind this icon wait on you; shown as a count in place of the dot. */
+  badge?: number;
   onClick: (e: MouseEvent<HTMLButtonElement>) => void;
   onContextMenu?: (e: MouseEvent<HTMLButtonElement>) => void;
   children: ReactNode;
@@ -759,7 +888,9 @@ function RailIconButton({ label, active = false, dot, onClick, onContextMenu, ch
       className={cx('relative grid size-8 shrink-0 place-items-center rounded-md transition-colors duration-150', active ? 'bg-selection-strong text-content' : 'text-content/60 hover:bg-content/10 hover:text-content')}
     >
       {children}
-      {dot ? <span className="absolute right-1 top-1 flex">{dot}</span> : null}
+      {badge > 0 ? (
+        <span role="img" aria-label={`${badge} ${badge === 1 ? 'needs' : 'need'} you`} className="absolute -right-0.5 -top-0.5 min-w-[15px] rounded-full bg-warning px-[3px] text-center text-[10px] font-semibold leading-[15px] tabular-nums text-black">{badge > 9 ? '9+' : badge}</span>
+      ) : dot ? <span className="absolute right-1 top-1 flex">{dot}</span> : null}
     </button>
   );
 }
@@ -809,15 +940,16 @@ function AgentRailIcon({ agent, selected, actions }: { agent: Agent; selected: b
 
 function ProjectRailIcon({ project, agents, selected, actions }: { project: Project; agents: Agent[]; selected: boolean; actions: SidebarActions }) {
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
-  const waiting = agents.some(a => a.status === 'waiting');
-  const working = agents.some(a => a.status === 'working');
+  const approvals = useApp(s => s.snapshot?.approvals);
+  const summary = agentsSummary(agents, new Set((approvals ?? []).map(a => a.agentId)));
   const Icon = selected ? FolderOpen : Folder;
   return (
     <>
       <RailIconButton
-        label={project.name}
+        label={summary.needsYou ? `${project.name}, ${summary.needsYou} ${summary.needsYou === 1 ? 'needs' : 'need'} you` : project.name}
         active={selected || Boolean(menu)}
-        dot={waiting ? <NeedsYouDot /> : working ? <WorkingDot /> : null}
+        badge={summary.needsYou}
+        dot={summary.working ? <WorkingDot /> : null}
         onClick={() => selectProject(project, agents.length, actions)}
         onContextMenu={e => openContextMenu(e, setMenu)}
       >
@@ -868,7 +1000,7 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
         <RailIconButton label={inFlight ? `Comms, ${inFlight} in flight` : 'Comms'} active={commsOpen} dot={inFlight ? <span className="size-1.5 rounded-full bg-accent" /> : null} onClick={() => open({ kind: 'comms' })}>
           <MessageMultiple className="size-4" strokeWidth={1.75} />
         </RailIconButton>
-        <RailIconButton label={superWaiting ? `SuperAgent, ${superWaiting} waiting for you` : 'SuperAgent'} dot={superWaiting ? <span className="size-1.5 rounded-full bg-accent" /> : null} onClick={() => void openSuper()}>
+        <RailIconButton label={superWaiting ? `SuperAgent, ${superWaiting} waiting for you` : 'SuperAgent'} badge={superWaiting} onClick={() => void openSuper()}>
           <SuperMark superId={superId} />
         </RailIconButton>
       </div>

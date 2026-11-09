@@ -29,6 +29,9 @@ export interface Pane {
   tabId: string | null;
 }
 
+/** The navigation column's lists, each of which folds. */
+export type RailSectionKey = 'channels' | 'agents' | 'projects';
+
 export interface Layout {
   tabs: Tab[];
   panes: Pane[];
@@ -42,6 +45,8 @@ export interface Layout {
    * the user picks, so the default follows the window: folded below 1280px.
    */
   rail?: boolean;
+  /** Navigation sections the user folded away; one not listed is open. */
+  folded?: Partial<Record<RailSectionKey, boolean>>;
   /** Column widths the user dragged to, in px; a column without one uses its default. */
   widths?: Partial<Record<ColumnKey, number>>;
   rightPanel: boolean;
@@ -295,6 +300,12 @@ export function setColumnWidth(key: ColumnKey, width: number | undefined): void 
   if (width === undefined) delete widths[key];
   else widths[key] = width;
   set({ ...layout, widths });
+}
+export function setSectionFolded(key: RailSectionKey, folded: boolean): void {
+  const next = { ...layout.folded };
+  if (folded) next[key] = true;
+  else delete next[key];
+  set({ ...layout, folded: next });
 }
 export function setProject(projectId: string): void { if (layout.projectId !== projectId) set({ ...layout, projectId }); }
 export function setRightPanel(rightPanel: boolean): void { set({ ...layout, rightPanel }); }
