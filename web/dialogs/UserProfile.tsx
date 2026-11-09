@@ -6,8 +6,26 @@ import { attempt, useApp } from '../store.ts';
 import { HeaderButton, INPUT, PRIMARY, TEXTAREA } from '../ui/common.tsx';
 import { Pencil, Plus, Trash2 } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
+import { Modal } from '../mono/Modal.tsx';
 import { Group } from '../mono/settings.tsx';
 import { submitKey } from './submitKey.ts';
+
+/** About you, from the sidebar: everything AgentsCode saved about the user, and where the file is. */
+export function ProfileDialog({ onClose }: { onClose: () => void }) {
+  const file = useApp(s => s.snapshot?.profile.file);
+  return (
+    <Modal title="About you" size="md" fitViewport onClose={onClose}>
+      <div className="px-4 pb-4 pt-4">
+        <AboutYouGroup />
+        {file ? (
+          <p className="pt-4 text-[12px] leading-relaxed text-content/45">
+            Saved in <span className="select-text break-all font-mono text-content/70">{file}</span>. Every agent reads it, whatever its project or engine.
+          </p>
+        ) : null}
+      </div>
+    </Modal>
+  );
+}
 
 /**
  * What AgentsCode knows about the user (user.md), shared by every agent: what waits for approval

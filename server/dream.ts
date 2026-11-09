@@ -903,7 +903,7 @@ export function dreamLine(record: DreamRecord): string {
   // What it learned about the user stands even when its memory changes were rolled back.
   const about = [
     learned ? `learned ${learned} ${learned === 1 ? 'thing' : 'things'} about you` : '',
-    proposed ? `${proposed} about you to review in Settings` : '',
+    proposed ? `${proposed} about you to review in About you` : '',
   ].filter(Boolean).map(part => `, ${part}`).join('');
   if (record.status === 'rolled-back') return `Dreamed: changes rolled back (${(record.error ?? 'Rolled back.').replace(/^Rolled back: /, '').replace(/\.$/, '')})${about}`;
   const applied = record.ops.filter(o => o.result === 'applied');

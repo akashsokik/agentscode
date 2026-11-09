@@ -249,8 +249,8 @@ test('a dream adds what the user said outright, proposes what it inferred, and r
   assert.equal(waiting.kind, 'dream');
   assert.equal(waiting.dreamId, record.id);
   assert.match(waiting.text, /Keep replies short/);
-  assert.equal(dreamLine(record), 'Dreamed: no changes, learned 1 thing about you, 1 about you to review in Settings');
-  assert.equal(dreamLine({ ...record, status: 'rolled-back', error: 'Rolled back: memory is over its limit.' }), 'Dreamed: changes rolled back (memory is over its limit), learned 1 thing about you, 1 about you to review in Settings');
+  assert.equal(dreamLine(record), 'Dreamed: no changes, learned 1 thing about you, 1 about you to review in About you');
+  assert.equal(dreamLine({ ...record, status: 'rolled-back', error: 'Rolled back: memory is over its limit.' }), 'Dreamed: changes rolled back (memory is over its limit), learned 1 thing about you, 1 about you to review in About you');
   assert.ok(!fs.existsSync(path.join(homes.path(agent.id), 'memory.md')), 'memory is untouched');
 
   // The next dream is shown the profile, and the same fact again is refused.
@@ -350,7 +350,7 @@ test('the app reads, adds, edits and deletes the profile and decides proposals o
   const json = { 'Content-Type': 'application/json' };
   const send = (url: string, method: string, body?: unknown) => fetch(url, { method, headers: json, ...(body ? { body: JSON.stringify(body) } : {}) });
   try {
-    assert.deepEqual(await (await fetch(base)).json(), { entries: [], proposals: [] });
+    assert.deepEqual(await (await fetch(base)).json(), { entries: [], proposals: [], file: path.join(t.store.dataDir, 'user.md') });
     const added = await (await send(base, 'POST', { text: 'Keep replies short.', why: 'Reads on a phone.' })).json() as UserProfile;
     const [entry] = added.entries;
     assert.equal(entry.text, 'Keep replies short.');

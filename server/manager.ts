@@ -780,7 +780,7 @@ export class AgentManager {
         const target = before.find(e => e.id === parsed.data.id);
         if (!target) throw new HttpError(404, 'No profile entry with that id.');
         // The profile is everyone's: an agent removes only what it saved itself; the rest is the user's call.
-        if (target.agentId !== agent.id) throw new HttpError(403, 'You can only forget profile entries you saved. Ask the user to change this one in AgentsCode (Settings, About you).');
+        if (target.agentId !== agent.id) throw new HttpError(403, 'You can only forget profile entries you saved. Ask the user to change this one in AgentsCode (About you, in the sidebar).');
         const { entry, entries } = this.profile.forget(target.id);
         this.publishProfile();
         this.sawOwnProfile(agent, before, entries);

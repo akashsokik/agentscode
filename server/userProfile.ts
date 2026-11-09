@@ -35,7 +35,7 @@ export function renderProfile(entries: ProfileEntry[]): string {
   const lines = [
     '# About the user',
     '',
-    'AgentsCode keeps this file and gives it to every agent. Agents add what they learn about you; edit or delete entries in the app (Settings, About you). A hand edit here must keep each entry under its "## <id> (<time>)" heading: lines outside an entry are dropped on the next write.',
+    'AgentsCode keeps this file and gives it to every agent. Agents add what they learn about you; edit or delete entries in the app (About you, in the sidebar). A hand edit here must keep each entry under its "## <id> (<time>)" heading: lines outside an entry are dropped on the next write.',
   ];
   for (const entry of entries) {
     const when = new Date(entry.createdAt).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -148,7 +148,7 @@ export class ProfileStore {
   }
 
   view(): UserProfile {
-    return { entries: this.entries(), proposals: this.proposals() };
+    return { entries: this.entries(), proposals: this.proposals(), file: this.file(PROFILE) };
   }
 
   /**
@@ -300,7 +300,7 @@ export class ProfileStore {
   private write(entries: ProfileEntry[], over?: string): void {
     const text = renderProfile(entries);
     if (over && text.length > PROFILE_LIMIT && text.length > renderProfile(this.entries()).length) {
-      throw new HttpError(400, `${over} (about ${PROFILE_LIMIT} characters). Delete or shorten entries in Settings, About you, then try again.`);
+      throw new HttpError(400, `${over} (about ${PROFILE_LIMIT} characters). Delete or shorten entries in About you, in the sidebar, then try again.`);
     }
     fs.mkdirSync(this.dir, { recursive: true });
     const file = this.file(PROFILE);

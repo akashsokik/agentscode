@@ -9,7 +9,6 @@ import { RefreshCw } from '../mono/icons.tsx';
 import { Modal } from '../mono/Modal.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Group, Row, Segmented, Toggle } from '../mono/settings.tsx';
-import { AboutYouGroup } from './UserProfile.tsx';
 
 function save(change: Partial<Settings>) {
   return attempt(() => api.updateSettings(change));
@@ -31,8 +30,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <Segmented<ThemePreference> label="Theme" value={theme} onChange={setTheme} options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'system', label: 'System' }]} />
           </Row>
         </Group>
-
-        <AboutYouGroup />
 
         <Group title="Agent communication" description="How agents see and message each other.">
           <Row label="Who can agents message?" description="Replies to messages they received always go through, and channel members can always reach each other in their channel.">

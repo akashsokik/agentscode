@@ -181,6 +181,8 @@ export interface ProfileProposal {
 export interface UserProfile {
   entries: ProfileEntry[];
   proposals: ProfileProposal[];
+  /** Where user.md is on disk, for the app to show. */
+  file: string;
 }
 
 /** One thing a dream learned about the user, and what came of it. Kept apart from DreamOp, which is about memory.md. */

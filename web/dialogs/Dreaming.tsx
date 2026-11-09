@@ -295,11 +295,11 @@ function OpRow({ op, undone }: { op: DreamOp; undone?: string }) {
   );
 }
 
-/** One thing the dream learned about the user: in user.md, waiting in Settings, About you, or refused. */
+/** One thing the dream learned about the user: in user.md, waiting in About you, or refused. */
 function ProfileOpRow({ op, undone }: { op: ProfileOp; undone: boolean }) {
   const kept = op.result !== 'rejected' && !undone;
   const Icon = op.result === 'rejected' ? X : undone ? RotateCcw : Check;
-  const label = op.result === 'proposed' ? 'About you, waiting for approval in Settings' : 'About you';
+  const label = op.result === 'proposed' ? 'About you, waiting for your approval' : 'About you';
   return (
     <li data-dream-profile-op={op.result} className="flex min-w-0 items-start gap-1.5 text-[12px]">
       <Icon className={`mt-[3px] size-3 shrink-0 ${kept ? 'text-content/55' : 'text-content/35'}`} strokeWidth={2} />
