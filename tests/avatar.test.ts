@@ -38,6 +38,11 @@ test('a new agent gets a shape and colour no one else has while any is free', ()
   assert.equal(`${look.shape}:${look.color}`, 'pebble:green', 'the only free pair');
   assert.notEqual(`${freshLook([], () => 0).shape}:${freshLook([], () => 0).color}`, `${SUPER_LOOK.shape}:${SUPER_LOOK.color}`, 'never the SuperAgent\'s');
   assert.ok(isLook(freshLook([...taken, { shape: 'pebble', color: 'green', eyes: 'round' }], () => 0.99)), 'all taken: still a valid look');
+  const all = [...taken, { shape: 'pebble', color: 'green', eyes: 'round' } as const];
+  for (const r of [0, 0.3, 0.6, 0.85, 0.99]) {
+    const look = freshLook(all, () => r);
+    assert.ok(!(look.shape === SUPER_LOOK.shape && look.color === SUPER_LOOK.color), 'never the SuperAgent\'s, even when every pair is taken');
+  }
 });
 
 test('status maps to the face: content, lively, attentive, pleased or tired', () => {
@@ -75,24 +80,43 @@ test('the gallery (every shape, colour, eye style and mood) matches tests/fixtur
   // Regenerate on purpose with UPDATE_AVATAR_GALLERY=1; otherwise a change to the set must be seen.
   if (process.env.UPDATE_AVATAR_GALLERY === '1' || !fs.existsSync(file)) fs.writeFileSync(file, svg);
   assert.equal(svg, fs.readFileSync(file, 'utf8'));
-  assert.equal(svg.match(/<path d="M[^"]*" fill="#/g)?.length, 2 * (8 * (5 + 3) + 10 + 5 * 2), 'both panels: every shape at 5 sizes and 3 eye styles, 10 colours, 5 moods at 40 and 16 px');
+  assert.equal(svg.match(/<path d="M[^"]*" fill="#/g)?.length, 2 * (8 * (6 + 3) + 10 + 5 * 2), 'both panels: every shape at 6 sizes and 3 eye styles, 10 colours, 5 moods at 40 and 16 px');
 });
 
-test('a face is cheerful and stays legible small: catchlights, smile and blush only from 18px', async () => {
-  const { avatarParts, isSmallAvatar, AVATAR_EYE_Y, AVATAR_PATH } = await import('../shared/avatar.ts');
+test('a face is flat: one solid body and two pill eyes, no shading or mouth, bigger pills when small', async () => {
+  const { avatarParts, isSmallAvatar, AVATAR_PATH, AVATAR_FILL, AVATAR_PILL, avatarMarkup } = await import('../shared/avatar.ts');
   const kinds = (parts: { kind: string }[]) => parts.map(p => p.kind);
-  const round = { shape: 'circle', color: 'teal', eyes: 'round' } as const;
-  assert.deepEqual(kinds(avatarParts(round, 'calm', false)), ['body', 'eye', 'eye', 'glint', 'glint', 'smile']);
-  assert.deepEqual(kinds(avatarParts({ ...round, eyes: 'wide' }, 'calm', false)), ['body', 'blush', 'blush', 'eye', 'eye', 'glint', 'glint']);
-  assert.deepEqual(kinds(avatarParts(round, 'calm', true)), ['body', 'eye', 'eye'], 'small keeps only what survives at 14 to 16px');
-  const big = avatarParts(round, 'calm', false).find(p => p.kind === 'eye') as { rx: number };
-  const small = avatarParts(round, 'calm', true).find(p => p.kind === 'eye') as { rx: number };
-  assert.ok(small.rx > big.rx, 'small faces get bigger eyes');
-  assert.deepEqual(kinds(avatarParts(round, 'pleased', false)), ['body', 'happy', 'happy', 'smile'], 'pleased closes into happy arcs');
-  assert.deepEqual(kinds(avatarParts(round, 'pleased', true)), ['body', 'eye', 'eye'], 'too small for arcs: plain eyes');
-  assert.ok(!kinds(avatarParts(round, 'down', false)).some(k => k === 'smile' || k === 'glint' || k === 'blush'), 'tired, not smiling');
-  for (const y of Object.values(AVATAR_EYE_Y)) assert.ok(y < 19, 'eyes sit in the upper half of the face');
-  assert.equal(Object.keys(AVATAR_PATH).length, 8);
+  const look = { shape: 'circle', color: 'teal', eyes: 'round' } as const;
+  for (const eyes of ['round', 'tall', 'wide'] as const) {
+    assert.deepEqual(kinds(avatarParts({ ...look, eyes }, 'calm', false)), ['body', 'eye', 'eye']);
+  }
+  const body = avatarParts(look, 'calm', false)[0] as { fill: string };
+  assert.equal(body.fill, AVATAR_FILL.teal, 'one solid colour');
+  const eye = avatarParts(look, 'calm', false)[1] as { w: number; h: number };
+  assert.ok(eye.h > eye.w * 2, 'tall narrow pills');
+  assert.equal(eye.w, AVATAR_PILL.w);
+  const small = avatarParts(look, 'calm', true)[1] as { w: number; h: number };
+  assert.ok(small.h >= eye.h * 1.3, 'bigger pills at 14 to 16px');
+  assert.deepEqual(kinds(avatarParts(look, 'pleased', false)), ['body', 'happy', 'happy'], 'pleased pills become small arcs');
+  const svg = avatarMarkup(look, 'down', 40, { still: true });
+  assert.doesNotMatch(svg, /Gradient|opacity|stroke=".*" stroke-width="[^"]*"\/><\/g>.*smile/, 'no gradients or highlights');
+  assert.match(svg, /height="1\.57"/, 'tired pills flatten to dashes in a still frame (5.6 x 0.28)');
+  for (const d of Object.values(AVATAR_PATH)) assert.doesNotMatch(d, /[AaHhVv]/, 'organic curves, no arcs or straight edges');
   assert.equal(isSmallAvatar(16), true);
   assert.equal(isSmallAvatar(18), false);
+});
+
+test('agents from before avatars get distinct looks once, colours spread out', async () => {
+  const { assignLooks, isLook } = await import('../shared/avatar.ts');
+  const agents = [
+    { id: 'super', role: 'super' },
+    { id: 'kept', role: 'dev', avatar: { shape: 'circle', color: 'orange', eyes: 'round' } },
+    { id: 'fen', role: 'dev' }, { id: 'rhea', role: 'reviewer' }, { id: 'bo', role: 'dev' },
+  ];
+  let n = 0;
+  const looks = assignLooks(agents, () => ((n++ * 0.37) % 1));
+  assert.deepEqual([...looks.keys()], ['fen', 'rhea', 'bo'], 'the SuperAgent and agents with a look are left alone');
+  const colors = [...looks.values()].map(l => l.color);
+  assert.ok([...looks.values()].every(isLook));
+  assert.equal(new Set([...colors, 'orange']).size, 4, 'four agents, four colours');
 });

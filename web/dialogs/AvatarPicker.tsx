@@ -3,14 +3,12 @@
  * small choices, no boxes; the chosen one carries the selection fill. Saved with the dialog.
  */
 import type { ReactNode } from 'react';
-import { AVATAR_COLORS, AVATAR_EYES, AVATAR_SHAPES, freshLook, isSuperPair, type AvatarLook } from '../../shared/avatar.ts';
+import { AVATAR_COLORS, AVATAR_EYES, AVATAR_SHAPE_NAMES, AVATAR_SHAPES, freshLook, isSuperPair, type AvatarLook } from '../../shared/avatar.ts';
 import { AVATAR_FILL, AvatarGlyph } from '../ui/Avatar.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 
-const SHAPE_NAMES: Record<AvatarLook['shape'], string> = {
-  circle: 'Circle', squircle: 'Squircle', triangle: 'Triangle', pebble: 'Pebble', capsule: 'Capsule', pentagon: 'Pentagon', blob: 'Blob', diamond: 'Diamond',
-};
-const EYE_NAMES: Record<AvatarLook['eyes'], string> = { round: 'Round eyes', tall: 'Tall eyes', wide: 'Wide eyes' };
+const SHAPE_NAMES = AVATAR_SHAPE_NAMES;
+const EYE_NAMES: Record<AvatarLook['eyes'], string> = { round: 'Eyes centred', tall: 'Eyes low and left', wide: 'Eyes high and right' };
 
 function Choice({ selected, label, onPick, disabled = false, children }: { selected: boolean; label: string; onPick: () => void; disabled?: boolean; children: ReactNode }) {
   return (

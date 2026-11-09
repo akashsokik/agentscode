@@ -24,6 +24,7 @@ import { ActivityLine, JumpToLatest, PostList, SPINNER, useFollowLatest } from '
 import { ChannelThread } from './ChannelThread.tsx';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
 import { AgentAvatar } from '../ui/Avatar.tsx';
+import { AvatarStack } from '../ui/AvatarStack.tsx';
 
 /** The thread open in each channel, so it is still open when you come back to the tab. */
 const openThreads = new Map<string, string>();
@@ -44,10 +45,12 @@ function Members({ channel, members, onEdit }: { channel: Channel; members: Agen
         aria-expanded={shown}
         onClick={() => setShown(v => !v)}
         title={`Members of #${channel.name}`}
-        className="flex h-6.5 shrink-0 items-center gap-1 rounded-md bg-selection px-1.5 font-sans text-[11px] text-content hover:bg-selection-hover"
+        aria-label={`${members.length} ${members.length === 1 ? 'member' : 'members'}: ${members.map(m => m.name).join(', ')}`}
+        className="flex h-6.5 shrink-0 items-center gap-1.5 rounded-md px-1.5 font-sans text-[11px] text-content/70 transition-colors hover:bg-selection-hover hover:text-content"
       >
-        <Bot className="size-3.5 text-content/60" strokeWidth={1.75} />
-        <span>{members.length} {members.length === 1 ? 'member' : 'members'}</span>
+        {/* Who is in it at a glance: their avatars, each on a disc of the header colour. */}
+        {members.length ? <AvatarStack agents={members} /> : <Bot className="size-3.5 text-content/60" strokeWidth={1.75} />}
+        <span>{members.length}</span>
         <ChevronDown className={`size-3 text-content/50 ${shown ? 'rotate-180' : ''}`} strokeWidth={1.75} />
       </button>
       {shown ? (

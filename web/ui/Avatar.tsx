@@ -6,16 +6,10 @@
  * Decorative: the agent's name always sits beside it.
  */
 import type { Agent } from '../../shared/types.ts';
-import { AVATAR_FILL, AVATAR_INK, agentLook, avatarMood, avatarParts, isSmallAvatar, type AvatarLook, type AvatarMood } from '../../shared/avatar.ts';
+import { AVATAR_FILL, AVATAR_INK, agentLook, avatarDelay, avatarMood, avatarParts, isSmallAvatar, type AvatarLook, type AvatarMood } from '../../shared/avatar.ts';
 
 export { AVATAR_FILL };
 
-/** A stable delay per avatar, so a row of them never blinks in step. */
-function delay(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 9973;
-  return `${-(h % 70) / 10}s`;
-}
 
 /**
  * The px size a Tailwind size class asks for (size-4 is 16px, size-[18px] is 18px); 1em and
@@ -44,20 +38,14 @@ export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-
       focusable="false"
       data-avatar-mood={mood}
       className={`avatar shrink-0 select-none ${animate ? 'avatar-live' : ''} ${className}`}
-      style={{ ['--avatar-delay' as string]: delay(seed) }}
+      style={{ ['--avatar-delay' as string]: avatarDelay(seed) }}
     >
-      {parts.map((part, i) => {
-        if (part.kind === 'body') return <path key={i} d={part.d} fill={part.fill} />;
-        if (part.kind === 'blush') return <ellipse key={i} cx={part.cx} cy={part.cy} rx={part.rx} ry={part.ry} fill="#ff6f96" opacity={0.4} />;
-        if (part.kind === 'smile') return <path key={i} d={part.d} fill="none" stroke={AVATAR_INK} strokeWidth={1.4} strokeLinecap="round" />;
-        return null;
-      })}
-      {/* The face moves as one: gaze, glance and look up; each eye blinks or half-closes on its own. */}
+      {parts.map((part, i) => (part.kind === 'body' ? <path key={i} d={part.d} fill={part.fill} /> : null))}
+      {/* The pills move as one (glance, look up); each blinks or flattens to a dash on its own. */}
       <g className="avatar-eyes">
         {parts.map((part, i) => {
-          if (part.kind === 'eye') return <ellipse key={i} className="avatar-eye" cx={part.cx} cy={part.cy} rx={part.rx} ry={part.ry} fill={AVATAR_INK} />;
-          if (part.kind === 'glint') return <circle key={i} className="avatar-glint" cx={part.cx} cy={part.cy} r={part.r} fill="#fff" />;
-          if (part.kind === 'happy') return <path key={i} d={part.d} fill="none" stroke={AVATAR_INK} strokeWidth={2.2} strokeLinecap="round" />;
+          if (part.kind === 'eye') return <rect key={i} className="avatar-eye" x={part.x} y={part.y} width={part.w} height={part.h} rx={part.w / 2} fill={AVATAR_INK} />;
+          if (part.kind === 'happy') return <path key={i} d={part.d} fill="none" stroke={AVATAR_INK} strokeWidth={part.width} strokeLinecap="round" />;
           return null;
         })}
       </g>

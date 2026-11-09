@@ -126,7 +126,8 @@ function CommsFeed({ agent }: { agent: Agent | undefined }) {
               <div className="flex min-w-0 items-center gap-1.5 text-[12px]">
                 <AgentAvatar agent={agents?.find(a => a.id === message.fromAgentId) ?? { id: message.fromAgentId }} className="size-3.5" />
                 <span className="min-w-0 truncate font-medium">
-                  {message.fromName} <span className="font-normal text-content/45">to</span> {message.toName}
+                  {message.fromName} <span className="font-normal text-content/45">to</span>{' '}
+                  <AgentAvatar agent={agents?.find(a => a.id === message.toAgentId) ?? { id: message.toAgentId }} animate={false} className="mr-1 inline-block size-3.5 align-[-0.2em]" />{message.toName}
                   {message.channelId ? <span className="font-normal text-content/45"> in #{channels?.find(c => c.id === message.channelId)?.name ?? 'deleted-channel'}</span> : null}
                 </span>
                 <time dateTime={new Date(message.ts).toISOString()} title={new Date(message.ts).toLocaleString()} className="ml-auto shrink-0 text-[11px] tabular-nums text-content/40">{relativeTime(message.ts, now)}</time>
