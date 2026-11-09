@@ -117,11 +117,11 @@ the [latest release](https://github.com/akashsokik/agentscode/releases/latest):
 #### Updating
 
 On Windows and Linux the app updates itself: it checks for a new release at launch and every few
-hours, and **Update** in the sidebar (or **Check for Updates** in the Help menu) downloads it, stops
-the agents and restarts into the new version. On a Mac the build is not signed with a Developer ID
+hours, and **Update to** the new version in the sidebar (or **Check for Updates** in the Help menu)
+downloads it, stops the agents and restarts into the new version. On a Mac the build is not signed with a Developer ID
 yet, so it cannot replace itself: it tells you about a new version and gives you the install command
-to run in Terminal (quit AgentsCode first). **Settings > About** (or **About AgentsCode** in the app
-menu) shows the version, its build, the update status with **Check for updates**, the install command
+to run in Terminal (quit AgentsCode first). **Settings > About** (or **About AgentsCode**, in the app
+menu on macOS and the Help menu on Windows and Linux) shows the version, its build, the update status with **Check for updates**, the install command
 on an unsigned Mac build, and a link to the release notes.
 
 - The app bundles Electron, so it needs no Node install. It still needs the `claude`, `codex` and
@@ -193,9 +193,9 @@ npm run dist:mac   # release/AgentsCode-mac-<arch>.dmg and .zip (also dist:win, 
    against HEAD; click a file for its diff. The **Files** sidebar tab browses any agent's workspace or
    project read-only.
 8. **Use a terminal.** See [Terminal](#terminal).
-9. **Preview in the browser.** In the desktop app, **Shift+Cmd+B** opens a browser tab. Localhost
-   links agents mention open beside you, and agents have browser tools (open, snapshot, screenshot,
-   console, click, type) to check web work in their own tabs.
+9. **Preview in the browser.** In the desktop app, **Shift+Cmd+B** opens a browser tab. A localhost
+   link in a reply opens in a browser tab beside you when you click it, and agents have browser tools
+   (open, snapshot, screenshot, console, click, type) to check web work in their own tabs.
 
 ### @-mentions
 
@@ -221,7 +221,7 @@ Each agent has a private home in `~/.agentscode/agents/<id>/`, outside its worki
 - **Dreams**: after a session (at least three turns, and an hour since the last dream), an agent
   reviews a digest of what happened and proposes small memory changes and, now and then, a soul
   change, which waits for you. Every dream is recorded in **Agent Settings > Dreaming**, and its
-  changes can be undone.
+  changes can be undone; **Dream now** there runs one at once.
 - **About you** (`~/.agentscode/user.md`): a profile of you shared by every agent: your style, taste
   and how you like to work. What you say outright is saved directly; what a dream infers waits for
   your approval. See and edit it under **About you** in the sidebar.
@@ -250,76 +250,6 @@ agents you want in it. Change members later from the channel's member list or it
   cannot start other members. Stopping an agent ends the collaborations it is in.
 - A channel cannot be deleted while a member is still working on one of its posts. Removing an agent
   takes it out of every channel.
-
-## SuperAgent
-
-The SuperAgent is one agent that runs the team for you across every project. It never edits: its
-autonomy is read-only on every engine, it has no edit tools and no shell, and every change goes
-through an agent it delegates to. Open it from **SuperAgent** in the sidebar.
-
-- **What it does on its own.** It watches your agents (it wakes when one finishes, fails, gets
-  stuck or waits for you), works a goals backlog top down, creates agents and channels, adds or
-  removes channel members, delegates, nudges a stuck agent, starts a new session and stops a runaway
-  turn. Each command carries a short reason.
-- **What it asks you first.** Merging, pushing or deploying, deleting anything, removing an agent,
-  adding a project, and large or costly work. Its questions appear above its composer, as desktop
-  notifications, and in the quick window, with the choices to click.
-- **The right panel.** With the SuperAgent focused, the panel has three more tabs:
-  - **Decisions**: what it did on its own, with why, and **Undo** for what can be put back.
-  - **Goals**: your backlog, in order. Add, edit, reorder, set the status of or remove a goal, and see
-    which agent is on it.
-  - **Routines**: things it should do on a schedule (daily at a time, or every few hours). Routines
-    it proposes wait until you confirm them.
-- **Limits that only stop its own work.** In **Settings > SuperAgent**: whether it wakes on updates,
-  wake-ups an hour, a daily budget in dollars, agents it may create a day, quiet hours, and
-  notifications. These hold back only what it starts on its own; your own messages to it, and the
-  work you asked for, always go.
-- **Eyes.** The SuperAgent, reviewers and testers get read-only tools: GitHub and CI through the
-  `gh` CLI (open PRs, a PR's checks and reviews, CI runs and a run's failed log, open issues),
-  `run_check` for read-only git commands in a project (and its test, typecheck and lint scripts, only
-  for reviewers and testers at Full access), and `app_screenshot`, a capture of the AgentsCode window. What GitHub
-  returns is treated as data, never instructions.
-- **Quick window.** **Shift+Cmd+Space** (Ctrl+Shift+Space on Windows and Linux) opens a floating
-  composer over any app: talk to the SuperAgent or any agent, or start a new agent, with your team at
-  a glance and the SuperAgent's questions answerable inline. Enter sends; Cmd+Enter sends and opens
-  the conversation. The desktop app registers the shortcut system-wide and adds a menu bar item.
-
-## Settings
-
-**Settings** (Cmd+,) has:
-
-- **Appearance**: Dark, Light or System.
-- **Agent communication**: who agents can message (nobody, same project, all projects), the message
-  budget, whether `list_agents` shares current tasks, whether tasks start with a team snapshot, and
-  whether agents may run their own scripts in their browser tabs.
-- **SuperAgent**: the limits above.
-- **Engines**: which CLIs were found, with each one's version and path, and **Refresh models**.
-- **About**: the version and build, updates, and the release notes.
-
-Each agent's own settings (the gear in its header) are in sections: **General** (its folder, name,
-avatar and role, and removing it), **Soul**, **Memory** and **Dreaming**. Model, effort and autonomy
-are the chips under its composer.
-
-## Keyboard shortcuts
-
-Cmd on macOS is Ctrl on Windows and Linux.
-
-| Keys | Does |
-| :-- | :-- |
-| Cmd+N | New agent |
-| Cmd+K | Search and commands |
-| Cmd+, | Settings |
-| Cmd+W | Close the focused tab |
-| Cmd+1 to Cmd+8, Cmd+9 | That tab; Cmd+9 is the last |
-| Cmd+Shift+[ and Cmd+Shift+], Ctrl+Tab | Previous and next tab |
-| Cmd+B | Show or hide the sidebar |
-| Option+Cmd+B | Show or hide the right panel |
-| Cmd+J or Ctrl+\` | Show or hide the terminal |
-| Shift+Cmd+B | Open a browser tab |
-| Shift+Cmd+Enter | Maximize the focused pane |
-| Shift+Cmd+Space | The quick window |
-
-The terminal has its own keys; see [Terminal](#terminal).
 
 ### Terminal
 
@@ -354,6 +284,84 @@ WebAssembly. It is not the Ghostty app, so `~/.config/ghostty` does not apply.
 - Drag the panel's top edge to resize it; double-click it to reset.
 
 </details>
+
+## SuperAgent
+
+The SuperAgent is one agent that runs the team for you across every project. It never edits: its
+autonomy is read-only on every engine, it has no edit tools, and no shell on Claude Code or
+OrcaCode (on Codex its commands run in the read-only sandbox), and every change goes through an
+agent it delegates to. Open it from **SuperAgent** in the sidebar.
+
+- **What it does on its own.** It watches your agents (it wakes when one finishes, fails, gets
+  stuck or waits for you), works a goals backlog top down, creates agents and channels, adds or
+  removes channel members, delegates, nudges a stuck agent, starts a new session and stops a runaway
+  turn. Each command carries a short reason.
+- **What it asks you first.** Merging, pushing or deploying, deleting anything, removing an agent,
+  adding a project, and large or costly work. Its questions appear above its composer, as desktop
+  notifications, and in the quick window, with the choices to click. It bases its decisions on About
+  you, so what you tell it there (for example, which of these it may do without asking) is what it
+  goes by.
+- **Morning brief.** Once a day, the first time it may wake after quiet hours, it tells you what
+  happened since yesterday, what is stuck, and what it proposes next.
+- **The right panel.** With the SuperAgent focused, the panel has three more tabs:
+  - **Decisions**: what it did on its own, with why, and **Undo** for what can be put back.
+  - **Goals**: your backlog, in order. Add, edit, reorder, set the status of or remove a goal, and see
+    which agent is on it.
+  - **Routines**: things it should do on a schedule (daily at a time, or every few hours). Routines
+    it proposes wait until you confirm them.
+- **Limits that only stop its own work.** In **Settings > SuperAgent**: whether it wakes on updates,
+  wake-ups an hour, a daily budget in dollars, agents it may create a day, quiet hours, and
+  notifications. These hold back only what it starts on its own; your own messages to it, and the
+  work you asked for, always go.
+- **Eyes.** The SuperAgent, reviewers and testers get read-only tools: GitHub and CI through the
+  `gh` CLI (open PRs, a PR's checks and reviews, CI runs and a run's failed log, open issues),
+  `run_check` for read-only git commands in a project (and its test, typecheck and lint scripts, only
+  for reviewers and testers at Full access), and `app_screenshot`, a capture of the AgentsCode window. What GitHub
+  returns is treated as data, never instructions.
+- **Quick window.** **Shift+Cmd+Space** (Ctrl+Shift+Space on Windows and Linux) opens a floating
+  composer over any app: talk to the SuperAgent or any agent, or start a new agent, with your team at
+  a glance and the SuperAgent's questions answerable inline. Enter sends; Cmd+Enter sends and opens
+  the conversation. The desktop app registers the shortcut system-wide (if another app already holds
+  it, it works inside AgentsCode only) and, while there is a SuperAgent, adds a menu bar item
+  (a notification-area icon on Windows and Linux).
+
+## Settings
+
+**Settings** (Cmd+,) has:
+
+- **Appearance**: Dark, Light or System.
+- **Agent communication**: who agents can message (nobody, same project, all projects), the message
+  budget, whether `list_agents` shares current tasks, whether tasks start with a team snapshot, and
+  whether agents may run their own scripts in their browser tabs.
+- **SuperAgent**: the limits above.
+- **Engines**: which CLIs were found, with each one's version and path, and **Refresh models**.
+- **About**: the version and build, updates, and the release notes.
+
+Each agent's own settings (the gear in its header) are in sections: **General** (its folder, name,
+avatar and role, and removing it), **Soul**, **Memory** and **Dreaming**. Model, effort and autonomy
+are the chips under its composer.
+
+## Keyboard shortcuts
+
+Cmd on macOS is Ctrl on Windows and Linux.
+
+| Keys | Does |
+| :-- | :-- |
+| Cmd+N | New agent |
+| Cmd+K | Search and commands |
+| Cmd+, | Settings |
+| Cmd+W | Close the focused tab |
+| Cmd+1 to Cmd+8, Cmd+9 | That tab; Cmd+9 is the last |
+| Cmd+Shift+[ and Cmd+Shift+], Ctrl+Shift+Tab and Ctrl+Tab | Previous and next tab |
+| Cmd+B | Show or hide the sidebar |
+| Option+Cmd+B | Show or hide the right panel |
+| Cmd+J or Ctrl+\` | Show or hide the terminal |
+| Shift+Cmd+B | Open a browser tab |
+| Shift+Cmd+Enter | Maximize or restore the focused pane |
+| Shift+Cmd+Space | The quick window |
+
+The terminal has its own keys; see [Terminal](#terminal). On Windows and Linux, Ctrl chords in a
+focused terminal go to the shell, except Ctrl+Tab and Ctrl+\`.
 
 ## How it works
 
@@ -396,9 +404,10 @@ Every agent gets an `agentscode` MCP server with these tools:
 
 Agents in the desktop app also get browser tools (`browser_open`, `browser_snapshot`,
 `browser_screenshot`, `browser_console`, `browser_click`, `browser_type`, `browser_press` and more).
-The SuperAgent adds its own commands (`create_agent`, `update_agent`, `new_session`, `stop_agent`,
-`create_channel`, `update_channel`, `ask_user`, `read_transcript`, the goal tools, `list_routines`
-and `propose_routine`), and the SuperAgent, reviewers and testers get the read-only `gh_*`,
+The SuperAgent's browser tools only look (open, list, close, snapshot, screenshot, console). It adds
+its own commands (`create_agent`, `update_agent`, `new_session`, `stop_agent`, `create_channel`,
+`update_channel`, `ask_user`, `read_transcript`, the goal tools, `list_routines` and
+`propose_routine`), and the SuperAgent, reviewers and testers get the read-only `gh_*`,
 `run_check` and `app_screenshot` tools.
 
 <details>
