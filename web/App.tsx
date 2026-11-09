@@ -5,7 +5,7 @@ import { AgentSettingsDialog } from './dialogs/AgentSettingsDialog.tsx';
 import { ChannelDialog } from './dialogs/ChannelDialog.tsx';
 import { NewAgentDialog } from './dialogs/NewAgentDialog.tsx';
 import { RemoveAgentDialog } from './dialogs/RemoveAgentDialog.tsx';
-import { SettingsDialog } from './dialogs/SettingsDialog.tsx';
+import { SettingsDialog, type SettingsGroup } from './dialogs/SettingsDialog.tsx';
 import { ProfileDialog } from './dialogs/UserProfile.tsx';
 import { SuperQuickBar } from './ui/SuperQuickBar.tsx';
 import { openAsks, openSuper, superLabel, useSuperAgent, useSuperBridge } from './super.ts';
@@ -341,7 +341,7 @@ function Toasts() {
 type Dialog =
   | { kind: 'newAgent'; projectId?: string | null }
   | { kind: 'addProject'; thenNewAgent?: boolean }
-  | { kind: 'settings'; group?: 'super' }
+  | { kind: 'settings'; group?: SettingsGroup }
   | { kind: 'profile' }
   | { kind: 'agentSettings' | 'removeAgent'; agentId: string }
   | { kind: 'newChannel' }
@@ -386,10 +386,13 @@ export function App() {
 
   // An agent's settings link to Settings at a group (the SuperAgent's limits); see openSettingsAt.
   useEffect(() => {
-    const onOpen = (event: Event) => setDialog({ kind: 'settings', group: (event as CustomEvent<{ group?: 'super' }>).detail?.group });
+    const onOpen = (event: Event) => setDialog({ kind: 'settings', group: (event as CustomEvent<{ group?: SettingsGroup }>).detail?.group });
     window.addEventListener('agentscode:open-settings', onOpen);
     return () => window.removeEventListener('agentscode:open-settings', onOpen);
   }, []);
+
+  // The app menu's About AgentsCode (electron/main.ts) opens Settings at About.
+  useEffect(() => window.agentscodeDesktop?.updates?.onShowAbout?.(() => setDialog({ kind: 'settings', group: 'about' })), []);
 
   const actions: SidebarActions = {
     newAgent: projectId => setDialog({ kind: 'newAgent', projectId }),

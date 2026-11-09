@@ -23,6 +23,14 @@ const updates: DesktopUpdates = {
       ipcRenderer.removeListener('updates:changed', listener);
     };
   },
+  check: () => ipcRenderer.invoke('updates:check') as Promise<void>,
+  onShowAbout(callback) {
+    const listener = () => callback();
+    ipcRenderer.on('updates:about', listener);
+    return () => {
+      ipcRenderer.removeListener('updates:about', listener);
+    };
+  },
 };
 
 const browser: DesktopBrowser = {

@@ -29,7 +29,18 @@ export type DesktopUpdates = {
   install(): Promise<void>;
   /** Calls back with every new snapshot; returns the unsubscribe function. */
   onChange(callback: (snapshot: UpdateSnapshot) => void): () => void;
+  /** Check for Updates: looks now and reports the outcome in a dialog, as the app menu's item does. */
+  check(): Promise<void>;
+  /** The app menu's About AgentsCode: calls back to open Settings at About. */
+  onShowAbout(callback: () => void): () => void;
 };
+
+/**
+ * The Mac installer (install.sh at the repo root). curl does not quarantine what it downloads, so
+ * an unsigned build it installs opens without Gatekeeper's "Apple could not verify" refusal. A copy
+ * downloaded in a browser is quarantined and needs Open Anyway in System Settings first.
+ */
+export const MAC_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/akashsokik/agentscode/main/install.sh | bash';
 
 export const RELEASES_URL = 'https://github.com/akashsokik/agentscode/releases';
 
