@@ -4,7 +4,7 @@ import { ALL_PROJECTS } from '../projects.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
 import { setSuperLog, useLayout } from '../layout.ts';
 import { nextLogState, peekAfter, SUPER_LOG_MIN_PANE, superLogMode } from '../superText.ts';
-import { AgentSettingsDialog } from '../dialogs/AgentSettingsDialog.tsx';
+import { AgentSettingsDialog, type AgentSettingsSection } from '../dialogs/AgentSettingsDialog.tsx';
 import { SoulProposalNotice } from '../dialogs/Dreaming.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
@@ -24,7 +24,7 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
   const allApprovals = useApp(s => s.snapshot?.approvals);
   const approvals = useMemo(() => (allApprovals ?? []).filter(a => a.agentId === agentId), [allApprovals, agentId]);
   const question = approvals.find(a => a.type === 'question');
-  const [settings, setSettings] = useState(false);
+  const [settings, setSettings] = useState<AgentSettingsSection | null>(null);
   const logOpen = useLayout().superLog !== false;
   // In a narrow pane the log opens over the conversation, and only when you ask for it.
   const [peek, setPeek] = useState(false);
@@ -86,7 +86,7 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
               data-super-log-toggle
             />
           ) : null}
-          <HeaderButton icon={Settings} label="Agent settings" onClick={() => setSettings(true)} />
+          <HeaderButton icon={Settings} label="Agent settings" onClick={() => setSettings('general')} />
         </>
       )}
     >
@@ -100,12 +100,12 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
           <Transcript agent={agent} entries={entries} approvals={approvals} />
         </OpenUIActionContext.Provider>
         {/* A soul change a dream proposed waits here until you accept or reject it in the settings. */}
-        <SoulProposalNotice agent={agent} onReview={() => setSettings(true)} />
+        <SoulProposalNotice agent={agent} onReview={() => setSettings('soul')} />
         {/* The SuperAgent's questions wait above its composer until you answer them. */}
         {agent.role === 'super' ? <SuperInbox /> : null}
-        <Composer agent={agent} project={project} question={question} onSettings={() => setSettings(true)} />
+        <Composer agent={agent} project={project} question={question} onSettings={() => setSettings('general')} />
       </WithLog>
-      {settings ? <AgentSettingsDialog agent={agent} onClose={() => setSettings(false)} /> : null}
+      {settings ? <AgentSettingsDialog agent={agent} section={settings} onClose={() => setSettings(null)} /> : null}
     </PaneFrame>
   );
 }
