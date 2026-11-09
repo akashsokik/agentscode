@@ -21,6 +21,7 @@ import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useFollowLatest } from './ChannelPosts.tsx';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
 import { AgentAvatar } from '../ui/Avatar.tsx';
+import { AvatarStack } from '../ui/AvatarStack.tsx';
 
 /** "1 message", "3 messages", "2 of 10 messages". */
 function count(n: number, noun: string, limit?: number): string {
@@ -279,13 +280,7 @@ function ThreadCard({ thread, state, title, agents, now, active, unseen }: {
     >
       <span className="flex items-center gap-2">
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="flex shrink-0 items-center -space-x-1">
-            {thread.participants.slice(0, 3).map(id => (
-              <span key={id} className="grid size-4 place-items-center rounded-full bg-background-base">
-                <AgentMark agent={agents.find(a => a.id === id)} className="size-3.5" />
-              </span>
-            ))}
-          </span>
+          <AvatarStack agents={thread.participants.map(id => agents.find(a => a.id === id) ?? { id })} max={3} size="size-3.5" />
           <span className="min-w-0 truncate text-[11px] text-content/55">{people.join(', ')}</span>
         </span>
         <span className="flex shrink-0 items-center gap-1.5">
