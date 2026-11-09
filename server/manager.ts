@@ -204,6 +204,7 @@ export class AgentManager {
         return Boolean(agent) && !this.runners.get(id!)?.busy && agent!.status !== 'working' && agent!.status !== 'waiting';
       },
       settings: () => this.store.settings,
+      cost: () => { const id = this.superId(); return id ? this.store.agents.get(id)?.costUsd ?? 0 : 0; },
       store: this.superStore,
       deliver: (prompt, events) => this.wakeSuper(prompt, `Update: ${events.map(e => e.text).join('; ')}`),
     });
@@ -1326,7 +1327,9 @@ export class AgentManager {
     if (answer !== null && answer.length > 4000) throw new HttpError(400, 'That answer is too long.');
     const ask = this.superStore.answer(askId, answer);
     const id = this.superId();
-    if (id && answer !== null) this.send(id, `Answer to your question "${ask.question}": ${answer}`);
+    // The transcript keeps only the user's own words; the SuperAgent's question goes in the prompt,
+    // so a dream never reads the question as something the user said.
+    if (id && answer !== null) this.startUserTask(id, answer, `Answer to your question "${ask.question}": ${answer}`, { summary: clip(answer, 280), source: 'user' });
     return this.publishSuper();
   }
 
@@ -1372,6 +1375,7 @@ export class AgentManager {
   /** Every minute: send what waits if it may go now, and report agents stuck in a turn or on the user. */
   private superTick(): void {
     if (!this.superId()) return;
+    this.watcher.morning();
     const now = Date.now();
     for (const agent of this.store.agents.values()) {
       if (agent.role === 'super') continue;
@@ -1973,6 +1977,9 @@ export class AgentManager {
     for (const key of ['superWake', 'superNotify'] as const) {
       if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new HttpError(400, 'Toggles must be true or false.');
     }
+    if (input.superDailyBudgetUsd !== undefined && (typeof input.superDailyBudgetUsd !== 'number' || !Number.isFinite(input.superDailyBudgetUsd) || input.superDailyBudgetUsd < 0 || input.superDailyBudgetUsd > 1000)) {
+      throw new HttpError(400, 'The daily budget is dollars from 0 (no cap) to 1000.');
+    }
     if (input.superMaxWakesPerHour !== undefined && (!Number.isSafeInteger(input.superMaxWakesPerHour) || input.superMaxWakesPerHour < 0 || input.superMaxWakesPerHour > 60)) {
       throw new HttpError(400, 'Wake-ups an hour must be a whole number from 0 to 60.');
     }
@@ -1987,6 +1994,7 @@ export class AgentManager {
     if (input.browserEval !== undefined) settings.browserEval = input.browserEval;
     for (const key of ['superWake', 'superNotify'] as const) if (input[key] !== undefined) settings[key] = input[key]!;
     if (input.superMaxWakesPerHour !== undefined) settings.superMaxWakesPerHour = input.superMaxWakesPerHour;
+    if (input.superDailyBudgetUsd !== undefined) settings.superDailyBudgetUsd = input.superDailyBudgetUsd;
     for (const key of ['superQuietFrom', 'superQuietTo'] as const) if (input[key] !== undefined) settings[key] = input[key]!.trim();
     this.store.save();
     this.hub.broadcast({ type: 'settings', settings });

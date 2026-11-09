@@ -194,6 +194,16 @@ test('the OrcaCode runner runs a turn: session, tools, approval over stdin, usag
   assert.equal(r.results[1].ok, true);
 });
 
+test('the SuperAgent on OrcaCode never runs a shell command: it is refused without asking the user', async () => {
+  const dir = tempDir('orca-super');
+  const r = runnerFor(dir, { ...base, role: 'super', autonomy: 'readonly' }, () => true);
+  await r.turn('First');
+  assert.equal(r.approvals.length, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'decision.txt'), 'utf8')), { type: 'approval', id: 'approval-1', decision: 'deny' });
+  assert.ok(r.run().args.includes('--read-only'));
+  assert.equal(JSON.parse(r.run().mcp!)[COMMS_SERVER].env.AGENTSCODE_EXECUTIVE, '1');
+});
+
 test('a denied approval is written as deny, and a turn that runs out of steps says so', async () => {
   const dir = tempDir('orca-deny');
   const r = runnerFor(dir, { ...base }, () => false);

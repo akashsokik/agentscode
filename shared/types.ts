@@ -642,6 +642,8 @@ export interface Settings {
   superQuietTo: string;
   /** Desktop notifications when the SuperAgent asks something. */
   superNotify: boolean;
+  /** Dollars the SuperAgent may spend a day before wake-ups wait for tomorrow; 0 means no cap. Your own messages always go. */
+  superDailyBudgetUsd: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -655,6 +657,7 @@ export const DEFAULT_SETTINGS: Settings = {
   superQuietFrom: '22:00',
   superQuietTo: '08:00',
   superNotify: true,
+  superDailyBudgetUsd: 10,
 };
 
 export interface ModelOption {

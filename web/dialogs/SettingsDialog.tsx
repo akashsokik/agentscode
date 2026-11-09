@@ -21,6 +21,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const theme = useTheme();
   const [limit, setLimit] = useState(String(settings?.messageLimit ?? 12));
   const [wakes, setWakes] = useState(String(settings?.superMaxWakesPerHour ?? 6));
+  const [budget, setBudget] = useState(String(settings?.superDailyBudgetUsd ?? 10));
   const [refreshing, setRefreshing] = useState(false);
   if (!settings) return null;
   return (
@@ -74,6 +75,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               value={wakes}
               onChange={e => setWakes(e.target.value)}
               onBlur={() => { const value = Number(wakes); if (Number.isInteger(value) && value >= 0 && value !== settings.superMaxWakesPerHour) void save({ superMaxWakesPerHour: value }); }}
+              className={`${INPUT} w-20`}
+            />
+          </Row>
+          <Row label="Daily budget" description="Dollars a day it may spend on wake-ups; then they wait for tomorrow. 0 means no cap. Your own messages always go.">
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={budget}
+              onChange={e => setBudget(e.target.value)}
+              onBlur={() => { const value = Number(budget); if (Number.isFinite(value) && value >= 0 && value !== settings.superDailyBudgetUsd) void save({ superDailyBudgetUsd: value }); }}
               className={`${INPUT} w-20`}
             />
           </Row>

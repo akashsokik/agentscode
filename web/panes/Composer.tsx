@@ -384,7 +384,8 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
           <div className="composer-toolbar flex min-w-0 flex-1 items-center">
             <div className="flex min-w-0 items-center gap-1">
               <ModelPicker agent={agent} models={models} onChange={(change) => void patch(agent, change)} onClose={() => field.current?.focus()} />
-              <AccessPicker value={agent.autonomy} busy={busy} onChange={(autonomy) => void patch(agent, { autonomy })} onClose={() => field.current?.focus()} />
+              {/* The SuperAgent never edits, so its access is fixed at read-only. */}
+              {agent.role === 'super' ? null : <AccessPicker value={agent.autonomy} busy={busy} onChange={(autonomy) => void patch(agent, { autonomy })} onClose={() => field.current?.focus()} />}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">

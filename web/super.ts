@@ -40,6 +40,8 @@ export function useSuperBridge(onQuick: () => void): void {
   const waiting = openAsks(asks);
 
   useEffect(() => {
+    // Not before the first snapshot: what is there then is not news.
+    if (asks === undefined) return;
     const ids = new Set(waiting.map(a => a.id));
     const before = known.current;
     known.current = ids;

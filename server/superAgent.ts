@@ -38,6 +38,10 @@ interface Stored {
   log: SuperAction[];
   /** When it was woken, for the hourly budget. */
   wakes: number[];
+  /** The SuperAgent's running cost when the local day began, for the daily budget. */
+  costDay?: { day: string; start: number };
+  /** The local day of the last morning brief. */
+  briefDay?: string;
 }
 
 export class SuperStore {
@@ -51,6 +55,8 @@ export class SuperStore {
         asks: Array.isArray(raw.asks) ? raw.asks : [],
         log: Array.isArray(raw.log) ? raw.log : [],
         wakes: Array.isArray(raw.wakes) ? raw.wakes.filter(n => typeof n === 'number') : [],
+        ...(raw.costDay && typeof raw.costDay.start === 'number' ? { costDay: raw.costDay } : {}),
+        ...(typeof raw.briefDay === 'string' ? { briefDay: raw.briefDay } : {}),
       };
     } catch {
       return { asks: [], log: [], wakes: [] };
@@ -60,7 +66,11 @@ export class SuperStore {
   private write(stored: Stored): void {
     const open = stored.asks.filter(isOpen);
     const closed = stored.asks.filter(a => !isOpen(a)).slice(0, Math.max(0, ASKS_KEPT - open.length));
-    const next: Stored = { asks: [...open, ...closed].sort((a, b) => b.createdAt - a.createdAt), log: stored.log.slice(0, LOG_KEPT), wakes: stored.wakes.slice(-100) };
+    const next: Stored = {
+      asks: [...open, ...closed].sort((a, b) => b.createdAt - a.createdAt), log: stored.log.slice(0, LOG_KEPT), wakes: stored.wakes.slice(-100),
+      ...(stored.costDay ? { costDay: stored.costDay } : {}),
+      ...(stored.briefDay ? { briefDay: stored.briefDay } : {}),
+    };
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     fs.writeFileSync(`${this.file}.tmp`, `${JSON.stringify(next)}\n`);
     fs.renameSync(`${this.file}.tmp`, this.file);
@@ -131,6 +141,24 @@ export class SuperStore {
     return this.read().wakes.filter(t => t >= since).length;
   }
 
+  /** True once per local day: the first call that day takes the morning brief. */
+  takeBrief(now: Date): boolean {
+    const day = localDay(now);
+    const stored = this.read();
+    if (stored.briefDay === day) return false;
+    this.write({ ...stored, briefDay: day });
+    return true;
+  }
+
+  /** What it spent since the local day began, from its running total; a new day starts at zero. */
+  spentToday(total: number, now: Date): number {
+    const day = localDay(now);
+    const stored = this.read();
+    if (stored.costDay?.day === day && stored.costDay.start <= total) return total - stored.costDay.start;
+    this.write({ ...stored, costDay: { day, start: total } });
+    return 0;
+  }
+
   noteWake(now = Date.now()): void {
     const stored = this.read();
     this.write({ ...stored, wakes: [...stored.wakes, now] });
@@ -138,6 +166,7 @@ export class SuperStore {
 }
 
 const isOpen = (ask: SuperAsk) => ask.answeredAt === undefined;
+const localDay = (now: Date) => `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
 
 /** One thing that happened, for the next update. `text` is AgentsCode's words; `untrusted` is an agent's. */
 export interface SuperEvent {
@@ -176,6 +205,8 @@ export interface WatcherHost {
   /** Whether it can take a turn now: idle, not working or waiting on the user. */
   idle(): boolean;
   settings(): Settings;
+  /** The SuperAgent's running cost in dollars, for the daily budget. */
+  cost(): number;
   store: SuperStore;
   /** Start the update turn: the prompt it reads, and the events behind it (for the transcript's line). */
   deliver(prompt: string, events: SuperEvent[]): void;
@@ -207,6 +238,18 @@ export class SuperWatcher {
   /** Updates waiting to go. */
   waiting(): number { return this.pending.length; }
 
+  /**
+   * Once a day, the first time wake-ups may go (after quiet hours end), ask for a morning brief:
+   * what happened since yesterday and what it proposes next. True when it was added.
+   */
+  morning(): boolean {
+    const settings = this.host.settings();
+    const now = new Date(this.now());
+    if (!this.host.superId() || !settings.superWake || inQuietHours(settings, now) || !this.host.store.takeBrief(now)) return false;
+    this.note({ agentId: 'brief', key: `brief:${localDay(now)}`, text: 'Morning brief: tell the user in a few lines what happened since yesterday across the team, what is stuck, and what you propose next. Use ask_user for anything that needs their decision' });
+    return true;
+  }
+
   private schedule(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => { this.timer = null; this.flush(); }, WAKE_DEBOUNCE_MS);
@@ -220,6 +263,7 @@ export class SuperWatcher {
     if (!settings.superWake) return 'wake-ups are off';
     if (inQuietHours(settings, new Date(this.now()))) return 'quiet hours';
     if (this.host.store.wakesSince(this.now() - 3_600_000) >= Math.max(0, settings.superMaxWakesPerHour)) return 'the hourly budget is used';
+    if (settings.superDailyBudgetUsd > 0 && this.host.store.spentToday(this.host.cost(), new Date(this.now())) >= settings.superDailyBudgetUsd) return 'the daily budget is used';
     if (!this.host.idle()) return 'the SuperAgent is busy';
     return null;
   }

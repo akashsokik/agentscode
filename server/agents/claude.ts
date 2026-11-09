@@ -32,6 +32,8 @@ const MODE: Record<Autonomy, PermissionMode> = {
  * NotebookEdit or Agent/Task (a subagent would have them all), whatever the user's settings allow.
  */
 export const SUPER_CLAUDE_TOOLS = ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch'];
+/** Named as well, so they are gone even if a setting or plugin brings them back. */
+export const SUPER_DISALLOWED_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'BashOutput', 'KillShell', 'Agent', 'Task', 'Skill', 'ExitPlanMode'];
 
 /**
  * The tools and permission mode of a Claude session. Every agent gets its comms tools without a
@@ -40,12 +42,12 @@ export const SUPER_CLAUDE_TOOLS = ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetc
  * (it has nothing to edit, so it has no plan to leave).
  */
 export function claudeToolPolicy(agent: Pick<Agent, 'role' | 'autonomy' | 'useMcp'>, comms: boolean): {
-  tools?: string[]; allowedTools?: string[]; permissionMode: PermissionMode; strictMcpConfig: boolean;
+  tools?: string[]; disallowedTools?: string[]; allowedTools?: string[]; permissionMode: PermissionMode; strictMcpConfig: boolean;
 } {
   const mcp = (names: string[]) => names.map(name => `mcp__${COMMS_SERVER}__${name}`);
   if (agent.role === 'super') {
     const own = [...COMMS_TOOLS.filter(t => !BROWSER_TOOLS.includes(t as never)), ...SUPER_BROWSER_TOOLS, ...SUPER_TOOLS];
-    return { tools: [...SUPER_CLAUDE_TOOLS], allowedTools: comms ? mcp(own) : undefined, permissionMode: 'default', strictMcpConfig: true };
+    return { tools: [...SUPER_CLAUDE_TOOLS], disallowedTools: [...SUPER_DISALLOWED_TOOLS], allowedTools: comms ? mcp(own) : undefined, permissionMode: 'default', strictMcpConfig: true };
   }
   return { allowedTools: comms ? mcp(COMMS_TOOLS) : undefined, permissionMode: MODE[agent.autonomy], strictMcpConfig: !agent.useMcp };
 }
@@ -329,7 +331,7 @@ export class ClaudeRunner implements Runner {
         effort: (agent.effort || undefined) as EffortLevel | undefined,
         settings: agent.serviceTier === 'fast' ? { fastMode: true } : undefined,
         permissionMode: policy.permissionMode,
-        ...(policy.tools ? { tools: policy.tools } : {}),
+        ...(policy.tools ? { tools: policy.tools, disallowedTools: policy.disallowedTools } : {}),
         allowDangerouslySkipPermissions: this.startedWithBypass || undefined,
         canUseTool: this.canUseTool,
         // soul.md, memory.md and the dream records are off limits to edit tools in every mode.

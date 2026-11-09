@@ -289,3 +289,32 @@ test('the edit guard is registered in every permission mode and denies soul.md i
     runner.close();
   }
 });
+
+test('a SuperAgent session gets only read tools, its commands, none of the user\'s MCP servers, and every other tool refused', async () => {
+  const captured: { options?: Options; prompts: unknown[] } = { prompts: [] };
+  const approvals: ApprovalRequest[] = [];
+  const hooks: RunnerHooks = {
+    session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, turnEnd: () => {}, closed: () => {},
+    approval: async request => { approvals.push(request); return { allow: true }; },
+  };
+  const boss: Agent = { ...agent, id: 's1', name: 'SuperAgent', role: 'super', autonomy: 'readonly', projectId: null, useMcp: true };
+  const runner = new ClaudeRunner({ agent: () => boss, project: null, cwd: '/tmp/home', binPath: null, hooks, commsToken: 'tok-s' }, fakeQuery(captured));
+  runner.send('Run the team.');
+  await settle(10);
+  const options = captured.options!;
+  assert.deepEqual(options.tools, ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch']);
+  for (const tool of ['Edit', 'Write', 'Bash', 'Agent', 'Task', 'Skill']) assert.ok((options.disallowedTools as string[]).includes(tool), tool);
+  assert.equal(options.permissionMode, 'default');
+  assert.equal(options.strictMcpConfig, true);
+  assert.ok((options.allowedTools as string[]).includes(`mcp__${COMMS_SERVER}__create_agent`));
+  assert.ok(!(options.allowedTools as string[]).includes(`mcp__${COMMS_SERVER}__browser_eval`));
+  const servers = options.mcpServers as Record<string, { env: Record<string, string> }>;
+  assert.equal(servers[COMMS_SERVER].env.AGENTSCODE_EXECUTIVE, '1');
+  const signal = new AbortController().signal;
+  for (const tool of ['Bash', 'Edit', 'Write', 'mcp__other__write']) {
+    const decision = await options.canUseTool(tool, {}, { signal, suggestions: [] });
+    assert.equal(decision.behavior, 'deny', tool);
+  }
+  assert.equal(approvals.length, 0, 'refused without asking the user');
+  runner.close();
+});

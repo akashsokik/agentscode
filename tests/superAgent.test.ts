@@ -169,7 +169,11 @@ test('ask_user: the user clicks an answer, which reaches the SuperAgent as their
   await assert.rejects(t.call('ask_user', { question: 'Merge feat/user-profile?', options: ['Yes'] }), e => status(e) === 409);
   t.manager.answerSuper(asked.id, { answer: 'Merge it' });
   assert.equal(t.view().asks[0].answer, 'Merge it');
-  assert.ok(t.store.readEntries(t.sup.id).some(e => e.kind === 'user' && e.text === 'Answer to your question "Merge feat/user-profile?": Merge it'));
+  assert.ok(t.store.readEntries(t.sup.id).some(e => e.kind === 'user' && e.text === 'Merge it'), 'only the user\'s own words are theirs');
+  // It was busy, so the answer runs as its next turn.
+  t.runner.complete();
+  await settle();
+  assert.ok(t.runner.sent.some(s => s.text === 'Answer to your question "Merge feat/user-profile?": Merge it'));
   assert.throws(() => t.manager.answerSuper(asked.id, { answer: 'again' }), e => status(e) === 409);
 
   for (let i = 0; i < MAX_OPEN_ASKS; i++) await t.call('ask_user', { question: `Question ${i}?`, options: ['Yes'] });
@@ -206,7 +210,8 @@ test('the watcher batches, waits while busy, in quiet hours or over budget, and 
   let idle = false;
   const delivered: string[] = [];
   const settings = { ...DEFAULT_SETTINGS, superMaxWakesPerHour: 2 };
-  const host: WatcherHost = { superId: () => 'sup', idle: () => idle, settings: () => settings, store: new SuperStore(tempDir('super')), deliver: p => delivered.push(p), now: () => now };
+  let cost = 1;
+  const host: WatcherHost = { superId: () => 'sup', idle: () => idle, settings: () => settings, cost: () => cost, store: new SuperStore(tempDir('super')), deliver: p => delivered.push(p), now: () => now };
   const watcher = new SuperWatcher(host);
   watcher.note({ agentId: 'sup', key: 'self', text: 'SuperAgent finished' });
   assert.equal(watcher.waiting(), 0);
@@ -229,9 +234,23 @@ test('the watcher batches, waits while busy, in quiet hours or over budget, and 
   assert.equal(watcher.blocked(), 'the hourly budget is used');
   now += 3_600_001;
   assert.equal(watcher.flush(), true, 'a new hour, a new budget');
+  // Over the day's budget, updates wait for tomorrow.
+  watcher.note({ agentId: 'a2', key: 'cost', text: 'Something costly' });
+  cost = 1 + settings.superDailyBudgetUsd;
+  assert.equal(watcher.blocked(), 'the daily budget is used');
+  now += 86_400_000;
+  assert.equal(watcher.blocked(), null, 'a new day starts at zero');
   settings.superWake = false;
   watcher.note({ agentId: 'a2', key: 'x', text: 'Something' });
   assert.equal(watcher.blocked(), 'wake-ups are off');
+  // The morning brief: once a day, never in quiet hours.
+  settings.superWake = true;
+  settings.superQuietFrom = '00:00';
+  settings.superQuietTo = '23:59';
+  assert.equal(watcher.morning(), false, 'quiet hours');
+  settings.superQuietTo = '00:00';
+  assert.equal(watcher.morning(), true);
+  assert.equal(watcher.morning(), false, 'once a day');
   watcher.stop();
 
   // Nested tags in agent text cannot close the untrusted block.
@@ -273,6 +292,7 @@ test('settings for wake-ups and quiet hours are checked', () => {
   assert.throws(() => h.manager.updateSettings({ superQuietFrom: '25:00' }), e => status(e) === 400);
   assert.throws(() => h.manager.updateSettings({ superMaxWakesPerHour: 1000 }), e => status(e) === 400);
   assert.throws(() => h.manager.updateSettings({ superWake: 'yes' as unknown as boolean }), e => status(e) === 400);
+  assert.throws(() => h.manager.updateSettings({ superDailyBudgetUsd: -1 }), e => status(e) === 400);
   const saved = h.manager.updateSettings({ superMaxWakesPerHour: 3, superQuietFrom: '23:30', superNotify: false });
   assert.equal(saved.superMaxWakesPerHour, 3);
   assert.equal(saved.superQuietFrom, '23:30');

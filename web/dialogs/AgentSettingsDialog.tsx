@@ -72,9 +72,13 @@ export function AgentSettingsDialog({ agent, onClose }: { agent: Agent; onClose:
           <Row label="Name" description="Teammates address it by this name.">
             <input value={name} maxLength={24} onChange={e => setName(e.target.value)} onKeyDown={onSubmitKey} className={`${INPUT} w-44`} />
           </Row>
-          <Row label="Role" description={role === 'lead' ? 'Leads can delegate tasks and track reports.' : undefined}>
-            <Select label="Role" value={role} options={ROLES.map(r => ({ value: r.id, label: r.name }))} onChange={value => setRole(value as AgentRole)} />
-          </Row>
+          {agent.role === 'super' ? (
+            <Row label="Role" description="SuperAgent: it runs the team across every project and never edits. Remove it to stop using it." />
+          ) : (
+            <Row label="Role" description={role === 'lead' ? 'Leads can delegate tasks and track reports.' : undefined}>
+              <Select label="Role" value={role} options={ROLES.map(r => ({ value: r.id, label: r.name }))} onChange={value => setRole(value as AgentRole)} />
+            </Row>
+          )}
         </Group>
 
         <Group title="Soul" description={`Who ${agent.name} is and how it works. Only you edit it; changes reach it on its next turn.`}>

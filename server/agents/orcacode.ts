@@ -409,6 +409,12 @@ export class OrcacodeRunner implements Runner {
     const write = (decision: 'allow' | 'deny' | 'always') => {
       if (this.child === child && child.stdin?.writable) child.stdin.write(`${JSON.stringify({ type: 'approval', id, decision })}\n`);
     };
+    // OrcaCode has no OS sandbox, so read-only still asks before a shell command, which could write.
+    // The SuperAgent never edits: anything gated but its own AgentsCode tools is refused unasked.
+    if (this.ctx.agent().role === 'super' && !tool.name.includes(COMMS_SERVER)) {
+      write('deny');
+      return;
+    }
     this.ctx.hooks.activity('Waiting for approval');
     try {
       const decision = await this.ctx.hooks.approval(
