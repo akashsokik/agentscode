@@ -3,12 +3,12 @@
  * choices to click, and its decision log on the right of the pane, where anything it did on its own
  * can be undone.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SuperAsk } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { memoryDate } from '../memory.ts';
 import { openAsks } from '../super.ts';
-import { decisionRows, superLogWidth, type DecisionRow } from '../superText.ts';
+import { decisionRows, superLogMax, superLogWidth, type DecisionRow } from '../superText.ts';
 import { attempt, useApp } from '../store.ts';
 import { cx, HeaderButton, PRIMARY, TextButton } from '../ui/common.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
@@ -59,32 +59,53 @@ const time = (ts: number) => `${memoryDate(ts)} ${new Date(ts).toTimeString().sl
  * each with why and Undo, then what you answered it. Kept live by `super` events. `over` floats it
  * above the conversation in a narrow pane; otherwise it sits beside it, resizable from its left edge.
  */
-export function SuperLogSidebar({ over, paneWidth, onClose }: { over: boolean; paneWidth: number; onClose: () => void }) {
+export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; over: boolean; focused: boolean; onClose: () => void }) {
   const log = useApp(s => s.snapshot?.super.log);
   const asks = useApp(s => s.snapshot?.super.asks);
   const rows = decisionRows(log);
   const answered = (asks ?? []).filter(a => a.answeredAt !== undefined);
   const column = useColumnWidth('superLog', 300, 240, 0.4);
-  // The width you chose, cut to the pane it is in: the window-based cap alone lets it fill a split pane.
-  const width = superLogWidth(column.width, column.min, paneWidth, over ? 'over' : 'beside');
   const root = useRef<HTMLElement>(null);
+  // The pane's width, measured here (before the first paint) so resizing re-renders only the sidebar.
+  const paneWidth = useParentWidth(root);
+  const mode = over ? 'over' : 'beside';
+  // The width you chose, cut to the pane it is in: the window-based cap alone lets it fill a split pane.
+  const width = superLogWidth(column.width, column.min, paneWidth, mode);
+  // Dragging and the arrow keys stop at the pane-based limit too, and the handle reports it.
+  const max = paneWidth > 0 ? Math.min(column.max, superLogMax(column.min, paneWidth, mode)) : column.max;
+  const fit = (value: number) => Math.min(max, value);
+  const handle = { ...column, width, max, preview: (value: number | null) => column.preview(value === null ? null : fit(value)), commit: (value: number | undefined) => column.commit(value === undefined ? undefined : fit(value)) };
   const close = useRef(onClose);
   close.current = onClose;
 
-  // Over the conversation it is a popover: Escape or a click outside it closes it. Escape is heard
-  // as it bubbles, after anything inside: a field or control that handles it (an edit box cancelling)
-  // keeps it, and Escape typed in any field of the panel is that field's.
+  // Over the conversation it is a popover: focus moves into it when it opens, and goes back to the
+  // header's toggle when it closes, however it closes (Hide, Escape, a click outside).
   useEffect(() => {
     if (!over) return;
+    root.current?.querySelector<HTMLElement>('[data-super-log-hide]')?.focus({ preventScroll: true });
+    const panel = root.current;
+    return () => {
+      if (panel?.isConnected) return;
+      const toggle = document.querySelector<HTMLElement>('[data-super-log-toggle]');
+      if (toggle && (document.activeElement === document.body || !document.activeElement)) toggle.focus({ preventScroll: true });
+    };
+  }, [over]);
+
+  // Escape or a click outside closes it. Escape is heard as it bubbles (as ChannelThread's), only
+  // while this pane has focus, never when something inside it already handled Escape (an edit box
+  // cancelling), and never while a dialog or popover is open: that one takes Escape.
+  useEffect(() => {
+    if (!over || !focused) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
-      const target = event.target as HTMLElement | null;
+      if (document.querySelector('[role="dialog"][aria-modal="true"], [data-dialog-popover]')) return;
+      const target = event.target instanceof Element ? event.target : null;
       if (target && root.current?.contains(target) && target.closest('input, textarea, select, [contenteditable="true"]')) return;
       event.preventDefault();
       close.current();
     };
     const onPointer = (event: PointerEvent) => {
-      const target = event.target as Element | null;
+      const target = event.target instanceof Element ? event.target : null;
       // The header's toggle does its own closing; closing here too would reopen it on its click.
       if (!target || root.current?.contains(target) || target.closest('[data-super-log-toggle]')) return;
       close.current();
@@ -95,10 +116,11 @@ export function SuperLogSidebar({ over, paneWidth, onClose }: { over: boolean; p
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerdown', onPointer, true);
     };
-  }, [over]);
+  }, [over, focused]);
   const undoable = rows.filter(r => r.undoable).length;
   return (
     <aside
+      id={id}
       aria-label="Decision log"
       data-super-log
       ref={root}
@@ -111,7 +133,7 @@ export function SuperLogSidebar({ over, paneWidth, onClose }: { over: boolean; p
           Decisions
           {rows.length ? <span className="ml-1.5 font-normal tabular-nums text-content/40">{rows.length}</span> : null}
         </h2>
-        <HeaderButton icon={PanelRight} label="Hide the decision log" active onClick={onClose} />
+        <HeaderButton data-super-log-hide icon={PanelRight} label="Hide the decision log" active onClick={onClose} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {rows.length ? (
@@ -144,7 +166,7 @@ export function SuperLogSidebar({ over, paneWidth, onClose }: { over: boolean; p
         ) : null}
       </div>
       {/* From the width on screen, so a drag never jumps from a wider saved width. */}
-      <ResizeHandle column={{ ...column, width }} edge="left" label="Resize the decision log" />
+      <ResizeHandle column={handle} edge="left" label="Resize the decision log" />
     </aside>
   );
 }
@@ -164,7 +186,7 @@ function DecisionItem({ row }: { row: DecisionRow }) {
           {time(row.at)}{undone ? ' · undone' : ''}
         </time>
         {row.undoable ? (
-          <TextButton disabled={busy} onClick={() => void undo()} className="shrink-0 opacity-70 transition-opacity group-hover/decision:opacity-100 focus-visible:opacity-100">
+          <TextButton aria-label={`Undo: ${row.summary}`} disabled={busy} onClick={() => void undo()} className="shrink-0 opacity-70 transition-opacity group-hover/decision:opacity-100 focus-visible:opacity-100">
             {busy ? 'Undoing…' : 'Undo'}
           </TextButton>
         ) : null}
@@ -173,4 +195,18 @@ function DecisionItem({ row }: { row: DecisionRow }) {
       {row.why ? <p className="mt-0.5 text-[12px] leading-relaxed text-content/45">{row.why}</p> : null}
     </li>
   );
+}
+
+/** The width of an element's parent, measured before the first paint and kept current; 0 until then. */
+function useParentWidth(ref: React.RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const parent = ref.current?.parentElement;
+    if (!parent) return;
+    setWidth(Math.round(parent.getBoundingClientRect().width));
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, [ref]);
+  return width;
 }

@@ -45,9 +45,20 @@ export function peekAfter(paneWidth: number, peek: boolean): boolean {
   return paneWidth >= SUPER_LOG_MIN_PANE ? false : peek;
 }
 
-/** What the header toggle does: in a wide pane it flips the remembered choice; in a narrow one only the peek. */
-export function toggleSuperLog(open: boolean, paneWidth: number, peek: boolean): { open: boolean; peek: boolean } {
-  return paneWidth >= SUPER_LOG_MIN_PANE ? { open: !open, peek: false } : { open, peek: !peek };
+/**
+ * What the header toggle (or Hide, Escape and a click outside, which close it) leaves: shown, it
+ * closes; hidden, it opens. In a wide pane that is your remembered choice; in a narrow one only the
+ * peek, so a narrow pane never changes the wide-pane choice.
+ */
+export function nextLogState(mode: 'beside' | 'over' | 'hidden', paneWidth: number, open: boolean, peek: boolean): { open: boolean; peek: boolean } {
+  if (mode === 'over') return { open, peek: false };
+  if (mode === 'beside') return { open: false, peek: false };
+  return paneWidth >= SUPER_LOG_MIN_PANE ? { open: true, peek: false } : { open, peek: true };
+}
+
+/** The most the log may be dragged to in a pane: beside, leaving the conversation its room; over, the pane. */
+export function superLogMax(min: number, paneWidth: number, mode: 'beside' | 'over'): number {
+  return mode === 'beside' ? Math.max(min, paneWidth - SUPER_LOG_CONVERSATION_MIN) : Math.max(min, paneWidth);
 }
 
 export interface DecisionRow {

@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api.ts';
 import { ALL_PROJECTS } from '../projects.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
 import { setSuperLog, useLayout } from '../layout.ts';
-import { peekAfter, superLogMode, toggleSuperLog } from '../superText.ts';
+import { nextLogState, peekAfter, SUPER_LOG_MIN_PANE, superLogMode } from '../superText.ts';
 import { AgentSettingsDialog } from '../dialogs/AgentSettingsDialog.tsx';
 import { SoulProposalNotice } from '../dialogs/Dreaming.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
@@ -29,15 +29,18 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
   // In a narrow pane the log opens over the conversation, and only when you ask for it.
   const [peek, setPeek] = useState(false);
   const body = useRef<HTMLDivElement>(null);
-  const width = useWidth(body, agent?.role === 'super');
-  const logMode = agent?.role === 'super' ? superLogMode(logOpen, width, peek) : 'hidden';
+  // Only whether the pane is wide lives here, so resizing re-renders the pane only when that changes;
+  // the sidebar measures the exact width itself.
+  const wide = useWide(body, agent?.role === 'super');
+  const paneWidth = wide ? SUPER_LOG_MIN_PANE : 0;
+  const logMode = agent?.role === 'super' ? superLogMode(logOpen, paneWidth, peek) : 'hidden';
   // Once the pane is wide, a peek is spent: the log does not pop over the conversation when it narrows again.
   useEffect(() => {
-    if (peekAfter(width, peek) !== peek) setPeek(false);
-  }, [width, peek]);
+    if (peekAfter(paneWidth, peek) !== peek) setPeek(false);
+  }, [paneWidth, peek]);
   // A narrow pane only peeks: opening or closing it there never changes your choice for wide panes.
   const toggleLog = () => {
-    const next = toggleSuperLog(logOpen, width, peek);
+    const next = nextLogState(logMode, paneWidth, logOpen, peek);
     if (next.open !== logOpen) setSuperLog(next.open);
     setPeek(next.peek);
   };
@@ -74,9 +77,10 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
           {agent.role === 'super' ? (
             <HeaderButton
               icon={PanelRight}
-              label={logMode === 'hidden' ? 'Show the decision log' : 'Hide the decision log'}
+              label="Decision log"
               active={logMode !== 'hidden'}
-              aria-pressed={logMode !== 'hidden'}
+              aria-expanded={logMode !== 'hidden'}
+              aria-controls={`super-log-${agentId}`}
               onClick={toggleLog}
               data-super-log-toggle
             />
@@ -87,7 +91,7 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
     >
       <WithLog
         bodyRef={body}
-        log={agent.role === 'super' && logMode !== 'hidden' ? <SuperLogSidebar over={logMode === 'over'} paneWidth={width} onClose={toggleLog} /> : null}
+        log={agent.role === 'super' && logMode !== 'hidden' ? <SuperLogSidebar id={`super-log-${agentId}`} over={logMode === 'over'} focused={chrome.focused} onClose={toggleLog} /> : null}
         super={agent.role === 'super'}
       >
         {/* Buttons in the agent's ```openui-lang blocks answer it as if you had typed their message. */}
@@ -119,16 +123,20 @@ function WithLog({ super: isSuper, bodyRef, log, children }: { super: boolean; b
   );
 }
 
-/** An element's width, following resizes; 0 until it is measured, or while `enabled` is off. */
-function useWidth(ref: React.RefObject<HTMLElement | null>, enabled: boolean): number {
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
+/**
+ * Whether an element is at least SUPER_LOG_MIN_PANE wide, measured before the first paint (so the
+ * log never shows hidden for a frame and then appears) and kept as a boolean, so a resize re-renders
+ * only when it crosses the line.
+ */
+function useWide(ref: React.RefObject<HTMLElement | null>, enabled: boolean): boolean {
+  const [wide, setWide] = useState(false);
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!enabled || !el) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
+    setWide(el.getBoundingClientRect().width >= SUPER_LOG_MIN_PANE);
+    const observer = new ResizeObserver(([entry]) => setWide(entry.contentRect.width >= SUPER_LOG_MIN_PANE));
     observer.observe(el);
-    setWidth(Math.round(el.getBoundingClientRect().width));
     return () => observer.disconnect();
   }, [ref, enabled]);
-  return width;
+  return wide;
 }
