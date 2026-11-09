@@ -75,31 +75,28 @@ test('the gallery (every shape, colour, eye style and mood) matches tests/fixtur
   // Regenerate on purpose with UPDATE_AVATAR_GALLERY=1; otherwise a change to the set must be seen.
   if (process.env.UPDATE_AVATAR_GALLERY === '1' || !fs.existsSync(file)) fs.writeFileSync(file, svg);
   assert.equal(svg, fs.readFileSync(file, 'utf8'));
-  assert.equal(svg.match(/<path d="M[^"]*" fill="url\(/g)?.length, 2 * (8 * (6 + 3) + 10 + 5 * 2), 'both panels: every shape at 6 sizes and 3 eye styles, 10 colours, 5 moods at 40 and 16 px');
+  assert.equal(svg.match(/<path d="M[^"]*" fill="#/g)?.length, 2 * (8 * (6 + 3) + 10 + 5 * 2), 'both panels: every shape at 6 sizes and 3 eye styles, 10 colours, 5 moods at 40 and 16 px');
 });
 
-test('a face is soft 3D with no mouth, and stays bold small', async () => {
-  const { avatarParts, isSmallAvatar, AVATAR_EYE_Y, AVATAR_PATH, shade } = await import('../shared/avatar.ts');
+test('a face is flat: one solid body and two pill eyes, no shading or mouth, bigger pills when small', async () => {
+  const { avatarParts, isSmallAvatar, AVATAR_PATH, AVATAR_FILL, AVATAR_PILL, avatarMarkup } = await import('../shared/avatar.ts');
   const kinds = (parts: { kind: string }[]) => parts.map(p => p.kind);
-  const round = { shape: 'circle', color: 'teal', eyes: 'round' } as const;
-  assert.deepEqual(kinds(avatarParts(round, 'calm', false)), ['shadow', 'body', 'shine', 'eye', 'eye', 'glint', 'glint']);
-  assert.deepEqual(kinds(avatarParts(round, 'calm', true)), ['body', 'shine', 'eye', 'eye', 'glint', 'glint'], 'small keeps the shading and gloss, drops the contact shadow');
+  const look = { shape: 'circle', color: 'teal', eyes: 'round' } as const;
   for (const eyes of ['round', 'tall', 'wide'] as const) {
-    for (const mood of ['calm', 'busy', 'waiting', 'pleased', 'down'] as const) {
-      assert.ok(!kinds(avatarParts({ ...round, eyes }, mood, false)).some(k => k === 'smile' || k === 'blush'), 'no mouths, no blush');
-    }
+    assert.deepEqual(kinds(avatarParts({ ...look, eyes }, 'calm', false)), ['body', 'eye', 'eye']);
   }
-  const big = avatarParts(round, 'calm', false).find(p => p.kind === 'eye') as { rx: number };
-  const small = avatarParts(round, 'calm', true).find(p => p.kind === 'eye') as { rx: number };
-  assert.ok(small.rx >= big.rx * 1.3, 'small faces get much bolder eyes');
-  assert.deepEqual(kinds(avatarParts(round, 'pleased', false)), ['shadow', 'body', 'shine', 'happy', 'happy'], 'pleased closes into happy arcs');
-  assert.ok(!kinds(avatarParts(round, 'down', false)).includes('glint'), 'tired eyes lose their sparkle');
-  const body = avatarParts(round, 'calm', false).find(p => p.kind === 'body') as { light: string; mid: string; rim: string };
-  assert.deepEqual([body.light, body.mid, body.rim], [shade('#22c8b4', 0.32), '#22c8b4', shade('#22c8b4', -0.22)], 'lighter top left, darker rim');
-  assert.equal(shade('#000000', 0.5), '#808080');
-  assert.equal(shade('#ffffff', -0.5), '#808080');
-  for (const y of Object.values(AVATAR_EYE_Y)) assert.ok(y < 19, 'eyes sit in the upper half of the face');
-  assert.match(AVATAR_PATH.squircle, /H/, 'the squircle has flat sides');
+  const body = avatarParts(look, 'calm', false)[0] as { fill: string };
+  assert.equal(body.fill, AVATAR_FILL.teal, 'one solid colour');
+  const eye = avatarParts(look, 'calm', false)[1] as { w: number; h: number };
+  assert.ok(eye.h > eye.w * 2, 'tall narrow pills');
+  assert.equal(eye.w, AVATAR_PILL.w);
+  const small = avatarParts(look, 'calm', true)[1] as { w: number; h: number };
+  assert.ok(small.h >= eye.h * 1.3, 'bigger pills at 14 to 16px');
+  assert.deepEqual(kinds(avatarParts(look, 'pleased', false)), ['body', 'happy', 'happy'], 'pleased pills become small arcs');
+  const svg = avatarMarkup(look, 'down', 40, { still: true });
+  assert.doesNotMatch(svg, /Gradient|opacity|stroke=".*" stroke-width="[^"]*"\/><\/g>.*smile/, 'no gradients or highlights');
+  assert.match(svg, /height="1\.57"/, 'tired pills flatten to dashes in a still frame (5.6 x 0.28)');
+  for (const d of Object.values(AVATAR_PATH)) assert.doesNotMatch(d, /[AaHhVv]/, 'organic curves, no arcs or straight edges');
   assert.equal(isSmallAvatar(16), true);
   assert.equal(isSmallAvatar(18), false);
 });

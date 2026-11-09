@@ -6,8 +6,7 @@
  * Decorative: the agent's name always sits beside it.
  */
 import type { Agent } from '../../shared/types.ts';
-import { useId } from 'react';
-import { AVATAR_FILL, AVATAR_INK, AVATAR_INK_LIGHT, AVATAR_SHADOW_PX, agentLook, avatarDelay, avatarMood, avatarParts, isSmallAvatar, type AvatarLook, type AvatarMood } from '../../shared/avatar.ts';
+import { AVATAR_FILL, AVATAR_INK, agentLook, avatarDelay, avatarMood, avatarParts, isSmallAvatar, type AvatarLook, type AvatarMood } from '../../shared/avatar.ts';
 
 export { AVATAR_FILL };
 
@@ -31,12 +30,7 @@ export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-
   className?: string;
   animate?: boolean;
 }) {
-  const px = classSize(className);
-  const parts = avatarParts(look, mood, isSmallAvatar(px), px >= AVATAR_SHADOW_PX);
-  // Gradient ids unique to this avatar, so a hundred inline SVGs never share or clash.
-  const base = `av${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
-  const ids = { body: `${base}b`, eye: `${base}e`, shine: `${base}s`, shadow: `${base}c` };
-  const body = parts.find(p => p.kind === 'body');
+  const parts = avatarParts(look, mood, isSmallAvatar(classSize(className)));
   return (
     <svg
       viewBox="0 0 32 32"
@@ -46,38 +40,11 @@ export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-
       className={`avatar shrink-0 select-none ${animate ? 'avatar-live' : ''} ${className}`}
       style={{ ['--avatar-delay' as string]: avatarDelay(seed) }}
     >
-      <defs>
-        {body?.kind === 'body' ? (
-          <radialGradient id={ids.body} cx="0.36" cy="0.3" r="0.78">
-            <stop offset="0" stopColor={body.light} />
-            <stop offset="0.55" stopColor={body.mid} />
-            <stop offset="1" stopColor={body.rim} />
-          </radialGradient>
-        ) : null}
-        <linearGradient id={ids.eye} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0.45" stopColor={AVATAR_INK} />
-          <stop offset="1" stopColor={AVATAR_INK_LIGHT} />
-        </linearGradient>
-        <radialGradient id={ids.shine}>
-          <stop offset="0" stopColor="#fff" stopOpacity={0.75} />
-          <stop offset="1" stopColor="#fff" stopOpacity={0} />
-        </radialGradient>
-        <radialGradient id={ids.shadow}>
-          <stop offset="0" stopColor="#000" stopOpacity={0.32} />
-          <stop offset="1" stopColor="#000" stopOpacity={0} />
-        </radialGradient>
-      </defs>
-      {parts.map((part, i) => {
-        if (part.kind === 'shadow') return <ellipse key={i} cx={part.cx} cy={part.cy} rx={part.rx} ry={part.ry} fill={`url(#${ids.shadow})`} />;
-        if (part.kind === 'body') return <path key={i} d={part.d} fill={`url(#${ids.body})`} />;
-        if (part.kind === 'shine') return <ellipse key={i} cx={part.cx} cy={part.cy} rx={part.rx} ry={part.ry} transform={`rotate(${part.rotate} ${part.cx} ${part.cy})`} fill={`url(#${ids.shine})`} />;
-        return null;
-      })}
-      {/* The face moves as one: gaze, glance and look up; each eye blinks or half-closes on its own. */}
+      {parts.map((part, i) => (part.kind === 'body' ? <path key={i} d={part.d} fill={part.fill} /> : null))}
+      {/* The pills move as one (glance, look up); each blinks or flattens to a dash on its own. */}
       <g className="avatar-eyes">
         {parts.map((part, i) => {
-          if (part.kind === 'eye') return <ellipse key={i} className="avatar-eye" cx={part.cx} cy={part.cy} rx={part.rx} ry={part.ry} fill={`url(#${ids.eye})`} />;
-          if (part.kind === 'glint') return <circle key={i} className="avatar-glint" cx={part.cx} cy={part.cy} r={part.r} fill="#fff" />;
+          if (part.kind === 'eye') return <rect key={i} className="avatar-eye" x={part.x} y={part.y} width={part.w} height={part.h} rx={part.w / 2} fill={AVATAR_INK} />;
           if (part.kind === 'happy') return <path key={i} d={part.d} fill="none" stroke={AVATAR_INK} strokeWidth={part.width} strokeLinecap="round" />;
           return null;
         })}

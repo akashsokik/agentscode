@@ -1970,62 +1970,49 @@ html.layout-inset.theme-light .dialog-scrim {
   }
 }
 
-/* ---- agent avatars (web/ui/Avatar.tsx): the face carries the mood, quietly ---- */
-.avatar .avatar-eye,
-.avatar .avatar-glint {
+/* ---- agent avatars (web/ui/Avatar.tsx): flat, the pill eyes carry the mood, quietly ---- */
+.avatar .avatar-eye {
   transform-box: fill-box;
   transform-origin: center;
   transition: transform 300ms ease;
 }
 .avatar .avatar-eyes {
   transform-box: view-box;
-  /* Content: the gaze rests a little up, never down. */
-  transform: translateY(-0.6px);
   transition: transform 300ms ease;
 }
-/* An occasional blink, out of step between avatars; the catchlights blink with the eyes. */
-.avatar-live .avatar-eye,
-.avatar-live .avatar-glint {
+/* An occasional blink, out of step between avatars. */
+.avatar-live .avatar-eye {
   animation: avatar-blink 7s infinite;
   animation-delay: var(--avatar-delay, 0s);
 }
-/* Working: lively, the eyes glance side to side, slowly. */
-.avatar[data-avatar-mood='busy'] .avatar-eyes {
-  transform: translateY(-0.3px);
-}
+/* Working: the pills glance side to side, slowly. */
 .avatar-live[data-avatar-mood='busy'] .avatar-eyes {
   animation: avatar-glance 4.8s ease-in-out infinite;
   animation-delay: var(--avatar-delay, 0s);
 }
-/* Waiting on you: attentive, it looks up with eyes a touch wider. */
+/* Waiting on you: the pills move up, attentive. */
 .avatar[data-avatar-mood='waiting'] .avatar-eyes {
-  transform: translateY(-1.6px);
+  transform: translateY(-1.8px);
 }
-.avatar[data-avatar-mood='waiting'] .avatar-eye,
-.avatar[data-avatar-mood='waiting'] .avatar-glint {
-  animation: none;
-  transform: scale(1.12);
-}
-/* The last turn failed: tired, eyes half-closed, no blinking. Not tragic: no frown. */
+/* The last turn failed: tired, the pills flatten to short dashes; no blinking. */
 .avatar[data-avatar-mood='down'] .avatar-eyes {
-  transform: translateY(0.4px);
+  transform: translateY(0.6px);
 }
 .avatar[data-avatar-mood='down'] .avatar-eye {
   animation: none;
-  transform: scaleY(0.45);
+  transform: scaleY(0.28);
 }
 @keyframes avatar-blink {
   0%, 95%, 100% { transform: scaleY(1); }
   97% { transform: scaleY(0.12); }
 }
 @keyframes avatar-glance {
-  0%, 18%, 100% { transform: translate(0, -0.3px); }
-  30%, 46% { transform: translate(-1.4px, -0.3px); }
-  62%, 80% { transform: translate(1.4px, -0.3px); }
+  0%, 18%, 100% { transform: translateX(0); }
+  30%, 46% { transform: translateX(-1.4px); }
+  62%, 80% { transform: translateX(1.4px); }
 }
 @media (prefers-reduced-motion: reduce) {
   .avatar-live .avatar-eye,
-  .avatar-live .avatar-glint,
   .avatar-live .avatar-eyes {
     animation: none;
   }
