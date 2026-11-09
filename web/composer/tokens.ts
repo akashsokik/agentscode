@@ -135,12 +135,38 @@ export function isLeading(text: string, token: Token): boolean {
  * The `@mention` the caret is in, if the user is mentioning an agent, project or file. An @ inside
  * code, an email or a path is not one (mentionStart).
  */
-export function mentionTokenAt(text: string, cursor: number): Token | null {
+export function mentionTokenAt(text: string, cursor: number, names: readonly string[] = []): Token | null {
+  return spacedMentionAt(text, cursor, names) ?? wordMentionAt(text, cursor);
+}
+
+function wordMentionAt(text: string, cursor: number): Token | null {
   const { start, end, caret } = wordAround(text, cursor);
   if (!mentionStart(text, start)) return null;
   const typed = text.slice(start + 1, caret);
   if (typed.includes('@') || typed.length > 120) return null;
   return { start, end, query: typed };
+}
+
+/**
+ * A mention of a name with spaces ("@Ada Lo" on the way to "Ada Lovelace"): the @ is words back, on
+ * the same line, and what follows it is the start of such a name. Once a whole name is typed and a
+ * space follows ("@Ada " where Ada is a name of its own), it is done, so the picker does not come back.
+ */
+function spacedMentionAt(text: string, cursor: number, names: readonly string[]): Token | null {
+  const spaced = names.filter(n => /\s/.test(n)).map(n => n.toLowerCase());
+  if (!spaced.length) return null;
+  const caret = Math.min(text.length, Math.max(0, cursor));
+  const lineStart = text.lastIndexOf('\n', caret - 1) + 1;
+  for (let at = caret - 1; at >= Math.max(lineStart, caret - 121); at--) {
+    if (text[at] !== '@') continue;
+    const typed = text.slice(at + 1, caret);
+    if (!mentionStart(text, at) || !/\s/.test(typed) || typed.includes('@')) return null;
+    const lower = typed.toLowerCase();
+    if (/\s$/.test(typed) && names.some(n => n.toLowerCase() === lower.trimEnd())) return null;
+    if (!spaced.some(n => n.startsWith(lower))) return null;
+    return { start: at, end: wordAround(text, caret).end, query: typed };
+  }
+  return null;
 }
 
 /** `text` with the token replaced by `sigil` + `value` and a space after, and where the caret goes. */

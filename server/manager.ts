@@ -1,5 +1,5 @@
 import { agentLook, cleanLook, freshLook } from '../shared/avatar.ts';
-import { findMentions, mentionContext, type MentionAgent, type MentionProject, type MentionRef } from '../shared/mentions.ts';
+import { alignHints, findMentions, mentionContext, parseHints, type MentionAgent, type MentionProject, type MentionRef } from '../shared/mentions.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -507,7 +507,7 @@ export class AgentManager {
     this.emitAgent(agent);
     if (task) {
       try {
-        this.send(agent.id, task);
+        this.send(agent.id, task, undefined, req.mentionHints);
       } catch (err) {
         this.addEntry(agent.id, { id: randomUUID(), kind: 'error', text: `Could not start the first task: ${(err as Error).message}` });
       }
@@ -600,7 +600,8 @@ export class AgentManager {
     this.hub.broadcast({ type: 'agentRemoved', id });
   }
 
-  send(id: string, rawText: unknown, rawImages?: unknown): void {
+  /** `rawHints`: which agent or project the user picked where two share a name (shared/mentions.ts). */
+  send(id: string, rawText: unknown, rawImages?: unknown, rawHints?: unknown): void {
     this.agent(id);
     const text = String(rawText ?? '').trim();
     const images = this.attachments.resolve(id, rawImages);
@@ -610,7 +611,7 @@ export class AgentManager {
     const pictures = images.length === 1 ? 'an image' : `${images.length} images`;
     // The engines need some text with an image: Claude refuses an empty text block, Codex an empty prompt.
     // An @mention of an agent or project is a reference: the agent is told exactly who or what it is.
-    const mentions = findMentions(text, this.mentionLookup());
+    const mentions = findMentions(text, { ...this.mentionLookup(), hints: alignHints(text, parseHints(rawHints)) });
     const context = mentionContext(mentions, { ...this.mentionLookup(), roleName: role => rolePreset(role as Agent['role']).name });
     const base = this.withSkills(id, text) || `(The user sent ${pictures} with no text.)`;
     const prompt = context ? `${base}\n\n${context}` : base;
@@ -808,9 +809,9 @@ export class AgentManager {
     this.channelAttachments.remove(channel.id);
   }
   channelPosts(id: string): ChannelPost[] { return this.channels.posts(id); }
-  postToChannel(id: string, text: unknown, mentions: unknown, threadId?: unknown, images?: unknown): ChannelPost {
+  postToChannel(id: string, text: unknown, mentions: unknown, threadId?: unknown, images?: unknown, hints?: unknown): ChannelPost {
     const channel = this.channels.get(id);
-    return this.channels.postAsUser(channel.id, text, mentions, threadId, this.channelAttachments.resolve(channel.id, images));
+    return this.channels.postAsUser(channel.id, text, mentions, threadId, this.channelAttachments.resolve(channel.id, images), parseHints(hints));
   }
   /** Store an image for the user's next post in this channel; the post names it by the returned id. */
   saveChannelAttachment(id: string, body: unknown, name?: unknown): ImageAttachment {

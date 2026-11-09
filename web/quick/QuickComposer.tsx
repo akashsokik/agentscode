@@ -9,6 +9,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { ENGINES, type Agent, type EngineKind, type Entry, type SuperAsk } from '../../shared/types.ts';
 import { api } from '../api.ts';
+import { useAgentFiles, useProjectsFiles } from '../composer/catalog.ts';
+import { mentionNames, useMentionHints } from '../composer/mentionHints.ts';
+import { MentionPicker } from '../composer/Pickers.tsx';
+import { mentionTokenAt, pickValue, rankMentions, replaceToken, withFolders, type MentionPick } from '../composer/tokens.ts';
 import { IS_MAC } from '../platform.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
 import { heldText, openAsks } from '../superText.ts';
@@ -80,6 +84,44 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
   const entries = useApp(s => (replyId ? s.entries[replyId] : undefined));
   const project = live.kind === 'new' ? snapshot?.projects.find(p => p.id === live.projectId) : undefined;
 
+  // The same @ picker as the agent composer: agents, projects and files (the target's workspace, or
+  // the new agent's project), and the same mention notes when sent (shared/mentions.ts on the server).
+  const [caret, setCaret] = useState(() => readDraft().length);
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  const [highlight, setHighlight] = useState(0);
+  const hints = useMentionHints();
+  const caretAfter = useRef<number | null>(null);
+  const token = picker === null && snapshot ? mentionTokenAt(draft, caret, mentionNames(agents, snapshot.projects)) : null;
+  const mentionOpen = Boolean(token) && token?.start !== dismissedAt;
+  const agentFiles = useAgentFiles(replyId ?? '', mentionOpen && Boolean(replyId));
+  const newProjects = useMemo(() => (live.kind === 'new' && project ? [project] : []), [live.kind, project]);
+  const projectFiles = useProjectsFiles(newProjects, mentionOpen && newProjects.length > 0);
+  const fileSource = replyId ? agentFiles : projectFiles;
+  const folders = useMemo(() => {
+    // A new agent works in its project's folder: its files are relative to that, as in its own composer.
+    const files = replyId ? agentFiles.value?.files ?? [] : project ? (projectFiles.value?.files ?? []).map(f => f.slice(project.name.length + 1)) : [];
+    return withFolders(files);
+  }, [replyId, agentFiles.value, projectFiles.value, project]);
+  const picks = useMemo(() => (mentionOpen && token
+    ? rankMentions({ agents: agents.filter(a => a.id !== replyId), projects: snapshot?.projects ?? [], files: folders, query: token.query })
+    : []), [mentionOpen, token?.query, agents, replyId, snapshot?.projects, folders]); // eslint-disable-line react-hooks/exhaustive-deps
+  const active = Math.min(highlight, Math.max(0, picks.length - 1));
+  useEffect(() => { setHighlight(0); }, [token?.query]);
+  const pickMention = (choice: MentionPick) => {
+    if (!token) return;
+    hints.add(choice, token.start);
+    const next = replaceToken(draft, token, '@', pickValue(choice));
+    caretAfter.current = next.caret;
+    setDraft(next.text);
+    setCaret(next.caret);
+  };
+  // A pick moves the caret past what it wrote, once the new text is in the field.
+  useLayoutEffect(() => {
+    if (caretAfter.current == null) return;
+    field.current?.setSelectionRange(caretAfter.current, caretAfter.current);
+    caretAfter.current = null;
+  }, [draft]);
+
   useEffect(() => { try { localStorage.setItem(DRAFT_KEY, draft); } catch { /* private mode */ } }, [draft]);
   useEffect(() => { try { localStorage.setItem(TARGET_KEY, JSON.stringify(target)); } catch { /* private mode */ } }, [target]);
   useEffect(() => { if (replyId) void loadEntries(replyId); }, [replyId]);
@@ -104,7 +146,11 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (picker) {
+        if (mentionOpen && token) {
+          e.preventDefault();
+          e.stopPropagation();
+          setDismissedAt(token.start);
+        } else if (picker) {
           e.preventDefault();
           e.stopPropagation();
           setPicker(null);
@@ -125,15 +171,17 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [picker, mode, onDismiss]);
+  }, [picker, mode, onDismiss, mentionOpen, token?.start]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (open: boolean) => {
     if (busy || !draft.trim() || !snapshot) return;
     setBusy(true);
     setError('');
     try {
-      const { agentId } = await sendQuick(live, draft, { agents, superId }, api);
+      const { agentId } = await sendQuick(live, draft, { agents, superId }, api, hints.for(draft));
       setDraft('');
+      setCaret(0);
+      hints.clear();
       // A new agent is the one to follow now; the next message goes to it too.
       if (live.kind === 'new') setTarget({ kind: 'agent', agentId });
       void loadEntries(agentId, true);
@@ -147,6 +195,19 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
   };
 
   const onFieldKey = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    // An open @ picker takes the arrows, Tab and a plain Enter; Cmd+Enter still sends and opens.
+    if (mentionOpen && picks.length && !e.nativeEvent.isComposing) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setHighlight((active + (e.key === 'ArrowDown' ? 1 : picks.length - 1)) % picks.length);
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey)) {
+        e.preventDefault();
+        pickMention(picks[active]);
+        return;
+      }
+    }
     if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
     e.preventDefault();
     void submit(IS_MAC ? e.metaKey : e.ctrlKey);
@@ -226,12 +287,29 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
           value={draft}
           rows={1}
           disabled={!snapshot}
-          onChange={e => { setDraft(e.target.value); if (error) setError(''); }}
+          onChange={e => { setDraft(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); if (error) setError(''); }}
+          onSelect={e => setCaret(e.currentTarget.selectionStart ?? 0)}
           onKeyDown={onFieldKey}
+          aria-autocomplete="list"
+          aria-expanded={mentionOpen}
           placeholder={placeholder}
           className="scrollbar-none block w-full resize-none bg-transparent px-5 pb-2.5 pt-3.5 text-[15px] leading-6 text-content outline-none placeholder:text-content/35"
         />
       </div>
+
+      {mentionOpen ? (
+        <div className="shrink-0 px-3 pb-2">
+          <MentionPicker
+            picks={picks}
+            query={token?.query ?? ''}
+            active={active}
+            loading={fileSource.loading}
+            truncated={fileSource.value?.truncated}
+            onActive={setHighlight}
+            onPick={pickMention}
+          />
+        </div>
+      ) : null}
 
       <footer className="flex shrink-0 items-center gap-1.5 border-t border-stroke px-3 py-2">
         {live.kind === 'new' ? (

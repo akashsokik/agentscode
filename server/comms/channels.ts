@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { findMentions, mentionContext, type MentionAgent, type MentionProject, type MentionRef } from '../../shared/mentions.ts';
+import { alignHints, findMentions, mentionContext, type MentionAgent, type MentionHint, type MentionProject, type MentionRef } from '../../shared/mentions.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { ALL_PROJECTS, ENGINE_LABELS, noProjectFolder } from '../../shared/types.ts';
 import type {
@@ -191,7 +191,7 @@ export class Channels {
    * The user posts. Mentions are agent ids the client resolved from @names. Images were already
    * checked against this channel's uploads; a post may be images alone.
    */
-  postAsUser(id: string, rawText: unknown, rawMentions: unknown, rawThreadId?: unknown, images: PostImage[] = []): ChannelPost {
+  postAsUser(id: string, rawText: unknown, rawMentions: unknown, rawThreadId?: unknown, images: PostImage[] = [], hints: MentionHint[] = []): ChannelPost {
     const channel = this.get(id);
     const text = String(rawText ?? '').trim();
     if (!text && !images.length) throw new HttpError(400, 'Message is empty.');
@@ -205,7 +205,7 @@ export class Channels {
       return agent;
     });
     // Agents, projects and project/path files it names, kept for its chips and told to each recipient.
-    const mentioned = this.host.mentionLookup ? findMentions(text, { ...this.host.mentionLookup(), channel: true }) : [];
+    const mentioned = this.host.mentionLookup ? findMentions(text, { ...this.host.mentionLookup(), channel: true, hints: alignHints(text, hints) }) : [];
     const post = this.save(channel, {
       from: 'user', fromName: 'You', kind: 'post', text, ...thread,
       to: recipients.map(a => ({ agentId: a.id, name: a.name, status: 'queued' })),

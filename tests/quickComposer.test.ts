@@ -111,3 +111,19 @@ test('end to end against the server: each target, and answering a question from 
   assert.equal(h.manager.superView().asks.find(a => a.id === asked.id)!.answer, 'Not yet');
   assert.ok(h.store.readEntries(toSuper.agentId).some(e => e.kind === 'user' && e.text === 'Not yet'));
 });
+
+test('the quick window sends what was picked from its @ picker, aligned to the text as sent', async () => {
+  const hints: unknown[] = [];
+  const { api, calls } = fakeApi();
+  const recording: QuickApi = { ...api, send: async (id, text, _images, mentionHints) => { hints.push(mentionHints); await api.send(id, text); } };
+  const pick = { kind: 'project' as const, id: 'p9', name: 'orca', start: 6 };
+  // Written with leading spaces: the pick moves with the trim, to the @ it belongs to.
+  await sendQuick({ kind: 'super' }, '  look @orca', { agents: [], superId: 'sup' }, recording, [pick]);
+  assert.deepEqual(hints, [[{ ...pick, start: 5 }]]);
+  // A pick whose @ is gone is not sent; nothing picked sends no hints.
+  await sendQuick({ kind: 'agent', agentId: 'ada' }, 'no mention', { agents: [agent({ id: 'ada' })], superId: null }, recording, [pick]);
+  assert.deepEqual(hints[1], undefined);
+  // A new agent's first task carries its picks too.
+  await sendQuick({ kind: 'new', projectId: 'web', engine: 'claude', model: '' }, '@orca first', { agents: [], superId: null }, api, [{ ...pick, start: 0 }]);
+  assert.deepEqual((calls.at(-1)![1] as CreateAgentRequest).mentionHints, [{ ...pick, start: 0 }]);
+});

@@ -1,13 +1,13 @@
 /** MonoCode's composer box for a channel, with the same @ picker as the agent composer. */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Agent, Channel } from '../../shared/types.ts';
-import { findMentions } from '../../shared/mentions.ts';
+import { channelRecipients, findMentions } from '../../shared/mentions.ts';
 import { api } from '../api.ts';
 import { useProjectsFiles } from '../composer/catalog.ts';
+import { mentionNames, useMentionHints } from '../composer/mentionHints.ts';
 import { MentionPicker } from '../composer/Pickers.tsx';
 import { mentionTokenAt, pickValue, rankMentions, replaceToken, withFolders, type MentionPick } from '../composer/tokens.ts';
 import { someNames } from '../format.ts';
-import { resolveMentions } from '../mentions.ts';
 import { attempt, useApp } from '../store.ts';
 import { settleDraft } from '../threads.ts';
 import { TextButton } from '../ui/common.tsx';
@@ -60,7 +60,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
 
   // The same @ picker as the agent composer: members first (a mention starts them), then other agents,
   // projects, and files in the members' projects as project/path.
-  const query = mentionTokenAt(text, caret);
+  const query = mentionTokenAt(text, caret, mentionNames(agents, projects));
   const open = Boolean(query) && query?.start !== dismissedAt;
   const memberProjects = useMemo(() => {
     const ids = new Set(members.map(m => m.projectId).filter((id): id is string => Boolean(id)));
@@ -82,13 +82,18 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
   const active = Math.min(highlight, Math.max(0, options.length - 1));
   useEffect(() => { setHighlight(0); }, [query?.query]);
 
-  const mentioned = members.filter(m => resolveMentions(text, members).includes(m.id));
+  // Who a post starts comes from the same parse as its chips (shared/mentions.ts): a name in code,
+  // an email or a path starts nobody, and a picked project never starts the agent that shares its name.
+  const hints = useMentionHints();
+  const recipients = (value: string) => channelRecipients(value, members.map(m => m.id), { agents: agents ?? [], projects: projects ?? [], hints: hints.for(value) });
+  const startIds = recipients(text);
+  const mentioned = members.filter(m => startIds.includes(m.id));
   // Agents named here who are not members: a mention cannot start them, so say so and offer to add them.
   const outsiders = useMemo(() => {
     const memberIds = new Set(channel.memberIds);
-    const named = findMentions(text, { agents: agents ?? [], projects: [] }).filter(m => m.kind === 'agent' && !memberIds.has(m.id));
+    const named = findMentions(text, { agents: agents ?? [], projects: projects ?? [], channel: true, hints: hints.for(text) }).filter(m => m.kind === 'agent' && !memberIds.has(m.id));
     return [...new Map(named.map(m => [m.kind === 'agent' ? m.id : '', m])).values()].map(m => (m.kind === 'agent' ? (agents ?? []).find(a => a.id === m.id) : undefined)).filter((a): a is Agent => Boolean(a));
-  }, [text, agents, channel.memberIds]);
+  }, [text, agents, projects, channel.memberIds, hints]);
   const busy = mentioned.filter(m => m.status === 'working' || m.status === 'waiting');
   const confirming = armed !== null && armed === text.trim();
   const hint = !members.length
@@ -105,6 +110,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
   const caretAfter = useRef<number | null>(null);
   const pick = (choice: MentionPick) => {
     if (!query) return;
+    hints.add(choice, query.start);
     const next = replaceToken(text, query, '@', pickValue(choice));
     caretAfter.current = next.caret;
     setText(next.text);
@@ -127,17 +133,18 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
     // Images still uploading would be left behind, so Post waits for them.
     if ((!value && !images.ready.length) || images.uploading || sending) return;
     // Starting many sessions at once costs real money; ask once, the way Agent Office does for @all.
-    if (resolveMentions(value, members).length >= 3 && armed !== value) {
+    if (recipients(value).length >= 3 && armed !== value) {
       setArmed(value);
       return;
     }
     setArmed(null);
     setSending(true);
     const attached = images.ready;
-    const ok = await attempt(() => api.post(channel.id, value, resolveMentions(value, members), threadId, attached));
+    const ok = await attempt(() => api.post(channel.id, value, recipients(value), threadId, attached, hints.for(value)));
     setSending(false);
     if (ok) {
       images.clear();
+      hints.clear();
       // This composer may have closed while the post was in flight, and another opened on the same
       // draft. Clear only what was posted from the shared draft, then update whichever one is mounted.
       const rest = settleDraft(drafts, draftKey, sent);

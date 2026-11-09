@@ -63,16 +63,30 @@ function fileToken(rest: string): string | null {
   return token;
 }
 
+/**
+ * Which one the user picked from the @ picker where the text alone cannot tell: an agent and a project
+ * (or two agents) with the same name. `start` is the @'s index in the text as sent (alignHints).
+ */
+export interface MentionHint {
+  kind: 'agent' | 'project';
+  id: string;
+  name: string;
+  start: number;
+}
+
 export interface FindOptions {
   agents: MentionAgent[];
   projects: MentionProject[];
   /** A channel: file mentions are project/path. Otherwise they are relative to the agent's workspace. */
   channel?: boolean;
+  /** Picks that settle a name shared by more than one agent or project, by the @'s position. */
+  hints?: readonly MentionHint[];
 }
 
 /**
  * The mentions in `text`, in order. A name wins over a path, the longest name wins ("@Ada Lovelace"
- * over "@Ada"), and on the same name an agent wins over a project. Matching ignores case.
+ * over "@Ada"), and on the same name the one the user picked there wins (`hints`), else an agent
+ * over a project. Matching ignores case.
  */
 export function findMentions(text: string, options: FindOptions): MentionRef[] {
   const names = [
@@ -87,7 +101,11 @@ export function findMentions(text: string, options: FindOptions): MentionRef[] {
     const everyone = EVERYONE.find(word => lower.startsWith(word) && boundary(rest[word.length]));
     // A path such as "@web/app.ts" is a file even when "web" is also a name.
     const file = fileToken(rest);
-    const named = names.find(n => lower.startsWith(n.name.toLowerCase()) && boundary(rest[n.name.length]));
+    const matches = names.filter(n => lower.startsWith(n.name.toLowerCase()) && boundary(rest[n.name.length]));
+    // The longest name; when several share it, the one picked at this @.
+    const same = matches.filter(n => n.name.length === matches[0]?.name.length);
+    const hint = same.length > 1 ? options.hints?.find(h => h.start === i && same.some(n => n.kind === h.kind && n.id === h.id)) : undefined;
+    const named = hint ? same.find(n => n.kind === hint.kind && n.id === hint.id) : matches[0];
     if (named && !(file && file.length > named.name.length)) {
       const end = i + 1 + named.name.length;
       out.push({ kind: named.kind, start: i, end, id: named.id, name: named.name });
@@ -164,4 +182,54 @@ export function mentionContext(
     ? 'Mentioned in this post (who and what it refers to):'
     : 'Mentioned in this message (references to help you; mentioning an agent here does not message it):';
   return [heading, ...lines].join('\n');
+}
+
+/** Every place `@name` stands as a mention (mentionStart, a word boundary after it), by the @'s index. */
+function occurrences(text: string, name: string): number[] {
+  const out: number[] = [];
+  const needle = `@${name}`.toLowerCase();
+  const lower = text.toLowerCase();
+  for (let at = lower.indexOf(needle); at >= 0; at = lower.indexOf(needle, at + 1)) {
+    if (mentionStart(text, at) && boundary(text[at + needle.length])) out.push(at);
+  }
+  return out;
+}
+
+/**
+ * The picks still in the text as it is sent, each moved to the nearest `@name` from where it was
+ * picked (typing before a mention moves it), at most one pick per @. Picks whose @ was deleted drop.
+ */
+export function alignHints(text: string, hints: readonly MentionHint[]): MentionHint[] {
+  const taken = new Set<number>();
+  const out: MentionHint[] = [];
+  for (const hint of hints.slice(-100)) {
+    const near = occurrences(text, hint.name).filter(at => !taken.has(at)).sort((a, b) => Math.abs(a - hint.start) - Math.abs(b - hint.start))[0];
+    if (near === undefined) continue;
+    taken.add(near);
+    out.push({ ...hint, start: near });
+  }
+  return out;
+}
+
+/** Hints as the server takes them from a request: well formed, at most 100. */
+export function parseHints(raw: unknown): MentionHint[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 100).flatMap((h): MentionHint[] => {
+    const v = h as Partial<MentionHint> | null;
+    if (!v || (v.kind !== 'agent' && v.kind !== 'project') || typeof v.id !== 'string' || typeof v.name !== 'string') return [];
+    if (!Number.isInteger(v.start) || (v.start as number) < 0) return [];
+    return [{ kind: v.kind, id: v.id.slice(0, 200), name: v.name.slice(0, 200), start: v.start as number }];
+  });
+}
+
+/**
+ * The channel members a post starts, from the same parse as its chips: every member for @all,
+ * @channel or @here, else each member it names, in order. A name inside code, an email or a path
+ * starts nobody; neither does a project that shares a member's name when the project was picked.
+ */
+export function channelRecipients(text: string, memberIds: readonly string[], options: FindOptions): string[] {
+  const refs = findMentions(text, { ...options, channel: true });
+  if (refs.some(r => r.kind === 'everyone')) return [...memberIds];
+  const named = refs.flatMap(r => (r.kind === 'agent' && memberIds.includes(r.id) ? [r.id] : []));
+  return [...new Set(named)];
 }

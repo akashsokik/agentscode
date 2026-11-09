@@ -1,5 +1,5 @@
 import type { AvatarLook } from './avatar.ts';
-import type { MentionRef } from './mentions.ts';
+import type { MentionHint, MentionRef } from './mentions.ts';
 // Types shared by the server (Node, type-stripped) and the web client (Vite).
 // Keep this file to erasable syntax only (no enums, namespaces or parameter
 // properties) so Node can run it with plain type stripping.
@@ -892,6 +892,8 @@ export interface CreateAgentRequest {
   worktree?: boolean;
   branch?: string;
   task?: string;
+  /** For the first task: which agent or project the user picked where two share a name. */
+  mentionHints?: MentionHint[];
 }
 
 export interface AgentPatch {
