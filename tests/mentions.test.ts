@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { findMentions, inCode, mentionContext, mentionStart } from '../shared/mentions.ts';
+import { findMentions, inCode, joinPath, mentionContext, mentionStart } from '../shared/mentions.ts';
 import { mentionTokenAt, pickGroup, pickValue, rankMentions, withFolders } from '../web/composer/tokens.ts';
 import { resolveMentions } from '../web/mentions.ts';
 import { harness, projectDir } from './helpers.ts';
@@ -100,4 +100,11 @@ test('a channel post resolves project/path files to absolute paths for the membe
   const sent = h.runner(ada.id).sent[0].text;
   assert.match(sent, new RegExp(`the file or folder ${web.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/src/a\\.ts`));
   assert.deepEqual(h.manager.entries(ada.id).find(e => e.kind === 'user')?.mentions?.map(m => m.kind), ['agent', 'file']);
+});
+
+test('a channel file path stays inside its project', () => {
+  assert.equal(joinPath('/work/web/', 'src/./a.ts'), '/work/web/src/a.ts');
+  assert.equal(joinPath('/work/web', 'src/../lib/b.ts'), '/work/web/lib/b.ts');
+  assert.equal(joinPath('/work/web', '../../etc/passwd'), null);
+  assert.equal(mentionContext(findMentions('@web/../../x', { agents, projects, channel: true }), { agents, projects, channel: true }), '', 'a path leaving the project is not passed on');
 });

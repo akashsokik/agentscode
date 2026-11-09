@@ -111,8 +111,21 @@ export function findMentions(text: string, options: FindOptions): MentionRef[] {
   return out;
 }
 
-function joinPath(base: string, rel: string): string {
-  return `${base.replace(/[\\/]+$/, '')}/${rel.replace(/^[\\/]+/, '')}`;
+/**
+ * `rel` inside `base`, with "." and ".." resolved; null when it would leave `base`, so the note
+ * never names a path outside the project the user picked.
+ */
+export function joinPath(base: string, rel: string): string | null {
+  const parts: string[] = [];
+  for (const part of rel.split(/[\\/]+/)) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (!parts.length) return null;
+      parts.pop();
+    } else parts.push(part);
+  }
+  const root = base.replace(/[\\/]+$/, '');
+  return parts.length ? `${root}/${parts.join('/')}` : root;
 }
 
 /**
@@ -142,7 +155,8 @@ export function mentionContext(
       if (project) lines.push(`- @${ref.name}: the project ${project.name} at ${project.path}.`);
     } else if (ref.kind === 'file' && ref.projectId) {
       const project = lookup.projects.find(p => p.id === ref.projectId);
-      if (project) lines.push(`- @${ref.name}: the file or folder ${joinPath(project.path, ref.path)}.`);
+      const full = project ? joinPath(project.path, ref.path) : null;
+      if (full) lines.push(`- @${ref.name}: the file or folder ${full}.`);
     }
   }
   if (!lines.length) return '';
