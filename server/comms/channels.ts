@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { findMentions, mentionContext, type MentionAgent, type MentionProject, type MentionRef } from '../../shared/mentions.ts';
+import { rolePreset } from '../../shared/roles.ts';
 import { ALL_PROJECTS, ENGINE_LABELS, noProjectFolder } from '../../shared/types.ts';
 import type {
   Agent,
@@ -22,7 +24,9 @@ import { threadRoot, withThreadRoots } from './threads.ts';
 export interface ChannelHost {
   broadcast(event: ServerEvent): void;
   /** Start a user-priority task in an agent's session, the way a direct message does, with the post's images. */
-  startUserTask(agentId: string, text: string, prompt: string, task: AgentTask, channel: { id: string; postId: string }, images: PostImage[]): void;
+  startUserTask(agentId: string, text: string, prompt: string, task: AgentTask, channel: { id: string; postId: string }, images: PostImage[], mentions?: MentionRef[]): void;
+  /** Every agent and project a mention can name. */
+  mentionLookup?(): { agents: MentionAgent[]; projects: MentionProject[] };
 }
 
 /** An image on a user post: what the post shows, and the stored file the agents are sent. */
@@ -200,10 +204,13 @@ export class Channels {
       if (!channel.memberIds.includes(agentId)) throw new HttpError(400, `${agent.name} is not in #${channel.name}. Invite them first.`);
       return agent;
     });
+    // Agents, projects and project/path files it names, kept for its chips and told to each recipient.
+    const mentioned = this.host.mentionLookup ? findMentions(text, { ...this.host.mentionLookup(), channel: true }) : [];
     const post = this.save(channel, {
       from: 'user', fromName: 'You', kind: 'post', text, ...thread,
       to: recipients.map(a => ({ agentId: a.id, name: a.name, status: 'queued' })),
       ...(images.length ? { images: images.map(i => i.attachment) } : {}),
+      ...(mentioned.length ? { mentions: mentioned } : {}),
     });
     const summary = text ? oneLine(text, 280) : `Posted ${pictures(images.length)}`;
     // One missing workspace should not keep the post from the other recipients.
@@ -211,7 +218,7 @@ export class Channels {
       try {
         this.host.startUserTask(agent.id, text, this.userPrompt(channel, post, agent), {
           summary, source: 'user', channelId: channel.id, channelPostId: post.id,
-        }, { id: channel.id, postId: post.id }, images);
+        }, { id: channel.id, postId: post.id }, images, post.mentions);
       } catch (error) {
         this.setDelivery(post.id, agent.id, 'failed', (error as Error).message);
       }
@@ -455,6 +462,13 @@ export class Channels {
     ].filter(Boolean);
   }
 
+  /** Who and what a user post mentioned, with ids and absolute paths (shared/mentions.ts). */
+  private mentionLines(post: ChannelPost): string[] {
+    if (!post.mentions?.length || !this.host.mentionLookup) return [];
+    const context = mentionContext(post.mentions, { ...this.host.mentionLookup(), channel: true, roleName: role => rolePreset(role as Agent['role']).name });
+    return context ? ['', context] : [];
+  }
+
   private userPrompt(channel: Channel, post: ChannelPost, agent: Agent): string {
     const others = post.to.filter(d => d.agentId !== agent.id).map(d => d.name);
     return [
@@ -467,6 +481,7 @@ export class Channels {
       'Post:',
       post.text || `(The user posted ${pictures(post.images?.length ?? 0)} with no text.)`,
       ...(post.images?.length ? [`The post's ${post.images.length === 1 ? 'image is' : `${post.images.length} images are`} attached to this message.`] : []),
+      ...this.mentionLines(post),
     ].join('\n');
   }
 

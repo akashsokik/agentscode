@@ -56,3 +56,25 @@ export function useAgentFiles(agentId: string, enabled: boolean) {
   if (!load) loadFiles.set(agentId, (load = () => api.projectFiles({ agent: agentId }).catch(() => ({ files: [], truncated: false }))));
   return useCached(fileCache, agentId, enabled, load);
 }
+
+const loadProjectFiles = new Map<string, () => Promise<ProjectFileList>>();
+
+/**
+ * The files in several projects at once, each written project/path (a channel's members can work in
+ * different projects), while `enabled`. Truncated when any one of them is.
+ */
+export function useProjectsFiles(projects: { id: string; name: string }[], enabled: boolean) {
+  const key = projects.map(p => p.id).sort().join(',');
+  let load = loadProjectFiles.get(key);
+  if (!load) {
+    const list = [...projects];
+    loadProjectFiles.set(key, (load = async () => {
+      const lists = await Promise.all(list.map(p => api.projectFiles({ project: p.id }).catch(() => ({ files: [] as string[], truncated: false }))));
+      return {
+        files: lists.flatMap((l, i) => l.files.map(file => `${list[i].name}/${file}`)),
+        truncated: lists.some(l => l.truncated),
+      };
+    }));
+  }
+  return useCached(fileCache, `projects:${key}`, enabled && projects.length > 0, load);
+}

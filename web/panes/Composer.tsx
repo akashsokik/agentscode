@@ -9,19 +9,19 @@ import type { ComposerCommand } from '../../shared/composer.ts';
 import { noProjectFolder, type Agent, type Approval, type AgentPatch, type Project } from '../../shared/types.ts';
 import { useAgentCommands, useAgentFiles } from '../composer/catalog.ts';
 import { ModelPicker } from '../composer/ModelPicker.tsx';
-import { CommandPicker, FileMentionPicker } from '../composer/Pickers.tsx';
+import { CommandPicker, MentionPicker } from '../composer/Pickers.tsx';
 import {
   BUILTIN_COMMANDS,
   builtinCommand,
   isLeading,
   mentionTokenAt,
-  mentionValue,
+  pickValue,
   rankCommands,
-  rankFiles,
+  rankMentions,
   replaceToken,
   slashTokenAt,
   withFolders,
-  type RankedFile,
+  type MentionPick,
   type Token,
 } from '../composer/tokens.ts';
 import { api } from '../api.ts';
@@ -136,8 +136,18 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
     [slashOpen, leading, agentCommands.value, slash?.query],
   );
   const folders = useMemo(() => withFolders(agentFiles.value?.files ?? []), [agentFiles.value]);
-  const files = useMemo(() => (mentionOpen ? rankFiles(folders, mention?.query ?? '') : []), [mentionOpen, folders, mention?.query]);
-  const pickerLength = slashOpen ? commands.length : mentionOpen ? files.length : 0;
+  // One @ picker: other agents and projects (references the agent is told about), then files.
+  const allAgents = useApp(s => s.snapshot?.agents);
+  const allProjects = useApp(s => s.snapshot?.projects);
+  const picks = useMemo(() => (mentionOpen
+    ? rankMentions({
+      agents: (allAgents ?? []).filter(a => a.id !== agent.id),
+      projects: allProjects ?? [],
+      files: folders,
+      query: mention?.query ?? '',
+    })
+    : []), [mentionOpen, allAgents, allProjects, agent.id, folders, mention?.query]);
+  const pickerLength = slashOpen ? commands.length : mentionOpen ? picks.length : 0;
 
   // A new query starts the highlight from the top.
   useEffect(() => { setActive(0); }, [slash?.query, mention?.query, slashOpen, mentionOpen]);
@@ -192,10 +202,10 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
     setText(next.text);
   };
 
-  const pickFile = (file: RankedFile) => {
+  const pickMention = (pick: MentionPick) => {
     if (!mention) return;
     closePickers();
-    const next = replaceToken(text, mention, '@', mentionValue(file));
+    const next = replaceToken(text, mention, '@', pickValue(pick));
     caretAfter.current = next.caret;
     setText(next.text);
   };
@@ -210,7 +220,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
     };
     const pick = () => {
       if (slashOpen && commands[active]) pickCommand(commands[active]);
-      else if (mentionOpen && files[active]) pickFile(files[active]);
+      else if (mentionOpen && picks[active]) pickMention(picks[active]);
       else return false;
       e.preventDefault();
       return true;
@@ -290,14 +300,14 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
           </div>
         ) : mentionOpen ? (
           <div className="absolute inset-x-0 bottom-full z-30 mb-1">
-            <FileMentionPicker
-              files={files}
+            <MentionPicker
+              picks={picks}
               query={mention?.query ?? ''}
               active={active}
               loading={agentFiles.loading}
               truncated={agentFiles.value?.truncated}
               onActive={setActive}
-              onPick={pickFile}
+              onPick={pickMention}
             />
           </div>
         ) : null}

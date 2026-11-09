@@ -271,7 +271,7 @@ function PostRow({ post, agents, grouped, thread, now, openThreadId, onOpenThrea
   if (post.from === 'user') {
     return (
       <UserMessageBlock
-        entry={{ id: post.id, agentId: '', text: post.text, ts: post.ts }}
+        entry={{ id: post.id, agentId: '', text: post.text, ts: post.ts, mentions: post.mentions }}
         // Above the bubble, as MonoCode shows a message's images; a post can be images alone.
         media={post.images?.length ? <MessageImages images={post.images} url={image => channelAttachmentUrl(post.channelId, image)} /> : null}
         caption={pending.length ? <Deliveries to={pending} agents={agents} /> : undefined}

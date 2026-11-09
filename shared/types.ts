@@ -1,3 +1,4 @@
+import type { MentionRef } from './mentions.ts';
 // Types shared by the server (Node, type-stripped) and the web client (Vite).
 // Keep this file to erasable syntax only (no enums, namespaces or parameter
 // properties) so Node can run it with plain type stripping.
@@ -588,6 +589,8 @@ export interface ChannelPost {
   meta?: TurnMeta;
   /** Images the user attached; stored per channel, under /api/channels/:id/attachments/. */
   images?: ImageAttachment[];
+  /** What a user post @mentioned, resolved when posted (shared/mentions.ts), for its chips. */
+  mentions?: MentionRef[];
 }
 
 export interface ChannelInput {
@@ -636,6 +639,8 @@ export interface Entry {
   sessionStart?: boolean;
   /** Images the user attached to this message. */
   images?: ImageAttachment[];
+  /** What the user's message @mentioned, resolved when sent (shared/mentions.ts), for its chips. */
+  mentions?: MentionRef[];
 }
 
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';

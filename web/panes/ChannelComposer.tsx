@@ -1,17 +1,17 @@
-/** MonoCode's composer box for a channel, with an @mention list in a Popover. */
-import { useEffect, useMemo, useRef, useState } from 'react';
+/** MonoCode's composer box for a channel, with the same @ picker as the agent composer. */
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Agent, Channel } from '../../shared/types.ts';
-import { rolePreset } from '../../shared/roles.ts';
+import { findMentions } from '../../shared/mentions.ts';
 import { api } from '../api.ts';
+import { useProjectsFiles } from '../composer/catalog.ts';
+import { MentionPicker } from '../composer/Pickers.tsx';
+import { mentionTokenAt, pickValue, rankMentions, replaceToken, withFolders, type MentionPick } from '../composer/tokens.ts';
 import { someNames } from '../format.ts';
-import { mentionQuery, resolveMentions } from '../mentions.ts';
-import { projectLabel } from '../projects.ts';
+import { resolveMentions } from '../mentions.ts';
 import { attempt, useApp } from '../store.ts';
 import { settleDraft } from '../threads.ts';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
-import { MenuLabel, MenuRow } from '../ui/common.tsx';
+import { TextButton } from '../ui/common.tsx';
 import { ArrowUp, ImagePlus } from '../mono/icons.tsx';
-import { Popover } from '../mono/Popover.tsx';
 import { ToolButton } from './Composer.tsx';
 import { ComposerImageTray, useChannelImages } from './ComposerImages.tsx';
 
@@ -20,15 +20,6 @@ const drafts = new Map<string, string>();
 /** The composers mounted on each draft key, told when a send that finished changes their draft. */
 const draftListeners = new Map<string, Set<(text: string) => void>>();
 
-const EVERYONE = { id: '__all', name: 'all' };
-
-/** In the mention list, worded as the Members popover does: what a busy agent is on now. */
-function busyLabel(agent: Agent): string {
-  if (agent.status === 'waiting') return 'Needs you';
-  if (agent.status === 'working') return agent.activity || 'Working';
-  return '';
-}
-
 /**
  * MonoCode's composer box, with @mentions and a line saying exactly who a post starts.
  * With `threadId` it replies in that thread and keeps its own draft; render it with
@@ -36,6 +27,7 @@ function busyLabel(agent: Agent): string {
  */
 export function ChannelComposer({ channel, members, threadId }: { channel: Channel; members: Agent[]; threadId?: string }) {
   const projects = useApp(s => s.snapshot?.projects);
+  const agents = useApp(s => s.snapshot?.agents);
   const draftKey = threadId ? `${channel.id}:${threadId}` : channel.id;
   const [text, setText] = useState(() => drafts.get(draftKey) ?? '');
   const [caret, setCaret] = useState(0);
@@ -66,20 +58,37 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [text]);
 
-  const query = mentionQuery(text, caret);
+  // The same @ picker as the agent composer: members first (a mention starts them), then other agents,
+  // projects, and files in the members' projects as project/path.
+  const query = mentionTokenAt(text, caret);
+  const open = Boolean(query) && query?.start !== dismissedAt;
+  const memberProjects = useMemo(() => {
+    const ids = new Set(members.map(m => m.projectId).filter((id): id is string => Boolean(id)));
+    return (projects ?? []).filter(p => ids.has(p.id));
+  }, [members, projects]);
+  const projectFiles = useProjectsFiles(memberProjects, open);
+  const folders = useMemo(() => withFolders(projectFiles.value?.files ?? []), [projectFiles.value]);
   const options = useMemo(() => {
-    if (!query || query.start === dismissedAt) return [];
-    const q = query.query.toLowerCase();
-    // Names that start with what you typed first, then names that contain it; a few dozen at most.
-    const starts = members.filter(m => m.name.toLowerCase().startsWith(q));
-    const contains = q ? members.filter(m => !m.name.toLowerCase().startsWith(q) && m.name.toLowerCase().includes(q)) : [];
-    const matches: { id: string; name: string; agent?: Agent }[] = [...starts, ...contains].slice(0, 30).map(m => ({ id: m.id, name: m.name, agent: m }));
-    if (members.length > 1 && 'all'.startsWith(q)) matches.push(EVERYONE);
-    return matches;
-  }, [query?.start, query?.query, dismissedAt, members]);
+    if (!open || !query) return [];
+    const memberIds = new Set(members.map(m => m.id));
+    return rankMentions({
+      agents: [...members, ...(agents ?? []).filter(a => !memberIds.has(a.id))],
+      projects: projects ?? [],
+      files: folders,
+      query: query.query,
+      everyone: members.length > 1,
+    });
+  }, [open, query?.query, members, agents, projects, folders]);
   const active = Math.min(highlight, Math.max(0, options.length - 1));
+  useEffect(() => { setHighlight(0); }, [query?.query]);
 
   const mentioned = members.filter(m => resolveMentions(text, members).includes(m.id));
+  // Agents named here who are not members: a mention cannot start them, so say so and offer to add them.
+  const outsiders = useMemo(() => {
+    const memberIds = new Set(channel.memberIds);
+    const named = findMentions(text, { agents: agents ?? [], projects: [] }).filter(m => m.kind === 'agent' && !memberIds.has(m.id));
+    return [...new Map(named.map(m => [m.kind === 'agent' ? m.id : '', m])).values()].map(m => (m.kind === 'agent' ? (agents ?? []).find(a => a.id === m.id) : undefined)).filter((a): a is Agent => Boolean(a));
+  }, [text, agents, channel.memberIds]);
   const busy = mentioned.filter(m => m.status === 'working' || m.status === 'waiting');
   const confirming = armed !== null && armed === text.trim();
   const hint = !members.length
@@ -93,18 +102,24 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
         ? threadId ? 'No mention, so this reply starts nobody.' : 'No mention, so this posts as a note.'
         : threadId ? 'Type @ to start an agent in this thread.' : 'Type @ to start an agent, or @all for everyone.';
 
-  const pick = (name: string) => {
+  const caretAfter = useRef<number | null>(null);
+  const pick = (choice: MentionPick) => {
     if (!query) return;
-    const before = text.slice(0, query.start);
-    const insert = `@${name} `;
-    const next = before + insert + text.slice(caret);
-    const at = before.length + insert.length;
-    setText(next);
-    drafts.set(draftKey, next);
-    setCaret(at);
+    const next = replaceToken(text, query, '@', pickValue(choice));
+    caretAfter.current = next.caret;
+    setText(next.text);
+    drafts.set(draftKey, next.text);
+    setCaret(next.caret);
     setHighlight(0);
-    requestAnimationFrame(() => field.current?.setSelectionRange(at, at));
   };
+  // A pick moves the caret past what it wrote, once the new text is in the field.
+  useLayoutEffect(() => {
+    if (caretAfter.current == null) return;
+    field.current?.setSelectionRange(caretAfter.current, caretAfter.current);
+    caretAfter.current = null;
+  }, [text]);
+
+  const invite = (agent: Agent) => void attempt(() => api.updateChannel(channel.id, { memberIds: [...channel.memberIds, agent.id] }));
 
   const send = async () => {
     const sent = text;
@@ -146,6 +161,12 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
           onClick={trackCaret}
           onPaste={images.onPaste}
           onKeyDown={e => {
+            if (open && e.key === 'Escape') {
+              e.preventDefault();
+              e.stopPropagation();
+              setDismissedAt(query?.start ?? null);
+              return;
+            }
             if (options.length) {
               if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                 e.preventDefault();
@@ -154,12 +175,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
               }
               if (e.key === 'Enter' || e.key === 'Tab') {
                 e.preventDefault();
-                pick(options[active].name);
-                return;
-              }
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                setDismissedAt(query?.start ?? null);
+                pick(options[active]);
                 return;
               }
             }
@@ -195,24 +211,26 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
       {/* Under the box, where the agent Composer shows its folder: who this post starts. */}
       <div className={`flex min-w-0 items-center gap-2.5 overflow-hidden px-[15px] pt-1.5 font-sans text-[12px] ${confirming ? 'text-warning' : 'text-content/50'}`}>
         <span className="min-w-0 truncate" title={hint}>{hint}</span>
+        {outsiders.length ? (
+          <span className="flex shrink-0 items-center gap-1 text-content/50">
+            <span>{someNames(outsiders.map(a => a.name))} {outsiders.length > 1 ? 'are' : 'is'} not in #{channel.name}.</span>
+            <TextButton onClick={() => { for (const agent of outsiders) invite(agent); }}>Add to #{channel.name}</TextButton>
+          </span>
+        ) : null}
       </div>
-      {options.length ? (
-        <Popover anchor={box} side="top" align="start" width={280} maxHeight={300} onDismiss={() => setDismissedAt(query?.start ?? null)} role="listbox" aria-label="Mention" className="overflow-y-auto overscroll-contain p-1">
-          <MenuLabel>Mention to start</MenuLabel>
-          {options.map((option, index) => (
-            <MenuRow
-              key={option.id}
-              highlighted={index === active}
-              title={option.agent
-                ? <span className="flex items-center gap-1.5"><EngineIcon engine={option.agent.engine} className="size-3.5" />{option.name}</span>
-                : '@all'}
-              hint={option.agent
-                ? [projectLabel(option.agent.projectId, projects), rolePreset(option.agent.role).name, busyLabel(option.agent)].filter(Boolean).join(', ')
-                : `Every member: ${someNames(members.map(m => m.name))}.`}
-              onSelect={() => { pick(option.name); field.current?.focus(); }}
-            />
-          ))}
-        </Popover>
+      {open ? (
+        <div className="absolute inset-x-1.5 bottom-full z-30 mb-1">
+          <MentionPicker
+            picks={options}
+            query={query?.query ?? ''}
+            active={active}
+            loading={projectFiles.loading}
+            truncated={projectFiles.value?.truncated}
+            label="Mention"
+            onActive={setHighlight}
+            onPick={choice => { pick(choice); field.current?.focus(); }}
+          />
+        </div>
       ) : null}
     </div>
   );
