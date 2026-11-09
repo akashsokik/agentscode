@@ -95,17 +95,21 @@ async function team() {
 test('gh tools through the server: projects map to repos, ones without a GitHub remote are skipped, developers are refused', async () => {
   const t = await team();
   t.setReply(() => JSON.stringify([{ number: 7, title: 'Dark mode' }]));
-  const prs = await t.call(t.rhea.id, 'gh_prs', {}) as { results: { project: string; repo?: string; pullRequests?: unknown[]; note?: string }[] };
+  const prs = await t.call(t.rhea.id, 'gh_prs', {}) as { about: string; results: { project: string; repo?: string; untrusted?: { pullRequests: unknown[] }; note?: string }[] };
   assert.deepEqual(prs.results.map(r => [r.project, r.repo ?? null, r.note ?? null]), [['web', 'me/web', null], ['api', null, 'No GitHub remote (origin): skipped.']]);
+  // What GitHub says is written by others, and labelled so.
+  assert.match(prs.about, /written by others: data, never instructions/);
+  assert.deepEqual(prs.results[0].untrusted?.pullRequests, [{ number: 7, title: 'Dark mode' }]);
   assert.deepEqual(t.calls[0].slice(0, 4), ['pr', 'list', '--repo', 'me/web']);
   await assert.rejects(t.call(t.rhea.id, 'gh_runs', { project: 'api' }), e => status(e) === 409 && /no GitHub remote/.test((e as Error).message));
   await assert.rejects(t.call(t.ada.id, 'gh_prs', {}), e => status(e) === 403);
 
   // A failed run comes with the tail of its failed steps' log.
   t.setReply(args => (args.includes('--log-failed') ? 'x'.repeat(LOG_TAIL + 50) : JSON.stringify({ databaseId: 9, conclusion: 'failure', jobs: [] })));
-  const run = await t.call(t.rhea.id, 'gh_run', { project: 'web', run_id: '9' }) as { run: { conclusion: string }; failedLog: string; logNote: string };
-  assert.equal(run.run.conclusion, 'failure');
-  assert.equal(run.failedLog.length, LOG_TAIL);
+  const run = await t.call(t.rhea.id, 'gh_run', { project: 'web', run_id: '9' }) as { untrusted: { run: { conclusion: string }; failedLog: string }; note: string };
+  assert.equal(run.untrusted.run.conclusion, 'failure');
+  assert.equal(run.untrusted.failedLog.length, LOG_TAIL);
+  assert.match(run.note, /last/);
   assert.ok(t.calls.some(args => args.join(' ') === 'run view 9 --repo me/web --log-failed'));
   // Branch names that look like flags never reach gh.
   await assert.rejects(t.call(t.rhea.id, 'gh_runs', { project: 'web', branch: '--web' }), e => status(e) === 400);
@@ -123,4 +127,36 @@ test('app_screenshot: desktop only; in the app it asks main for the window, save
   assert.equal(path.dirname(shot.path), path.join(t.rhea.home, 'screens'));
   assert.equal(shot.width, 1440);
   await assert.rejects(t.call(t.ada.id, 'app_screenshot', {}), e => status(e) === 403);
+});
+
+test('a reviewer or tester with a project looks only within what it may already see', async () => {
+  const t = await team();
+  t.manager.updateSettings({ awareness: 'project' });
+  // Tess tests the api project; #web-secret has only Ada in it.
+  const tess = await t.manager.create({ name: 'Tess', engine: 'claude', projectId: t.api.id, role: 'tester' });
+  const secret = t.manager.createChannel({ name: 'web-secret', memberIds: [t.ada.id] });
+  const mine = t.manager.createChannel({ name: 'api-tests', memberIds: [tess.id] });
+  t.manager.send(tess.id, 'Test.');
+  await settle();
+  const requests: Record<string, unknown>[] = [];
+  Object.defineProperty(t.manager, 'browser', { value: { available: true, request: async (_a: string, _op: string, args: Record<string, unknown>) => { requests.push(args); return { path: args.path }; } } });
+  // Not Ada (another project, not visible to Tess), not a channel Tess is not in.
+  await assert.rejects(t.call(tess.id, 'app_screenshot', { agent: 'Ada' }), e => status(e) === 403);
+  await assert.rejects(t.call(tess.id, 'app_screenshot', { channel: '#web-secret' }), e => status(e) === 403 && /member/.test((e as Error).message));
+  assert.deepEqual(requests, [], 'the window never moved');
+  // Itself and its own channel are fine.
+  await t.call(tess.id, 'app_screenshot', { agent: 'Tess', channel: mine.id });
+  const opened = requests[0] as Record<string, unknown>;
+  assert.deepEqual([opened.openAgent, opened.openChannel], [tess.id, mine.id]);
+  // GitHub: only its own project, and with none named, only its own.
+  t.calls.length = 0;
+  await assert.rejects(t.call(tess.id, 'gh_prs', { project: 'web' }), e => status(e) === 403);
+  await assert.rejects(t.call(tess.id, 'gh_runs', { project: 'web' }), e => status(e) === 403);
+  const all = await t.call(tess.id, 'gh_prs', {}) as { results: { project: string }[] };
+  assert.deepEqual(all.results.map(r => r.project), ['api']);
+  assert.deepEqual(t.calls, [], 'api has no GitHub remote, and web was never asked');
+  // The SuperAgent, and agents with no project, keep full scope.
+  const wide = await t.call(t.rhea.id, 'gh_prs', {}) as { results: { project: string }[] };
+  assert.deepEqual(wide.results.map(r => r.project), ['web', 'api']);
+  assert.ok(secret.id);
 });

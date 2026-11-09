@@ -65,7 +65,7 @@ import {
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool,
   appScreenshotInput, EYES_TOOLS, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
 } from './comms/tools.ts';
-import { capJson, GhError, ghArgs, logTail, repoFromRemote, runGh, type Exec } from './github.ts';
+import { capJson, GH_UNTRUSTED, GhError, ghArgs, logTail, repoFromRemote, runGh, type Exec } from './github.ts';
 import { IDLE_PROCESS_MS, PORT } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { capProfile, findPromotions, ProfileStore } from './userProfile.ts';
@@ -1836,6 +1836,24 @@ export class AgentManager {
     return remote ? repoFromRemote(remote) : null;
   }
 
+  /**
+   * What an agent may look at with the eyes tools. The SuperAgent, and an agent with no project
+   * (which already works with everyone), see every project; any other agent only its own project.
+   */
+  private eyesProjects(agent: Agent): Project[] | 'all' {
+    if (agent.role === 'super' || agent.projectId === null) return 'all';
+    const own = this.store.projects.get(agent.projectId);
+    return own ? [own] : [];
+  }
+
+  /** A project the agent may look at, by id or name; 403 for one outside its scope. */
+  private eyesProject(agent: Agent, ref: string): Project {
+    const project = this.projectRef(ref);
+    const scope = this.eyesProjects(agent);
+    if (scope !== 'all' && !scope.some(p => p.id === project.id)) throw new HttpError(403, `You work on ${scope[0]?.name ?? 'one project'}, so you can look only at its GitHub repo.`);
+    return project;
+  }
+
   private async eyesTool(agent: Agent, tool: EyesTool, args: Record<string, unknown>): Promise<unknown> {
     const bad = (message: string) => { throw new HttpError(400, message); };
     if (tool === 'app_screenshot') return this.appScreenshot(agent, args);
@@ -1846,32 +1864,35 @@ export class AgentManager {
         throw new HttpError(error instanceof GhError ? 409 : 500, (error as Error).message);
       }
     };
-    /** The repo for one named project, or a 409 that says why there is none. */
+    /** The repo for one named project in the agent's scope, or a 409 that says why there is none. */
     const oneRepo = async (ref: string) => {
-      const project = this.projectRef(ref);
+      const project = this.eyesProject(agent, ref);
       const repo = await this.projectRepo(project);
       if (!repo) throw new HttpError(409, `${project.name} has no GitHub remote (origin), so there is nothing to look up on GitHub.`);
       return { project, repo };
     };
+    // What GitHub returns is written by others (titles, bodies, reviews, logs): it goes under
+    // `untrusted`, with a line saying so, as agent text reaches the SuperAgent in its updates.
+    const outside = (key: string, out: { data: unknown; note?: string }) => ({ untrusted: { [key]: out.data }, ...(out.note ? { note: out.note } : {}) });
     if (tool === 'gh_prs' || tool === 'gh_issues') {
       const parsed = (tool === 'gh_prs' ? ghPrsInput : ghIssuesInput).safeParse(args);
-      if (!parsed.success) return bad('Give a project id or name, or nothing for every project.');
-      const projects = parsed.data.project ? [this.projectRef(parsed.data.project)] : [...this.store.projects.values()];
-      const results = [];
-      for (const project of projects) {
+      if (!parsed.success) return bad('Give a project id or name, or nothing for every project you may look at.');
+      const scope = this.eyesProjects(agent);
+      const projects = parsed.data.project ? [this.eyesProject(agent, parsed.data.project)] : scope === 'all' ? [...this.store.projects.values()] : scope;
+      // In parallel, so many projects stay within the tool's time.
+      const results = await Promise.all(projects.map(async project => {
         const repo = await this.projectRepo(project);
-        if (!repo) { results.push({ project: project.name, note: 'No GitHub remote (origin): skipped.' }); continue; }
+        if (!repo) return { project: project.name, note: 'No GitHub remote (origin): skipped.' };
         const out = capJson(await run(tool === 'gh_prs' ? ghArgs.prs(repo) : ghArgs.issues(repo)));
-        results.push({ project: project.name, repo, [tool === 'gh_prs' ? 'pullRequests' : 'issues']: out.data, ...(out.note ? { note: out.note } : {}) });
-      }
-      return { results };
+        return { project: project.name, repo, ...outside(tool === 'gh_prs' ? 'pullRequests' : 'issues', out) };
+      }));
+      return { about: GH_UNTRUSTED, results };
     }
     if (tool === 'gh_pr') {
       const parsed = ghPrInput.safeParse(args);
       if (!parsed.success) return bad('Give the project and the pull request number.');
       const { project, repo } = await oneRepo(parsed.data.project);
-      const out = capJson(await run(ghArgs.pr(repo, parsed.data.number)));
-      return { project: project.name, repo, pullRequest: out.data, ...(out.note ? { note: out.note } : {}) };
+      return { about: GH_UNTRUSTED, project: project.name, repo, ...outside('pullRequest', capJson(await run(ghArgs.pr(repo, parsed.data.number)))) };
     }
     if (tool === 'gh_runs') {
       const parsed = ghRunsInput.safeParse(args);
@@ -1879,8 +1900,7 @@ export class AgentManager {
       const { project, repo } = await oneRepo(parsed.data.project);
       let gh: string[];
       try { gh = ghArgs.runs(repo, { branch: parsed.data.branch, workflow: parsed.data.workflow }); } catch (error) { return bad((error as Error).message); }
-      const out = capJson(await run(gh));
-      return { project: project.name, repo, runs: out.data, ...(out.note ? { note: out.note } : {}) };
+      return { about: GH_UNTRUSTED, project: project.name, repo, ...outside('runs', capJson(await run(gh))) };
     }
     const parsed = ghRunInput.safeParse(args);
     if (!parsed.success) return bad('Give the project and the run id.');
@@ -1889,20 +1909,39 @@ export class AgentManager {
     const out = capJson(await run(ghArgs.run(repo, id)));
     const failed = parsed.data.failed_log && (out.data as { conclusion?: string } | null)?.conclusion === 'failure';
     const log = failed ? logTail(await run(ghArgs.runLog(repo, id)).catch(e => `(The failed log could not be read: ${(e as Error).message})`)) : undefined;
-    return { project: project.name, repo, run: out.data, ...(out.note ? { note: out.note } : {}), ...(log ? { failedLog: log.log, ...(log.note ? { logNote: log.note } : {}) } : {}) };
+    return {
+      about: GH_UNTRUSTED, project: project.name, repo,
+      untrusted: { run: out.data, ...(log ? { failedLog: log.log } : {}) },
+      ...(out.note || log?.note ? { note: [out.note, log?.note].filter(Boolean).join(' ') } : {}),
+    };
   }
 
   /**
    * A PNG of the desktop app's main window, or of the quick window while it shows, saved in the
-   * agent's home (screens/), never in a project. Opening a tab first changes what the user sees.
+   * agent's home (screens/), never in a project. Opening a tab first changes what the user sees, and
+   * stays within what the agent may already see: the SuperAgent anything; any other agent only
+   * itself or agents visible to it under the team setting, and only channels it is a member of.
    */
   private async appScreenshot(agent: Agent, args: Record<string, unknown>): Promise<unknown> {
     const parsed = appScreenshotInput.safeParse(args);
     if (!parsed.success) throw new HttpError(400, 'Choose window main or quick, and optionally an agent or channel to open first.');
     if (!this.browser.available) throw new HttpError(409, 'app_screenshot works only in the AgentsCode desktop app; this AgentsCode runs in a browser.');
     const input = parsed.data;
-    const openAgent = input.agent ? this.teammateOrSelf(input.agent).id : undefined;
-    const openChannel = input.channel ? this.channelByRef(input.channel).id : undefined;
+    const isSuper = agent.role === 'super';
+    let openAgent: string | undefined;
+    if (input.agent) {
+      const target = this.teammateOrSelf(input.agent);
+      if (!isSuper && target.id !== agent.id && !this.mailbox.teammates(agent.id).some(t => t.id === target.id)) {
+        throw new HttpError(403, `${target.name} is not visible to you under the team setting, so you cannot open its tab.`);
+      }
+      openAgent = target.id;
+    }
+    let openChannel: string | undefined;
+    if (input.channel) {
+      const channel = this.channelByRef(input.channel);
+      if (!isSuper && !this.channels.isMember(channel.id, agent.id)) throw new HttpError(403, `You are not a member of #${channel.name}, so you cannot open it.`);
+      openChannel = channel.id;
+    }
     const dir = path.join(this.homes.path(agent.id), 'screens');
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${input.window}.png`);

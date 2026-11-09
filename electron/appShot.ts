@@ -20,8 +20,10 @@ export interface AppShotDeps {
 
 export async function captureApp(deps: AppShotDeps, args: Record<string, unknown>): Promise<{ path: string; width: number; height: number; window: 'main' | 'quick' }> {
   const file = typeof args.path === 'string' ? args.path : '';
-  // The server picks the path, in the agent's home; anything else is refused.
-  if (!path.isAbsolute(file) || !file.endsWith('.png') || file.includes('\0')) throw new BrowserError('The screenshot path must be an absolute .png path.');
+  // The server picks the path, in the agent's home under screens/; anything else is refused.
+  if (!path.isAbsolute(file) || !file.endsWith('.png') || file.includes('\0') || path.basename(path.dirname(file)) !== 'screens') {
+    throw new BrowserError('The screenshot path must be an absolute .png path in a screens folder.');
+  }
   const which = args.window === 'quick' ? 'quick' : 'main';
   const win = which === 'quick' ? deps.quick() : deps.main();
   if (!win || win.isDestroyed()) {
