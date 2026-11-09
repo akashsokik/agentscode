@@ -21,7 +21,7 @@ import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
-import { railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
+import { AGENT_GROUP_LABEL, groupAgents, railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
 import { openAsks, openSuper } from '../super.ts';
 import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
 import { SUPER_LOOK } from '../../shared/avatar.ts';
@@ -136,16 +136,36 @@ function UnreadDot() {
   return <span role="img" className="size-1.5 shrink-0 rounded-full bg-accent" title="Unread" aria-label="Unread" />;
 }
 
-/** Agent status at the end of a card: MonoCode's terminal spinner, unread dot, or words. */
-function StatusMark({ agent, pending }: { agent: Agent; pending: boolean }) {
-  if (pending || agent.status === 'waiting') return <StatusLabel tone="warning" className="text-[11px] font-medium">Needs you</StatusLabel>;
-  if (agent.status === 'working') return <TerminalSpinner className="text-content/55" />;
-  if (agent.status === 'error') return <StatusLabel tone="danger" className="text-[11px]">Failed</StatusLabel>;
-  if (agent.unread) return <UnreadDot />;
-  return null;
+/**
+ * How an agent is doing, at the right of its name in a card or a sidebar row, always in the same
+ * place: Needs you, a spinner with how long it has worked, Failed, or how long ago it was active
+ * (with the unread dot when it has news).
+ */
+function AgentStateMark({ agent, pending, now }: { agent: Agent; pending: boolean; now: number }) {
+  if (pending || agent.status === 'waiting') return <span className="text-[11px] font-medium text-warning">Needs you</span>;
+  if (agent.status === 'working') {
+    const since = agent.turnStartedAt ? relativeTime(agent.turnStartedAt, now) : 'now';
+    return (
+      <span className="flex items-center gap-1.5 text-[11px] tabular-nums text-content/45" title="Working">
+        <TerminalSpinner className="text-content/55" />
+        {since === 'now' ? null : since}
+      </span>
+    );
+  }
+  if (agent.status === 'error') return <span className="text-[11px] text-danger">Failed</span>;
+  return (
+    <span className="flex items-center gap-1.5 text-[11px] tabular-nums text-content/40">
+      {agent.unread ? <UnreadDot /> : null}
+      {relativeTime(agent.lastActiveAt, now)}
+    </span>
+  );
 }
 
-/** A session card in MonoCode's sidebar: engine and model, title, then branch and status. */
+/**
+ * An agent in the workspace column. The agent leads: its avatar in a column of its own, then its
+ * name and role with its state at the right, what it is on, and, while it is active, one quiet line
+ * with the model and the branch.
+ */
 function AgentCard({ agent, selected, now, actions }: { agent: Agent; selected: boolean; now: number; actions: SidebarActions }) {
   const models = useApp(s => s.snapshot?.models[agent.engine]);
   const pending = useApp(s => Boolean(s.snapshot?.approvals.some(a => a.agentId === agent.id)));
@@ -154,6 +174,8 @@ function AgentCard({ agent, selected, now, actions }: { agent: Agent; selected: 
   const where = whereabouts(agent, projects);
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
   const task = agent.status === 'error' && agent.error ? agent.error : agent.currentTask?.summary || agent.lastSummary || 'No task yet';
+  const active = pending || agent.status === 'working' || agent.status === 'waiting';
+  const place = where && (where.branch || !where.own) ? where : null;
   return (
     <div className="group relative" onContextMenu={e => openContextMenu(e, setMenu)}>
       <button
@@ -161,38 +183,43 @@ function AgentCard({ agent, selected, now, actions }: { agent: Agent; selected: 
         onClick={e => (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'agent', agentId: agent.id })}
         title="Click to open, Cmd+click to open beside, right-click for more"
         aria-current={selected ? 'page' : undefined}
-        className={cx('flex w-full flex-col rounded-md border border-transparent px-2.5 py-2 text-left font-sans transition-colors duration-100', selected || menu ? 'bg-selection text-content' : 'text-content/80 hover:bg-content/5 hover:text-content')}
+        className={cx('grid w-full grid-cols-[28px_minmax(0,1fr)] items-start gap-x-2.5 rounded-lg px-2.5 py-2 text-left font-sans transition-colors duration-100', selected || menu ? 'bg-selection text-content' : 'text-content/80 hover:bg-content/5 hover:text-content')}
       >
-        {/* MonoCode's session card: engine and model, then the name, then what it is on. */}
-        <span className="flex items-center gap-2">
-          <span className="flex min-w-0 flex-1 items-center gap-1.5">
-            <AgentAvatar agent={agent} className="size-3.5" />
-            <span className="min-w-0 truncate text-[11px] text-content/50">{modelLabel(agent, models)}</span>
+        <AgentAvatar agent={agent} className="mt-px size-7" />
+        <span className="flex min-w-0 flex-col">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="min-w-0 truncate text-[13px] font-semibold leading-[18px] text-content">{agent.name}</span>
+            <span className="shrink-0 text-[11.5px] text-content/40">{rolePreset(agent.role).name}</span>
+            {/* The ... button takes this spot on hover. */}
+            <span className={cx('ml-auto flex shrink-0 items-center gap-1.5 pl-1.5 group-hover:invisible group-has-[[data-card-more]:focus-visible]:invisible', menu && 'invisible')}>
+              {agent.queued > 0 ? <span className="rounded-full bg-content/10 px-1.5 text-[10px] tabular-nums text-content/70" title={`${agent.queued} ${agent.queued === 1 ? 'message' : 'messages'} waiting`}>{agent.queued}</span> : null}
+              <AgentStateMark agent={agent} pending={pending} now={now} />
+            </span>
           </span>
-          {/* The ... button takes this spot on hover. */}
-          <span className={cx('shrink-0 text-[11px] tabular-nums text-content/45 group-hover:invisible group-has-[[data-card-more]:focus-visible]:invisible', menu && 'invisible')}>{relativeTime(agent.lastActiveAt, now)}</span>
-        </span>
-        <span className="mt-1 flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate text-[13px] font-semibold leading-snug text-content">{agent.name}</span>
-          <span className="shrink-0 text-[11px] text-content/40">{rolePreset(agent.role).name}</span>
-          <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            {agent.queued > 0 ? <span className="rounded-full bg-content/10 px-1.5 text-[10px] tabular-nums text-content/70" title={`${agent.queued} ${agent.queued === 1 ? 'message' : 'messages'} waiting`}>{agent.queued}</span> : null}
-            <StatusMark agent={agent} pending={pending} />
+          <span className={cx('mt-px line-clamp-2 min-w-0 break-words text-[12px] leading-[17px]', agent.currentTask ? 'text-content/70' : 'text-content/45')}>
+            {from ? <span className="text-content/50">from {from}: </span> : null}
+            {task}
           </span>
+          {active ? (
+            <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-content/40" title={place ? `Working in ${place.project}${place.branch ? ` on ${place.branch}` : ''}` : undefined}>
+              <span className="shrink-0">{modelLabel(agent, models)}</span>
+              {place ? (
+                <>
+                  <span aria-hidden className="shrink-0 text-content/20">/</span>
+                  <GitBranch className="size-3 shrink-0" strokeWidth={1.75} />
+                  {/* The card sits under its own project already, so only another project is named. */}
+                  {place.own ? null : <span className="max-w-[50%] shrink-0 truncate text-content/55">{place.project}</span>}
+                  {place.branch ? <span className="min-w-0 truncate">{place.branch}</span> : null}
+                </>
+              ) : agent.status === 'working' && agent.activity ? (
+                <>
+                  <span aria-hidden className="shrink-0 text-content/20">/</span>
+                  <span className="min-w-0 truncate">{agent.activity}</span>
+                </>
+              ) : null}
+            </span>
+          ) : null}
         </span>
-        <span className={cx('mt-1 min-w-0 truncate text-[12px] leading-snug', agent.currentTask ? 'text-content/70' : 'text-content/45')}>
-          {from ? <span className="text-content/50">from {from}: </span> : null}
-          {task}
-        </span>
-        {where && (where.branch || !where.own) ? (
-          <span className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-content/45" title={`Working in ${where.project}${where.branch ? ` on ${where.branch}` : ''}`}>
-            <GitBranch className="size-3 shrink-0" strokeWidth={1.75} />
-            {/* The card sits under its own project already, so only another project is named. */}
-            {where.own ? null : <span className="max-w-[60%] shrink-0 truncate text-content/60">{where.project}</span>}
-            {where.own || !where.branch ? null : <span aria-hidden className="shrink-0 text-content/25">/</span>}
-            {where.branch ? <span className="min-w-0 truncate">{where.branch}</span> : null}
-          </span>
-        ) : agent.status === 'working' && agent.activity ? <span className="mt-1 min-w-0 truncate text-[11px] text-content/45">{agent.activity}</span> : null}
       </button>
       <button
         type="button"
@@ -416,7 +443,8 @@ function AgentRailMark({ status, compact = false }: { status: RailAgentStatus; c
 
 /** An agent with no project in the navigation column: its engine and name; it works across all projects. */
 function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: boolean; actions: SidebarActions }) {
-  const status = railAgentStatus(agent, usePendingApproval(agent.id));
+  const pending = usePendingApproval(agent.id);
+  const now = useNow();
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
   return (
     <div className="group relative" onContextMenu={e => openContextMenu(e, setMenu)}>
@@ -425,12 +453,15 @@ function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: bo
         onClick={e => openRailAgent(agent, e)}
         title={`${agent.name}, works across all projects. Click to open, Cmd+click to open beside, right-click for more.`}
         aria-current={selected ? 'page' : undefined}
-        className={cx(railRow(status !== null || Boolean(menu)), railRowState(selected || Boolean(menu)))}
+        className={cx(railRow(Boolean(menu)), railRowState(selected || Boolean(menu)))}
       >
-        <AgentAvatar agent={agent} className="size-4" />
+        <AgentAvatar agent={agent} className="size-5" />
         <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', agent.unread ? 'font-semibold text-content' : 'font-medium')}>{agent.name}</span>
+        {/* How it is doing, in the same place on every row; the ... button takes the spot on hover. */}
+        <span className={cx('flex shrink-0 items-center group-hover:hidden group-has-[[data-card-more]:focus-visible]:hidden', menu && 'hidden')}>
+          <AgentStateMark agent={agent} pending={pending} now={now} />
+        </span>
       </button>
-      <RowStatus hidden={Boolean(menu)}><AgentRailMark status={status} /></RowStatus>
       <RowMore label={`${agent.name} actions`} open={Boolean(menu)} onClick={e => toggleMenu(e, setMenu)} />
       {menu ? <AgentMenu agent={agent} anchor={menu} actions={actions} onClose={() => setMenu(null)} /> : null}
     </div>
@@ -615,6 +646,8 @@ function WorkspaceColumn({ actions, project, titleBarAbove }: { actions: Sidebar
   const [query, setQuery] = useState('');
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
   const selected = focusedAgentId(layout);
+  const approvals = useApp(s => s.snapshot?.approvals);
+  const pendingIds = useMemo(() => new Set((approvals ?? []).map(a => a.agentId)), [approvals]);
   const mine = useMemo(() => (agents ?? []).filter(a => a.projectId === project?.id).sort((a, b) => a.createdAt - b.createdAt), [agents, project?.id]);
   const column = useColumnWidth('workspace', window.innerWidth < 1200 ? 240 : 260, 220, 0.4);
 
@@ -683,7 +716,16 @@ function WorkspaceColumn({ actions, project, titleBarAbove }: { actions: Sidebar
             </div>
             <div className="sidebar-session-scroll min-h-0 flex-1 overflow-y-auto overscroll-none">
               <div className="flex flex-col gap-0.5 p-1.5 pb-10">
-                {shown.map(agent => <AgentCard key={agent.id} agent={agent} selected={agent.id === selected} now={now} actions={actions} />)}
+                {groupAgents(shown, pendingIds).map(group => (
+                  <section key={group.key} aria-label={AGENT_GROUP_LABEL[group.key]} className="flex flex-col gap-0.5">
+                    {/* A quiet label, no rule: the list sorts itself by what wants attention. */}
+                    <h3 className="flex items-center gap-1.5 px-2.5 pb-0.5 pt-2 text-[11px] font-medium text-content/40">
+                      {AGENT_GROUP_LABEL[group.key]}
+                      <span className="font-normal tabular-nums text-content/25">{group.agents.length}</span>
+                    </h3>
+                    {group.agents.map(agent => <AgentCard key={agent.id} agent={agent} selected={agent.id === selected} now={now} actions={actions} />)}
+                  </section>
+                ))}
                 {!mine.length ? (
                   <button type="button" onClick={() => actions.newAgent(project.id)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[13px] text-content/50 transition-colors duration-100 hover:bg-content/5 hover:text-content">
                     <Plus className="size-3.5" strokeWidth={1.75} /> Add an agent

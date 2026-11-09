@@ -103,3 +103,26 @@ export function teamStatus(agents: readonly Agent[], approvals: readonly Pick<Ap
 export function targetAgentId(target: QuickTarget, superId: string | null): string | null {
   return target.kind === 'super' ? superId : target.kind === 'agent' ? target.agentId : null;
 }
+
+/**
+ * Where Home's composer sends: a message that opens with @Name goes to that agent (or the
+ * SuperAgent), with the mention taken off since it only addressed it; anything else goes to the
+ * chip that is picked. The longest matching name wins, so "@Agent 12" is not read as "Agent 1".
+ */
+export function homeTarget(rawText: string, agents: readonly Pick<Agent, 'id' | 'name' | 'role'>[], picked: QuickTarget): { target: QuickTarget; text: string } {
+  const text = rawText.trim();
+  if (!text.startsWith('@')) return { target: picked, text };
+  const rest = text.slice(1);
+  const lower = rest.toLowerCase();
+  const named = [...agents.map(a => ({ name: a.name, target: (a.role === 'super' ? { kind: 'super' } : { kind: 'agent', agentId: a.id }) as QuickTarget })), { name: 'SuperAgent', target: { kind: 'super' } as QuickTarget }]
+    .filter(entry => entry.name && lower.startsWith(entry.name.toLowerCase()) && !/[\p{L}\p{N}_-]/u.test(rest.charAt(entry.name.length)))
+    .sort((a, b) => b.name.length - a.name.length)[0];
+  if (!named) return { target: picked, text };
+  return { target: named.target, text: rest.slice(named.name.length).replace(/^[\s,:]+/, '') };
+}
+
+/** Home's "pick up where you left off": the agents that need you first, then the most recently active. */
+export function homeRecent<A extends Pick<Agent, 'id' | 'status' | 'lastActiveAt'>>(agents: readonly A[], pendingIds: ReadonlySet<string>, limit: number): A[] {
+  const needs = (a: A) => (a.status === 'waiting' || pendingIds.has(a.id) ? 0 : 1);
+  return [...agents].sort((a, b) => needs(a) - needs(b) || b.lastActiveAt - a.lastActiveAt).slice(0, limit);
+}

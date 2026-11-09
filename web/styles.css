@@ -555,9 +555,25 @@ html.theme-light .sidebar-glass {
     transition: none;
   }
 }
+/* The composer floats over the conversation, like the quick composer: a soft radius, a frosted
+   fill and a shadow that lifts it off the page. The conversation fades out before it reaches it. */
 [data-composer-box] {
-  --composer-radius: var(--radius-lg, 0.5rem);
-  --composer-blur: var(--blur-sm);
+  --composer-radius: 0.875rem;
+  --composer-blur: 24px;
+}
+
+html:not(.theme-light) [data-composer-box] {
+  border-color: color-mix(in srgb, var(--color-content) 11%, transparent);
+  box-shadow:
+    0 18px 48px rgb(0 0 0 / 0.45),
+    0 2px 8px rgb(0 0 0 / 0.3),
+    inset 0 1px 0 color-mix(in srgb, var(--color-content) 5%, transparent);
+}
+
+.transcript-fade {
+  --transcript-fade: 2.5rem;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--transcript-fade)), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--transcript-fade)), transparent);
 }
 
 /* MonoCode's name pill under a Mono's mascot (MonoHeader); a channel's name under its mark. */
@@ -576,8 +592,6 @@ html.theme-light .mono-pill {
 
 /* The inset layout rounds the box like a multi-line user message. */
 html.layout-inset [data-composer-box] {
-  --composer-radius: var(--radius-xl, 0.75rem);
-  --composer-blur: 24px;
   border-radius: var(--composer-radius);
 }
 
@@ -589,7 +603,7 @@ html.layout-inset [data-composer-box] {
   z-index: -1;
   clip-path: inset(var(--composer-blur-bleed) round var(--composer-radius));
   pointer-events: none;
-  background: color-mix(in srgb, var(--color-content) 3%, transparent);
+  background: color-mix(in srgb, var(--color-content) 5%, transparent);
   -webkit-backdrop-filter: blur(var(--composer-blur));
   backdrop-filter: blur(var(--composer-blur));
 }
@@ -853,6 +867,11 @@ html.theme-light .activity-tile[data-face="bare"] {
   background: none;
   box-shadow: none;
   color: var(--color-content);
+}
+/* The avatar fills the transcript's 22px gutter, so the bare tile is square. */
+.activity-tile[data-face="bare"] {
+  height: 22px;
+  overflow: visible;
 }
 /* The avatar and the chevron trade places where they stand (a fade), so neither slides over the label. */
 .activity-tile[data-face="bare"] .activity-tile-mark,
@@ -1331,9 +1350,21 @@ html.theme-light .activity-tile[data-face="neutral"] {
   animation: word-fade-in 320ms cubic-bezier(0.33, 0.53, 0.67, 1) both;
 }
 
-/* A finished turn's actions wait for its reply's last word, then fade in. */
+/* A finished turn's actions wait for its reply's last word, then fade in. They stay quiet until
+   the turn is pointed at or one of them has focus, so a page of turns is not a page of icons. */
 [data-turn-actions] {
   transition: opacity 200ms ease-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-turn-actions] {
+    opacity: 0.55;
+  }
+
+  .transcript-turn:hover:not(:has(.word-fading)) [data-turn-actions],
+  [data-turn-actions]:focus-within {
+    opacity: 1;
+  }
 }
 
 .transcript-turn:has(.word-fading) [data-turn-actions] {

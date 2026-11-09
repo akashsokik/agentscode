@@ -93,6 +93,41 @@ export function messageTag(message: PeerMessage): string {
   return message.expectsReply ? 'Question' : 'Note';
 }
 
+const ASKED: Record<DelegationKind, string> = {
+  implementation: 'asked for an implementation',
+  testing: 'asked for testing',
+  validation: 'asked for validation',
+  review: 'asked for a review',
+};
+
+/**
+ * What the sender did, as the words after its name in a transcript header: "SuperAgent asked for an
+ * implementation", "Ada reported back". `channel` is the channel's name when it came through one.
+ */
+export function messagePhrase(message: PeerMessage, channel?: string): string {
+  if (channel) return message.replyTo ? `answered in #${channel}` : `posted in #${channel}`;
+  if (message.report) return 'reported back';
+  if (message.delegation) return ASKED[message.delegation.kind];
+  if (message.replyTo) return 'replied';
+  return message.expectsReply ? 'asked' : 'sent a note';
+}
+
+/**
+ * A message in an agent's own work trail, as one phrase from that agent's side: "Reported to
+ * SuperAgent", "Replied to Ada", "Note from Rhea".
+ */
+export function trailPhrase(message: PeerMessage, selfId: string, channel?: string): string {
+  const sent = message.toAgentId !== selfId;
+  if (channel) return sent ? `Posted in #${channel}` : `${message.fromName} in #${channel}`;
+  if (sent) {
+    if (message.report) return `Reported to ${message.toName}`;
+    if (message.delegation) return `${kindWords(message.delegation.kind)} for ${message.toName}`;
+    if (message.replyTo) return `Replied to ${message.toName}`;
+    return message.expectsReply ? `Asked ${message.toName}` : `Note to ${message.toName}`;
+  }
+  return `${messageTag(message)} from ${message.fromName}`;
+}
+
 /** The message's whole body as Markdown, for when it is expanded. */
 export function messageMarkdown(message: PeerMessage): string {
   if (message.report) {

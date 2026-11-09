@@ -121,7 +121,7 @@ export function AccessPicker({
             : `flex h-6.5 min-w-0 max-w-[min(13rem,100%)] items-center gap-1 rounded-md px-1.5 ${
                 open
                   ? "bg-selection text-content"
-                  : "bg-selection text-content hover:bg-selection-hover"
+                  : "text-content/65 hover:bg-selection-hover hover:text-content"
               }`
         }
       >

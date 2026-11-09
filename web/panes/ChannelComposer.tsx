@@ -156,7 +156,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
 
   return (
     <div data-composer className="relative mx-auto w-full max-w-3xl shrink-0 p-1.5 pt-0">
-      <div ref={box} data-composer-box className="relative z-10 rounded-lg border border-content/10 has-focus:border-content/20" {...images.dropProps}>
+      <div ref={box} data-composer-box className="relative z-10 rounded-[14px] border border-content/10 has-focus:border-content/20" {...images.dropProps}>
         <ComposerImageTray images={images} />
         <textarea
           ref={field}

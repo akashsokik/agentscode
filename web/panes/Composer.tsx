@@ -31,6 +31,7 @@ import { attempt, useApp } from '../store.ts';
 import { MenuLabel, MenuRow } from '../ui/common.tsx';
 import { AccessPicker } from '../mono/AccessPicker.tsx';
 import { ContextMeter } from '../mono/ContextMeter.tsx';
+import { contextPercent } from '../../shared/contextUsage.ts';
 import { ArrowUp, Folder, GitBranch, ImagePlus, MoreHorizontal, RotateCcw, Settings, Square } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { QuestionForm } from '../mono/QuestionForm.tsx';
@@ -45,7 +46,7 @@ function patch(agent: Agent, change: AgentPatch) {
   return attempt(() => api.updateAgent(agent.id, change));
 }
 
-/** MonoCode's ToolButton. */
+/** MonoCode's ToolButton, as a ghost: no plate until it is pointed at or on. */
 export function ToolButton({ active, disabled, label, onClick, children }: { active?: boolean; disabled?: boolean; label: string; onClick?: () => void; children: ReactNode }) {
   return (
     <button
@@ -55,25 +56,30 @@ export function ToolButton({ active, disabled, label, onClick, children }: { act
       disabled={disabled}
       onClick={onClick}
       className={`grid size-6.5 shrink-0 place-items-center rounded-md transition-colors duration-150 ${
-        active ? 'bg-selection-emphasis text-content' : 'bg-selection text-content/50 hover:bg-selection-hover hover:text-content'
-      } disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-content/50`}
+        active ? 'bg-selection-emphasis text-content' : 'text-content/55 hover:bg-selection-hover hover:text-content'
+      } disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-content/55`}
     >
       {children}
     </button>
   );
 }
 
+/** A key name in the composer's hints. */
+function KeyHint({ children }: { children: ReactNode }) {
+  return <kbd className="mr-1 rounded bg-content/[0.07] px-1 py-px font-sans text-content/50">{children}</kbd>;
+}
+
 /** MonoCode's ComposerAction: send, or stop while the agent works. */
 function ComposerAction({ busy, hasValue, onSend, onStop }: { busy: boolean; hasValue: boolean; onSend: () => void; onStop: () => void }) {
   if (busy && !hasValue) {
     return (
-      <button type="button" title="Stop" aria-label="Stop" onClick={onStop} className="primary-action grid size-6.5 place-items-center rounded-md transition-[background-color,transform] duration-150 active:scale-[0.94]">
+      <button type="button" title="Stop" aria-label="Stop" onClick={onStop} className="primary-action grid size-6.5 place-items-center rounded-lg transition-[background-color,transform] duration-150 active:scale-[0.94]">
         <Square className="size-2.5 fill-current" strokeWidth={0} />
       </button>
     );
   }
   return (
-    <button type="button" title={busy ? 'Queue message' : 'Send'} aria-label={busy ? 'Queue message' : 'Send'} disabled={!hasValue} onClick={onSend} className="composer-send primary-action grid size-6.5 place-items-center rounded-md transition-[background-color,transform] duration-150 active:scale-[0.94] disabled:cursor-default disabled:active:scale-100">
+    <button type="button" title={busy ? 'Queue message' : 'Send'} aria-label={busy ? 'Queue message' : 'Send'} disabled={!hasValue} onClick={onSend} className="composer-send primary-action grid size-6.5 place-items-center rounded-lg transition-[background-color,transform] duration-150 active:scale-[0.94] disabled:cursor-default disabled:active:scale-100">
       <ArrowUp className="size-3.5" strokeWidth={2.25} />
     </button>
   );
@@ -280,13 +286,14 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
     field.current?.focus();
   };
 
+  const contextShare = contextPercent(agent.context);
   const where = agent.worktree?.cwd ?? project?.path ?? (agent.projectId === null ? noProjectFolder(agent.home) : '');
   return (
     <div data-composer className="@container/composer relative mx-auto w-full max-w-3xl shrink-0 p-1.5 pt-0">
       {question ? <div className="px-1.5 pb-1.5"><QuestionPrompt approval={question} /></div> : null}
       <div
         data-composer-box
-        className="relative z-10 rounded-lg border border-content/10"
+        className="relative z-10 rounded-[14px] border border-content/10"
         onDragOver={(e) => {
           if (!dragHasFiles(e.dataTransfer)) return;
           e.preventDefault();
@@ -340,6 +347,8 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
           value={text}
           rows={2}
           aria-label={`Message ${agent.name}`}
+          // Nothing to send: Enter here may answer a waiting approval instead (Transcript's ApprovalRow).
+          data-idle={!text.trim() && !images.images.length ? '' : undefined}
           aria-autocomplete="list"
           aria-expanded={slashOpen || mentionOpen}
           onChange={(e) => {
@@ -402,12 +411,19 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
               {agent.role === 'super' ? null : <AccessPicker value={agent.autonomy} busy={busy} onChange={(autonomy) => void patch(agent, { autonomy })} onClose={() => field.current?.focus()} />}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-2.5">
+            {/* The quick composer's key hints, while there is something to send and room to say it. */}
+            {text.trim() ? (
+              <span aria-hidden className="flex items-center gap-2.5 font-sans text-[11px] text-content/35 @max-xl/composer:hidden">
+                <span><KeyHint>Enter</KeyHint>{busy ? 'queue' : 'send'}</span>
+                <span><KeyHint>Shift Enter</KeyHint>new line</span>
+              </span>
+            ) : null}
             <ComposerAction busy={busy} hasValue={canSend} onSend={() => void send()} onStop={() => void attempt(() => api.stop(agent.id))} />
           </div>
         </div>
       </div>
-      <div data-composer-workspace-bar className="flex min-w-0 items-center gap-2.5 overflow-hidden pl-[15px] pr-[15px] pt-1.5 font-sans text-[12px] text-content/50">
+      <div data-composer-workspace-bar className="flex min-w-0 items-center gap-2.5 overflow-hidden pl-[15px] pr-[15px] pt-2 font-sans text-[11.5px] text-content/40">
         <span className="flex min-w-0 items-center gap-1.5" title={where}>
           <Folder className="size-3.5 shrink-0" strokeWidth={1.75} />
           <span className="min-w-0 truncate">{shortPath(where, home)}</span>
@@ -420,6 +436,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-2.5">
           {agent.queued > 0 ? <span className="shrink-0">{agent.queued} queued</span> : null}
+          {contextShare !== null ? <span className="shrink-0 tabular-nums">{contextShare}% context</span> : null}
           {/* Only Claude reports its context; a fresh Claude session shows a bare ring. */}
           <ContextMeter usage={agent.context} empty={agent.engine === 'claude' && !agent.sessionId && !agent.context} />
         </span>

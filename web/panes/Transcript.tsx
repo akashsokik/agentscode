@@ -25,14 +25,15 @@ import { distanceFromEnd, Follower, scrollsUp, WHEEL_HOLD_MS } from '../transcri
 import { Markdown } from '../ui/Markdown.tsx';
 import { MentionText } from '../ui/MentionText.tsx';
 import { reducedMotion, staggerWordFades, WORD_FADE_MS } from '../ui/wordFade.ts';
-import { ChipButton, Empty, INPUT, Loading, StatusLabel, TextButton } from '../ui/common.tsx';
-import { AiIdea, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, CircleDashed, Copy, Eraser, File, Folder, MessageSquare, Route, Search, Sparkles, X } from '../mono/icons.tsx';
+import { ChipButton, cx, Empty, INPUT, Loading, TextButton } from '../ui/common.tsx';
+import { AiIdea, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, Copy, Eraser, File, Folder, MessageSquare, Route, Search, Sparkles, X } from '../mono/icons.tsx';
 import { MarkTile, PhaseTile } from '../mono/ActivityTile.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { MessageImages } from './ImageViews.tsx';
-import { Comms, DelegationRow, PeerPrompt, PeerTrailRow } from './PeerMessages.tsx';
+import { Comms, DelegationRow, EDGE, GUTTER, PeerPrompt, PeerTrailRow } from './PeerMessages.tsx';
+import { APPROVAL_KEY_GUARD_MS, approvalKeyAction, approvalText } from '../approvalText.ts';
 import { commsIndex, repeatedPromptTurns } from '../peerText.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 
@@ -74,9 +75,9 @@ function formatElapsed(elapsedMs: number | null): string | null {
   return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-/** MonoCode's turn clock: "Opus 4.5 worked for 8s", or "Worked for 8s" when the model has no name. */
-function formatWorkingDuration(elapsedMs: number | null, done = false, who?: string): string {
-  const verb = who ? `${who} ${done ? 'worked' : 'working'}` : done ? 'Worked' : 'Working';
+/** The turn clock, as the words after the agent's name: "worked for 8s", "working for 12s". */
+function formatWorkingDuration(elapsedMs: number | null, done = false): string {
+  const verb = done ? 'worked' : 'working';
   const elapsed = formatElapsed(elapsedMs);
   if (elapsed == null) return done ? verb : `${verb}…`;
   return `${verb} for ${elapsed}`;
@@ -103,11 +104,9 @@ function useElapsedFrom(startedAt: number | undefined, paused: boolean): number 
 export function DaySeparator({ at }: { at: number }) {
   const [day, time] = dayStamp(at);
   return (
-    <div role="separator" aria-label={`${day} ${time}`} data-day-separator className="flex items-center justify-center px-4 pb-3 pt-6 font-sans text-[12px]">
-      <span className="rounded-full bg-content/[0.07] px-3 py-1 leading-4">
-        <span className="font-semibold text-content/75">{day}</span>{' '}
-        <span className="text-content/45">{time}</span>
-      </span>
+    // Plain text, no pill: each header under it carries its own time.
+    <div role="separator" aria-label={`${day} ${time}`} title={`${day} ${time}`} data-day-separator className="px-4 pb-3 pt-6 text-center font-sans text-[11.5px] leading-4 text-content/40">
+      {day}
     </div>
   );
 }
@@ -509,6 +508,12 @@ function useLivePhaseScroll(el: HTMLDivElement | null, enabled: boolean, steps: 
   }, [el, enabled]);
 }
 
+/** A group that is one teammate message and nothing else (a delegation this agent sent has its own row). */
+function isLonePeerRow(entries: Entry[], selfId: string): boolean {
+  const entry = entries[0];
+  return entries.length === 1 && entry.kind === 'peer' && Boolean(entry.peer) && !(entry.peer!.delegation && entry.peer!.fromAgentId === selfId);
+}
+
 /**
  * MonoCode's ActivityPhaseGroup: a run of work under one line saying what it adds up to, led by a
  * tile coloured by that work, its steps on a rail dropping from the tile. The group the agent is in
@@ -516,7 +521,7 @@ function useLivePhaseScroll(el: HTMLDivElement | null, enabled: boolean, steps: 
  * moves on it folds back to its line. A click overrides either way. Even one tool call gets its
  * line ("Ran a command"), as in MonoCode, so a run of chips never floats without its verb.
  */
-function ActivityPhaseGroup({ entries, active, selfId }: { entries: Entry[]; active: boolean; selfId: string }) {
+function ActivityPhaseGroup({ entries, active, selfId, trailing }: { entries: Entry[]; active: boolean; selfId: string; trailing?: ReactNode }) {
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? active;
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
@@ -528,6 +533,8 @@ function ActivityPhaseGroup({ entries, active, selfId }: { entries: Entry[]; act
 
   // A lone message or status line is its own summary; a line over it would say it twice.
   if (entries.length === 1 && entries[0].kind !== 'tool') {
+    // A teammate message on its own is a quiet line with no tile: an arrow, who, and how it came out.
+    if (isLonePeerRow(entries, selfId)) return <PeerTrailRow message={entries[0].peer!} selfId={selfId} lead trailing={trailing} />;
     return (
       <div className="flex min-w-0 items-start gap-2">
         <span className="mt-[5px]"><PhaseTile kind={kind} folds={false} /></span>
@@ -606,16 +613,24 @@ function TurnRow({ folded, children }: { folded: boolean; children: ReactNode | 
 }
 
 /** MonoCode's LiveFoldTitle: the shimmering clock while the agent works. */
-function LiveFoldTitle({ startedAt, paused, waitingLabel, who }: { startedAt?: number; paused: boolean; waitingLabel?: string; who?: string }) {
+function LiveFoldTitle({ startedAt, paused, waitingLabel }: { startedAt?: number; paused: boolean; waitingLabel?: string }) {
   const elapsedMs = useElapsedFrom(startedAt, paused);
-  const text = paused ? (waitingLabel ?? 'Waiting for approval') : formatWorkingDuration(elapsedMs, false, who);
-  return <Shimmer className="min-w-0 truncate font-sans text-sm" duration={1}>{text}</Shimmer>;
+  const text = paused ? (waitingLabel ?? 'waiting for approval') : formatWorkingDuration(elapsedMs, false);
+  return <Shimmer className="min-w-0 truncate" duration={1}>{text}</Shimmer>;
 }
 
-/** MonoCode's WorkFoldLine: the provider's tile and the clock, with the work folded behind it. */
-function WorkFoldLine({ title, agent, live, expandable, open, onToggle }: {
+/**
+ * MonoCode's WorkFoldLine, read as a sentence: the agent's avatar in the gutter, its name, the clock
+ * ("worked for 2m 17s"), the model as a quiet suffix and the time the turn landed at the right. The
+ * work folds behind it.
+ */
+function WorkFoldLine({ title, agent, model, at, live, expandable, open, onToggle }: {
   title: ReactNode;
   agent: Agent;
+  /** The model's name, when it has one. */
+  model?: string;
+  /** When the turn settled. */
+  at?: number;
   live: boolean;
   expandable: boolean;
   open: boolean;
@@ -623,9 +638,16 @@ function WorkFoldLine({ title, agent, live, expandable, open, onToggle }: {
 }) {
   // Only a fold that opens shows the chevron; a line over work that has not folded keeps the mark.
   // Only the turn running now moves and shows the mood; past turns stay calm and still.
-  const icon = <MarkTile mark={<AgentAvatar agent={live ? agent : { id: agent.id, role: agent.role, avatar: agent.avatar }} animate={live} className="size-[18px]" />} folds={expandable} open={open} />;
-  const label = live ? title : (
-    <span className="min-w-0 flex-1 truncate font-sans text-sm text-content/50 transition-colors duration-200 group-hover:text-content/80">{title}</span>
+  const icon = <MarkTile mark={<AgentAvatar agent={live ? agent : { id: agent.id, role: agent.role, avatar: agent.avatar }} animate={live} className="size-[22px]" />} folds={expandable} open={open} />;
+  const label = (
+    <span className="flex min-w-0 flex-1 items-center gap-1.5 font-sans text-[12.5px]">
+      <span className="shrink-0 font-semibold text-content/90">{agent.name}</span>
+      {live ? title : <span className="min-w-0 truncate text-content/45 transition-colors duration-200 group-hover:text-content/80">{title}</span>}
+      {model ? <span className="shrink-0 text-content/30">· {model}</span> : null}
+      {at != null ? (
+        <time dateTime={new Date(at).toISOString()} title={new Date(at).toLocaleString()} className="ml-auto shrink-0 pl-2 text-[11.5px] tabular-nums text-content/30">{formatClockTime(at)}</time>
+      ) : null}
+    </span>
   );
   const row = `tile-host flex w-full min-w-0 items-center gap-2 px-4 py-1 text-left${open ? ' zen-fold-drop' : ''}`;
   if (!expandable) {
@@ -661,82 +683,158 @@ function TurnMetricsBadge({ meta }: { meta?: TurnMeta }) {
 }
 
 /** MonoCode's TurnDuration: what you can do with a finished turn, and when it landed. */
-function TurnDuration({ elapsedMs, labelHidden, copyText, completedAt, meta, agent }: {
+function TurnDuration({ elapsedMs, labelHidden, copyText, completedAt, meta, agent, inline = false }: {
   elapsedMs: number | null;
+  /** The fold line above already says who worked for how long, and when. */
   labelHidden: boolean;
   copyText?: string;
   completedAt?: number;
   meta?: TurnMeta;
   agent: Agent;
+  /** Just the buttons, to sit at the right of the turn's closing row. */
+  inline?: boolean;
 }) {
-  const label = formatWorkingDuration(elapsedMs, true, useModelName(agent));
+  const label = `${agent.name} ${formatWorkingDuration(elapsedMs, true)}`;
   const dot = <span aria-hidden className="size-[3px] shrink-0 rounded-full bg-content/25" />;
+  const buttons = (
+    <span className="flex shrink-0 items-center gap-1">
+      {copyText ? <CopyTurnButton text={copyText} /> : inline ? null : <Check className="size-3.5" strokeWidth={1.75} />}
+      <TurnMetricsBadge meta={meta} />
+    </span>
+  );
+  // Quiet until the turn is pointed at (styles.css, [data-turn-actions]).
+  if (inline) return <span data-turn-actions aria-label={label} className="flex shrink-0 items-center font-sans text-sm text-content/40">{buttons}</span>;
   return (
-    <div data-turn-actions aria-label={label} className="flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden px-4 pb-3 pt-1 font-sans text-sm text-content/40">
-      <span className="flex shrink-0 items-center gap-1">
-        {copyText ? <CopyTurnButton text={copyText} /> : <Check className="size-3.5" strokeWidth={1.75} />}
-        <TurnMetricsBadge meta={meta} />
-      </span>
+    <div data-turn-actions aria-label={label} className={cx(EDGE, 'flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden pb-3 pt-1 font-sans text-sm text-content/40')}>
+      {buttons}
       {labelHidden ? null : (
-        <span className="flex min-w-0 items-center gap-2.5">
-          {dot}
-          <span className="flex min-w-0 items-center gap-1.5">
-            <AgentAvatar agent={agent} className="size-3.5" animate={false} />
-            <span className="min-w-0 truncate" title={label}>{label}</span>
+        <>
+          <span className="flex min-w-0 items-center gap-2.5">
+            {dot}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <AgentAvatar agent={agent} className="size-3.5" animate={false} />
+              <span className="min-w-0 truncate" title={label}>{label}</span>
+            </span>
           </span>
-        </span>
+          {completedAt != null ? (
+            <span className="flex shrink-0 items-center gap-2.5">
+              {dot}
+              <span className="shrink-0 text-content/35">{formatClockTime(completedAt)}</span>
+            </span>
+          ) : null}
+        </>
       )}
-      {completedAt != null ? (
-        <span className="flex shrink-0 items-center gap-2.5">
-          {dot}
-          <span className="shrink-0 text-content/35">{formatClockTime(completedAt)}</span>
-        </span>
-      ) : null}
     </div>
   );
 }
 
-/** MonoCode's ApprovalControls, for a tool call or plan waiting on the user. Deny can carry a note. */
+/** Whether a menu, picker or dialog is open: then Enter and Esc belong to it. */
+function overlayOpen(): boolean {
+  return Boolean(document.querySelector('[role="dialog"], [role="menu"], [role="listbox"], [aria-modal="true"]'));
+}
+
+/**
+ * A tool call or plan waiting on the user, in the conversation's own flow: the agent's avatar in the
+ * gutter, "needs your OK" beside its name, and the question as a sentence in the soft plate a
+ * teammate's message gets. Raw tool input waits behind "Show details"; a command or a diff shows up
+ * front, since that is what you are allowing. Enter allows and Esc denies (approvalKeyAction says
+ * when). Deny by its button can carry a note.
+ */
 function ApprovalRow({ approval }: { approval: Approval }) {
   const [noting, setNoting] = useState(false);
   const [note, setNote] = useState('');
+  const [details, setDetails] = useState(false);
+  const agent = useApp(s => s.snapshot?.agents.find(a => a.id === approval.agentId));
+  const root = useRef<HTMLDivElement>(null);
   const decide = (allow: boolean, always = false, message?: string) => attempt(() => api.resolveApproval(approval.id, { allow, always, message }));
   const plan = approval.type === 'plan';
   const deny = () => void decide(false, false, note.trim() || undefined);
-  // The one thing in the transcript that waits on you, so it sits in a warning-tinted card.
+  const text = approvalText(approval);
+
+  useEffect(() => {
+    const shownAt = performance.now();
+    const onKey = (event: KeyboardEvent) => {
+      const el = root.current;
+      if (!el) return;
+      const pane = el.closest('section');
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const field = target?.closest<HTMLElement>('input, textarea, select, [contenteditable="true"]') ?? null;
+      const ownComposer = field instanceof HTMLTextAreaElement && Boolean(field.closest('[data-composer]')) && Boolean(pane?.contains(field));
+      // The composer marks itself idle when it holds neither text nor images (Composer.tsx).
+      const emptyComposer = ownComposer && field.hasAttribute('data-idle');
+      // Something else took the key (a menu, a picker). The empty composer always takes Enter, to
+      // send nothing, so there the key is still ours.
+      if (event.defaultPrevented && !emptyComposer) return;
+      const action = approvalKeyAction({
+        key: event.key,
+        modified: event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.repeat || event.isComposing,
+        shownForMs: performance.now() - shownAt,
+        inScope: !target || target === document.body || Boolean(pane?.contains(target)),
+        typing: Boolean(field) && !emptyComposer,
+        // A button or link with focus takes Enter itself.
+        overlay: overlayOpen() || (event.key === 'Enter' && Boolean(target?.closest('button, a, summary'))),
+        first: pane?.querySelector('[data-approval]') === el,
+      });
+      if (!action) return;
+      event.preventDefault();
+      void attempt(() => api.resolveApproval(approval.id, { allow: action === 'allow' }));
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [approval.id]);
+
+  const key = (label: string) => <kbd className="font-sans font-normal opacity-45">{label}</kbd>;
   return (
-    <div className="px-4 py-1.5">
-      <div role="group" aria-label={plan ? 'Plan waiting for your approval' : 'Action waiting for your approval'} className="rounded-lg border border-warning/25 bg-warning/[0.04] px-3 py-2.5">
-        <StatusLabel tone="warning" className="text-[11px] font-medium">{plan ? 'Plan needs your approval' : 'Needs your approval'}</StatusLabel>
-        <div className="mt-1.5 flex w-full min-w-0 items-center gap-2">
-          <CircleDashed className="size-3.5 shrink-0 text-content/40" strokeWidth={1.75} />
-          <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-content/85" title={approval.title}>{approval.title}</span>
+    <div ref={root} data-approval={approval.id} className={cx(GUTTER, 'px-4 py-1.5 font-sans')}>
+      <AgentAvatar agent={agent ?? { id: approval.agentId }} className="size-[22px]" />
+      <div role="group" aria-label={plan ? 'Plan waiting for your approval' : 'Action waiting for your approval'} className="flex min-w-0 flex-col items-start">
+        <div className="flex h-[22px] w-full min-w-0 items-center gap-1.5 text-[12.5px]">
+          {agent ? <span className="shrink-0 font-semibold text-content/90">{agent.name}</span> : null}
+          <span className="min-w-0 truncate text-warning">{plan ? 'has a plan for your OK' : 'needs your OK'}</span>
+          <time dateTime={new Date(approval.createdAt).toISOString()} title={new Date(approval.createdAt).toLocaleString()} className="ml-auto shrink-0 pl-2 text-[11.5px] tabular-nums text-content/30">{formatClockTime(approval.createdAt)}</time>
         </div>
-        {plan && approval.plan ? (
-          <div className="mt-2 rounded-lg border border-content/10 bg-content/3 px-3 py-2.5"><Markdown text={approval.plan} /></div>
-        ) : approval.detail ? (
-          <pre className="mt-1.5 max-h-72 min-w-0 overflow-y-auto whitespace-pre-wrap break-words pl-5.5 font-mono text-[12px] leading-5 text-content/55">{approval.detail}</pre>
-        ) : null}
-        {approval.description ? <p className="mt-1 pl-5.5 font-sans text-xs text-content/45">{approval.description}</p> : null}
-        <div className="mt-2.5 flex flex-wrap gap-2">
-          <ChipButton primary onClick={() => void decide(true)}>{plan ? 'Approve plan' : 'Allow'}</ChipButton>
-          {approval.canAlwaysAllow ? <ChipButton onClick={() => void decide(true, true)}>Always allow</ChipButton> : null}
-          <ChipButton aria-expanded={plan ? undefined : noting} onClick={() => (noting ? deny() : setNoting(true))}>
-            {plan ? 'Keep planning' : 'Deny'}
-          </ChipButton>
+        <div className="mt-1 w-fit min-w-[min(100%,22rem)] max-w-[min(100%,40rem)] rounded-xl bg-content/[0.055] px-3 py-2.5">
+          <p className="min-w-0 break-words text-sm leading-5.5 text-content" title={approval.title}>
+            {text.target ? <>{text.lead} <span className="font-semibold">{text.target}</span>?</> : text.lead}
+          </p>
+          {text.path ? <p className="mt-0.5 truncate font-mono text-[11.5px] leading-5 text-content/45" title={text.path}>{text.path}</p> : null}
+          {plan && approval.plan ? (
+            <div className="mt-2 min-w-0"><Markdown text={approval.plan} /></div>
+          ) : text.shown ? (
+            <pre className="mt-1.5 max-h-72 min-w-0 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-content/60">{text.shown}</pre>
+          ) : null}
+          {approval.description ? <p className="mt-1.5 text-xs text-warning">{approval.description}</p> : null}
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            <ChipButton primary title={`${plan ? 'Approve plan' : 'Allow'} (Enter)`} onClick={() => void decide(true)}>{plan ? 'Approve plan' : 'Allow'} {key('Enter')}</ChipButton>
+            {approval.canAlwaysAllow ? <ChipButton onClick={() => void decide(true, true)}>Always allow</ChipButton> : null}
+            <ChipButton
+              aria-expanded={plan ? undefined : noting}
+              title={`${plan ? 'Keep planning' : 'Deny'} (Esc), or click to say why`}
+              onClick={() => (noting ? deny() : setNoting(true))}
+              className="bg-transparent text-content/60 hover:bg-content/10"
+            >
+              {plan ? 'Keep planning' : 'Deny'} {key('Esc')}
+            </ChipButton>
+            {text.hidden ? (
+              <TextButton aria-expanded={details} className="ml-auto" onClick={() => setDetails(v => !v)}>{details ? 'Hide details' : 'Show details'}</TextButton>
+            ) : null}
+          </div>
+          {details && text.hidden ? (
+            <pre className="mt-2 max-h-72 min-w-0 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[12px] leading-5 text-content/55">{text.hidden}</pre>
+          ) : null}
+          {noting ? (
+            <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); deny(); }}>
+              <input
+                autoFocus
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder={plan ? 'What should change in the plan? (optional)' : 'What should it do instead? (optional)'}
+                className={INPUT}
+              />
+              <ChipButton type="submit">Send</ChipButton>
+            </form>
+          ) : null}
         </div>
-        {noting ? (
-          <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); deny(); }}>
-            <input
-              autoFocus
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder={plan ? 'What should change in the plan? (optional)' : 'What should it do instead? (optional)'}
-              className={INPUT}
-            />
-            <ChipButton type="submit">Send</ChipButton>
-          </form>
-        ) : null}
       </div>
     </div>
   );
@@ -820,27 +918,27 @@ function MemoryLine({ entry }: { entry: Entry }) {
 }
 
 /** One item of a turn outside its fold: prose at full size, a memory line, or a group of work. */
-function TurnItemView({ item, active, selfId, underLine }: { item: TurnItem; active: boolean; selfId: string; underLine: boolean }) {
-  if (item.type === 'memory') return <div className="px-4"><MemoryLine entry={item.entry} /></div>;
-  if (item.type === 'dream') return <div className="px-4"><DreamLine entry={item.entry} /></div>;
-  if (item.type === 'walkthrough') return <div className="px-4"><WalkthroughCard entry={item.entry} agentId={selfId} /></div>;
-  if (item.type === 'delegation') return <div className="px-4"><DelegationRow message={item.entry.peer!} /></div>;
+function TurnItemView({ item, active, selfId, underLine, trailing }: { item: TurnItem; active: boolean; selfId: string; underLine: boolean; trailing?: ReactNode }) {
+  if (item.type === 'memory') return <div className={EDGE}><MemoryLine entry={item.entry} /></div>;
+  if (item.type === 'dream') return <div className={EDGE}><DreamLine entry={item.entry} /></div>;
+  if (item.type === 'walkthrough') return <div className={EDGE}><WalkthroughCard entry={item.entry} agentId={selfId} /></div>;
+  if (item.type === 'delegation') return <div className={EDGE}><DelegationRow message={item.entry.peer!} /></div>;
   if (item.type === 'prose') {
     return (
-      <div data-chat-message={item.entry.id} data-chat-message-role="assistant" className={`min-w-0 px-4 pb-1 text-content ${underLine ? 'pt-1' : 'pt-3'}`}>
+      <div data-chat-message={item.entry.id} data-chat-message-role="assistant" className={`min-w-0 ${EDGE} pb-1 text-content ${underLine ? 'pt-1' : 'pt-3'}`}>
         <ProseBlock entry={item.entry} />
       </div>
     );
   }
-  return <ArrivingGroup item={item} active={active} selfId={selfId} />;
+  return <ArrivingGroup item={item} active={active} selfId={selfId} trailing={trailing} />;
 }
 
 /** A group that opens while you watch grows in under the line above it. */
-function ArrivingGroup({ item, active, selfId }: { item: Extract<TurnItem, { type: 'activity' }>; active: boolean; selfId: string }) {
+function ArrivingGroup({ item, active, selfId, trailing }: { item: Extract<TurnItem, { type: 'activity' }>; active: boolean; selfId: string; trailing?: ReactNode }) {
   const arriving = useArriving(item.entries[0].id);
   return (
-    <RevealHeight animateIn={arriving && active} className="px-4">
-      <ActivityPhaseGroup entries={item.entries} active={active} selfId={selfId} />
+    <RevealHeight animateIn={arriving && active} className={EDGE}>
+      <ActivityPhaseGroup entries={item.entries} active={active} selfId={selfId} trailing={trailing} />
     </RevealHeight>
   );
 }
@@ -887,6 +985,21 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
   // turn settling does not shuffle the layout around the answer.
   const showFoldLine = live || items.length > 0 || settled;
 
+  const actions = (inline: boolean) => (
+    <TurnDuration
+      agent={agent}
+      elapsedMs={elapsedMs ?? null}
+      labelHidden={showFoldLine}
+      copyText={lastProse?.type === 'prose' ? lastProse.entry.text : undefined}
+      completedAt={settledAt}
+      meta={done?.meta ?? errors.at(-1)?.meta}
+      inline={inline}
+    />
+  );
+  // A turn that ends on a quiet teammate line (its report going out) shares that row with its actions.
+  const tail = rest.at(-1);
+  const sharesRow = settled && !errors.length && !approvals.length && tail?.type === 'activity' && isLonePeerRow(tail.entries, agent.id);
+
   const prompt = turn.prompt;
   const promptCaption = caption ?? (prompt?.kind === 'user' && prompt.channel ? <ChannelCaption channelId={prompt.channel.id} /> : undefined);
   const body = (
@@ -898,9 +1011,11 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
           expandable={Boolean(fold)}
           open={Boolean(fold) && workOpen}
           onToggle={onToggleWork}
+          model={who}
+          at={settled ? settledAt : undefined}
           title={live
-            ? <LiveFoldTitle startedAt={agent.turnStartedAt ?? turn.startedAt} paused={waiting} who={who} />
-            : formatWorkingDuration(elapsedMs, true, who)}
+            ? <LiveFoldTitle startedAt={agent.turnStartedAt ?? turn.startedAt} paused={waiting} />
+            : formatWorkingDuration(elapsedMs, true)}
         />
       </TurnRow>
       {fold ? (
@@ -930,25 +1045,18 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
             // Only the last group can still be the one the agent is in.
             active={live && index === rest.length - 1}
             underLine={index === 0 && showFoldLine}
+            trailing={sharesRow && index === rest.length - 1 ? actions(true) : undefined}
           />
         </div>
       ))}
       {errors.map(error => (
-        <div key={error.id} className="px-4 py-2 text-danger">
+        <div key={error.id} className={`${EDGE} py-2 text-danger`}>
           <pre className="min-w-0 whitespace-pre-wrap break-words font-sans text-sm">{error.text}</pre>
         </div>
       ))}
       {approvals.map(approval => <ArrivingApproval key={approval.id} approval={approval} />)}
-      {settled ? (
-        <TurnDuration
-          agent={agent}
-          elapsedMs={elapsedMs ?? null}
-          labelHidden={showFoldLine}
-          copyText={lastProse?.type === 'prose' ? lastProse.entry.text : undefined}
-          completedAt={settledAt}
-          meta={done?.meta ?? errors.at(-1)?.meta}
-        />
-      ) : null}
+      {/* The row that closes the turn carries the actions; the gap under it stays the same. */}
+      {settled ? (sharesRow ? <div aria-hidden className="h-3" /> : actions(false)) : null}
     </>
   );
   // A turn not started yet (a message waiting its turn) has nothing under its prompt.
@@ -1328,12 +1436,12 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
   for (const section of visible) {
     if (section.type === 'note' && isDreamLine(section.entry)) {
       // A dream that ran between sessions sits between turns, as compact as inside one.
-      rows.push(<div key={section.entry.id} className="px-4"><DreamLine entry={section.entry} /></div>);
+      rows.push(<div key={section.entry.id} className={EDGE}><DreamLine entry={section.entry} /></div>);
       continue;
     }
     if (section.type === 'note') {
       rows.push(
-        <div key={section.entry.id} className="px-4 py-2 text-content/50">
+        <div key={section.entry.id} className={`${EDGE} py-2 text-content/50`}>
           <pre className="min-w-0 whitespace-pre-wrap break-words font-sans text-sm">{section.entry.text}</pre>
         </div>,
       );
@@ -1399,11 +1507,11 @@ export function Transcript({ agent, entries, approvals }: { agent: Agent; entrie
           const toggle = (event.target as Element).closest('[aria-expanded]');
           if (toggle) held.current = { el: toggle, top: toggle.getBoundingClientRect().top, until: performance.now() + TOGGLE_HOLD_MS };
         }}
-        className="agent-transcript min-h-0 flex-1 overflow-y-auto"
+        className="agent-transcript transcript-fade min-h-0 flex-1 overflow-y-auto"
       >
         <Arrivals.Provider value={arriving}>
         <Comms.Provider value={comms}>
-          <div ref={content} className="mx-auto w-full max-w-3xl pb-4 pt-2">
+          <div ref={content} className="mx-auto w-full max-w-3xl pb-10 pt-2">
             {entries === undefined ? <Loading /> : null}
             {hidden > 0 ? (
               <div data-earlier className="flex justify-center py-2">
