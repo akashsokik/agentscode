@@ -17,12 +17,12 @@ export function superLabel(agent: Pick<Agent, 'status' | 'activity'> | undefined
 export const SUPER_LOG_MIN_PANE = 760;
 
 /**
- * How the decision log shows: beside the conversation when it is open and the pane is wide enough,
- * over it when the pane is narrow but you asked for it (`peek`), and not at all when closed.
+ * How the decision log shows. In a wide pane, your remembered choice (`open`) decides: beside the
+ * conversation or not at all. In a narrow pane it shows only over the conversation, only while you
+ * asked for it there (`peek`), whatever the wide-pane choice is; peeking never changes that choice.
  */
 export function superLogMode(open: boolean, paneWidth: number, peek: boolean): 'beside' | 'over' | 'hidden' {
-  if (!open) return 'hidden';
-  if (paneWidth >= SUPER_LOG_MIN_PANE) return 'beside';
+  if (paneWidth >= SUPER_LOG_MIN_PANE) return open ? 'beside' : 'hidden';
   return peek ? 'over' : 'hidden';
 }
 
@@ -40,9 +40,14 @@ export function superLogWidth(chosen: number, min: number, paneWidth: number, mo
   return Math.round(Math.min(chosen, max));
 }
 
-/** Once the log sits beside the conversation, asking to see it over a narrow pane is spent: narrowing again does not reopen it over the conversation. */
-export function peekAfter(mode: 'beside' | 'over' | 'hidden', peek: boolean): boolean {
-  return mode === 'beside' ? false : peek;
+/** Once the pane is wide, asking to see the log over a narrow pane is spent: narrowing again does not reopen it over the conversation. */
+export function peekAfter(paneWidth: number, peek: boolean): boolean {
+  return paneWidth >= SUPER_LOG_MIN_PANE ? false : peek;
+}
+
+/** What the header toggle does: in a wide pane it flips the remembered choice; in a narrow one only the peek. */
+export function toggleSuperLog(open: boolean, paneWidth: number, peek: boolean): { open: boolean; peek: boolean } {
+  return paneWidth >= SUPER_LOG_MIN_PANE ? { open: !open, peek: false } : { open, peek: !peek };
 }
 
 export interface DecisionRow {

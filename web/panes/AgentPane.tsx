@@ -3,7 +3,7 @@ import { api } from '../api.ts';
 import { ALL_PROJECTS } from '../projects.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
 import { setSuperLog, useLayout } from '../layout.ts';
-import { peekAfter, superLogMode } from '../superText.ts';
+import { peekAfter, superLogMode, toggleSuperLog } from '../superText.ts';
 import { AgentSettingsDialog } from '../dialogs/AgentSettingsDialog.tsx';
 import { SoulProposalNotice } from '../dialogs/Dreaming.tsx';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
@@ -31,16 +31,15 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
   const body = useRef<HTMLDivElement>(null);
   const width = useWidth(body, agent?.role === 'super');
   const logMode = agent?.role === 'super' ? superLogMode(logOpen, width, peek) : 'hidden';
-  // Seen beside the conversation, the log no longer pops over it when the pane narrows again.
+  // Once the pane is wide, a peek is spent: the log does not pop over the conversation when it narrows again.
   useEffect(() => {
-    if (peekAfter(logMode, peek) !== peek) setPeek(false);
-  }, [logMode, peek]);
+    if (peekAfter(width, peek) !== peek) setPeek(false);
+  }, [width, peek]);
+  // A narrow pane only peeks: opening or closing it there never changes your choice for wide panes.
   const toggleLog = () => {
-    // Closing it over a narrow pane leaves your choice for wide panes as it was.
-    if (logMode === 'over') { setPeek(false); return; }
-    if (logMode === 'beside') { setSuperLog(false); setPeek(false); return; }
-    setSuperLog(true);
-    setPeek(true);
+    const next = toggleSuperLog(logOpen, width, peek);
+    if (next.open !== logOpen) setSuperLog(next.open);
+    setPeek(next.peek);
   };
   const answer = useMemo(() => (text: string) => void attempt(() => api.send(agentId, text)), [agentId]);
 

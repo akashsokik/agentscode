@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SuperAction } from '../shared/types.ts';
-import { decisionRows, peekAfter, SUPER_LOG_CONVERSATION_MIN, SUPER_LOG_MIN_PANE, superLogMode, superLogWidth } from '../web/superText.ts';
+import { decisionRows, peekAfter, SUPER_LOG_CONVERSATION_MIN, SUPER_LOG_MIN_PANE, superLogMode, superLogWidth, toggleSuperLog } from '../web/superText.ts';
 import { harness, settle } from './helpers.ts';
 
 test('the decision log sits beside the conversation in a wide pane, over it in a narrow one only when asked, and not when closed', () => {
@@ -10,6 +10,7 @@ test('the decision log sits beside the conversation in a wide pane, over it in a
   assert.equal(superLogMode(true, SUPER_LOG_MIN_PANE - 1, false), 'hidden', 'it gives way to the conversation on its own');
   assert.equal(superLogMode(true, 500, true), 'over');
   assert.equal(superLogMode(false, 1400, true), 'hidden');
+  assert.equal(superLogMode(false, 500, true), 'over', 'a narrow peek shows it whatever the wide-pane choice');
   assert.equal(superLogMode(true, 0, false), 'hidden', 'before the pane is measured');
 });
 
@@ -53,11 +54,24 @@ test('the log width follows the pane: the conversation keeps its minimum beside 
   assert.equal(superLogWidth(300, 240, 0, 'over'), 300, 'before the pane is measured');
 });
 
-test('once the log sits beside the conversation, a narrow pane does not reopen it over it', () => {
-  assert.equal(peekAfter('beside', true), false);
-  assert.equal(peekAfter('over', true), true);
-  assert.equal(peekAfter('hidden', false), false);
+test('once the pane is wide, a narrow pane does not reopen the log over the conversation', () => {
+  assert.equal(peekAfter(1200, true), false);
+  assert.equal(peekAfter(600, true), true);
+  assert.equal(peekAfter(600, false), false);
   // Wide, then narrow again: peek was reset, so the log hides instead of floating unasked.
-  const peek = peekAfter(superLogMode(true, 1200, true), true);
+  const peek = peekAfter(1200, true);
   assert.equal(superLogMode(true, 600, peek), 'hidden');
+});
+
+test('the toggle in a narrow pane only peeks; it never changes the remembered wide-pane choice', () => {
+  // Wide: it flips your choice.
+  assert.deepEqual(toggleSuperLog(true, 1200, false), { open: false, peek: false });
+  assert.deepEqual(toggleSuperLog(false, 1200, false), { open: true, peek: false });
+  // Narrow: open over the conversation and close it again, with the choice left as it was either way.
+  for (const open of [true, false]) {
+    const opened = toggleSuperLog(open, 600, false);
+    assert.deepEqual(opened, { open, peek: true });
+    assert.equal(superLogMode(opened.open, 600, opened.peek), 'over');
+    assert.deepEqual(toggleSuperLog(opened.open, 600, opened.peek), { open, peek: false });
+  }
 });

@@ -71,14 +71,16 @@ export function SuperLogSidebar({ over, paneWidth, onClose }: { over: boolean; p
   const close = useRef(onClose);
   close.current = onClose;
 
-  // Over the conversation it is a popover: Escape or a click outside it closes it.
+  // Over the conversation it is a popover: Escape or a click outside it closes it. Escape is heard
+  // as it bubbles, after anything inside: a field or control that handles it (an edit box cancelling)
+  // keeps it, and Escape typed in any field of the panel is that field's.
   useEffect(() => {
     if (!over) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      // Handled here, so a dialog or thread underneath does not also close.
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (target && root.current?.contains(target) && target.closest('input, textarea, select, [contenteditable="true"]')) return;
       event.preventDefault();
-      event.stopPropagation();
       close.current();
     };
     const onPointer = (event: PointerEvent) => {
@@ -87,10 +89,10 @@ export function SuperLogSidebar({ over, paneWidth, onClose }: { over: boolean; p
       if (!target || root.current?.contains(target) || target.closest('[data-super-log-toggle]')) return;
       close.current();
     };
-    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keydown', onKey);
     document.addEventListener('pointerdown', onPointer, true);
     return () => {
-      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerdown', onPointer, true);
     };
   }, [over]);
