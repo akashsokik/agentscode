@@ -36,8 +36,8 @@ export interface SuperTrayState {
   asks: { id: string; question: string }[];
 }
 
-/** quick: the in-app quick bar; open: the SuperAgent's tab; openAgent: that agent's tab, in the main window. */
-export type SuperCommand = { type: 'quick' } | { type: 'open' } | { type: 'openAgent'; agentId: string };
+/** quick: the in-app quick bar; open: the SuperAgent's tab; openAgent, openChannel: that tab, in the main window. */
+export type SuperCommand = { type: 'quick' } | { type: 'open' } | { type: 'openAgent'; agentId: string } | { type: 'openChannel'; channelId: string };
 
 export interface DesktopSuper {
   /** Keep the menu bar up to date; an empty state with no SuperAgent hides it. */

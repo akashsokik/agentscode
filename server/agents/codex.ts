@@ -9,7 +9,7 @@ import { usageSince, usageTotal } from '../../shared/turnUsage.ts';
 import { clip, mcpSummary, toolResultText } from './describe.ts';
 import { commandPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
-import { codexCommsConfig, COMMS_INSTRUCTIONS } from '../comms/tools.ts';
+import { codexCommsConfig, COMMS_INSTRUCTIONS, hasEyes } from '../comms/tools.ts';
 
 const SANDBOX: Record<Autonomy, string> = {
   readonly: 'read-only',
@@ -80,7 +80,7 @@ export function codexTurnUsage(
 export function codexArgs(agent: Agent, commsToken?: string, images: readonly RunnerImage[] = [], directories: readonly string[] = []): string[] {
   const sandbox = SANDBOX[agent.autonomy];
   const options = ['--json', ...images.map(image => `--image=${image.path}`), '--skip-git-repo-check', '-c', `sandbox_mode="${sandbox}"`];
-  if (commsToken) options.push('-c', codexCommsConfig(commsToken, agent.role === 'super'));
+  if (commsToken) options.push('-c', codexCommsConfig(commsToken, agent.role === 'super', hasEyes(agent.role)));
   // A worktree keeps its git data in the main repo's .git, which must be writable to commit.
   // An agent with no project works from its home, so every project folder has to be writable too.
   const writable = [...(agent.worktree ? [agent.worktree.gitDir] : []), ...directories];

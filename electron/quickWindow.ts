@@ -22,6 +22,11 @@ export class QuickWindow {
     this.preload = options.preload;
   }
 
+  /** The window while it shows, for a screenshot; null when hidden or not made. */
+  visible(): BrowserWindow | null {
+    return this.win && !this.win.isDestroyed() && this.win.isVisible() ? this.win : null;
+  }
+
   /** The window's web contents, so the bridge can tell its messages from the main window's. */
   owns(contents: Electron.WebContents): boolean {
     return Boolean(this.win && !this.win.isDestroyed() && this.win.webContents === contents);
