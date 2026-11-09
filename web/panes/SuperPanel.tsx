@@ -1,19 +1,19 @@
 /**
- * The SuperAgent's own parts of its pane: the questions it waits on you for, as cards with the
- * choices to click, and its decision log on the right of the pane, where anything it did on its own
- * can be undone.
+ * The SuperAgent's own parts of the app: in its pane, the questions it waits on you for, as cards
+ * with the choices to click; in the right panel, its Decisions (anything it did on its own, which you
+ * can undo), Goals and Routines tabs.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { GoalStatus, RoutineSchedule, SuperAsk, SuperGoal, SuperRoutine } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { memoryDate } from '../memory.ts';
 import { openAsks } from '../super.ts';
-import { decisionRows, GOAL_STATUS_LABEL, goalSections, heldText, scheduleLabel, superLogMax, superLogWidth, type DecisionRow } from '../superText.ts';
+import { decisionRows, GOAL_STATUS_LABEL, goalSections, heldText, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type DecisionRow, type SuperTab } from '../superText.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
-import { cx, HeaderButton, IconTab, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
-import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
-import { ChevronDown, ChevronUp, CircleDot, Clock, ListBullet, PanelRight, Pencil, Trash2 } from '../mono/icons.tsx';
+import { cx, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
+import { useNow } from '../ui/useNow.ts';
+import { ChevronDown, ChevronUp, CircleDot, Clock, ListBullet, Pencil, Trash2 } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
@@ -63,149 +63,92 @@ function AskCard({ ask }: { ask: SuperAsk }) {
 const time = (ts: number) => `${memoryDate(ts)} ${new Date(ts).toTimeString().slice(0, 5)}`;
 
 /**
- * The SuperAgent's decision log, on the right of its pane: what it did on its own, newest first,
- * each with why and Undo, then what you answered it. Kept live by `super` events. `over` floats it
- * above the conversation in a narrow pane; otherwise it sits beside it, resizable from its left edge.
+ * The Decisions tab: what the SuperAgent did on its own, newest first, each with why and Undo, then
+ * what you answered it. Kept live by `super` events.
  */
-export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; over: boolean; focused: boolean; onClose: () => void }) {
+export function DecisionsView() {
   const log = useApp(s => s.snapshot?.super.log);
   const asks = useApp(s => s.snapshot?.super.asks);
-  const goals = useApp(s => s.snapshot?.super.goals);
   const rows = decisionRows(log);
   const answered = (asks ?? []).filter(a => a.answeredAt !== undefined);
-  const column = useColumnWidth('superLog', 300, 240, 0.4);
-  const root = useRef<HTMLElement>(null);
-  // The pane's width, measured here (before the first paint) so resizing re-renders only the sidebar.
-  const paneWidth = useParentWidth(root);
-  const mode = over ? 'over' : 'beside';
-  // The width you chose, cut to the pane it is in: the window-based cap alone lets it fill a split pane.
-  const width = superLogWidth(column.width, column.min, paneWidth, mode);
-  // Dragging and the arrow keys stop at the pane-based limit too, and the handle reports it.
-  const max = paneWidth > 0 ? Math.min(column.max, superLogMax(column.min, paneWidth, mode)) : column.max;
-  const fit = (value: number) => Math.min(max, value);
-  const handle = { ...column, width, max, preview: (value: number | null) => column.preview(value === null ? null : fit(value)), commit: (value: number | undefined) => column.commit(value === undefined ? undefined : fit(value)) };
-  const close = useRef(onClose);
-  close.current = onClose;
-
-  // Over the conversation it is a popover: focus moves into it when it opens.
-  useEffect(() => {
-    if (over) root.current?.querySelector<HTMLElement>('[data-super-log-hide]')?.focus({ preventScroll: true });
-  }, [over]);
-  // However it closes, in either mode (Hide, Escape, a click outside), focus that fell to the page
-  // goes back to the header's toggle.
-  useEffect(() => {
-    const panel = root.current;
-    return () => {
-      if (panel?.isConnected) return;
-      const toggle = document.querySelector<HTMLElement>('[data-super-log-toggle]');
-      if (toggle && (document.activeElement === document.body || !document.activeElement)) toggle.focus({ preventScroll: true });
-    };
-  }, []);
-
-  // Escape or a click outside closes it. Escape is heard as it bubbles (as ChannelThread's), only
-  // while this pane has focus, never when something inside it already handled Escape (an edit box
-  // cancelling), and never while a dialog or popover is open: that one takes Escape.
-  useEffect(() => {
-    if (!over || !focused) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (document.querySelector('[role="dialog"][aria-modal="true"], [data-dialog-popover]')) return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (target && root.current?.contains(target) && target.closest('input, textarea, select, [contenteditable="true"]')) return;
-      event.preventDefault();
-      close.current();
-    };
-    const onPointer = (event: PointerEvent) => {
-      const target = event.target instanceof Element ? event.target : null;
-      // The header's toggle does its own closing; closing here too would reopen it on its click.
-      if (!target || root.current?.contains(target) || target.closest('[data-super-log-toggle]')) return;
-      close.current();
-    };
-    window.addEventListener('keydown', onKey);
-    document.addEventListener('pointerdown', onPointer, true);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.removeEventListener('pointerdown', onPointer, true);
-    };
-  }, [over, focused]);
   const undoable = rows.filter(r => r.undoable).length;
-  const [view, setView] = useState<SideView>(readView);
-  const pickView = (next: SideView) => {
-    setView(next);
-    try { localStorage.setItem(VIEW_KEY, next); } catch { /* private mode */ }
-  };
-  const openGoals = goalSections(goals).open.length;
-  const proposedRoutines = useApp(s => s.snapshot?.super.routines?.filter(r => r.proposed).length ?? 0);
   return (
-    <aside
-      id={id}
-      aria-label="SuperAgent sidebar"
-      data-super-log
-      ref={root}
-      style={{ width }}
-      // One position utility only: with both, .relative (later in the CSS) wins and it never floats.
-      className={cx('flex shrink-0 flex-col border-l border-stroke font-sans', over ? 'body-glass absolute inset-y-0 right-0 z-20 shadow-2xl' : 'relative')}
-    >
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke pl-2 pr-1.5">
-        <div role="tablist" aria-label="SuperAgent sidebar" className="flex min-w-0 flex-1 items-center gap-0.5">
-          <IconTab role="tab" aria-selected={view === 'decisions'} icon={ListBullet} label="Decisions" selected={view === 'decisions'} onClick={() => pickView('decisions')} />
-          <IconTab role="tab" aria-selected={view === 'goals'} icon={CircleDot} label="Goals" count={openGoals || undefined} selected={view === 'goals'} onClick={() => pickView('goals')} />
-          <IconTab role="tab" aria-selected={view === 'routines'} icon={Clock} label="Routines" count={proposedRoutines || undefined} selected={view === 'routines'} onClick={() => pickView('routines')} />
-        </div>
-        <HeaderButton data-super-log-hide icon={PanelRight} label="Hide the sidebar" active onClick={onClose} />
-      </div>
-      {view === 'goals' ? <GoalsView /> : view === 'routines' ? <RoutinesView /> : (
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        {rows.length ? (
-          <>
-            <p className="px-3.5 pb-1 pt-2.5 text-[11px] leading-relaxed text-content/40">
-              What it did on its own.{undoable ? ' Undo puts it back, and the SuperAgent hears that you did.' : ''}
-            </p>
-            <ol>{rows.map(row => <DecisionItem key={row.id} row={row} />)}</ol>
-          </>
-        ) : (
-          <div className="flex flex-col items-center px-6 pb-6 pt-10 text-center">
-            <ListBullet className="size-5 text-content/25" strokeWidth={1.5} />
-            <p className="mt-2.5 text-[13px] text-content/60">No decisions yet</p>
-            <p className="mt-1 text-[12px] leading-relaxed text-content/40">When the SuperAgent creates agents or channels, delegates or nudges, it shows here with why, and you can undo it.</p>
-          </div>
-        )}
-        {answered.length ? (
-          <section aria-label="Your answers" className="mt-2 border-t border-stroke">
-            <h3 className="px-3.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-content/40">Your answers</h3>
-            <ol>
-              {answered.map(ask => (
-                <li key={ask.id} className="px-3.5 py-2">
-                  <p className="text-[12px] leading-5 text-content/75">{ask.question}</p>
-                  <p className="text-[12px] leading-5 text-content/45">{ask.dismissed ? 'Put aside' : ask.answer}</p>
-                  <p className="text-[11px] text-content/30">{time(ask.answeredAt!)}</p>
-                </li>
-              ))}
-            </ol>
-          </section>
-        ) : null}
-      </div>
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 font-sans">
+      {rows.length ? (
+        <>
+          <p className="px-4 pb-1 pt-3 text-[12px] leading-relaxed text-content/45">
+            What it did on its own.{undoable ? ' Undo puts it back, and the SuperAgent hears that you did.' : ''}
+          </p>
+          <ol>{rows.map(row => <DecisionItem key={row.id} row={row} />)}</ol>
+        </>
+      ) : (
+        <TabEmpty icon={ListBullet} title="No decisions yet">When the SuperAgent creates agents or channels, delegates or nudges, it shows here with why, and you can undo it.</TabEmpty>
       )}
-      {/* From the width on screen, so a drag never jumps from a wider saved width. */}
-      <ResizeHandle column={handle} edge="left" label="Resize the sidebar" />
-    </aside>
+      {answered.length ? (
+        <section aria-label="Your answers" className="pt-4">
+          <h3 className="px-4 pb-1 text-[12px] font-medium text-content/50">Your answers</h3>
+          <ol>
+            {answered.map(ask => (
+              <li key={ask.id} className="px-4 py-2">
+                <p className="text-[12px] leading-5 text-content/75">{ask.question}</p>
+                <p className="text-[12px] leading-5 text-content/45">{ask.dismissed ? 'Put aside' : ask.answer}</p>
+                <p className="text-[11px] text-content/30">{time(ask.answeredAt!)}</p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+    </div>
   );
 }
 
-type SideView = 'decisions' | 'goals' | 'routines';
-const VIEW_KEY = 'agentscode:super-sidebar-view';
-function readView(): SideView {
+/** An empty tab: a quiet icon, what goes here, and how it gets there. */
+function TabEmpty({ icon: Icon, title, children }: { icon: typeof ListBullet; title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center px-6 pb-6 pt-10 text-center font-sans">
+      <Icon className="size-5 text-content/25" strokeWidth={1.5} />
+      <p className="mt-2.5 text-[13px] text-content/60">{title}</p>
+      <p className="mt-1 text-[12px] leading-relaxed text-content/40">{children}</p>
+    </div>
+  );
+}
+
+const SEEN_KEY = 'agentscode:super-tabs-seen';
+function readSeen(): Partial<Record<SuperTab, number>> {
   try {
-    const saved = localStorage.getItem(VIEW_KEY);
-    return saved === 'goals' || saved === 'routines' ? saved : 'decisions';
-  } catch { return 'decisions'; }
+    const saved = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}') as Record<string, unknown>;
+    return Object.fromEntries(SUPER_TABS.filter(t => typeof saved[t] === 'number').map(t => [t, saved[t] as number]));
+  } catch { return {}; }
+}
+
+/**
+ * The SuperAgent's tabs in the right panel: the count on each, and a dot on a tab that has something
+ * new you have not seen. Opening a tab marks what is on it as seen, remembered across restarts.
+ */
+export function useSuperTabs(selected: string): { counts: Record<SuperTab, number>; dots: Record<SuperTab, boolean> } {
+  const log = useApp(s => s.snapshot?.super.log);
+  const goals = useApp(s => s.snapshot?.super.goals);
+  const routines = useApp(s => s.snapshot?.super.routines);
+  const now = useNow();
+  const [seen, setSeen] = useState(readSeen);
+  const lists = { log, goals, routines };
+  const latest = superTabLatest(lists);
+  const shown = (SUPER_TABS as readonly string[]).includes(selected) ? selected as SuperTab : null;
+  const shownLatest = shown ? latest[shown] : 0;
+  useEffect(() => {
+    if (!shown || shownLatest <= (seen[shown] ?? 0)) return;
+    const next = { ...seen, [shown]: shownLatest };
+    setSeen(next);
+    try { localStorage.setItem(SEEN_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+  }, [shown, shownLatest, seen]);
+  return { counts: superTabCounts(lists, now), dots: superTabDots(latest, seen, selected) };
 }
 
 /**
  * The goals backlog: what you want done, in order. The SuperAgent works it top down, giving each
  * goal to a free agent; you add, edit, reorder and remove goals here, and see who is on each.
  */
-function GoalsView() {
+export function GoalsView() {
   const goals = useApp(s => s.snapshot?.super.goals);
   const projects = useApp(s => s.snapshot?.projects) ?? [];
   const { open, done } = goalSections(goals);
@@ -229,8 +172,8 @@ function GoalsView() {
     if (ok) setText('');
   };
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-stroke px-3 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col font-sans">
+      <div className="shrink-0 px-4 pb-2 pt-3">
         <textarea
           ref={addBox}
           aria-label="New goal"
@@ -251,21 +194,17 @@ function GoalsView() {
           <button type="button" className={PRIMARY} disabled={busy || !text.trim()} onClick={() => void add()}>{busy ? 'Adding…' : 'Add'}</button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
         {open.length ? (
           <ol ref={list} aria-label="Open goals">
             {open.map((goal, i) => <GoalItem key={goal.id} goal={goal} index={i} last={i === open.length - 1} onRemoved={() => focusAfterRemove(i)} />)}
           </ol>
         ) : (
-          <div className="flex flex-col items-center px-6 pb-6 pt-10 text-center">
-            <CircleDot className="size-5 text-content/25" strokeWidth={1.5} />
-            <p className="mt-2.5 text-[13px] text-content/60">No goals yet</p>
-            <p className="mt-1 text-[12px] leading-relaxed text-content/40">Add what you want done. The SuperAgent works through them top down, giving each to a free agent, and asks you when it needs to.</p>
-          </div>
+          <TabEmpty icon={CircleDot} title="No goals yet">Add what you want done. The SuperAgent works through them top down, giving each to a free agent, and asks you when it needs to.</TabEmpty>
         )}
         {done.length ? (
-          <section aria-label="Done goals" className="border-t border-stroke">
-            <button type="button" onClick={() => setShowDone(v => !v)} className="flex w-full items-center gap-1.5 px-3.5 py-2.5 text-left text-[11px] font-medium uppercase tracking-wide text-content/40 hover:text-content/70">
+          <section aria-label="Done goals" className="pt-4">
+            <button type="button" aria-expanded={showDone} onClick={() => setShowDone(v => !v)} className="flex w-full items-center gap-1.5 px-4 py-1 text-left text-[12px] font-medium text-content/50 hover:text-content/80">
               <ChevronDown className={cx('size-3 transition-transform', showDone ? '' : '-rotate-90')} strokeWidth={2} />
               Done <span className="font-normal tabular-nums">{done.length}</span>
             </button>
@@ -322,7 +261,7 @@ function GoalItem({ goal, index, last, onRemoved }: { goal: SuperGoal; index: nu
   };
   const done = goal.status === 'done';
   return (
-    <li data-goal={goal.id} data-goal-status={goal.status} className="group/goal border-b border-content/5 px-3.5 py-2.5 last:border-b-0">
+    <li data-goal={goal.id} data-goal-status={goal.status} className="group/goal px-4 py-2.5">
       <div className="flex items-center gap-1">
         <select
           aria-label={`Status of ${named}`}
@@ -415,7 +354,7 @@ function DecisionItem({ row }: { row: DecisionRow }) {
   };
   const undone = row.undoneAt !== undefined;
   return (
-    <li data-super-action={row.id} className="group/decision border-b border-content/5 px-3.5 py-2.5 last:border-b-0">
+    <li data-super-action={row.id} className="group/decision px-4 py-2.5">
       <div className="flex items-baseline gap-2">
         <time dateTime={new Date(row.at).toISOString()} title={new Date(row.at).toLocaleString()} className="min-w-0 flex-1 truncate text-[11px] tabular-nums text-content/35">
           {time(row.at)}{undone ? ' · undone' : ''}
@@ -432,26 +371,12 @@ function DecisionItem({ row }: { row: DecisionRow }) {
   );
 }
 
-/** The width of an element's parent, measured before the first paint and kept current; 0 until then. */
-function useParentWidth(ref: React.RefObject<HTMLElement | null>): number {
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const parent = ref.current?.parentElement;
-    if (!parent) return;
-    setWidth(Math.round(parent.getBoundingClientRect().width));
-    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
-    observer.observe(parent);
-    return () => observer.disconnect();
-  }, [ref]);
-  return width;
-}
-
 /**
  * Scheduled routines: what the SuperAgent does on its own at set times, in your words. Each becomes
  * an update at its time, so every wake limit and the daily budget apply. Proposals from the
  * SuperAgent wait here until you confirm them.
  */
-function RoutinesView() {
+export function RoutinesView() {
   const routines = useApp(s => s.snapshot?.super.routines) ?? [];
   const projects = useApp(s => s.snapshot?.projects) ?? [];
   const [name, setName] = useState('');
@@ -474,8 +399,8 @@ function RoutinesView() {
   };
   const field = 'h-6 rounded-md border border-content/12 bg-transparent px-1.5 text-[12px] text-content/75 outline-none';
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-stroke px-3 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col font-sans">
+      <div className="shrink-0 px-4 pb-2 pt-3">
         <input aria-label="Routine name" value={name} maxLength={80} onChange={e => setName(e.target.value)} placeholder="Name, for example Morning CI check" className={`${field} h-7 w-full text-[13px]`} />
         <textarea aria-label="What the SuperAgent should do" value={instruction} rows={2} maxLength={1000} onChange={e => setInstruction(e.target.value)} placeholder="What the SuperAgent should do each time" className={`${TEXTAREA} mt-1.5 text-[13px]`} />
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -493,19 +418,15 @@ function RoutinesView() {
           <button type="button" className={PRIMARY} disabled={!ready || busy} onClick={() => void add()}>{busy ? 'Adding…' : 'Add'}</button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
         {proposed.length ? (
-          <section aria-label="Proposed by the SuperAgent" className="border-b border-stroke">
-            <h3 className="px-3.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-content/40">Proposed, waiting for you</h3>
+          <section aria-label="Proposed by the SuperAgent" className="pb-2 pt-2">
+            <h3 className="px-4 pb-1 text-[12px] font-medium text-content/50">Proposed, waiting for you</h3>
             <ol>{proposed.map(r => <RoutineItem key={r.id} routine={r} />)}</ol>
           </section>
         ) : null}
         {own.length ? <ol aria-label="Routines">{own.map(r => <RoutineItem key={r.id} routine={r} />)}</ol> : !proposed.length ? (
-          <div className="flex flex-col items-center px-6 pb-6 pt-10 text-center">
-            <Clock className="size-5 text-content/25" strokeWidth={1.5} />
-            <p className="mt-2.5 text-[13px] text-content/60">No routines yet</p>
-            <p className="mt-1 text-[12px] leading-relaxed text-content/40">Add something the SuperAgent should do on a schedule, such as checking CI every morning. It runs within your wake limits and daily budget.</p>
-          </div>
+          <TabEmpty icon={Clock} title="No routines yet">Add something the SuperAgent should do on a schedule, such as checking CI every morning. It runs within your wake limits and daily budget.</TabEmpty>
         ) : null}
       </div>
     </div>
@@ -518,7 +439,7 @@ function RoutineItem({ routine }: { routine: SuperRoutine }) {
   const run = async (action: () => Promise<unknown>) => { setBusy(true); await attempt(action); setBusy(false); };
   const named = `"${routine.name}"`;
   return (
-    <li data-routine={routine.id} className="group/routine border-b border-content/5 px-3.5 py-2.5 last:border-b-0">
+    <li data-routine={routine.id} className="group/routine px-4 py-2.5">
       <div className="flex items-center gap-2">
         <p className={cx('min-w-0 flex-1 truncate text-[13px] font-medium', routine.enabled || routine.proposed ? 'text-content/85' : 'text-content/45')}>{routine.name}</p>
         {routine.proposed ? (

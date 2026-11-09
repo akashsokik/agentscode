@@ -6,7 +6,7 @@ import { useEffect, useRef } from 'react';
 import { inQuietHours, type DesktopSuper, type SuperCommand } from '../shared/superAgent.ts';
 import type { Agent } from '../shared/types.ts';
 import { api } from './api.ts';
-import { open } from './layout.ts';
+import { getLayout, open, setRightPanel } from './layout.ts';
 import { attempt, getState, useApp } from './store.ts';
 import { openAsks, superLabel } from './superText.ts';
 
@@ -19,12 +19,21 @@ export function useSuperAgent(): Agent | undefined {
   return useApp(s => s.snapshot?.agents.find(a => a.role === 'super'));
 }
 
-/** Open the SuperAgent's tab, setting it up first if there is none. */
+/**
+ * Open the SuperAgent's tab, setting it up first if there is none, with the right panel shown: its
+ * Decisions, Goals and Routines live there.
+ */
 export async function openSuper(): Promise<void> {
-  const id = getState().snapshot?.super.agentId;
-  if (id) return open({ kind: 'agent', agentId: id });
-  const created = await attempt(() => api.createSuper());
-  if (created) open({ kind: 'agent', agentId: created.id });
+  const id = getState().snapshot?.super.agentId ?? (await attempt(() => api.createSuper()))?.id;
+  if (!id) return;
+  open({ kind: 'agent', agentId: id });
+  if (!getLayout().rightPanel) setRightPanel(true);
+}
+
+/** Open an agent's tab; the SuperAgent's opens as openSuper does, with the right panel. */
+export function openAgent(agentId: string): void {
+  if (agentId === getState().snapshot?.super.agentId) void openSuper();
+  else open({ kind: 'agent', agentId });
 }
 
 /**
@@ -69,7 +78,7 @@ export function useSuperBridge(onQuick: () => void): void {
   quick.current = onQuick;
   useEffect(() => desktop?.onCommand((command: SuperCommand) => {
     if (command.type === 'quick') quick.current();
-    else if (command.type === 'openAgent') open({ kind: 'agent', agentId: command.agentId });
+    else if (command.type === 'openAgent') openAgent(command.agentId);
     else if (command.type === 'openChannel') open({ kind: 'channel', channelId: command.channelId });
     else void openSuper();
   }), []);

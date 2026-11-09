@@ -1,5 +1,5 @@
 /** The SuperAgent's words for the page. Pure, so it is tested directly. */
-import type { Agent, GoalStatus, RoutineSchedule, SuperAction, SuperAsk, SuperGoal } from '../shared/types.ts';
+import type { Agent, GoalStatus, RoutineSchedule, SuperAction, SuperAsk, SuperGoal, SuperRoutine } from '../shared/types.ts';
 
 /** Questions the SuperAgent asked that wait for the user, newest first. */
 export function openAsks(asks: readonly SuperAsk[] | undefined): SuperAsk[] {
@@ -11,54 +11,6 @@ export function superLabel(agent: Pick<Agent, 'status' | 'activity'> | undefined
   if (!agent) return 'Set up the SuperAgent';
   const doing = agent.status === 'working' ? agent.activity || 'Working' : agent.status === 'error' ? 'Hit a problem' : 'Watching your agents';
   return waiting ? `${doing} · ${waiting} waiting for you` : doing;
-}
-
-/** Below this pane width the decision log no longer sits beside the conversation; it opens over it instead. */
-export const SUPER_LOG_MIN_PANE = 760;
-
-/**
- * How the decision log shows. In a wide pane, your remembered choice (`open`) decides: beside the
- * conversation or not at all. In a narrow pane it shows only over the conversation, only while you
- * asked for it there (`peek`), whatever the wide-pane choice is; peeking never changes that choice.
- */
-export function superLogMode(open: boolean, paneWidth: number, peek: boolean): 'beside' | 'over' | 'hidden' {
-  if (paneWidth >= SUPER_LOG_MIN_PANE) return open ? 'beside' : 'hidden';
-  return peek ? 'over' : 'hidden';
-}
-
-/** The narrowest the conversation gets while the log sits beside it, in px. */
-export const SUPER_LOG_CONVERSATION_MIN = 420;
-
-/**
- * The log's width in a pane `paneWidth` wide, from the width you chose: beside the conversation it
- * leaves that SUPER_LOG_CONVERSATION_MIN (never going under `min`); over it, it never runs past the
- * pane's left edge.
- */
-export function superLogWidth(chosen: number, min: number, paneWidth: number, mode: 'beside' | 'over'): number {
-  if (paneWidth <= 0) return Math.round(chosen);
-  const max = mode === 'beside' ? Math.max(min, paneWidth - SUPER_LOG_CONVERSATION_MIN) : paneWidth;
-  return Math.round(Math.min(chosen, max));
-}
-
-/** Once the pane is wide, asking to see the log over a narrow pane is spent: narrowing again does not reopen it over the conversation. */
-export function peekAfter(paneWidth: number, peek: boolean): boolean {
-  return paneWidth >= SUPER_LOG_MIN_PANE ? false : peek;
-}
-
-/**
- * What the header toggle (or Hide, Escape and a click outside, which close it) leaves: shown, it
- * closes; hidden, it opens. In a wide pane that is your remembered choice; in a narrow one only the
- * peek, so a narrow pane never changes the wide-pane choice.
- */
-export function nextLogState(mode: 'beside' | 'over' | 'hidden', paneWidth: number, open: boolean, peek: boolean): { open: boolean; peek: boolean } {
-  if (mode === 'over') return { open, peek: false };
-  if (mode === 'beside') return { open: false, peek: false };
-  return paneWidth >= SUPER_LOG_MIN_PANE ? { open: true, peek: false } : { open, peek: true };
-}
-
-/** The most the log may be dragged to in a pane: beside, leaving the conversation its room; over, the pane. */
-export function superLogMax(min: number, paneWidth: number, mode: 'beside' | 'over'): number {
-  return mode === 'beside' ? Math.max(min, paneWidth - SUPER_LOG_CONVERSATION_MIN) : Math.max(min, paneWidth);
 }
 
 export interface DecisionRow {
@@ -99,4 +51,49 @@ export function heldText(held: { count: number; reason: string }): string {
 /** "Daily at 09:00", "Every 6 hours". */
 export function scheduleLabel(schedule: RoutineSchedule): string {
   return schedule.kind === 'daily' ? `Daily at ${schedule.at}` : `Every ${schedule.hours} ${schedule.hours === 1 ? 'hour' : 'hours'}`;
+}
+
+/** The SuperAgent's own tabs in the right panel. */
+export type SuperTab = 'decisions' | 'goals' | 'routines';
+export const SUPER_TABS: readonly SuperTab[] = ['decisions', 'goals', 'routines'];
+
+/** The right panel's tab for the SuperAgent: the last one picked, or Decisions the first time. */
+export function superPanelView<V extends string>(saved: string | undefined, views: readonly V[]): V {
+  return saved !== undefined && (views as readonly string[]).includes(saved) ? saved as V : 'decisions' as V;
+}
+
+interface SuperLists {
+  log?: readonly SuperAction[];
+  goals?: readonly SuperGoal[];
+  routines?: readonly SuperRoutine[];
+}
+
+/**
+ * The count on each tab: decisions made today that can still be undone, open goals, and routines the
+ * SuperAgent proposed that wait for you. `now` decides what today is, in local time.
+ */
+export function superTabCounts(lists: SuperLists, now: number): Record<SuperTab, number> {
+  const day = new Date(now);
+  day.setHours(0, 0, 0, 0);
+  return {
+    decisions: decisionRows(lists.log).filter(r => r.undoable && r.at >= day.getTime()).length,
+    goals: goalSections(lists.goals).open.length,
+    routines: (lists.routines ?? []).filter(r => r.proposed).length,
+  };
+}
+
+/** When the newest item on each tab came: a decision made, a goal or a routine added. 0 for none. */
+export function superTabLatest(lists: SuperLists): Record<SuperTab, number> {
+  const newest = (times: number[]) => times.reduce((max, t) => Math.max(max, t), 0);
+  return {
+    decisions: newest((lists.log ?? []).map(a => a.at)),
+    goals: newest((lists.goals ?? []).map(g => g.createdAt)),
+    routines: newest((lists.routines ?? []).map(r => r.createdAt)),
+  };
+}
+
+/** Which tabs show a dot: something newer than you last saw there, on a tab that is not open. */
+export function superTabDots(latest: Record<SuperTab, number>, seen: Partial<Record<SuperTab, number>>, selected: string): Record<SuperTab, boolean> {
+  const dot = (tab: SuperTab) => tab !== selected && latest[tab] > (seen[tab] ?? 0);
+  return { decisions: dot('decisions'), goals: dot('goals'), routines: dot('routines') };
 }
