@@ -205,7 +205,6 @@ export class AgentManager {
         return Boolean(agent) && !this.runners.get(id!)?.busy && agent!.status !== 'working' && agent!.status !== 'waiting';
       },
       settings: () => this.store.settings,
-      cost: () => { const id = this.superId(); return id ? this.store.agents.get(id)?.costUsd ?? 0 : 0; },
       mailQueued: messageId => this.store.messages.some(m => m.id === messageId && m.status === 'queued'),
       store: this.superStore,
       deliver: (prompt, events) => this.wakeSuper(prompt, `Update: ${events.map(e => e.text).join('; ')}`),
@@ -1972,6 +1971,11 @@ export class AgentManager {
       turnCost = result.costUsd >= last ? result.costUsd - last : result.costUsd;
       this.processCost.set(agentId, result.costUsd);
       agent.costUsd += turnCost;
+      // The daily budget covers only what the SuperAgent does on its own: its update turns, and mail
+      // about work it began itself. Your turns, and mail about work you asked for, never count.
+      if (agent.role === 'super' && (task?.source === 'system' || (task?.source === 'agent' && !this.userWork(task.messageId)))) {
+        this.superStore.addAutonomousCost(turnCost);
+      }
     }
     if (result.tokens) agent.tokens += result.tokens;
     if (result.threadUsage) agent.threadUsage = result.threadUsage;

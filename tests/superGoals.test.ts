@@ -332,10 +332,9 @@ test('the daily budget holds only what it starts on its own, and says so; work y
   const its = await t.call('delegate_task', { to_agent_id: t.bo.id, kind: 'review', task: 'Look around.', acceptance_criteria: 'Notes.' }) as { id: string };
   t.runner.complete();
   await settle();
-  // The day's spending passes the budget.
+  // Its own spending today passes the budget.
   t.manager.updateSettings({ superDailyBudgetUsd: 1 });
-  t.watcher.held();
-  t.store.agents.get(t.sup.id)!.costUsd += 5;
+  new SuperStore(t.store.dataDir).addAutonomousCost(5);
   // Bo (its own work) reports first, then Ada (yours).
   for (const [runner, id] of [[t.runners.get(t.bo.id)!.at(-1)!, its.id], [t.runners.get(t.ada.id)!.at(-1)!, mine.id]] as const) {
     await t.manager.commsTool(runner.ctx.commsToken!, 'report_result', { message_id: id, outcome: 'done', summary: 'Done.', evidence: 'x' });
@@ -431,4 +430,53 @@ test('goals read from super.json are checked; the app must send text as text', a
   t.manager.addGoal({ text: 'Two\nlines' });
   assert.equal(t.manager.superView().goals[0].text, 'Two lines', 'a goal is one line');
   assert.throws(() => t.manager.updateGoal(t.manager.superView().goals[0].id, { text: ['x'] }), e => status(e) === 400);
+});
+
+test('an answer to its question is your turn: what it delegates there comes back with wake-ups off, no budget and the day spent', async () => {
+  const t = await team();
+  t.manager.updateSettings({ superWake: false, superMaxWakesPerHour: 0, superDailyBudgetUsd: 1, ...quietNow() });
+  new SuperStore(t.store.dataDir).addAutonomousCost(5);
+  // It asks; you answer from the card. That answer is a turn you started.
+  const { asked } = await t.call('ask_user', { question: 'Let your own work finish past the cap?', options: ['Yes', 'No'] }) as { asked: { id: string } };
+  t.runner.complete();
+  t.manager.answerSuper(asked.id, { answer: 'Yes' });
+  await settle();
+  assert.equal(t.runner.sent.at(-1)!.task?.source, 'user');
+  const toAda = await t.call('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'Do it.', acceptance_criteria: 'Done.' }) as { id: string; conversationId: string };
+  assert.equal(t.store.conversations.find(c => c.id === toAda.conversationId)?.userStarted, true);
+  t.runner.complete();
+  await settle();
+  const ada = t.runners.get(t.ada.id)!.at(-1)!;
+  await t.manager.commsTool(ada.ctx.commsToken!, 'report_result', { message_id: toAda.id, outcome: 'done', summary: 'Done.', evidence: 'x' });
+  ada.complete(true, 'Reported.');
+  await settle();
+  const report = reportTo(t, t.sup.id, t.ada.id)!;
+  assert.notEqual(report.status, 'queued', 'delivered at once');
+  assert.equal(t.runner.sent.at(-1)!.task?.messageId, report.id);
+  assert.equal(t.manager.superView().held, null);
+});
+
+test('the daily budget counts only its own turns: what you start, and mail on your work, never use it up', async () => {
+  const t = await team();
+  t.manager.updateSettings({ superDailyBudgetUsd: 10 });
+  const store = new SuperStore(t.store.dataDir);
+  // End the running turn as the engine would, reporting its running cost.
+  const end = (cost: number) => {
+    t.runner.busy = false;
+    t.runner.ctx.hooks.turnEnd({ ok: true, summary: 'Done.', costUsd: t.store.agents.get(t.sup.id)!.costUsd + cost });
+    t.runner.ctx.hooks.ready?.();
+  };
+  // A turn you started, however costly, is not counted.
+  end(40);
+  await settle();
+  assert.equal(store.spentToday(new Date()), 0);
+  assert.equal(t.watcher.dailyHeld(), null);
+  // An update turn is.
+  t.watcher.note({ agentId: t.ada.id, key: 'k', text: 'Ada is free' });
+  assert.ok(t.watcher.flush());
+  await settle();
+  end(12);
+  await settle();
+  assert.equal(Math.round(store.spentToday(new Date())), 12);
+  assert.equal(t.watcher.dailyHeld(), 'the daily budget is used');
 });

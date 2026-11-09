@@ -212,8 +212,8 @@ test('the watcher batches, waits while busy, in quiet hours or over budget, and 
   let idle = false;
   const delivered: string[] = [];
   const settings = { ...DEFAULT_SETTINGS, superMaxWakesPerHour: 2 };
-  let cost = 1;
-  const host: WatcherHost = { superId: () => 'sup', idle: () => idle, settings: () => settings, cost: () => cost, store: new SuperStore(tempDir('super')), deliver: p => delivered.push(p), now: () => now };
+  const store = new SuperStore(tempDir('super'));
+  const host: WatcherHost = { superId: () => 'sup', idle: () => idle, settings: () => settings, store, deliver: p => delivered.push(p), now: () => now };
   const watcher = new SuperWatcher(host);
   watcher.note({ agentId: 'sup', key: 'self', text: 'SuperAgent finished' });
   assert.equal(watcher.waiting(), 0);
@@ -238,7 +238,7 @@ test('the watcher batches, waits while busy, in quiet hours or over budget, and 
   assert.equal(watcher.flush(), true, 'a new hour, a new budget');
   // Over the day's budget, updates wait for tomorrow.
   watcher.note({ agentId: 'a2', key: 'cost', text: 'Something costly' });
-  cost = 1 + settings.superDailyBudgetUsd;
+  store.addAutonomousCost(1 + settings.superDailyBudgetUsd, new Date(now));
   assert.equal(watcher.blocked(), 'the daily budget is used');
   now += 86_400_000;
   assert.equal(watcher.blocked(), null, 'a new day starts at zero');
