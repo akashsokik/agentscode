@@ -5,6 +5,7 @@
  * them directly.
  */
 import type { Conversation, PeerMessage } from '../shared/types.ts';
+import { reportKind } from './peerText.ts';
 
 export interface CommsThread {
   id: string;
@@ -45,16 +46,20 @@ export function commsThreads(messages: readonly PeerMessage[], conversations: re
  * Where a conversation stands, most urgent first: stopped by you, someone working, something
  * waiting, a failure, a blocked or finished report, or every message handled.
  */
-export type ThreadState = 'stopped' | 'working' | 'queued' | 'failed' | 'blocked' | 'done' | 'handled';
+export type ThreadState = 'stopped' | 'working' | 'queued' | 'failed' | 'changes' | 'blocked' | 'approved' | 'done' | 'handled';
 
 export function threadState(thread: Pick<CommsThread, 'conversation' | 'messages'>): ThreadState {
   if (thread.conversation?.stopped) return 'stopped';
   if (thread.messages.some(m => m.status === 'delivering')) return 'working';
   if (thread.messages.some(m => m.status === 'queued')) return 'queued';
   if (thread.messages[thread.messages.length - 1]?.status === 'failed') return 'failed';
-  const report = thread.messages.findLast(m => m.report)?.report;
-  if (report?.outcome === 'failed') return 'failed';
+  const last = thread.messages.findLast(m => m.report);
+  const report = last?.report;
+  // A review reads as the work it answers: changes needed, or approved (web/peerText.ts).
+  const review = last ? reportKind(last, thread.messages.find(m => m.id === last.replyTo)) === 'review' : false;
+  if (report?.outcome === 'failed') return review ? 'changes' : 'failed';
   if (report?.outcome === 'blocked') return 'blocked';
+  if (report?.outcome === 'passed' && review) return 'approved';
   if (report) return 'done';
   return 'handled';
 }
@@ -64,7 +69,9 @@ export const STATE_LABEL: Record<ThreadState, string> = {
   working: 'Working',
   queued: 'Queued',
   failed: 'Failed',
+  changes: 'Changes needed',
   blocked: 'Blocked',
+  approved: 'Approved',
   done: 'Done',
   handled: 'Handled',
 };
@@ -74,7 +81,7 @@ export type CommsFilter = 'all' | 'active' | 'attention';
 /** Active: someone is on it or it is waiting. Attention: it failed or was reported blocked. */
 export function inFilter(state: ThreadState, filter: CommsFilter): boolean {
   if (filter === 'active') return state === 'working' || state === 'queued';
-  if (filter === 'attention') return state === 'failed' || state === 'blocked';
+  if (filter === 'attention') return state === 'failed' || state === 'changes' || state === 'blocked';
   return true;
 }
 

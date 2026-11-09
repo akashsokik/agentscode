@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Conversation, PeerMessage } from '../shared/types.ts';
 import {
-  commsThreads, inFilter, isUnseen, markSeen, matchesQuery, messageKind, parseSeen, plainLine, threadState, threadTitle, timelineTail,
+  commsThreads, inFilter, isUnseen, markSeen, matchesQuery, messageKind, parseSeen, plainLine, STATE_LABEL, threadState, threadTitle, timelineTail,
 } from '../web/comms.ts';
 
 const T0 = new Date(2026, 10, 5, 9, 0, 0).getTime();
@@ -50,6 +50,14 @@ test('state: stopped beats everything, then working, queued, failure, report, ha
   assert.equal(s([report('blocked')]), 'blocked');
   assert.equal(s([report('failed')]), 'failed');
   assert.equal(s([report('passed'), m({ id: 'thanks' })]), 'done', 'a later note does not undo the outcome');
+  // A review reads as the work it answers: changes needed is not a failure, a pass approves.
+  const asked = m({ id: 'ask', delegation: { kind: 'review', task: 'Review it', acceptanceCriteria: '' } });
+  const answer = (outcome: 'passed' | 'failed') => m({ id: 'r', replyTo: 'ask', report: { outcome, summary: 's', evidence: 'e' } });
+  assert.equal(s([asked, answer('failed')]), 'changes');
+  assert.equal(s([asked, answer('passed')]), 'approved');
+  assert.equal(s([m({ id: 'r', text: 'REVIEW RESULT: FAILED', report: { outcome: 'failed', summary: 's', evidence: '' } })]), 'changes', 'known from its own text too');
+  assert.equal(inFilter('changes', 'attention'), true);
+  assert.equal(STATE_LABEL.changes, 'Changes needed');
   assert.equal(s([m({ id: '1' })]), 'handled');
   assert.equal(threadState({ conversation: undefined, messages: [m({ id: '1' })] }), 'handled');
 });

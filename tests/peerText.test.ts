@@ -21,6 +21,8 @@ test('outcomes read as the work they answer: a review approves or needs changes,
   assert.equal(outcomeWords('blocked', 'review'), 'Blocked');
   assert.equal(outcomeWords('failed'), 'Failed', 'an unknown kind keeps the plain word');
   assert.equal(outcomeTone('failed'), 'danger');
+  assert.equal(outcomeTone('failed', 'testing'), 'danger');
+  assert.equal(outcomeTone('failed', 'review'), 'warning', 'changes needed is not a failure');
   assert.equal(outcomeTone('blocked'), 'warning');
   assert.equal(outcomeTone('done'), 'success');
 });
@@ -70,7 +72,7 @@ test('a report finds the delegation it answers, and the delegation shows where i
   const index = commsIndex([entry(asked), entry(report)]);
   assert.equal(index.reportFor.get('d')?.id, 'r');
   assert.equal(reportKind(report, index.byId.get('d')), 'review');
-  assert.deepEqual(delegationState(asked, index.reportFor.get('d')), { label: 'Changes needed', tone: 'danger' });
+  assert.deepEqual(delegationState(asked, index.reportFor.get('d')), { label: 'Changes needed', tone: 'warning' });
   assert.deepEqual(delegationState(asked), { label: 'Working', tone: 'busy' });
   assert.deepEqual(delegationState({ ...asked, status: 'queued' }), { label: 'Sent', tone: 'neutral' });
   assert.deepEqual(delegationState({ ...asked, status: 'delivered' }), { label: 'Awaiting report', tone: 'neutral' });
@@ -81,14 +83,15 @@ test('a report finds the delegation it answers, and the delegation shows where i
   assert.equal(commsIndex([entry(asked), entry(report), entry(again), entry(chat)]).reportFor.get('d')?.id, 'r2');
 });
 
-test('the same message delivered twice marks the second turn as a repeat', () => {
+test('the same message delivered twice marks the second turn as a repeat of the first one\'s time', () => {
   const peer = entry(msg({ id: 'x' }));
   const other = entry(msg({ id: 'y' }));
   const user: Entry = { id: 'u', agentId: 'b', kind: 'user', text: 'hi', ts: 1 };
   const repeats = repeatedPromptTurns([
-    { id: 't1', prompt: peer }, { id: 't2', prompt: user }, { id: 't3', prompt: peer }, { id: 't4', prompt: other }, { id: 't5' },
+    { id: 't1', prompt: peer, startedAt: 100 }, { id: 't2', prompt: user, startedAt: 200 }, { id: 't3', prompt: peer, startedAt: 300 },
+    { id: 't4', prompt: other, startedAt: 400 }, { id: 't5', startedAt: 500 },
   ]);
-  assert.deepEqual([...repeats], ['t3']);
+  assert.deepEqual([...repeats], [['t3', 100]]);
 });
 
 test('an openui-lang block only comes alive in the agent\'s own words, never in a teammate\'s message', async () => {

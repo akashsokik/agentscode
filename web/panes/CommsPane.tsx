@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import type { Agent, PeerMessage, Report } from '../../shared/types.ts';
+import type { Agent, PeerMessage } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import {
   commsThreads, inFilter, isUnseen, matchesQuery, messageKind, STATE_LABEL, threadState, threadTitle, timelineTail,
@@ -10,10 +10,9 @@ import { relativeTime, STATUS_LABEL } from '../format.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
-import { Markdown } from '../ui/Markdown.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { cx, Empty, HeaderButton, StatusLabel, type Tone } from '../ui/common.tsx';
-import { outcomeWords, reportKind } from '../peerText.ts';
+import { PeerBubble } from './PeerMessages.tsx';
 import {
   AlertCircle, ArrowLeft, Bot, CheckCheck, CheckCircle, ChevronDown, CircleX, Clock, MessageMultiple, Search, Square, X,
   type IconComponent,
@@ -63,7 +62,9 @@ const STATE_MARK: Record<Exclude<ThreadState, 'working'>, { icon: IconComponent;
   stopped: { icon: Square, className: 'text-content/40' },
   queued: { icon: Clock, className: 'text-content/50' },
   failed: { icon: CircleX, className: 'text-danger' },
+  changes: { icon: AlertCircle, className: 'text-warning' },
   blocked: { icon: AlertCircle, className: 'text-warning' },
+  approved: { icon: CheckCircle, className: 'text-success' },
   done: { icon: CheckCircle, className: 'text-success' },
   handled: { icon: CheckCheck, className: 'text-content/40' },
 };
@@ -76,15 +77,8 @@ function StateIcon({ state, className = 'size-3' }: { state: ThreadState; classN
 
 /** The state's words take its colour only when it needs you, as StatusLabel does. */
 function stateWords(state: ThreadState): string {
-  return state === 'failed' ? 'text-danger' : state === 'blocked' ? 'text-warning' : '';
+  return state === 'failed' ? 'text-danger' : state === 'blocked' || state === 'changes' ? 'text-warning' : '';
 }
-
-const OUTCOME: Record<Report['outcome'], { icon: IconComponent; className: string }> = {
-  passed: { icon: CheckCircle, className: 'text-success' },
-  done: { icon: CheckCircle, className: 'text-success' },
-  failed: { icon: CircleX, className: 'text-danger' },
-  blocked: { icon: AlertCircle, className: 'text-warning' },
-};
 
 /** How much of a conversation's message budget is spent, as a hairline meter. */
 function BudgetMeter({ used, limit }: { used: number; limit: number }) {
@@ -108,16 +102,6 @@ function AgentMark({ agent, className = 'size-3.5' }: { agent: Agent | undefined
   return agent
     ? <EngineIcon engine={agent.engine} className={className} />
     : <Bot aria-hidden className={cx('shrink-0 text-content/45', className)} strokeWidth={1.75} />;
-}
-
-function AgentLink({ id, name, agents }: { id: string; name: string; agents: Agent[] }) {
-  const agent = agents.find(a => a.id === id);
-  if (!agent) return <span className="min-w-0 truncate font-medium text-content/55">{name}</span>;
-  return (
-    <button type="button" onClick={() => open({ kind: 'agent', agentId: id })} title={`Open ${name}`} className="-mx-1 min-w-0 truncate rounded px-1 font-medium text-content transition-colors duration-100 hover:bg-content/8">
-      {name}
-    </button>
-  );
 }
 
 const FILTERS: { value: CommsFilter; label: string }[] = [
@@ -525,114 +509,11 @@ function TailStop({ stop, agents, fresh, first, last }: { stop: TimelineTail; ag
   );
 }
 
-/** InboxComment for a peer message: a header of who, what and when, over its body. */
-function MessageCard({ message, answered, agents, now }: { message: PeerMessage; answered?: PeerMessage; agents: Agent[]; now: number }) {
-  const outcome = message.report ? OUTCOME[message.report.outcome] : undefined;
-  return (
-    <article className={cx('overflow-hidden rounded-md border bg-content/5', message.status === 'failed' ? 'border-danger/25' : 'border-content/10')}>
-      <header className="flex min-h-9 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-stroke px-3 py-1.5 font-sans text-[12px] text-content/50">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <AgentLink id={message.fromAgentId} name={message.fromName} agents={agents} />
-          <span className="shrink-0">to</span>
-          <AgentLink id={message.toAgentId} name={message.toName} agents={agents} />
-        </span>
-        <span aria-hidden>·</span>
-        <span className="shrink-0">{messageKind(message)}</span>
-        {message.delegation ? <><span aria-hidden>·</span><span className="shrink-0">{message.delegation.kind}</span></> : null}
-        {message.report && outcome ? (
-          <>
-            <span aria-hidden>·</span>
-            <span className={cx('inline-flex shrink-0 items-center gap-1', outcome.className)}>
-              <outcome.icon className="size-3.5" strokeWidth={1.75} />
-              {/* As the work it answers reads it: a failed review needs changes (web/peerText.ts). */}
-              {outcomeWords(message.report.outcome, reportKind(message, answered))}
-            </span>
-          </>
-        ) : null}
-        <span aria-hidden>·</span>
-        <time dateTime={new Date(message.ts).toISOString()} title={new Date(message.ts).toLocaleString()} className="shrink-0 tabular-nums">{relativeTime(message.ts, now)}</time>
-        {/* Handled is the quiet default; only the states still moving, or gone wrong, say so. */}
-        {message.status !== 'delivered' ? <span className="ml-auto text-[11px]"><MessageStatus message={message} /></span> : null}
-      </header>
-      <div className="px-3 py-2.5">
-        <CollapsibleBody>
-          {message.delegation ? (
-            <div className="font-sans">
-              <p className="whitespace-pre-wrap text-[13px] font-medium leading-5 text-content">{message.delegation.task}</p>
-              <Section label="Acceptance criteria"><p className="whitespace-pre-wrap text-[12px] leading-5 text-content/70">{message.delegation.acceptanceCriteria}</p></Section>
-              {message.delegation.context ? <Section label="Context"><p className="whitespace-pre-wrap text-[12px] leading-5 text-content/70">{message.delegation.context}</p></Section> : null}
-            </div>
-          ) : message.report ? (
-            <div>
-              <Markdown inert text={message.report.summary} />
-              {message.report.evidence.trim() ? (
-                <Section label="Evidence">
-                  <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-content/5 px-2.5 py-2 font-mono text-[12px] leading-5 text-content/60">{message.report.evidence}</pre>
-                </Section>
-              ) : null}
-            </div>
-          ) : (
-            <Markdown inert text={message.text} />
-          )}
-        </CollapsibleBody>
-      </div>
-      {message.error ? (
-        <p className="flex items-start gap-1.5 border-t border-stroke px-3 py-2 font-sans text-[12px] text-danger">
-          <CircleX className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
-          <span className="min-w-0 break-words">{message.error}</span>
-        </p>
-      ) : null}
-    </article>
-  );
+/**
+ * A message in the conversation, in the same borderless bubble a transcript shows it in (PeerBubble):
+ * who sent it to whom, the kind and outcome, the gist, and the whole of it on Show more.
+ */
+function MessageCard({ message, answered }: { message: PeerMessage; answered?: PeerMessage; agents: Agent[]; now: number }) {
+  return <PeerBubble message={message} between answered={answered} thread={false} />;
 }
 
-function Section({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="mt-3">
-      <p className="mb-1 font-sans text-[11px] font-medium text-content/45">{label}</p>
-      {children}
-    </div>
-  );
-}
-
-const CLAMPED_BODY_PX = 180;
-
-/** MonoCode's CollapsibleBody: long write-ups start clamped behind a fade so the timeline stays scannable. */
-function CollapsibleBody({ children }: { children: ReactNode }) {
-  const inner = useRef<HTMLDivElement>(null);
-  const [overflows, setOverflows] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    const el = inner.current;
-    if (!el) return;
-    // A little slack, so a body barely over the limit just shows in full.
-    const measure = () => setOverflows(el.scrollHeight > CLAMPED_BODY_PX + 48);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const clamped = overflows && !expanded;
-  return (
-    <>
-      <div
-        style={clamped ? { maxHeight: CLAMPED_BODY_PX } : undefined}
-        className={clamped ? 'overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]' : undefined}
-      >
-        <div ref={inner}>{children}</div>
-      </div>
-      {overflows ? (
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded(value => !value)}
-          className="mt-1.5 font-sans text-[12px] text-content/50 transition-colors duration-150 hover:text-content"
-        >
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      ) : null}
-    </>
-  );
-}

@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { kindWords, messagePreview, outcomeWords, reportKind, taskTitle } from '../peerText.ts';
 import type { Agent, ChangedFile, GitStatus } from '../../shared/types.ts';
 import { AgentOverview } from './AgentOverview.tsx';
 import type { Root } from '../api.ts';
@@ -127,7 +128,7 @@ function CommsFeed({ agent }: { agent: Agent | undefined }) {
                 <time dateTime={new Date(message.ts).toISOString()} title={new Date(message.ts).toLocaleString()} className="ml-auto shrink-0 text-[11px] tabular-nums text-content/40">{relativeTime(message.ts, now)}</time>
               </div>
               <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-content/55">
-                {message.report ? `${message.report.outcome.toUpperCase()}: ${message.report.summary}` : message.delegation ? `${message.delegation.kind}: ${message.delegation.task}` : message.text}
+                {message.report ? `${outcomeWords(message.report.outcome, reportKind(message, messages?.find(m => m.id === message.replyTo)))}: ${messagePreview(message)}` : message.delegation ? `${kindWords(message.delegation.kind)}: ${taskTitle(message.delegation.task)}` : messagePreview(message)}
               </p>
               <div className="mt-1 text-[11px]"><MessageStatus message={message} /></div>
             </button>
