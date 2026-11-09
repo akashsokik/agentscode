@@ -38,6 +38,11 @@ test('a new agent gets a shape and colour no one else has while any is free', ()
   assert.equal(`${look.shape}:${look.color}`, 'pebble:green', 'the only free pair');
   assert.notEqual(`${freshLook([], () => 0).shape}:${freshLook([], () => 0).color}`, `${SUPER_LOOK.shape}:${SUPER_LOOK.color}`, 'never the SuperAgent\'s');
   assert.ok(isLook(freshLook([...taken, { shape: 'pebble', color: 'green', eyes: 'round' }], () => 0.99)), 'all taken: still a valid look');
+  const all = [...taken, { shape: 'pebble', color: 'green', eyes: 'round' } as const];
+  for (const r of [0, 0.3, 0.6, 0.85, 0.99]) {
+    const look = freshLook(all, () => r);
+    assert.ok(!(look.shape === SUPER_LOOK.shape && look.color === SUPER_LOOK.color), 'never the SuperAgent\'s, even when every pair is taken');
+  }
 });
 
 test('status maps to the face: content, lively, attentive, pleased or tired', () => {

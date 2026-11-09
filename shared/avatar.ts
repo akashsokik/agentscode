@@ -84,7 +84,9 @@ export function freshLook(taken: AvatarLook[], random: () => number = Math.rando
     return list.filter(l => uses(field, l[field]) === min);
   };
   const pool = free.length ? least(least(free, 'color'), 'shape') : [];
-  const base = pool.length ? pick(pool) : { shape: pick(AVATAR_SHAPES), color: pick(AVATAR_COLORS), eyes: 'round' as AvatarEyes };
+  let base = pool.length ? pick(pool) : { shape: pick(AVATAR_SHAPES), color: pick(AVATAR_COLORS), eyes: 'round' as AvatarEyes };
+  // Every pair taken: a random one, but never the SuperAgent's.
+  if (isSuperPair(base)) base = { ...base, color: AVATAR_COLORS.find(c => c !== SUPER_LOOK.color)! };
   return { ...base, eyes: pick(AVATAR_EYES) };
 }
 
