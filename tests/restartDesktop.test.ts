@@ -6,6 +6,8 @@ import test from 'node:test';
 import { tempDir } from './helpers.ts';
 
 const SCRIPT = path.join(import.meta.dirname, '..', 'scripts', 'restart-desktop.sh');
+/** The script drives a Mac app (ditto, osascript, open, a .app bundle), so it is tested only on macOS; CI checks run on Linux. */
+const MAC_ONLY = { skip: process.platform !== 'darwin' ? 'scripts/restart-desktop.sh is macOS-only (ditto, osascript, open)' : false };
 
 /**
  * scripts/restart-desktop.sh against a stand-in app: a real process (so kill works on it), with
@@ -64,7 +66,7 @@ function world(quit: 'exits' | 'hangs' | 'holds') {
   return { dir, app, build, env, run, pid, isAlive, installed, opened, cleanup };
 }
 
-test('a normal quit: the new build goes in, the old one is kept, and the app is opened', async () => {
+test('a normal quit: the new build goes in, the old one is kept, and the app is opened', MAC_ONLY, async () => {
   const w = world('exits');
   const before = w.pid();
   try {
@@ -79,7 +81,7 @@ test('a normal quit: the new build goes in, the old one is kept, and the app is 
   } finally { w.cleanup(); }
 });
 
-test('the browser-holder hang: server gone but the process stays, so it is ended and the restart goes on', async () => {
+test('the browser-holder hang: server gone but the process stays, so it is ended and the restart goes on', MAC_ONLY, async () => {
   const w = world('hangs');
   const stuck = w.pid();
   try {
@@ -92,7 +94,7 @@ test('the browser-holder hang: server gone but the process stays, so it is ended
   } finally { w.cleanup(); }
 });
 
-test('a quit held while the server still answers (a dialog): nothing is killed, swapped or reopened', async () => {
+test('a quit held while the server still answers (a dialog): nothing is killed, swapped or reopened', MAC_ONLY, async () => {
   const w = world('holds');
   const app = w.pid();
   try {
@@ -105,7 +107,7 @@ test('a quit held while the server still answers (a dialog): nothing is killed, 
   } finally { w.cleanup(); }
 });
 
-test('no build, or another restart already waiting: nothing happens', async () => {
+test('no build, or another restart already waiting: nothing happens', MAC_ONLY, async () => {
   const w = world('exits');
   const app = w.pid();
   try {
@@ -123,7 +125,7 @@ test('no build, or another restart already waiting: nothing happens', async () =
   } finally { w.cleanup(); }
 });
 
-test('--when-idle restarts after two idle checks in a row', async () => {
+test('--when-idle restarts after two idle checks in a row', MAC_ONLY, async () => {
   const w = world('exits');
   try {
     const { code, out } = await w.run('--when-idle');
@@ -134,7 +136,7 @@ test('--when-idle restarts after two idle checks in a row', async () => {
   } finally { w.cleanup(); }
 });
 
-test('if the current app cannot be moved aside, nothing is copied into it and the old app reopens (exit 1)', async () => {
+test('if the current app cannot be moved aside, nothing is copied into it and the old app reopens (exit 1)', MAC_ONLY, async () => {
   const w = world('exits');
   const prev = w.env.AGENTSCODE_PREV;
   // A leftover .prev that cannot be removed: rm -rf fails, so the app must not be replaced.
@@ -155,7 +157,7 @@ test('if the current app cannot be moved aside, nothing is copied into it and th
   }
 });
 
-test('with no app installed, a restart does nothing', async () => {
+test('with no app installed, a restart does nothing', MAC_ONLY, async () => {
   const w = world('exits');
   try {
     fs.rmSync(w.app, { recursive: true });
@@ -167,7 +169,7 @@ test('with no app installed, a restart does nothing', async () => {
   } finally { w.cleanup(); }
 });
 
-test('a lock left by a waiter that is gone is taken over; one held by a live waiter is not', async () => {
+test('a lock left by a waiter that is gone is taken over; one held by a live waiter is not', MAC_ONLY, async () => {
   const w = world('exits');
   try {
     fs.mkdirSync(w.env.AGENTSCODE_LOCK);
