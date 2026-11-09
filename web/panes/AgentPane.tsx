@@ -4,7 +4,6 @@ import { ALL_PROJECTS } from '../projects.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
 import { AgentSettingsDialog, type AgentSettingsSection } from '../dialogs/AgentSettingsDialog.tsx';
 import { SoulProposalNotice } from '../dialogs/Dreaming.tsx';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { Empty, HeaderButton } from '../ui/common.tsx';
 import { Bot, Settings } from '../mono/icons.tsx';
@@ -13,6 +12,7 @@ import { Transcript } from './Transcript.tsx';
 import { OpenUIActionContext } from '../openui/context.ts';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
 import { SuperInbox } from './SuperPanel.tsx';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 /** One agent's session: transcript, inline approvals and the composer. */
 export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneChrome }) {
@@ -45,7 +45,7 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
       chrome={chrome}
       title={
         <span className="flex min-w-0 items-center gap-2">
-          <EngineIcon engine={agent.engine} className="size-3.5" />
+          <AgentAvatar agent={agent} className="size-3.5" />
           <span className="shrink-0 text-[13px] text-content">{agent.name}</span>
           {/* An agent with no project works across all of them; a project agent's project is in the Overview. */}
           {agent.projectId === null ? <span className="shrink-0 text-[12px] font-normal text-content/45">{ALL_PROJECTS}</span> : null}

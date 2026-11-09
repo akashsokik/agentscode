@@ -9,9 +9,10 @@ import type { Agent } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { groupByProject, projectLabel } from '../projects.ts';
 import { useApp } from '../store.ts';
-import { EngineIcon, ENGINE_NAMES } from './EngineIcon.tsx';
+import { ENGINE_NAMES } from './EngineIcon.tsx';
 import { MenuRow } from './common.tsx';
 import { Search, X } from '../mono/icons.tsx';
+import { AgentAvatar } from './Avatar.tsx';
 
 /** Rendering hundreds of rows helps nobody; past this, typing narrows the list. */
 const SHOWN = 80;
@@ -86,7 +87,7 @@ export function AgentPicker({ value, onChange }: { value: string[]; onChange: (i
         <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto border-b border-content/5 px-3 py-2.5">
           {picked.map(agent => (
             <span key={agent.id} title={describe(agent)} className="inline-flex h-6.5 max-w-full items-center gap-1 rounded-md bg-selection pl-1.5 pr-0.5 text-[12px] text-content">
-              <EngineIcon engine={agent.engine} className="size-3.5" />
+              <AgentAvatar agent={agent} className="size-3.5" />
               <span className="min-w-0 truncate">{agent.name}</span>
               <span className="min-w-0 truncate text-content/40">{projectName(agent.projectId)}</span>
               <button type="button" aria-label={`Remove ${agent.name}`} onClick={() => toggle(agent.id)} className="grid size-5 shrink-0 place-items-center rounded text-content/45 hover:bg-content/10 hover:text-content">
@@ -118,7 +119,7 @@ export function AgentPicker({ value, onChange }: { value: string[]; onChange: (i
               {shown.map(agent => (
                 <div key={agent.id} data-picker-row={agent.id} onMouseEnter={() => setActive(rows.indexOf(agent))}>
                   <MenuRow
-                    title={<span className="flex items-center gap-1.5"><EngineIcon engine={agent.engine} className="size-3.5" />{agent.name}</span>}
+                    title={<span className="flex items-center gap-1.5"><AgentAvatar agent={agent} className="size-3.5" />{agent.name}</span>}
                     hint={describe(agent)}
                     checked={selected.has(agent.id)}
                     highlighted={rows[current]?.id === agent.id}

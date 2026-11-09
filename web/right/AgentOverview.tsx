@@ -11,10 +11,11 @@ import { projectLabel } from '../projects.ts';
 import { loadMemory, useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { StatusLabel } from '../ui/common.tsx';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
+import { ENGINE_NAMES } from '../ui/EngineIcon.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { ArrowLeft, ArrowUp, Folder, GitBranch, Route } from '../mono/icons.tsx';
 import { whereabouts, type Whereabouts } from '../whereabouts.ts';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 const HANDOFFS = 4;
 const PEERS = 4;
@@ -55,13 +56,13 @@ export function AgentOverview({ agent, git }: { agent: Agent; git: GitStatus | n
   }, [mine, agent.id]);
   const agents = useApp(s => s.snapshot?.agents);
 
-  const subtitle = [rolePreset(agent.role).name, modelLabel(agent, models)].filter(Boolean).join(' · ');
+  const subtitle = [rolePreset(agent.role).name, ENGINE_NAMES[agent.engine], modelLabel(agent, models)].filter(Boolean).join(' · ');
   const where = whereabouts(agent, projects);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto pb-4 font-sans">
       <div className="flex items-center gap-3.5 px-4 pt-5">
-        <EngineIcon engine={agent.engine} className="size-10" />
+        <AgentAvatar agent={agent} className="size-10" />
         <div className="min-w-0">
           <p className="truncate text-[15px] font-semibold leading-6 text-content">{agent.name}</p>
           <p className="truncate text-[12px] text-content/45" title={subtitle}>{subtitle}</p>
@@ -121,7 +122,7 @@ export function AgentOverview({ agent, git }: { agent: Agent; git: GitStatus | n
                   onClick={e => (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'comms', conversationId: peer.conversationId })}
                   className="flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left transition-colors duration-150 hover:bg-content/5"
                 >
-                  {teammate ? <EngineIcon engine={teammate.engine} className="size-3.5" /> : <span className="size-3.5 shrink-0" />}
+                  {teammate ? <AgentAvatar agent={teammate} className="size-3.5" /> : <span className="size-3.5 shrink-0" />}
                   <span className="min-w-0 truncate text-[13px] text-content/85">{peer.name}</span>
                   <span className="shrink-0 text-[11px] text-content/40">{peer.count} {peer.count === 1 ? 'message' : 'messages'}</span>
                   <span className="ml-auto shrink-0 text-[11px] tabular-nums text-content/35">{relativeTime(peer.last, now)}</span>

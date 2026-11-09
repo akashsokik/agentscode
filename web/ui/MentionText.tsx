@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from 'react';
 import { findMentions, type MentionRef } from '../../shared/mentions.ts';
 import { open, setProject } from '../layout.ts';
 import { useApp } from '../store.ts';
+import { AgentAvatar } from './Avatar.tsx';
 
 /**
  * Plain text with its @mentions as quiet inline chips: agents, projects, files, and @all, @channel
@@ -63,6 +64,7 @@ function Chip({ mention, shown, agentId }: { mention: MentionRef; shown: string;
       onClick={(event) => { event.stopPropagation(); go!(); }}
       className={`${LIVE} cursor-pointer transition-colors duration-150 hover:bg-mention/20`}
     >
+      {agent ? <AgentAvatar agent={agent} animate={false} className="mr-0.5 inline-block size-[1em] align-[-0.15em]" /> : null}
       {shown}
     </button>
   );

@@ -19,10 +19,10 @@ import { attempt, useApp } from '../store.ts';
 import { hideTerminal, newTerminal, showTerminal, splitFront } from '../terminal/actions.ts';
 import { setTheme, useTheme, type ThemePreference } from '../theme.ts';
 import { cx } from './common.tsx';
-import { EngineIcon } from './EngineIcon.tsx';
 import { Check, Globe, Folder, FolderPlus, FolderTree, GitCompare, MessageMultiple, MessageSquarePlus, Palette, PanelBottom, PanelLeft, PanelRight, Plus, RotateCcw, Search, Settings, SlidersHorizontal, SplitColumns, SplitRows, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Modal } from '../mono/Modal.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
+import { AgentAvatar } from './Avatar.tsx';
 
 /** What the palette needs from the app shell: the dialogs it can open. */
 export interface PaletteActions {
@@ -94,7 +94,7 @@ function useCommands(actions: PaletteActions): Command[] {
         title: agent.name,
         keywords: [projectName(agent.projectId), rolePreset(agent.role).name, agent.currentTask?.summary ?? ''].join(' '),
         hint: [projectName(agent.projectId), rolePreset(agent.role).name, status.label].filter(Boolean).join(' · '),
-        icon: <EngineIcon engine={agent.engine} className="size-4" />,
+        icon: <AgentAvatar agent={agent} className="size-4" />,
         status: status.mark,
         priority: 2,
         recency: agent.lastActiveAt,

@@ -10,11 +10,11 @@ import { rolePreset } from '../../shared/roles.ts';
 import { shortPath } from '../format.ts';
 import { projectLabel } from '../projects.ts';
 import { useApp } from '../store.ts';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import type { ComposerCommand } from '../../shared/composer.ts';
 import { Bot, File, Folder } from '../mono/icons.tsx';
 import { useLockOverscroll } from '../mono/useLockOverscroll.ts';
 import { pickGroup, type MentionPick } from './tokens.ts';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 /** Fuzzy-matched text with the matched characters accented. */
 export function MatchText({ text, positions, active }: { text: string; positions: number[]; active: boolean }): ReactNode {
@@ -190,7 +190,7 @@ export function MentionPicker({ picks, query, active, loading, truncated, label 
               const agent = agents?.find(a => a.id === pick.agent.id);
               body = (
                 <>
-                  {agent ? <EngineIcon engine={agent.engine} className="size-3.5" /> : <Bot className="size-3.5 shrink-0 text-content/55" strokeWidth={1.75} />}
+                  <AgentAvatar agent={agent ?? { id: pick.agent.id }} className="size-3.5" />
                   <span className={`min-w-0 shrink truncate ${highlighted ? 'text-mention' : ''}`}><MatchText text={pick.agent.name} positions={pick.positions} active={searching} /></span>
                   <span className="min-w-0 flex-1 truncate text-right text-[11px] text-content/40">{agentHint(agent, projects)}</span>
                 </>

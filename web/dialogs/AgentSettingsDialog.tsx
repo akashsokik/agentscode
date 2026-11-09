@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { noProjectFolder, type Agent, type AgentRole, type MemoryEntry } from '../../shared/types.ts';
 import { ROLES } from '../../shared/roles.ts';
 import { api } from '../api.ts';
@@ -15,6 +15,9 @@ import { Group, Row, Select } from '../mono/settings.tsx';
 import { DreamingSection, SoulProposalGroup } from './Dreaming.tsx';
 import { RemoveAgentDialog } from './RemoveAgentDialog.tsx';
 import { submitKey } from './submitKey.ts';
+import { AvatarPicker } from './AvatarPicker.tsx';
+import { AgentAvatar } from '../ui/Avatar.tsx';
+import { agentLook, type AvatarLook } from '../../shared/avatar.ts';
 import { IS_MAC } from '../platform.ts';
 import { openingSection, rememberedSection, rememberSection, SECTIONS, sectionForKey, type AgentSettingsSection } from '../settingsSections.ts';
 
@@ -63,6 +66,10 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
   const project = projects?.find(p => p.id === agent.projectId);
   const [name, setName] = useState(agent.name);
   const [role, setRole] = useState<AgentRole>(agent.role);
+  const [look, setLook] = useState<AvatarLook>(() => agentLook(agent));
+  const lookChanged = agent.role !== 'super' && JSON.stringify(look) !== JSON.stringify(agentLook(agent));
+  const allAgents = useApp(s => s.snapshot?.agents);
+  const others = useMemo(() => (allAgents ?? []).filter(a => a.id !== agent.id).map(a => agentLook(a)), [allAgents, agent.id]);
   const [instructions, setInstructions] = useState(agent.instructions);
   // Accepting a soul proposal (or a hand edit of soul.md) changes the soul while this is open. A box
   // you have not touched follows it, so Save never writes the old soul back.
@@ -77,7 +84,7 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
 
   const save = async () => {
     setBusy(true);
-    const ok = await attempt(() => api.updateAgent(agent.id, { name: name.trim(), role, instructions }));
+    const ok = await attempt(() => api.updateAgent(agent.id, { name: name.trim(), role, instructions, ...(lookChanged ? { avatar: look } : {}) }));
     setBusy(false);
     if (ok) onClose();
   };
@@ -155,6 +162,16 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
                 <Row label="Name" description="Teammates address it by this name.">
                   <input value={name} maxLength={24} onChange={e => setName(e.target.value)} onKeyDown={onSubmitKey} className={`${INPUT} w-44`} />
                 </Row>
+                {agent.role === 'super' ? (
+                  <Row label="Avatar" description="The SuperAgent keeps its own look, so it is easy to spot.">
+                    <AgentAvatar agent={agent} className="size-8" />
+                  </Row>
+                ) : (
+                  <>
+                    <Row label="Avatar" description="How it looks across AgentsCode. Shuffle for one no other agent has." />
+                    <AvatarPicker look={look} others={others} onChange={setLook} />
+                  </>
+                )}
                 {agent.role === 'super' ? (
                   <Row label="Role" description="SuperAgent: it runs the team across every project and never edits. Remove it to stop using it." />
                 ) : (

@@ -10,7 +10,6 @@ import { focusedAgentId, focusedChannelId, open, openToSide, setRightPanel, setR
 import { ALL_PROJECTS } from '../projects.ts';
 import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
 import { Empty, HeaderButton, IconTab, Loading, TextButton } from '../ui/common.tsx';
 import { Bot, CheckCircle, CircleDot, Clock, DashboardSquare, FileDiff, Folder, GitBranch, ListBullet, MessageMultiple, PanelRight, RefreshCw, type IconComponent } from '../mono/icons.tsx';
@@ -19,6 +18,7 @@ import { MessageStatus } from '../panes/CommsPane.tsx';
 import { DecisionsView, GoalsView, RoutinesView, useSuperTabs } from '../panes/SuperPanel.tsx';
 import { superPanelView } from '../superText.ts';
 import { useNow } from '../ui/useNow.ts';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 /** Porcelain codes as MonoCode's Changes list shows them: M, A, D, R, U. */
 const STATUS_TONE: Record<string, string> = {
@@ -169,7 +169,7 @@ function TeamRow({ agent, pending }: { agent: Agent; pending: boolean }) {
       title={`Open ${agent.name}`}
       className="flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-150 hover:bg-content/5"
     >
-      <EngineIcon engine={agent.engine} className="size-4" />
+      <AgentAvatar agent={agent} className="size-4" />
       <span className="shrink-0 text-[13px] font-medium text-content">{agent.name}</span>
       <span className="shrink-0 text-[11px] text-content/40">{rolePreset(agent.role).name}</span>
       <AgentStatus agent={agent} pending={pending} className="ml-auto min-w-0 max-w-[55%] text-[12px]" />

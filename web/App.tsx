@@ -31,7 +31,6 @@ import { TerminalPanel } from './terminal/TerminalPanel.tsx';
 import { CommandPalette } from './ui/CommandPalette.tsx';
 import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
-import { EngineIcon } from './ui/EngineIcon.tsx';
 import { UsageFooter } from './ui/UsageFooter.tsx';
 import { HeaderButton, StatusLabel } from './ui/common.tsx';
 import { AlertCircle, CheckCircle, Route, File, FileDiff, Globe, MessageMultiple, PanelLeft, Sparkles, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
@@ -41,6 +40,7 @@ import { TabLabel } from './mono/TabLabel.tsx';
 import { TabWidthMotion } from './mono/TabWidthMotion.tsx';
 import { TerminalSpinner } from './mono/TerminalSpinner.tsx';
 import { useTabCloseMotion } from './mono/useTabCloseMotion.ts';
+import { AgentAvatar } from './ui/Avatar.tsx';
 
 const MAX_PANES = 3;
 
@@ -59,7 +59,7 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
     if (!agent) return { icon: <X className="size-3.5 shrink-0 text-content/40" strokeWidth={1.75} />, headline: 'Removed', meta: '' };
     const pending = Boolean(snapshot?.approvals.some(a => a.agentId === agent.id));
     return {
-      icon: <EngineIcon engine={agent.engine} className="size-3.5 shrink-0" />,
+      icon: <AgentAvatar agent={agent} className="size-3.5" />,
       headline: agent.name,
       meta: agent.currentTask?.summary || agent.lastSummary || projectLabel(agent.projectId, snapshot?.projects),
       busy: agent.status === 'working',

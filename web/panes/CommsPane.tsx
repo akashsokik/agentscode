@@ -9,7 +9,6 @@ import { markThreadsSeen, useCommsSeen } from '../commsSeen.ts';
 import { relativeTime, STATUS_LABEL } from '../format.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { cx, Empty, HeaderButton, StatusLabel, type Tone } from '../ui/common.tsx';
 import { PeerBubble } from './PeerMessages.tsx';
@@ -21,6 +20,7 @@ import { Shimmer } from '../mono/Shimmer.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useFollowLatest } from './ChannelPosts.tsx';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 /** "1 message", "3 messages", "2 of 10 messages". */
 function count(n: number, noun: string, limit?: number): string {
@@ -97,10 +97,10 @@ function BudgetMeter({ used, limit }: { used: number; limit: number }) {
   );
 }
 
-/** The engine logo that stands for an agent, or a muted bot once it has been removed. */
+/** The avatar that stands for an agent, or a muted bot once it has been removed. */
 function AgentMark({ agent, className = 'size-3.5' }: { agent: Agent | undefined; className?: string }) {
   return agent
-    ? <EngineIcon engine={agent.engine} className={className} />
+    ? <AgentAvatar agent={agent} className={className} />
     : <Bot aria-hidden className={cx('shrink-0 text-content/45', className)} strokeWidth={1.75} />;
 }
 

@@ -1,3 +1,4 @@
+import type { AvatarLook } from './avatar.ts';
 import type { MentionRef } from './mentions.ts';
 // Types shared by the server (Node, type-stripped) and the web client (Vite).
 // Keep this file to erasable syntax only (no enums, namespaces or parameter
@@ -58,6 +59,8 @@ export interface Agent {
   id: string;
   name: string;
   engine: EngineKind;
+  /** How it looks in the app (shared/avatar.ts); absent, it comes from the id. */
+  avatar?: AvatarLook;
   /** The project it works on; null for an agent with no project, which works across every registered project. */
   projectId: string | null;
   worktree: Worktree | null;
@@ -900,6 +903,8 @@ export interface AgentPatch {
   /** Rewrites the agent's soul.md. */
   instructions?: string;
   dreaming?: boolean;
+  /** Its avatar's shape, colour and eyes (shared/avatar.ts). */
+  avatar?: AvatarLook;
 }
 
 /** A change to one memory entry from the app. */
