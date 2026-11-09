@@ -9,6 +9,10 @@ import { api } from './api.ts';
 import { open, showPanelForSuperOnce } from './layout.ts';
 import { attempt, getState, useApp } from './store.ts';
 import { openAsks, superLabel } from './superText.ts';
+import { avatarSvg, SUPER_LOOK } from '../shared/avatar.ts';
+
+/** The SuperAgent's avatar for notifications (some platforms show the app icon instead). */
+const SUPER_ICON = `data:image/svg+xml,${encodeURIComponent(avatarSvg(SUPER_LOOK, 'calm', 0, 0, 64).replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" '))}`;
 
 export { openAsks, superLabel };
 
@@ -61,7 +65,7 @@ export function useSuperBridge(onQuick: () => void): void {
     if (document.hasFocus() && !document.hidden) return;
     const show = () => {
       for (const ask of fresh) {
-        const note = new Notification('SuperAgent asks', { body: ask.question, tag: `super-ask-${ask.id}` });
+        const note = new Notification('SuperAgent asks', { body: ask.question, tag: `super-ask-${ask.id}`, icon: SUPER_ICON });
         note.onclick = () => { desktop?.focus(); window.focus(); void openSuper(); note.close(); };
       }
     };

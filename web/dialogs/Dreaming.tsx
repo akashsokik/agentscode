@@ -13,6 +13,7 @@ import { Sparkline } from '../ui/Sparkline.tsx';
 import { Check, RotateCcw, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Group, Row, Toggle } from '../mono/settings.tsx';
+import { AgentAvatar } from '../ui/Avatar.tsx';
 
 /** How many dreams the log shows before "Show more". */
 const LOG_SHOWN = 5;
@@ -335,7 +336,7 @@ export function SoulProposalCard({ agent, proposal }: { agent: Agent; proposal: 
   };
   return (
     <div data-soul-proposal className="px-4 py-3.5">
-      <p className="text-[13px] text-content">{agent.name} proposes a change to its soul</p>
+      <p className="flex items-center gap-1.5 text-[13px] text-content"><AgentAvatar agent={agent} className="size-4" />{agent.name} proposes a change to its soul</p>
       <p className="mt-1 text-[12px] leading-relaxed text-content/55">{proposal.why}</p>
       {proposal.evidence?.length ? <p className="mt-1 text-[11px] text-content/40">Evidence: {proposal.evidence.join(', ')}</p> : null}
       {proposal.stale ? (

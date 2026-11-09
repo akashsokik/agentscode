@@ -95,6 +95,7 @@ export function AgentOverview({ agent, git }: { agent: Agent; git: GitStatus | n
                 >
                   <span className="flex min-w-0 items-center gap-1.5 text-[12px]">
                     <Arrow className={`size-3 shrink-0 text-content/40 ${outgoing ? 'rotate-45' : ''}`} strokeWidth={2} />
+                    <AgentAvatar agent={{ id: outgoing ? message.toAgentId : message.fromAgentId, ...agents?.find(a => a.id === (outgoing ? message.toAgentId : message.fromAgentId)) }} className="size-3.5" />
                     <span className="shrink-0 text-content/50">{outgoing ? `To ${message.toName}` : `From ${message.fromName}`}</span>
                     <span className="ml-auto shrink-0">
                       {report

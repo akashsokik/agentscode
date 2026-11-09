@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Snapshot } from '../shared/types.ts';
+import type { Agent, Snapshot } from '../shared/types.ts';
 import { AddProjectDialog } from './dialogs/AddProjectDialog.tsx';
 import { AgentSettingsDialog } from './dialogs/AgentSettingsDialog.tsx';
 import { ChannelDialog } from './dialogs/ChannelDialog.tsx';
@@ -33,7 +33,7 @@ import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
 import { UsageFooter } from './ui/UsageFooter.tsx';
 import { HeaderButton, StatusLabel } from './ui/common.tsx';
-import { AlertCircle, CheckCircle, Route, File, FileDiff, Globe, MessageMultiple, PanelLeft, Sparkles, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
+import { AlertCircle, CheckCircle, Route, File, FileDiff, Globe, MessageMultiple, PanelLeft, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
 import { LAYER } from './mono/layers.ts';
 import { Shimmer } from './mono/Shimmer.tsx';
 import { TabLabel } from './mono/TabLabel.tsx';
@@ -246,9 +246,18 @@ function SuperDock() {
       title={`SuperAgent (${SHORTCUTS.superQuick} for the quick bar)`}
       className={`inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 transition-colors duration-150 hover:bg-content/10 hover:text-content ${waiting ? 'text-content/75' : 'text-content/40'}`}
     >
-      {agent.status === 'working' ? <TerminalSpinner className="text-content/45" /> : <Sparkles className="size-3" strokeWidth={1.75} />}
+      <AgentAvatar agent={agent} className="size-3.5" />
       {superLabel(agent, waiting)}
     </button>
+  );
+}
+
+/** Up to four avatars, overlapping a little, for who is working or waiting. */
+function AvatarStack({ agents }: { agents: Agent[] }) {
+  return (
+    <span aria-hidden className="flex items-center -space-x-1">
+      {agents.slice(0, 4).map(agent => <AgentAvatar key={agent.id} agent={agent} className="size-3.5" />)}
+    </span>
   );
 }
 
@@ -273,8 +282,8 @@ function StatusFooter() {
           <StatusLabel tone="warning">{connection === 'connecting' ? 'Connecting…' : 'Reconnecting…'}</StatusLabel>
         </span>
       )}
-      {working ? <span className="flex shrink-0 items-center gap-1 text-content/45"><TerminalSpinner className="text-content/45" />{working} working</span> : null}
-      {waiting ? <span className="shrink-0 text-warning">{waiting} {waiting === 1 ? 'needs' : 'need'} you</span> : null}
+      {working ? <span className="flex shrink-0 items-center gap-1 text-content/45" title={(agents ?? []).filter(a => a.status === 'working').map(a => a.name).join(', ')}><AvatarStack agents={(agents ?? []).filter(a => a.status === 'working')} />{working} working</span> : null}
+      {waiting ? <span className="flex shrink-0 items-center gap-1 text-warning" title={(agents ?? []).filter(a => a.status === 'waiting').map(a => a.name).join(', ')}><AvatarStack agents={(agents ?? []).filter(a => a.status === 'waiting')} />{waiting} {waiting === 1 ? 'needs' : 'need'} you</span> : null}
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <SuperDock />
         <button

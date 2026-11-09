@@ -887,6 +887,8 @@ export interface CreateAgentRequest {
   useMcp?: boolean;
   role?: AgentRole;
   instructions?: string;
+  /** The look picked in the new-agent dialog; absent, a free one (shared/avatar.ts). */
+  avatar?: AvatarLook;
   worktree?: boolean;
   branch?: string;
   task?: string;

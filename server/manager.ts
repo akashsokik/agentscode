@@ -460,7 +460,7 @@ export class AgentManager {
       name,
       engine,
       // A look no other agent has yet; the SuperAgent always looks like itself (shared/avatar.ts).
-      ...(options.super ? {} : { avatar: freshLook([...this.store.agents.values()].map(a => agentLook(a))) }),
+      ...(options.super ? {} : { avatar: cleanLook(req.avatar) ?? freshLook([...this.store.agents.values()].map(a => agentLook(a))) }),
       projectId: project?.id ?? null,
       worktree,
       home: this.homes.path(id),

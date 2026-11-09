@@ -63,3 +63,14 @@ test('agents get a look when made; a change is validated, and the SuperAgent kee
   assert.equal(sup.avatar, undefined);
   await assert.rejects(h.manager.update(sup.id, { avatar: { shape: 'circle', color: 'teal', eyes: 'round' } }), (e: unknown) => e instanceof HttpError && e.status === 400);
 });
+
+test('the gallery (every shape, colour, eye style and mood) matches tests/fixtures/avatar-gallery.svg', async () => {
+  const { avatarGallery } = await import('../shared/avatar.ts');
+  const fs = await import('node:fs');
+  const file = new URL('./fixtures/avatar-gallery.svg', import.meta.url);
+  const svg = avatarGallery();
+  // Regenerate on purpose with UPDATE_AVATAR_GALLERY=1; otherwise a change to the set must be seen.
+  if (process.env.UPDATE_AVATAR_GALLERY === '1' || !fs.existsSync(file)) fs.writeFileSync(file, svg);
+  assert.equal(svg, fs.readFileSync(file, 'utf8'));
+  assert.equal(svg.match(/<path /g)?.length, 2 * (8 * (5 + 3) + 10 + 4), 'both panels: every shape at 5 sizes and 3 eye styles, 10 colours, 4 moods');
+});

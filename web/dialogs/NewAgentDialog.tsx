@@ -14,6 +14,8 @@ import { Modal } from '../mono/Modal.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Group, Row, Select, Toggle } from '../mono/settings.tsx';
 import { submitKey } from './submitKey.ts';
+import { AvatarGlyph } from '../ui/Avatar.tsx';
+import { agentLook, freshLook, type AvatarLook } from '../../shared/avatar.ts';
 
 const NAMES = AGENT_NAMES;
 const ADD_PROJECT = '__add';
@@ -28,6 +30,10 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   const taken = useMemo(() => new Set((snapshot?.agents ?? []).map(a => a.name.toLowerCase())), [snapshot?.agents]);
   const [name, setName] = useState(() => NAMES.find(n => !taken.has(n.toLowerCase())) ?? '');
   const [engine, setEngine] = useState<EngineKind>(() => ENGINES.find(kind => engines?.[kind].available) ?? 'claude');
+  // The look it will have: a free one, which Shuffle rerolls; Agent Settings changes it later.
+  const allAgents = useApp(s => s.snapshot?.agents);
+  const takenLooks = useMemo(() => (allAgents ?? []).map(a => agentLook(a)), [allAgents]);
+  const [look, setLook] = useState<AvatarLook>(() => freshLook(takenLooks));
   const [project, setProject] = useState(projectId === null ? NO_PROJECT : projectId ?? projects[0]?.id ?? NO_PROJECT);
   const [role, setRole] = useState<AgentRole>('dev');
   const [instructions, setInstructions] = useState(rolePreset('dev').instructions);
@@ -60,7 +66,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   const create = async () => {
     setBusy(true);
     const agent = await attempt(() => api.createAgent({
-      name: name.trim(), engine, projectId: noProject ? null : project, role, instructions, autonomy, model, effort,
+      name: name.trim(), engine, projectId: noProject ? null : project, role, instructions, autonomy, model, effort, avatar: look,
       worktree: !noProject && worktree, branch: (!noProject && worktree && branch.trim()) || undefined, useMcp: engine === 'claude' && useMcp, task: task.trim() || undefined,
     }));
     setBusy(false);
@@ -92,7 +98,13 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
       <div className="px-4 pb-5 pt-4">
         <Group title="Agent">
           <Row label="Name" description="Teammates address each other by name.">
-            <input autoFocus value={name} maxLength={24} onChange={e => setName(e.target.value)} onKeyDown={onSubmitKey} className={`${INPUT} w-44`} />
+            <span className="flex items-center gap-2">
+              <AvatarGlyph look={look} seed="new-agent" className="size-7" />
+              <input autoFocus value={name} maxLength={24} onChange={e => setName(e.target.value)} onKeyDown={onSubmitKey} className={`${INPUT} w-44`} />
+            </span>
+          </Row>
+          <Row label="Avatar" description="A look no other agent has. Change it any time in its settings.">
+            <SecondaryButton onClick={() => setLook(freshLook(takenLooks))}>Shuffle</SecondaryButton>
           </Row>
           <Row label="Project" description={noProject ? 'Works from its own folder and can reach every project you have added.' : undefined}>
             <Select
