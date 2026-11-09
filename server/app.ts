@@ -196,6 +196,19 @@ export function createApp(
   app.post('/api/profile/proposals/:proposalId', (req, res) => {
     res.json(manager.decideProfile(param(req, 'proposalId'), req.body?.action));
   });
+  // The SuperAgent: set it up, answer its questions, undo its decisions.
+  app.get('/api/super', (_req, res) => {
+    res.json(manager.superView());
+  });
+  app.post('/api/super', async (req, res) => {
+    res.json(await manager.createSuper(req.body ?? {}));
+  });
+  app.post('/api/super/asks/:askId', (req, res) => {
+    res.json(manager.answerSuper(param(req, 'askId'), req.body ?? {}));
+  });
+  app.post('/api/super/log/:actionId/undo', async (req, res) => {
+    res.json(await manager.undoSuper(param(req, 'actionId')));
+  });
   app.get('/api/dream-stats', (_req, res) => {
     res.json(manager.dreamStats());
   });

@@ -20,6 +20,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const models = useApp(s => s.snapshot?.models);
   const theme = useTheme();
   const [limit, setLimit] = useState(String(settings?.messageLimit ?? 12));
+  const [wakes, setWakes] = useState(String(settings?.superMaxWakesPerHour ?? 6));
+  const [budget, setBudget] = useState(String(settings?.superDailyBudgetUsd ?? 10));
   const [refreshing, setRefreshing] = useState(false);
   if (!settings) return null;
   return (
@@ -58,6 +60,42 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </Row>
           <Row label="Browser scripts" description="Let agents run their own JavaScript in their browser tabs (browser_eval). Plan-only agents never can.">
             <Toggle label="Browser scripts" on={settings.browserEval} onChange={browserEval => void save({ browserEval })} />
+          </Row>
+        </Group>
+
+        <Group title="SuperAgent" description="It runs your team across every project. It never edits code; agents do the work.">
+          <Row label="Wake it when agents finish, fail or get stuck" description="Updates are batched into one turn, and only sent while it is idle.">
+            <Toggle label="Wake the SuperAgent" on={settings.superWake} onChange={superWake => void save({ superWake })} />
+          </Row>
+          <Row label="Wake-ups an hour" description="Past this, updates wait for the next hour.">
+            <input
+              type="number"
+              min={0}
+              max={60}
+              value={wakes}
+              onChange={e => setWakes(e.target.value)}
+              onBlur={() => { const value = Number(wakes); if (Number.isInteger(value) && value >= 0 && value !== settings.superMaxWakesPerHour) void save({ superMaxWakesPerHour: value }); }}
+              className={`${INPUT} w-20`}
+            />
+          </Row>
+          <Row label="Daily budget" description="Dollars a day it may spend on wake-ups; then they wait for tomorrow. 0 means no cap. Your own messages always go.">
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={budget}
+              onChange={e => setBudget(e.target.value)}
+              onBlur={() => { const value = Number(budget); if (Number.isFinite(value) && value >= 0 && value !== settings.superDailyBudgetUsd) void save({ superDailyBudgetUsd: value }); }}
+              className={`${INPUT} w-20`}
+            />
+          </Row>
+          <Row label="Quiet hours" description="No wake-ups and no notifications between these times. The same time twice turns them off.">
+            <input type="time" aria-label="Quiet from" value={settings.superQuietFrom} onChange={e => void save({ superQuietFrom: e.target.value })} className={`${INPUT} w-24`} />
+            <span className="text-[12px] text-content/45">to</span>
+            <input type="time" aria-label="Quiet to" value={settings.superQuietTo} onChange={e => void save({ superQuietTo: e.target.value })} className={`${INPUT} w-24`} />
+          </Row>
+          <Row label="Notify me when it asks something" description="A desktop notification while you are in another app or window.">
+            <Toggle label="SuperAgent notifications" on={settings.superNotify} onChange={superNotify => void save({ superNotify })} />
           </Row>
         </Group>
 
