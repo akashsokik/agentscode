@@ -27,11 +27,14 @@ const text = z.string().trim().min(1).max(10_000);
 export const sendInput = z.object({ to_agent_id: z.string().min(1), text, expects_reply: z.boolean().default(true) });
 export const replyInput = z.object({ message_id: z.string().min(1), text, expects_reply: z.boolean().default(false) });
 export const summaryInput = z.object({ summary: z.string().trim().min(1).max(280) });
+/** agent: your own memory.md (the default). user: user.md, what every agent knows about the user. */
+const scope = z.enum(['agent', 'user']).default('agent');
 export const rememberInput = z.object({
   text: z.string().trim().min(1).max(MEMORY_TEXT_LIMIT),
   why: z.string().trim().max(MEMORY_WHY_LIMIT).optional(),
+  scope,
 });
-export const forgetInput = z.object({ id: z.string().trim().min(1).max(40) });
+export const forgetInput = z.object({ id: z.string().trim().min(1).max(40), scope });
 export const delegationInput = z.object({
   to_agent_id: z.string().min(1),
   kind: z.enum(['implementation', 'testing', 'validation', 'review']),
@@ -139,11 +142,11 @@ export function createCommsMcpServer(call: CommsHandler): McpServer {
     inputSchema: summaryInput.shape,
   }, args => invoke('set_task_summary', args));
   server.registerTool('remember', {
-    description: 'Save one short fact to your memory (memory.md) so later sessions know it: when the user tells you to remember something, corrects you, or confirms a non-obvious approach. Give the why. Never save secrets or what the repo already records. Returns the entry and its id.',
+    description: 'Save one short fact so later sessions know it: when the user tells you to remember something, corrects you, or confirms a non-obvious approach. Give the why. scope "agent" (default) saves to your own memory (memory.md). scope "user" saves to the user profile (user.md), which every agent reads: use it only for something about the user themselves (style, taste, how they like to work) that holds beyond this project. Never save secrets or what the repo already records. Returns the entry and its id.',
     inputSchema: rememberInput.shape,
   }, args => invoke('remember', args));
   server.registerTool('forget', {
-    description: 'Remove one entry from your memory by its id (shown in your instructions as [id]), when it is wrong or outdated, or to make room after consolidating.',
+    description: 'Remove one entry by its id (shown in your instructions as [id]), when it is wrong or outdated, or to make room after consolidating. scope "agent" (default) is your memory; scope "user" is the user profile, where you may remove only entries you saved.',
     inputSchema: forgetInput.shape,
   }, args => invoke('forget', args));
   server.registerTool('delegate_task', {
@@ -211,7 +214,7 @@ export function codexCommsConfig(token: string): string {
 }
 
 export const COMMS_INSTRUCTIONS = [
-  `AgentsCode gives you ${COMMS_SERVER} MCP tools to work with teammate agents: list_agents, send_message, reply, read_messages, set_task_summary, delegate_task, list_delegations, report_result, list_channels, read_channel and post_to_channel. remember and forget keep your own memory. create_walkthrough publishes a guided tour of your work, only when the user asks for one.`,
+  `AgentsCode gives you ${COMMS_SERVER} MCP tools to work with teammate agents: list_agents, send_message, reply, read_messages, set_task_summary, delegate_task, list_delegations, report_result, list_channels, read_channel and post_to_channel. remember and forget keep your own memory, and with scope "user" the user profile every agent shares. create_walkthrough publishes a guided tour of your work, only when the user asks for one.`,
   'Replies can also include interactive UI (metrics, tables, charts, status, buttons the user clicks to answer you) in ```openui-lang blocks. Use it when the user would rather see or click than read; call openui_guide once for the syntax first.',
   'In the desktop app you have your own browser: browser_open a page (e.g. your dev server), browser_snapshot to read it, then browser_click, browser_type and browser_press to use it, browser_screenshot to see it and browser_console for errors. Use it to check web work the way the user would.',
   'AgentsCode draws ```mermaid code blocks as diagrams in your replies, channel posts and walkthroughs (flowchart, sequenceDiagram, architecture-beta, classDiagram, erDiagram, stateDiagram). Use one when a flow, a sequence of calls or an architecture is clearer as a picture than as prose. In architecture-beta, services are placed by edge sides: connect each neighbour of a service on a different side (L, R, T, B), or two land on the same spot.',

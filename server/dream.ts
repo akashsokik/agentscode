@@ -6,8 +6,9 @@ import readline from 'node:readline';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type {
-  Agent, DreamMetrics, DreamOp, DreamOpKind, DreamReason, DreamRecord, DreamStats, EngineKind, Entry, MemoryEntry, ServerEvent, SoulProposal,
+  Agent, DreamMetrics, DreamOp, DreamOpKind, DreamReason, DreamRecord, DreamStats, EngineKind, Entry, MemoryEntry, ProfileEntry, ProfileOp, ServerEvent, SoulProposal,
 } from '../shared/types.ts';
+import type { ProfileStore } from './userProfile.ts';
 import { splitOrcacodeModel } from '../shared/engines.ts';
 import { AgentHomes, looksSecret, MEMORY_LIMIT, renderMemory, SOUL_LIMIT } from './agentHome.ts';
 import { HttpError } from './errors.ts';
@@ -23,12 +24,16 @@ import { HttpError } from './errors.ts';
 //   dream-reverts.jsonl  dream-made entries you later edited, deleted or undid
 //   history/           memory.md before each dream, soul.md before each accepted proposal
 //   soul.proposed.md / soul.proposed.json   a soul change waiting for you
+// A dream also learns about the user, for user.md (see userProfile.ts): what the user said outright is
+// added, with the dream's id so undoing the dream removes it; what it inferred waits for approval.
 
 export const DREAM_GAP_MS = 60 * 60 * 1000;
 export const DREAM_MIN_TURNS = 3;
 export const LOCK_STALE_MS = 10 * 60 * 1000;
 export const DIGEST_LIMIT = 12_000;
 export const MAX_OPS = 8;
+/** At most this many things learned about the user per dream. */
+export const MAX_PROFILE_OPS = 3;
 /** A dream that removes more than this share of memory is rolled back (see removedTooMuch). */
 export const MAX_REMOVED_SHARE = 0.25;
 /** A soul proposal that changes more than this share of soul.md's lines is invalid (see soulChange). */
@@ -288,7 +293,7 @@ function forms(word: string): string[] {
   return [...out];
 }
 
-interface Word {
+export interface Word {
   /** The forms of the whole token, to tell "commit" and "commits" are one word. */
   key: Set<string>;
   /** The forms of the token and of its parts ("server/log.ts": server, log), generic and common words left out. */
@@ -296,7 +301,7 @@ interface Word {
 }
 
 /** The distinctive words of a text: one per token, a path with its parts counting once, said twice counting once. */
-function distinctive(text: string): Word[] {
+export function distinctive(text: string): Word[] {
   const words: Word[] = [];
   for (const raw of text.toLowerCase().match(/[a-z0-9][a-z0-9_./@-]*/g) ?? []) {
     const token = raw.replace(/[^a-z0-9]+$/, '');
@@ -349,6 +354,8 @@ export interface DreamInput {
   rejectedSoul?: { text: string; reason: string };
   /** The last dream left memory over its limit: consolidate before adding. */
   consolidate?: boolean;
+  /** user.md, what every agent knows about the user; undefined when the dream has no profile to add to. */
+  profile?: ProfileEntry[];
 }
 
 export function dreamPrompt(input: DreamInput): string {
@@ -367,6 +374,7 @@ export function dreamPrompt(input: DreamInput): string {
     '- Prefer update or merge over add when an entry already covers the point. Remove an entry only when the user contradicted it.',
     '- Each memory entry shows when it was saved, and each digest item when it happened. An entry saved after an item did not exist yet when that item happened.',
     '- soul.md is the standing instructions, which only the user edits. Propose a change only for a lasting rule the user stated, as the whole new soul.md text, changing at most 30% of its lines. Otherwise soul is null.',
+    `- user is for user.md, which every agent reads: at most ${MAX_PROFILE_OPS} facts about the user themselves (their style, taste, or how they like to work) that hold beyond this project, each citing user items that say it. Put such a fact in user, not in memory. Facts about this project or this agent stay in memory. Never repeat what user.md already says. Leave user empty when there is nothing like that.`,
     '- List under corrections every user item where the user corrected or redirected the agent. matchesMemoryId is the id of a memory entry, saved before that item, that already said what the user had to correct (so the agent should have known); otherwise null. An entry saved after the item never matches, even if it says the same thing.',
   ];
   if (input.soulCut) lines.push(`- soul.md is longer than the ${SOUL_LIMIT} characters shown here, so do not propose a soul change: soul is null.`);
@@ -379,12 +387,17 @@ export function dreamPrompt(input: DreamInput): string {
     '',
     'memory.md, oldest first:',
     memory.length ? memory.map(m => `- [${m.id}] (saved ${m.createdAt ? stamp(m.createdAt) : 'at an unknown time'}${m.dreamId ? ' by a dream' : ''}) ${m.text}${m.why ? ` (why: ${m.why})` : ''}`).join('\n') : '(empty)',
+    ...(input.profile ? [
+      '',
+      'user.md, shared by every agent:',
+      input.profile.length ? input.profile.map(p => `- ${p.text}`).join('\n') : '(empty)',
+    ] : []),
     '',
     'Digest of the session:',
     digest.items.map(renderItem).join('\n'),
     '',
     'Reply with exactly this shape:',
-    '{"memory":[{"op":"add|update|merge|remove","ids":["<memory id>"],"text":"<the entry>","why":"<why it matters>","evidence":["d1"]}],"soul":null,"diary":"<3 to 6 short lines on the session>","corrections":[{"digestId":"d1","matchesMemoryId":null}]}',
+    '{"memory":[{"op":"add|update|merge|remove","ids":["<memory id>"],"text":"<the entry>","why":"<why it matters>","evidence":["d1"]}],"user":[{"text":"<a fact about the user>","why":"<why it matters>","evidence":["d1"]}],"soul":null,"diary":"<3 to 6 short lines on the session>","corrections":[{"digestId":"d1","matchesMemoryId":null}]}',
     'For soul, use {"proposal":"<the whole new soul.md>","why":"...","evidence":["d1"]} or null.',
   );
   return lines.join('\n');
@@ -395,6 +408,11 @@ const replySchema = z.object({
     op: z.string(),
     id: z.string().optional(),
     ids: z.array(z.string()).optional(),
+    text: z.string().optional(),
+    why: z.string().optional(),
+    evidence: z.array(z.string()).optional(),
+  }).passthrough()).default([]),
+  user: z.array(z.object({
     text: z.string().optional(),
     why: z.string().optional(),
     evidence: z.array(z.string()).optional(),
@@ -564,6 +582,54 @@ export function applyDream(homes: AgentHomes, agent: Agent, reply: DreamReply, d
   };
 }
 
+/** User items that state a lasting rule outright: a correction or a stated preference ("always", "never", "from now on"). */
+const outright = (item: DigestItem) => item.source === 'user' && (item.kind === 'correction' || item.kind === 'preference');
+
+/**
+ * Check each thing the dream learned about the user, as memory ops are checked (trusted evidence that
+ * mentions it, no open question, no secret, no duplicate), then decide in code, never by the model,
+ * where it goes: when every cited trusted item is the user saying it outright, it is added to user.md
+ * tagged with the dream; when any is inferred (a plain instruction, a confirmed result), it waits for
+ * approval. Dreams only add: changing or removing what every agent shares is the user's call.
+ */
+export function applyProfile(profile: ProfileStore, agent: Agent, reply: DreamReply, digest: Digest, dreamId: string): ProfileOp[] {
+  const ops: ProfileOp[] = [];
+  reply.user.forEach((raw, index) => {
+    const evidence = (raw.evidence ?? []).map(String);
+    const op: ProfileOp = { text: raw.text ?? '', why: raw.why ?? '', evidence, result: 'rejected' };
+    const reject = (reason: string) => { op.reason = reason; ops.push(op); };
+    if (index >= MAX_PROFILE_OPS) return reject(`over the limit of ${MAX_PROFILE_OPS}`);
+    if (!evidence.length) return reject('no evidence');
+    const items = evidence.map(id => digest.items.find(i => i.id === id));
+    if (!items.some(Boolean)) return reject('unknown evidence');
+    const trusted = items.filter((item): item is DigestItem => trustedEvidence(item));
+    if (!trusted.length) return reject('evidence is not from the user or a confirmed result');
+    if (!raw.text?.trim()) return reject('missing text');
+    if (OPEN_QUESTION.test(raw.text)) return reject('an open question, not a fact');
+    if (!mentions(trusted, raw.text)) return reject('cited evidence does not mention it');
+    try {
+      if (trusted.every(outright)) {
+        const problem = profile.proposalProblem(raw.text.replace(/\s+/g, ' ').trim());
+        if (problem === 'the profile already says it' || problem === 'the user rejected it before') return reject(problem);
+        const { entry, added } = profile.add(raw.text, raw.why, { agentId: agent.id, from: agent.name, dreamId });
+        if (!added) return reject('duplicate');
+        op.entryId = entry.id;
+        op.result = 'applied';
+      } else {
+        op.proposalId = profile.propose({ kind: 'dream', text: raw.text, why: raw.why, agentId: agent.id, from: agent.name, dreamId }).id;
+        op.result = 'proposed';
+      }
+    } catch (err) {
+      return reject(err instanceof HttpError ? err.message.replace(/^Not proposed: |\.$/g, '') : `failed: ${(err as Error).message}`);
+    }
+    ops.push(op);
+  });
+  return ops;
+}
+
+/** A dream that changed the profile: added an entry, or made a proposal. */
+const changedProfile = (record: DreamRecord) => Boolean(record.profile?.some(o => o.result === 'applied' || o.result === 'proposed'));
+
 function writeHistory(homes: AgentHomes, agent: Agent, name: string, text: string): void {
   const dir = path.join(homes.path(agent.id), 'history');
   fs.mkdirSync(dir, { recursive: true });
@@ -614,6 +680,8 @@ export interface DreamOptions {
   signal?: AbortSignal;
   /** Called just before the synchronous apply: false (the agent is gone) stops without writing. */
   stillThere?: () => boolean;
+  /** user.md, for what the dream learns about the user; without it the dream learns only for memory. */
+  profile?: ProfileStore;
   now?: () => number;
 }
 
@@ -660,7 +728,10 @@ export async function dream(options: DreamOptions): Promise<DreamOutcome | null>
     return { record, digest, memoryHash: hash(homes.memoryText(agent)) };
   }
 
-  const prompt = dreamPrompt({ agent, soul, soulCut: soulRaw.trim().length > SOUL_LIMIT, memory, digest, rejectedSoul: state.rejectedSoul, consolidate: state.consolidate });
+  const prompt = dreamPrompt({
+    agent, soul, soulCut: soulRaw.trim().length > SOUL_LIMIT, memory, digest, rejectedSoul: state.rejectedSoul, consolidate: state.consolidate,
+    ...(options.profile ? { profile: options.profile.entries() } : {}),
+  });
   let result: DreamEngineResult;
   let reply: DreamReply;
   try {
@@ -675,6 +746,7 @@ export async function dream(options: DreamOptions): Promise<DreamOutcome | null>
 
   // From here to the end, no awaits: backup, apply, rollback and the proposal happen together.
   const applied = applyDream(homes, agent, reply, digest, id);
+  const profileOps = options.profile ? applyProfile(options.profile, agent, reply, digest, id) : [];
   const judged = judgeCorrections(reply, digest, memory);
   let soulResult: DreamRecord['soul'];
   let proposal: SoulProposal | undefined;
@@ -691,8 +763,9 @@ export async function dream(options: DreamOptions): Promise<DreamOutcome | null>
     }
   }
   const memoryText = homes.memoryText(agent);
+  const learned = profileOps.some(o => o.result !== 'rejected');
   const status: DreamRecord['status'] = applied.status === 'rolled-back' ? 'rolled-back'
-    : applied.status === 'applied' || soulResult?.status === 'pending' ? 'applied' : 'nothing';
+    : applied.status === 'applied' || soulResult?.status === 'pending' || learned ? 'applied' : 'nothing';
   const record: DreamRecord = {
     ...base(status, {
       corrections: judged.corrections,
@@ -705,6 +778,7 @@ export async function dream(options: DreamOptions): Promise<DreamOutcome | null>
     diary: reply.diary.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 6).join('\n'),
     ...(applied.rollback ? { error: `Rolled back: ${applied.rollback}.` } : {}),
     ...(soulResult ? { soul: soulResult } : {}),
+    ...(profileOps.length ? { profile: profileOps } : {}),
   };
   return { record, digest, applied, proposal, memoryHash: hash(memoryText) };
 }
@@ -813,6 +887,10 @@ export function renderDream(record: DreamRecord): string {
       lines.push(`- ${op.result} ${op.op}${target}${op.text ? `: ${op.text}` : ''}${op.reason ? ` (${op.reason})` : ''}${op.evidence.length ? ` [${op.evidence.join(', ')}]` : ''}`);
     }
   }
+  if (record.profile?.length) {
+    lines.push('', 'About the user:');
+    for (const op of record.profile) lines.push(`- ${op.result}: ${op.text}${op.reason ? ` (${op.reason})` : ''}${op.evidence.length ? ` [${op.evidence.join(', ')}]` : ''}`);
+  }
   if (record.soul) lines.push('', `Soul: ${record.soul.status} (${record.soul.why})`);
   const m = record.metrics;
   lines.push('', `${m.turns} turns, ${m.failedTurns} failed, ${m.corrections} corrections (${m.repeatCorrections} repeated), ${m.digestItems} digest items${m.costUsd ? `, $${m.costUsd.toFixed(4)}` : ''}.`);
@@ -827,7 +905,13 @@ export function dreamLine(record: DreamRecord): string {
   const count = (kinds: DreamOpKind[]) => applied.filter(o => kinds.includes(o.op)).length;
   const parts = [['+', count(['add'])], ['-', count(['remove'])], ['~', count(['update', 'merge'])]] as const;
   const changes = parts.filter(([, n]) => n > 0).map(([sign, n]) => `${sign}${n}`).join(' ') || 'no changes';
-  return `Dreamed: ${changes}${record.soul?.status === 'pending' ? ', soul change proposed' : ''}`;
+  const learned = record.profile?.filter(o => o.result === 'applied').length ?? 0;
+  const proposed = record.profile?.filter(o => o.result === 'proposed').length ?? 0;
+  const about = [
+    learned ? `learned ${learned} ${learned === 1 ? 'thing' : 'things'} about you` : '',
+    proposed ? `${proposed} about you to review` : '',
+  ].filter(Boolean).map(part => `, ${part}`).join('');
+  return `Dreamed: ${changes}${about}${record.soul?.status === 'pending' ? ', soul change proposed' : ''}`;
 }
 
 // ---- the numbers ----------------------------------------------------------------------------
@@ -950,6 +1034,12 @@ export interface DreamHost {
   memoryChanged(agent: Agent, entries: MemoryEntry[]): void;
   /** soul.md changed (a proposal was accepted). */
   soulChanged(agent: Agent, soul: string): void;
+  /** user.md, shared by every agent; without it dreams learn only for memory. */
+  profile?: ProfileStore;
+  /** user.md or its proposals changed (a dream added to it, or was undone). */
+  profileChanged?(): void;
+  /** A dream finished and was recorded. */
+  dreamed?(agent: Agent, record: DreamRecord): void;
   now?(): number;
 }
 
@@ -1065,6 +1155,7 @@ export class Dreamer {
       const outcome = await dream({
         homes, agent, entries: this.host.entries(agent.id), engine: this.host.engine, reason, state,
         signal: controller.signal, stillThere: () => this.host.agent(agent.id) === agent && agent.dreaming, now: () => this.now(),
+        ...(this.host.profile ? { profile: this.host.profile } : {}),
       });
       // The agent was removed, dreaming was turned off, or AgentsCode is closing while the model
       // thought: write nothing, so the next dream reads the same session instead of logging a failure.
@@ -1091,8 +1182,10 @@ export class Dreamer {
         });
       this.host.note(agent.id, dreamLine(record));
       if (applied?.ops.some(o => o.result === 'applied')) this.host.memoryChanged(agent, homes.memory(agent));
+      if (changedProfile(record)) this.host.profileChanged?.();
       if (proposal) this.host.broadcast({ type: 'soulProposal', agentId: agent.id, proposal });
       this.host.broadcast({ type: 'dream', agentId: agent.id, dream: record });
+      this.host.dreamed?.(agent, record);
       return record;
     } finally {
       clearTimeout(timer);
@@ -1128,6 +1221,8 @@ export class Dreamer {
    * Undo a dream: memory.md goes back to its backup. Only a dream that changed memory, only when no
    * later dream changed it (later dreams that changed nothing, failed, were rolled back or were undone
    * do not count), and only while memory.md is as the dream left it, so nothing saved since is lost.
+   * What it added to user.md is removed by id, and its waiting proposals go: user.md is shared, so it
+   * is never restored whole, and entries others added since stay.
    */
   undo(agent: Agent, dreamId: string): DreamRecord {
     const records = readRecords(this.host.homes, agent);
@@ -1136,18 +1231,33 @@ export class Dreamer {
     if (!record) throw new HttpError(404, 'No dream with that id.');
     if (this.running.has(agent.id)) throw new HttpError(409, `${agent.name} is dreaming. Try again when it is done.`);
     if (record.undoneAt) throw new HttpError(409, 'This dream was already undone.');
-    if (!changedMemory(record)) throw new HttpError(409, 'This dream did not change memory, so there is nothing to undo.');
-    if (records.slice(index + 1).some(changedMemory)) throw new HttpError(409, 'A later dream changed memory since. Undo that one first.');
-    if (record.memoryHash && hash(this.host.homes.memoryText(agent)) !== record.memoryHash) {
-      throw new HttpError(409, 'Memory changed since this dream; undoing it would discard those changes. Edit the entries instead.');
+    const memory = changedMemory(record);
+    const profile = changedProfile(record) && Boolean(this.host.profile);
+    if (!memory && !profile) throw new HttpError(409, 'This dream did not change memory, so there is nothing to undo.');
+    let backup: string | undefined;
+    if (memory) {
+      if (records.slice(index + 1).some(changedMemory)) throw new HttpError(409, 'A later dream changed memory since. Undo that one first.');
+      if (record.memoryHash && hash(this.host.homes.memoryText(agent)) !== record.memoryHash) {
+        throw new HttpError(409, 'Memory changed since this dream; undoing it would discard those changes. Edit the entries instead.');
+      }
+      try {
+        backup = fs.readFileSync(path.join(this.host.homes.path(agent.id), 'history', `memory-${dreamId}.md`), 'utf8');
+      } catch {
+        throw new HttpError(409, 'The backup from before this dream is gone.');
+      }
     }
-    let backup: string;
-    try {
-      backup = fs.readFileSync(path.join(this.host.homes.path(agent.id), 'history', `memory-${dreamId}.md`), 'utf8');
-    } catch {
-      throw new HttpError(409, 'The backup from before this dream is gone.');
+    if (backup !== undefined) this.host.homes.restoreMemory(agent, backup);
+    if (profile) {
+      const store = this.host.profile!;
+      const current = store.entries();
+      for (const op of record.profile!) {
+        // Only an entry as the dream wrote it: one the user rewrote since is theirs now, and stays.
+        const written = op.text.replace(/\s+/g, ' ').trim();
+        if (op.result === 'applied' && op.entryId && current.some(e => e.id === op.entryId && e.dreamId === dreamId && e.text === written)) store.forget(op.entryId);
+      }
+      store.dropFromDream(dreamId);
+      this.host.profileChanged?.();
     }
-    this.host.homes.restoreMemory(agent, backup);
     const done: StoredRecord = { ...record, undoneAt: this.now() };
     saveRecord(this.host.homes, agent, done);
     for (const op of record.ops) {
@@ -1155,8 +1265,10 @@ export class Dreamer {
         fs.appendFileSync(this.file(agent, 'dream-reverts.jsonl'), `${JSON.stringify({ entryId: op.entryId, dreamId, at: done.undoneAt!, how: 'undone' } satisfies Revert)}\n`);
       }
     }
-    this.host.note(agent.id, 'Undid the last dream: memory is back to how it was before it.');
-    this.host.memoryChanged(agent, this.host.homes.memory(agent));
+    this.host.note(agent.id, memory
+      ? `Undid the last dream: memory is back to how it was before it${profile ? ', and what it added about you is gone' : ''}.`
+      : 'Undid the dream: what it added about you is gone.');
+    if (memory) this.host.memoryChanged(agent, this.host.homes.memory(agent));
     const result = publicRecord(done);
     this.host.broadcast({ type: 'dream', agentId: agent.id, dream: result });
     return result;
