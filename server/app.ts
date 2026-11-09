@@ -219,6 +219,16 @@ export function createApp(
   app.post('/api/super/goals/:goalId/move', (req, res) => {
     res.json(manager.moveGoal(param(req, 'goalId'), req.body?.to));
   });
+  // Scheduled routines: the user adds, changes, confirms, turns on or off, and removes them.
+  app.post('/api/super/routines', (req, res) => {
+    res.json(manager.addRoutine(req.body ?? {}));
+  });
+  app.patch('/api/super/routines/:routineId', (req, res) => {
+    res.json(manager.updateRoutine(param(req, 'routineId'), req.body ?? {}));
+  });
+  app.delete('/api/super/routines/:routineId', (req, res) => {
+    res.json(manager.removeRoutine(param(req, 'routineId')));
+  });
   app.post('/api/super/log/:actionId/undo', async (req, res) => {
     res.json(await manager.undoSuper(param(req, 'actionId')));
   });

@@ -60,7 +60,7 @@ import { ScopedRunner, type ExecutionContext } from './agents/scoped.ts';
 import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
 import {
-  addGoalInput, agentCommandInput, askUserInput, completeGoalInput, updateGoalInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
+  addGoalInput, agentCommandInput, proposeRoutineInput, askUserInput, completeGoalInput, updateGoalInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
   SUPER_TOOLS, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool,
   appScreenshotInput, EYES_TOOLS, runCheckInput, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
@@ -70,7 +70,7 @@ import { CheckError, runCheck, type CheckExec } from './checks.ts';
 import { IDLE_PROCESS_MS, PORT } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { capProfile, findPromotions, ProfileStore } from './userProfile.ts';
-import { STUCK_WAITING_MS, STUCK_WORKING_MS, SUPER_NAME, SuperStore, SuperWatcher, validQuietTime } from './superAgent.ts';
+import { scheduleText, STUCK_WAITING_MS, STUCK_WORKING_MS, SUPER_NAME, SuperStore, SuperWatcher, validQuietTime } from './superAgent.ts';
 import { HttpError } from './errors.ts';
 import type { Broadcaster } from './hub.ts';
 import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, emptyModels } from './models.ts';
@@ -1276,6 +1276,15 @@ export class AgentManager {
       return { asked: ask, note: 'The user sees it in AgentsCode; their answer arrives as a later turn. Do not wait or ask again.' };
     }
     if (tool === 'list_goals') return { goals: this.superStore.goals() };
+    if (tool === 'list_routines') return { routines: this.superStore.routines() };
+    if (tool === 'propose_routine') {
+      const parsed = proposeRoutineInput.safeParse(args);
+      if (!parsed.success) return fail('Give a name, a schedule (daily at "HH:MM", or every 1 to 168 hours), an optional project, the instruction and a why.');
+      const input = parsed.data;
+      const routine = this.superStore.addRoutine({ name: input.name, instruction: input.instruction, projectId: input.project ? this.projectRef(input.project).id : null, schedule: input.schedule, why: input.why }, 'super');
+      this.recordSuper({ tool, why: input.why, undo: { kind: 'routine', routineId: routine.id }, summary: `Proposed the routine "${routine.name}" (${scheduleText(routine.schedule)})` });
+      return { proposed: routine, note: 'It waits for the user to confirm it in the Routines tab; it never runs before that.' };
+    }
     if (tool === 'add_goal') {
       const parsed = addGoalInput.safeParse(args);
       if (!parsed.success) return fail('Give the goal in up to 500 characters, an optional project, and a why.');
@@ -1447,6 +1456,23 @@ export class AgentManager {
     return this.publishSuper();
   }
 
+  // The user's routines: add (on at once), change, confirm a proposal, turn on or off, remove.
+
+  addRoutine(body: { name?: unknown; instruction?: unknown; projectId?: unknown; schedule?: unknown }): SuperState {
+    this.superStore.addRoutine({ name: body?.name, instruction: body?.instruction, projectId: this.goalProject(body?.projectId), schedule: body?.schedule }, 'user');
+    return this.publishSuper();
+  }
+
+  updateRoutine(id: string, body: { name?: unknown; instruction?: unknown; projectId?: unknown; schedule?: unknown; enabled?: unknown; confirm?: unknown }): SuperState {
+    this.superStore.updateRoutine(id, { ...body, ...(body?.projectId !== undefined ? { projectId: this.goalProject(body.projectId) } : { projectId: undefined }) });
+    return this.publishSuper();
+  }
+
+  removeRoutine(id: string): SuperState {
+    this.superStore.removeRoutine(id);
+    return this.publishSuper();
+  }
+
   /**
    * The user answers a SuperAgent question: a click on an option, their own words, or (null) put
    * aside. An answer goes to the SuperAgent as the user's message, which it is.
@@ -1483,6 +1509,12 @@ export class AgentManager {
       this.updateChannel(undo.channelId, { ...undo.before, memberIds: undo.before.memberIds.filter(m => this.store.agents.has(m)) });
     } else if (undo.kind === 'goal') {
       this.superStore.restoreGoal(undo.goalId, undo.before);
+    } else if (undo.kind === 'routine') {
+      // Withdraw a proposal; one the user confirmed since is theirs now.
+      const routine = this.superStore.routines().find(r => r.id === undo.routineId);
+      if (!routine) throw new HttpError(409, 'That routine was removed since.');
+      if (!routine.proposed) throw new HttpError(409, 'The user confirmed that routine, so it is theirs now. Change it in the Routines tab.');
+      this.superStore.removeRoutine(routine.id);
     } else {
       if (!this.store.agents.has(undo.agentId)) throw new HttpError(409, 'That agent is gone.');
       await this.update(undo.agentId, undo.before);
@@ -1550,6 +1582,11 @@ export class AgentManager {
     const superId = this.superId();
     if (!superId) return;
     this.watcher.morning();
+    // Routines that are due become updates, so every wake limit and the daily budget apply.
+    for (const { routine, dueAt } of this.superStore.takeDueRoutines(new Date())) {
+      const project = routine.projectId ? this.store.projects.get(routine.projectId)?.name : undefined;
+      this.watcher.note({ agentId: 'routine', key: `routine:${routine.id}:${dueAt}`, text: `Routine "${routine.name}"${project ? ` for ${project}` : ''}, as the user set it up: ${routine.instruction}` });
+    }
     const now = Date.now();
     for (const agent of this.store.agents.values()) {
       if (agent.role === 'super') continue;

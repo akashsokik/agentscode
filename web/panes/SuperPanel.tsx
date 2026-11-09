@@ -4,16 +4,16 @@
  * can be undone.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { GoalStatus, SuperAsk, SuperGoal } from '../../shared/types.ts';
+import type { GoalStatus, RoutineSchedule, SuperAsk, SuperGoal, SuperRoutine } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { memoryDate } from '../memory.ts';
 import { openAsks } from '../super.ts';
-import { decisionRows, GOAL_STATUS_LABEL, goalSections, heldText, superLogMax, superLogWidth, type DecisionRow } from '../superText.ts';
+import { decisionRows, GOAL_STATUS_LABEL, goalSections, heldText, scheduleLabel, superLogMax, superLogWidth, type DecisionRow } from '../superText.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { cx, HeaderButton, IconTab, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
-import { ChevronDown, ChevronUp, CircleDot, ListBullet, PanelRight, Pencil, Trash2 } from '../mono/icons.tsx';
+import { ChevronDown, ChevronUp, CircleDot, Clock, ListBullet, PanelRight, Pencil, Trash2 } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
@@ -135,6 +135,7 @@ export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; ov
     try { localStorage.setItem(VIEW_KEY, next); } catch { /* private mode */ }
   };
   const openGoals = goalSections(goals).open.length;
+  const proposedRoutines = useApp(s => s.snapshot?.super.routines?.filter(r => r.proposed).length ?? 0);
   return (
     <aside
       id={id}
@@ -149,10 +150,11 @@ export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; ov
         <div role="tablist" aria-label="SuperAgent sidebar" className="flex min-w-0 flex-1 items-center gap-0.5">
           <IconTab role="tab" aria-selected={view === 'decisions'} icon={ListBullet} label="Decisions" selected={view === 'decisions'} onClick={() => pickView('decisions')} />
           <IconTab role="tab" aria-selected={view === 'goals'} icon={CircleDot} label="Goals" count={openGoals || undefined} selected={view === 'goals'} onClick={() => pickView('goals')} />
+          <IconTab role="tab" aria-selected={view === 'routines'} icon={Clock} label="Routines" count={proposedRoutines || undefined} selected={view === 'routines'} onClick={() => pickView('routines')} />
         </div>
         <HeaderButton data-super-log-hide icon={PanelRight} label="Hide the sidebar" active onClick={onClose} />
       </div>
-      {view === 'goals' ? <GoalsView /> : (
+      {view === 'goals' ? <GoalsView /> : view === 'routines' ? <RoutinesView /> : (
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {rows.length ? (
           <>
@@ -190,10 +192,13 @@ export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; ov
   );
 }
 
-type SideView = 'decisions' | 'goals';
+type SideView = 'decisions' | 'goals' | 'routines';
 const VIEW_KEY = 'agentscode:super-sidebar-view';
 function readView(): SideView {
-  try { return localStorage.getItem(VIEW_KEY) === 'goals' ? 'goals' : 'decisions'; } catch { return 'decisions'; }
+  try {
+    const saved = localStorage.getItem(VIEW_KEY);
+    return saved === 'goals' || saved === 'routines' ? saved : 'decisions';
+  } catch { return 'decisions'; }
 }
 
 /**
@@ -439,4 +444,98 @@ function useParentWidth(ref: React.RefObject<HTMLElement | null>): number {
     return () => observer.disconnect();
   }, [ref]);
   return width;
+}
+
+/**
+ * Scheduled routines: what the SuperAgent does on its own at set times, in your words. Each becomes
+ * an update at its time, so every wake limit and the daily budget apply. Proposals from the
+ * SuperAgent wait here until you confirm them.
+ */
+function RoutinesView() {
+  const routines = useApp(s => s.snapshot?.super.routines) ?? [];
+  const projects = useApp(s => s.snapshot?.projects) ?? [];
+  const [name, setName] = useState('');
+  const [instruction, setInstruction] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [kind, setKind] = useState<RoutineSchedule['kind']>('daily');
+  const [at, setAt] = useState('09:00');
+  const [hours, setHours] = useState('6');
+  const [busy, setBusy] = useState(false);
+  const proposed = routines.filter(r => r.proposed);
+  const own = routines.filter(r => !r.proposed);
+  const ready = Boolean(name.trim() && instruction.trim()) && (kind === 'daily' ? /^\d{1,2}:\d{2}$/.test(at) : Number(hours) >= 1 && Number(hours) <= 168);
+  const add = async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    const schedule: RoutineSchedule = kind === 'daily' ? { kind, at } : { kind, hours: Math.trunc(Number(hours)) };
+    const ok = await attempt(() => api.addRoutine({ name: name.trim(), instruction: instruction.trim(), projectId: projectId || null, schedule }));
+    setBusy(false);
+    if (ok) { setName(''); setInstruction(''); }
+  };
+  const field = 'h-6 rounded-md border border-content/12 bg-transparent px-1.5 text-[12px] text-content/75 outline-none';
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 border-b border-stroke px-3 py-2.5">
+        <input aria-label="Routine name" value={name} maxLength={80} onChange={e => setName(e.target.value)} placeholder="Name, for example Morning CI check" className={`${field} h-7 w-full text-[13px]`} />
+        <textarea aria-label="What the SuperAgent should do" value={instruction} rows={2} maxLength={1000} onChange={e => setInstruction(e.target.value)} placeholder="What the SuperAgent should do each time" className={`${TEXTAREA} mt-1.5 text-[13px]`} />
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <select aria-label="How often" value={kind} onChange={e => setKind(e.target.value as RoutineSchedule['kind'])} className={field}>
+            <option value="daily">Daily at</option>
+            <option value="every">Every</option>
+          </select>
+          {kind === 'daily'
+            ? <input type="time" aria-label="Time" value={at} onChange={e => setAt(e.target.value)} className={`${field} w-24`} />
+            : <><input type="number" aria-label="Hours" min={1} max={168} value={hours} onChange={e => setHours(e.target.value)} className={`${field} w-14`} /><span className="text-[12px] text-content/45">hours</span></>}
+          <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} className={`${field} min-w-0 flex-1 truncate`}>
+            <option value="">Any project</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <button type="button" className={PRIMARY} disabled={!ready || busy} onClick={() => void add()}>{busy ? 'Adding…' : 'Add'}</button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {proposed.length ? (
+          <section aria-label="Proposed by the SuperAgent" className="border-b border-stroke">
+            <h3 className="px-3.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-content/40">Proposed, waiting for you</h3>
+            <ol>{proposed.map(r => <RoutineItem key={r.id} routine={r} />)}</ol>
+          </section>
+        ) : null}
+        {own.length ? <ol aria-label="Routines">{own.map(r => <RoutineItem key={r.id} routine={r} />)}</ol> : !proposed.length ? (
+          <div className="flex flex-col items-center px-6 pb-6 pt-10 text-center">
+            <Clock className="size-5 text-content/25" strokeWidth={1.5} />
+            <p className="mt-2.5 text-[13px] text-content/60">No routines yet</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-content/40">Add something the SuperAgent should do on a schedule, such as checking CI every morning. It runs within your wake limits and daily budget.</p>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function RoutineItem({ routine }: { routine: SuperRoutine }) {
+  const project = useApp(s => s.snapshot?.projects.find(p => p.id === routine.projectId));
+  const [busy, setBusy] = useState(false);
+  const run = async (action: () => Promise<unknown>) => { setBusy(true); await attempt(action); setBusy(false); };
+  const named = `"${routine.name}"`;
+  return (
+    <li data-routine={routine.id} className="group/routine border-b border-content/5 px-3.5 py-2.5 last:border-b-0">
+      <div className="flex items-center gap-2">
+        <p className={cx('min-w-0 flex-1 truncate text-[13px] font-medium', routine.enabled || routine.proposed ? 'text-content/85' : 'text-content/45')}>{routine.name}</p>
+        {routine.proposed ? (
+          <>
+            <TextButton aria-label={`Reject ${named}`} disabled={busy} onClick={() => void run(() => api.removeRoutine(routine.id))}>Reject</TextButton>
+            <button type="button" aria-label={`Confirm ${named}`} className={PRIMARY} disabled={busy} onClick={() => void run(() => api.updateRoutine(routine.id, { confirm: true }))}>Confirm</button>
+          </>
+        ) : (
+          <>
+            <TextButton aria-label={`${routine.enabled ? 'Pause' : 'Resume'} ${named}`} disabled={busy} onClick={() => void run(() => api.updateRoutine(routine.id, { enabled: !routine.enabled }))}>{routine.enabled ? 'Pause' : 'Resume'}</TextButton>
+            <IconButton icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => void run(() => api.removeRoutine(routine.id))} />
+          </>
+        )}
+      </div>
+      <p className="mt-0.5 text-[11px] text-content/40">{scheduleLabel(routine.schedule)}{project ? ` · ${project.name}` : ''}{routine.enabled ? '' : routine.proposed ? ' · proposed by the SuperAgent' : ' · paused'}</p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-content/65">{routine.instruction}</p>
+      {routine.proposed && routine.why ? <p className="mt-0.5 text-[12px] leading-relaxed text-content/40">Why: {routine.why}</p> : null}
+    </li>
+  );
 }

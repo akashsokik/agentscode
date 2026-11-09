@@ -26,6 +26,7 @@ import type {
   Snapshot,
   TerminalInfo,
   GoalStatus,
+  RoutineSchedule,
   SuperState,
   TreeListing,
   UserProfile,
@@ -142,6 +143,10 @@ export const api = {
   updateGoal: (goalId: string, body: { text?: string; projectId?: string | null; status?: GoalStatus }) => request<SuperState>('PATCH', `/api/super/goals/${goalId}`, body),
   removeGoal: (goalId: string) => request<SuperState>('DELETE', `/api/super/goals/${goalId}`),
   moveGoal: (goalId: string, to: number) => request<SuperState>('POST', `/api/super/goals/${goalId}/move`, { to }),
+  /** Scheduled routines: add (on at once), change, confirm a proposal, turn on or off, remove. */
+  addRoutine: (body: { name: string; instruction: string; projectId: string | null; schedule: RoutineSchedule }) => request<SuperState>('POST', '/api/super/routines', body),
+  updateRoutine: (routineId: string, body: { name?: string; instruction?: string; projectId?: string | null; schedule?: RoutineSchedule; enabled?: boolean; confirm?: true }) => request<SuperState>('PATCH', `/api/super/routines/${routineId}`, body),
+  removeRoutine: (routineId: string) => request<SuperState>('DELETE', `/api/super/routines/${routineId}`),
   /** Take back one of its decisions. */
   undoSuper: (actionId: string) => request<SuperState>('POST', `/api/super/log/${actionId}/undo`),
   /** The agent's walkthroughs, newest first. */
