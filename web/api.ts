@@ -26,6 +26,7 @@ import type {
   Snapshot,
   TerminalInfo,
   TreeListing,
+  UserProfile,
   Walkthrough,
   WalkthroughSummary,
   WorktreeCleanup,
@@ -124,6 +125,12 @@ export const api = {
   undoDream: (id: string, dreamId: string) => request<DreamRecord>('POST', `/api/agents/${id}/dreams/${dreamId}/undo`),
   /** Accept or reject the soul proposal waiting for the agent. */
   soulProposal: (id: string, action: 'accept' | 'reject') => request<{ ok: true }>('POST', `/api/agents/${id}/soul-proposal`, { action }),
+  /** What AgentsCode knows about the user (user.md), shared by every agent. Changes also arrive as `profile` events. */
+  addProfile: (patch: MemoryPatch) => request<UserProfile>('POST', '/api/profile', patch),
+  updateProfile: (entryId: string, patch: MemoryPatch) => request<UserProfile>('PATCH', `/api/profile/${entryId}`, patch),
+  forgetProfile: (entryId: string) => request<UserProfile>('DELETE', `/api/profile/${entryId}`),
+  /** Accept (add to user.md) or reject a proposal about the user. */
+  decideProfile: (proposalId: string, action: 'accept' | 'reject') => request<UserProfile>('POST', `/api/profile/proposals/${proposalId}`, { action }),
   /** The agent's walkthroughs, newest first. */
   walkthroughs: (id: string) => request<WalkthroughSummary[]>('GET', `/api/agents/${id}/walkthroughs`),
   walkthrough: (id: string, walkthroughId: string) => request<Walkthrough>('GET', `/api/agents/${id}/walkthroughs/${walkthroughId}`),

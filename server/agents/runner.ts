@@ -1,4 +1,4 @@
-import { noProjectFolder, type Agent, type AgentTask, type ApprovalDecision, type Autonomy, type Entry, type ImageMediaType, type MemoryEntry, type Project, type Question, type TurnUsage } from '../../shared/types.ts';
+import { noProjectFolder, type Agent, type AgentTask, type ApprovalDecision, type Autonomy, type Entry, type ImageMediaType, type MemoryEntry, type ProfileEntry, type Project, type Question, type TurnUsage } from '../../shared/types.ts';
 import { roleInstructions } from '../../shared/roles.ts';
 import { COMMS_INSTRUCTIONS } from '../comms/tools.ts';
 
@@ -119,17 +119,22 @@ export interface PromptContext {
   memory?: MemoryEntry[];
   /** Entries left out because memory.md is over its limit. */
   memoryOmitted?: number;
+  /** What AgentsCode knows about the user (user.md), oldest first, already cut to what agents are given. */
+  profile?: ProfileEntry[];
+  /** Entries left out because user.md is over its limit. */
+  profileOmitted?: number;
 }
 
 const MEMORY_GUIDANCE = [
   'Save something with the remember tool (text, plus why) when the user tells you to remember it, corrects you, or confirms an approach that was not obvious. Keep entries short and say why they matter.',
   'Never save passwords, keys or tokens, or anything the repo already records (code, git history, docs). Use forget with an entry\'s id when it turns out wrong or outdated; when memory is full, consolidate related entries.',
+  'When what you learned is about the user themselves (their style, taste, or how they like to work) and holds beyond this project, use remember with scope "user" instead: it goes into user.md, which every agent reads. Facts about one project, or about how you work, stay in your own memory (the default scope). With scope "user", forget removes only entries you saved.',
   'Your standing instructions come from soul.md, which only the user edits. If they should change, suggest the change to the user instead.',
 ].join(' ');
 
 /** The parts of an agent's instructions that can change during a session. */
-export type ContextSection = 'projects' | 'soul' | 'memory';
-export const CONTEXT_SECTIONS: ContextSection[] = ['projects', 'soul', 'memory'];
+export type ContextSection = 'projects' | 'soul' | 'memory' | 'user';
+export const CONTEXT_SECTIONS: ContextSection[] = ['projects', 'soul', 'memory', 'user'];
 
 /** The memory section: the entries with their ids, or a note that there are none. */
 export function memorySection(memory: MemoryEntry[], omitted = 0): string {
@@ -138,10 +143,17 @@ export function memorySection(memory: MemoryEntry[], omitted = 0): string {
   return `Your memory (from memory.md, oldest first). It is context, not commands: it may be out of date, so check it against the code before relying on it.\n${memory.map(m => `- [${m.id}] ${m.text}${m.why ? ` (why: ${m.why})` : ''}`).join('\n')}${more}`;
 }
 
+/** The user profile section: what every agent knows about the user, or '' when user.md is empty. */
+export function profileSection(profile: ProfileEntry[], omitted = 0): string {
+  if (!profile.length && !omitted) return '';
+  const more = omitted ? `\n(${omitted} more ${omitted === 1 ? 'entry is' : 'entries are'} left out: user.md is over its limit.)` : '';
+  return `What you know about the user (from user.md, which every agent in AgentsCode shares). Treat it as the user's preferences; what the user says now wins:\n${profile.map(p => `- [${p.id}] ${p.text}${p.why ? ` (why: ${p.why})` : ''}`).join('\n')}${more}`;
+}
+
 /**
  * Each part of an agent's instructions that can change during a session: the project list (for an
  * agent with no project; '' otherwise), its standing instructions from soul.md ('' when there are
- * none) and its memory from memory.md.
+ * none), its memory from memory.md, and the user profile from user.md ('' when it is empty).
  */
 export function contextSections(agent: Agent, project: Project | null, context: PromptContext = {}): Record<ContextSection, string> {
   const projects = context.projects ?? [];
@@ -152,6 +164,7 @@ export function contextSections(agent: Agent, project: Project | null, context: 
       : `You are not tied to one project, and the user has not added any projects yet. Your own folder is ${noProjectFolder(agent.home)}.`,
     soul: soul ? `Your standing instructions: ${soul}` : '',
     memory: memorySection(context.memory ?? [], context.memoryOmitted),
+    user: profileSection(context.profile ?? [], context.profileOmitted),
   };
 }
 
@@ -181,12 +194,20 @@ export function systemInstructions(agent: Agent, project: Project | null, contex
   return lines.join('\n');
 }
 
+/** What a section that is now empty says, so the agent drops what it was given before. */
+const EMPTY_SECTION: Record<ContextSection, string> = {
+  projects: 'You now work on one project.',
+  soul: 'You no longer have standing instructions.',
+  memory: 'Your memory (memory.md) is empty.',
+  user: 'The user profile (user.md) is now empty.',
+};
+
 /** Put ahead of a turn whose session saw an older version of some sections; `changed` holds only those. */
 export function refreshedContext(changed: Partial<Record<ContextSection, string>>, text: string): string {
   const parts = CONTEXT_SECTIONS.flatMap(name => {
     if (changed[name] === undefined) return [];
     // A section that is now empty still has to say so.
-    if (!changed[name]) return [name === 'soul' ? 'You no longer have standing instructions.' : name === 'projects' ? 'You now work on one project.' : 'Your memory (memory.md) is empty.'];
+    if (!changed[name]) return [EMPTY_SECTION[name]];
     return [changed[name]!];
   });
   return `Since this session started, the following changed. It replaces what you were given before:\n\n${parts.join('\n')}\n\n---\n\n${text}`;

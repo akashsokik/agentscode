@@ -59,25 +59,46 @@ export const STATUS_LABELS: Record<string, string> = {
   failed: 'Failed',
 };
 
-type DreamLike = { id: string; status: string; undoneAt?: number; ops: readonly OpLike[] };
+/** What a dream learned about the user, for user.md (ProfileOp). */
+export interface ProfileOpLike {
+  text: string;
+  result: 'applied' | 'proposed' | 'rejected';
+  reason?: string;
+}
+
+type DreamLike = { id: string; status: string; undoneAt?: number; ops: readonly OpLike[]; profile?: readonly ProfileOpLike[] };
 
 /** A dream whose memory changes stand: applied, with an applied op, and not undone (as the server's changedMemory). */
 export function changedMemory(dream: DreamLike): boolean {
   return dream.status === 'applied' && !dream.undoneAt && dream.ops.some(op => op.result === 'applied');
 }
 
+/** A dream that added to user.md or proposed something for it, and was not undone (as the server's changedProfile). */
+export function changedProfile(dream: DreamLike): boolean {
+  return !dream.undoneAt && Boolean(dream.profile?.some(op => op.result === 'applied' || op.result === 'proposed'));
+}
+
+/** "learned 1 about you, 1 to review", or '' when the dream learned nothing about the user. */
+export function profileCountsText(profile: readonly ProfileOpLike[] = []): string {
+  const learned = profile.filter(op => op.result === 'applied').length;
+  const proposed = profile.filter(op => op.result === 'proposed').length;
+  return [learned ? `learned ${learned} about you` : '', proposed ? `${proposed} to review` : ''].filter(Boolean).join(', ');
+}
+
 /**
- * A dream can be undone when it changed memory and no later dream did: later dreams that changed
- * nothing, failed, were rolled back or were undone do not stand in the way. Returns why not
- * otherwise. `dreams` is newest first. The server also refuses if memory changed since.
+ * A dream can be undone when it changed memory and no later dream did (later dreams that changed
+ * nothing, failed, were rolled back or were undone do not stand in the way), or when it only changed
+ * the user profile, whose entries it removes by id. Returns why not otherwise. `dreams` is newest
+ * first. The server also refuses if memory changed since.
  */
 export function undoState(dreams: readonly DreamLike[], dreamId: string): { can: true } | { can: false; why: string } {
   const index = dreams.findIndex(d => d.id === dreamId);
   const dream = dreams[index];
   if (!dream) return { can: false, why: 'This dream is gone.' };
   if (dream.undoneAt) return { can: false, why: 'Already undone.' };
-  if (!changedMemory(dream)) return { can: false, why: 'It changed nothing.' };
-  if (dreams.slice(0, index).some(changedMemory)) return { can: false, why: 'A later dream changed memory since.' };
+  const memory = changedMemory(dream);
+  if (!memory && !changedProfile(dream)) return { can: false, why: 'It changed nothing.' };
+  if (memory && dreams.slice(0, index).some(changedMemory)) return { can: false, why: 'A later dream changed memory since.' };
   return { can: true };
 }
 

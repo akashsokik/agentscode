@@ -16,7 +16,7 @@ import { ResizeHandle, useColumnWidth, useWindowWidth } from '../ui/ResizeHandle
 import { SHORTCUTS } from '../shortcuts.ts';
 import { showTerminal } from '../terminal/actions.ts';
 import { cx, Empty, HeaderButton, Loading, MenuDivider, MenuLabel, MenuRow, StatusLabel } from '../ui/common.tsx';
-import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, SplitColumns, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
+import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, SplitColumns, Square, StickyNote, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
@@ -29,6 +29,8 @@ export interface SidebarActions {
   newAgent: (projectId?: string | null) => void;
   addProject: () => void;
   settings: () => void;
+  /** About you: what every agent knows about the user (user.md). */
+  profile: () => void;
   agentSettings: (agentId: string) => void;
   removeAgent: (agentId: string) => void;
   newChannel: () => void;
@@ -503,6 +505,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
   const projects = useApp(s => s.snapshot?.projects);
   const agents = useApp(s => s.snapshot?.agents);
   const inFlight = useApp(s => s.snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0);
+  const waiting = useApp(s => s.snapshot?.profile.proposals.length ?? 0);
   const focusedPane = layout.panes.find(p => p.id === layout.focused);
   const commsOpen = layout.tabs.find(t => t.id === focusedPane?.tabId)?.content.kind === 'comms';
   const channelId = focusedChannelId(layout);
@@ -546,6 +549,9 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
       </div>
       <SidebarUpdateFooter />
       <div className="flex shrink-0 flex-col gap-px p-2">
+        <RailAction icon={StickyNote} label="About you" onClick={actions.profile}>
+          {waiting ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${waiting} waiting for your approval`}>{waiting}</span> : null}
+        </RailAction>
         <RailAction icon={Settings} label="Settings" hint={SHORTCUTS.settings} onClick={actions.settings} />
       </div>
       <ResizeHandle column={column} edge="right" label="Resize navigation" />
@@ -830,6 +836,7 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
             <ArrowDownCircle className="size-4 text-accent" strokeWidth={1.75} />
           </RailIconButton>
         ) : null}
+        <RailIconButton label="About you" onClick={actions.profile}><StickyNote className="size-4" strokeWidth={1.75} /></RailIconButton>
         <RailIconButton label={`Settings (${SHORTCUTS.settings})`} onClick={actions.settings}><Settings className="size-4" strokeWidth={1.75} /></RailIconButton>
       </div>
     </nav>

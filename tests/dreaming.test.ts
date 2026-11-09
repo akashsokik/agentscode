@@ -236,7 +236,7 @@ function homeWith(memory: MemoryEntry[] = [], soul = 'Prefer small diffs.') {
   return { homes, agent };
 }
 const mem = (id: string, text: string, minutes = -60): MemoryEntry => ({ id, text, createdAt: at(minutes) });
-const reply = (r: Partial<DreamReply>): DreamReply => ({ memory: [], soul: null, diary: '', corrections: [], ...r });
+const reply = (r: Partial<DreamReply>): DreamReply => ({ memory: [], user: [], soul: null, diary: '', corrections: [], ...r });
 
 test('each op applies through the memory checks, tagged with the dream; each bad op is rejected with its reason', () => {
   const memory = [mem('aaaa1111', 'Use pnpm.'), mem('bbbb2222', 'Tests live in tests/.'), mem('cccc3333', 'Run lint first.'), mem('dddd4444', 'Lint with eslint.'), mem('eeee5555', 'Log requests with console.log.'), mem('ffff6666', 'Branch names use dashes.'), mem('abab7777', 'Old fact.'), mem('cdcd8888', 'Another fact.')];

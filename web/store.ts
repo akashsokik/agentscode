@@ -225,6 +225,8 @@ function apply(snapshot: Snapshot, event: ServerEvent): Snapshot {
       return { ...snapshot, settings: event.settings };
     case 'models':
       return { ...snapshot, models: event.models };
+    case 'profile':
+      return { ...snapshot, profile: event.profile };
     default:
       return snapshot;
   }

@@ -141,6 +141,64 @@ export interface MemoryEntry {
   dreamId?: string;
 }
 
+// ---- the user profile -----------------------------------------------------------
+
+/**
+ * One thing AgentsCode learned about the user (their style, taste, how they like to work), kept in
+ * <dataDir>/user.md and given to every agent. An agent adds one with remember scope "user", a dream
+ * adds one the user stated outright, and the user adds, edits or deletes them in the app.
+ */
+export interface ProfileEntry {
+  id: string;
+  text: string;
+  why?: string;
+  createdAt: number;
+  /** The agent that saved it; absent when the user wrote it, or it came from several agents' memories. */
+  agentId?: string;
+  /** Who it came from, as a name to show: an agent's name when saved, or several joined. */
+  from?: string;
+  /** The dream that wrote it; undoing that dream removes it. */
+  dreamId?: string;
+}
+
+/**
+ * Something about the user that waits for approval before it reaches user.md: a dream inferred it
+ * (the user did not say it outright), or two or more agents remembered the same thing.
+ */
+export interface ProfileProposal {
+  id: string;
+  kind: 'dream' | 'promotion';
+  text: string;
+  why?: string;
+  at: number;
+  agentId?: string;
+  from?: string;
+  dreamId?: string;
+  /** For a promotion: the memory entries it replaces. Accepting it removes them from those agents' memory. */
+  sources?: { agentId: string; agentName: string; entryId: string; text: string }[];
+}
+
+export interface UserProfile {
+  entries: ProfileEntry[];
+  proposals: ProfileProposal[];
+  /** Where user.md is on disk, for the app to show. */
+  file: string;
+}
+
+/** One thing a dream learned about the user, and what came of it. Kept apart from DreamOp, which is about memory.md. */
+export interface ProfileOp {
+  text: string;
+  why: string;
+  evidence: string[];
+  /** applied: in user.md now; proposed: waiting for approval; rejected: refused by the checks. */
+  result: 'applied' | 'proposed' | 'rejected';
+  reason?: string;
+  /** The user.md entry it wrote. */
+  entryId?: string;
+  /** The proposal it made. */
+  proposalId?: string;
+}
+
 // ---- dreaming -----------------------------------------------------------------
 
 export type DreamReason = 'session-end' | 'idle' | 'manual';
@@ -193,6 +251,8 @@ export interface DreamRecord {
   error?: string;
   ops: DreamOp[];
   soul?: { status: 'pending' | 'accepted' | 'rejected' | 'invalid'; why: string };
+  /** What it learned about the user, for user.md. */
+  profile?: ProfileOp[];
   /** The dream's own note on the session, 3 to 6 lines. */
   diary: string;
   metrics: DreamMetrics;
@@ -615,6 +675,8 @@ export interface Snapshot {
   models: Record<EngineKind, EngineModels>;
   home: string;
   platform: string;
+  /** What AgentsCode knows about the user (user.md), and what waits for approval. */
+  profile: UserProfile;
 }
 
 /**
@@ -649,6 +711,8 @@ export type ServerEvent =
   | { type: 'dream'; agentId: string; dream: DreamRecord }
   /** A soul proposal is waiting, or (null) none is any more. */
   | { type: 'soulProposal'; agentId: string; proposal: SoulProposal | null }
+  /** user.md or its waiting proposals changed. */
+  | { type: 'profile'; profile: UserProfile }
   | { type: 'project'; project: Project }
   | { type: 'projectRemoved'; id: string }
   | { type: 'entry'; entry: Entry }

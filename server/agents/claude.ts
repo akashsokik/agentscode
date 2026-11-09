@@ -48,12 +48,16 @@ const inside = (dir: string, file: string) => {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 };
 
+/** user.md and its proposals, relative to the data dir; case-insensitive, as macOS file names are. */
+const PROFILE_FILE = /^user\.(?:md(?:\.tmp)?|proposals\.json(?:\.tmp)?)$/i;
+
 /**
  * Why an edit tool may not write this file, or null. An agent's home holds files only AgentsCode and
  * the user write (reservedHomeFile): soul.md (the user's instructions), memory.md (written only
  * through remember and forget, with the secret filter), a soul proposal, the dream records and
  * history/. Anything else there, such as notes saved before the agent had a workspace, and the
- * workspace itself, stay its own. The path is resolved through symlinks and macOS's case-insensitive
+ * workspace itself, stay its own. The user profile (user.md and its proposals, in the data dir two
+ * levels above every home) is shared by all agents and changes only through remember and forget. The path is resolved through symlinks and macOS's case-insensitive
  * names. The hook runs in every permission mode, Full access included, before any auto-accept.
  */
 export function ownFileProblem(home: string | undefined, cwd: string, toolName: string, input: Record<string, unknown>): string | null {
@@ -63,6 +67,9 @@ export function ownFileProblem(home: string | undefined, cwd: string, toolName: 
   const file = realpath(path.resolve(cwd, target));
   const homes = [...new Set([path.resolve(home), realpath(path.resolve(home))])];
   const own = homes.some(h => inside(h, file) && reservedHomeFile(path.relative(h, file)));
+  if (!own && homes.some(h => PROFILE_FILE.test(path.relative(path.dirname(path.dirname(h)), file)))) {
+    return 'That is the user profile, which every agent shares: change it with remember and forget (scope "user"), or ask the user to edit it in AgentsCode.';
+  }
   return own
     ? 'That file is in your AgentsCode home, which only AgentsCode and the user edit: soul.md is the user\'s standing instructions, and memory changes go through the remember and forget tools. Ask the user if soul.md should change.'
     : null;

@@ -180,6 +180,22 @@ export function createApp(
     manager.decideSoul(param(req, 'id'), req.body?.action);
     res.json({ ok: true });
   });
+  // The user profile (dataDir/user.md), shared by every agent: entries and the proposals waiting for approval.
+  app.get('/api/profile', (_req, res) => {
+    res.json(manager.profileView());
+  });
+  app.post('/api/profile', (req, res) => {
+    res.json(manager.addProfile(req.body ?? {}));
+  });
+  app.patch('/api/profile/:entryId', (req, res) => {
+    res.json(manager.updateProfile(param(req, 'entryId'), req.body ?? {}));
+  });
+  app.delete('/api/profile/:entryId', (req, res) => {
+    res.json(manager.forgetProfile(param(req, 'entryId')));
+  });
+  app.post('/api/profile/proposals/:proposalId', (req, res) => {
+    res.json(manager.decideProfile(param(req, 'proposalId'), req.body?.action));
+  });
   app.get('/api/dream-stats', (_req, res) => {
     res.json(manager.dreamStats());
   });

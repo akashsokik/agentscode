@@ -392,7 +392,7 @@ function soulText(text: string): string {
   return soul ? `${soul}\n` : '';
 }
 
-function checkEntry(rawText: unknown, rawWhy?: unknown): { text: string; why: string } {
+export function checkEntry(rawText: unknown, rawWhy?: unknown): { text: string; why: string } {
   const text = flat(rawText);
   const why = flat(rawWhy);
   if (!text) throw new HttpError(400, 'Say what to remember.');

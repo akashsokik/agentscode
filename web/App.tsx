@@ -6,6 +6,7 @@ import { ChannelDialog } from './dialogs/ChannelDialog.tsx';
 import { NewAgentDialog } from './dialogs/NewAgentDialog.tsx';
 import { RemoveAgentDialog } from './dialogs/RemoveAgentDialog.tsx';
 import { SettingsDialog } from './dialogs/SettingsDialog.tsx';
+import { ProfileDialog } from './dialogs/UserProfile.tsx';
 import { useGitStatus } from './git.ts';
 import { closeTab, focusedAgentId, open, pruneTabs, setProject, setRightPanel, setSidebar, setSidebarView, useLayout, type Pane, type Tab } from './layout.ts';
 import { AgentPane } from './panes/AgentPane.tsx';
@@ -319,6 +320,7 @@ type Dialog =
   | { kind: 'newAgent'; projectId?: string | null }
   | { kind: 'addProject'; thenNewAgent?: boolean }
   | { kind: 'settings' }
+  | { kind: 'profile' }
   | { kind: 'agentSettings' | 'removeAgent'; agentId: string }
   | { kind: 'newChannel' }
   | { kind: 'channelSettings'; channelId: string }
@@ -363,6 +365,7 @@ export function App() {
     newAgent: projectId => setDialog({ kind: 'newAgent', projectId }),
     addProject: () => setDialog({ kind: 'addProject' }),
     settings: () => setDialog({ kind: 'settings' }),
+    profile: () => setDialog({ kind: 'profile' }),
     agentSettings: agentId => setDialog({ kind: 'agentSettings', agentId }),
     removeAgent: agentId => setDialog({ kind: 'removeAgent', agentId }),
     newChannel: () => setDialog({ kind: 'newChannel' }),
@@ -440,6 +443,7 @@ export function App() {
         />
       ) : null}
       {dialog?.kind === 'settings' ? <SettingsDialog onClose={() => setDialog(null)} /> : null}
+      {dialog?.kind === 'profile' ? <ProfileDialog onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'agentSettings' && dialogAgent ? <AgentSettingsDialog agent={dialogAgent} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'removeAgent' && dialogAgent ? <RemoveAgentDialog agent={dialogAgent} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'newChannel' ? <ChannelDialog onClose={() => setDialog(null)} onNewAgent={() => setTimeout(() => setDialog({ kind: 'newAgent' }))} /> : null}

@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { Agent, DreamOp, DreamRecord, DreamStats, SoulProposal } from '../../shared/types.ts';
+import type { Agent, DreamOp, DreamRecord, DreamStats, ProfileOp, SoulProposal } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import {
   averageText, baselineMissing, comparable, compare, costText, countsText, dreamCounts, lineDiff, opText, percentText,
-  readiness, REASON_LABELS, rejectedText, STATUS_LABELS, trend, undoState,
+  profileCountsText, readiness, REASON_LABELS, rejectedText, STATUS_LABELS, trend, undoState,
 } from '../dreams.ts';
 import { duration } from '../format.ts';
 import { memoryDate } from '../memory.ts';
@@ -208,7 +208,10 @@ function DreamsLog({ agent, dreams }: { agent: Agent; dreams: DreamRecord[] | un
 function DreamEntry({ agentId, dream, dreams }: { agentId: string; dream: DreamRecord; dreams: DreamRecord[] }) {
   const [busy, setBusy] = useState(false);
   const undo = undoState(dreams, dream.id);
-  const counts = countsText(dreamCounts(dream.ops));
+  const about = profileCountsText(dream.profile);
+  const memoryCounts = countsText(dreamCounts(dream.ops));
+  // A dream that only learned about the user says that, not "no changes".
+  const counts = about ? (memoryCounts === 'no changes' ? about : `${memoryCounts}, ${about}`) : memoryCounts;
   const m = dream.metrics;
   const facts = [
     `${m.digestItems} ${m.digestItems === 1 ? 'thing' : 'things'} read`,
@@ -244,6 +247,11 @@ function DreamEntry({ agentId, dream, dreams }: { agentId: string; dream: DreamR
       {dream.ops.length ? (
         <ul className="mt-2 flex flex-col gap-1">
           {dream.ops.map((op, i) => <OpRow key={i} op={op} undone={dream.status === 'rolled-back' ? 'rolled back' : dream.undoneAt ? 'undone' : undefined} />)}
+        </ul>
+      ) : null}
+      {dream.profile?.length ? (
+        <ul data-dream-profile className="mt-2 flex flex-col gap-1">
+          {dream.profile.map((op, i) => <ProfileOpRow key={i} op={op} undone={Boolean(dream.undoneAt)} />)}
         </ul>
       ) : null}
       {dream.soul ? (
@@ -282,6 +290,23 @@ function OpRow({ op, undone }: { op: DreamOp; undone?: string }) {
         {!applied && op.reason ? <span className="text-content/50"> Not applied: {op.reason}</span> : null}
         {applied && undone ? <span className="text-content/45"> Applied, then {undone}.</span> : null}
         {kept && op.why ? <span className="text-content/40"> ({op.why})</span> : null}
+      </span>
+    </li>
+  );
+}
+
+/** One thing the dream learned about the user: in user.md, waiting in About you, or refused. */
+function ProfileOpRow({ op, undone }: { op: ProfileOp; undone: boolean }) {
+  const kept = op.result !== 'rejected' && !undone;
+  const Icon = op.result === 'rejected' ? X : undone ? RotateCcw : Check;
+  const label = op.result === 'proposed' ? 'About you, waiting for your approval' : 'About you';
+  return (
+    <li data-dream-profile-op={op.result} className="flex min-w-0 items-start gap-1.5 text-[12px]">
+      <Icon className={`mt-[3px] size-3 shrink-0 ${kept ? 'text-content/55' : 'text-content/35'}`} strokeWidth={2} />
+      <span className="min-w-0">
+        <span className={kept ? 'text-content/80' : 'text-content/45 line-through decoration-content/25'}>{label}: {op.text}</span>
+        {op.result === 'rejected' && op.reason ? <span className="text-content/50"> Not applied: {op.reason}</span> : null}
+        {op.result !== 'rejected' && undone ? <span className="text-content/45"> Removed when the dream was undone.</span> : null}
       </span>
     </li>
   );

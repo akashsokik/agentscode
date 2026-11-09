@@ -27,10 +27,12 @@ import {
   type MemoryEntry,
   type MemoryPatch,
   type PeerMessage,
+  type ProfileEntry,
   type Project,
   type Settings,
   type Snapshot,
   type TurnMeta,
+  type UserProfile,
   type Worktree,
   type WorktreeCleanup,
 } from '../shared/types.ts';
@@ -45,7 +47,7 @@ import { CodexRunner } from './agents/codex.ts';
 import { OrcacodeRunner } from './agents/orcacode.ts';
 import { clip } from './agents/describe.ts';
 import {
-  agentContext, CONTEXT_SECTIONS, contextSections, fullContext, memorySection, refreshedContext, systemInstructions,
+  agentContext, CONTEXT_SECTIONS, contextSections, fullContext, memorySection, profileSection, refreshedContext, systemInstructions,
   type ContextSection, type EntryDraft, type PromptContext, type Runner, type RunnerContext, type RunnerHooks, type RunnerImage, type TurnResult,
 } from './agents/runner.ts';
 import { AgentHomes, capMemory, MEMORY_TEXT_LIMIT, MEMORY_WHY_LIMIT, SOUL_LIMIT, workspacePath } from './agentHome.ts';
@@ -56,6 +58,7 @@ import { Mailbox } from './comms/mailbox.ts';
 import { BROWSER_TOOLS, browserInputs, COMMS_TOOLS, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput, rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool } from './comms/tools.ts';
 import { IDLE_PROCESS_MS, PORT } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
+import { capProfile, findPromotions, ProfileStore } from './userProfile.ts';
 import { HttpError } from './errors.ts';
 import type { Broadcaster } from './hub.ts';
 import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, emptyModels } from './models.ts';
@@ -153,6 +156,10 @@ export class AgentManager {
   private memoryVersions = new Map<string, string>();
   /** Dreaming: the gate, triggers, records, undo, soul proposals and the numbers. */
   private dreamer: Dreamer;
+  /** What AgentsCode knows about the user (user.md), shared by every agent, and its proposals. */
+  private profile: ProfileStore;
+  /** The profile the app was last sent, to notice user.md changing on disk. */
+  private profileVersion: string | undefined;
   private idleProcessMs: number;
   private createRunner: (ctx: RunnerContext) => Runner;
   private models: Record<EngineKind, EngineModels> = { claude: emptyModels('claude'), codex: emptyModels('codex'), orcacode: emptyModels('orcacode') };
@@ -171,6 +178,7 @@ export class AgentManager {
     this.attachments = new Attachments(path.join(store.dataDir, 'attachments'));
     this.channelAttachments = new Attachments(path.join(store.dataDir, 'channel-attachments'));
     this.homes = new AgentHomes(path.join(store.dataDir, 'agents'));
+    this.profile = new ProfileStore(store.dataDir);
     this.createRunner = options.createRunner ?? (ctx => createEngineRunner(ctx));
     this.idleProcessMs = options.idleProcessMs ?? IDLE_PROCESS_MS;
     this.browser = options.browser ?? new BrowserBridge();
@@ -189,6 +197,12 @@ export class AgentManager {
       soulChanged: (agent, soul) => {
         agent.instructions = soul;
         this.emitAgent(agent);
+      },
+      profile: this.profile,
+      profileChanged: () => this.publishProfile(),
+      dreamed: (_agent, record) => {
+        // New memory may now say what another agent's memory says: offer it for the profile.
+        if (record.status === 'applied' && record.ops.some(o => o.result === 'applied')) this.promote();
       },
     });
     this.mailbox = new Mailbox(store, {
@@ -268,6 +282,7 @@ export class AgentManager {
       models: this.models,
       home: os.homedir(),
       platform: process.platform,
+      profile: this.profileView(),
     };
   }
 
@@ -736,7 +751,19 @@ export class AgentManager {
     // Memory is the agent's own, so plan-only agents may learn too.
     if (tool === 'remember') {
       const parsed = rememberInput.safeParse(args);
-      if (!parsed.success) throw new HttpError(400, `Say what to remember in 1 to ${MEMORY_TEXT_LIMIT} characters, with an optional why of up to ${MEMORY_WHY_LIMIT}.`);
+      if (!parsed.success) throw new HttpError(400, `Say what to remember in 1 to ${MEMORY_TEXT_LIMIT} characters, with an optional why of up to ${MEMORY_WHY_LIMIT}, and scope "agent" or "user".`);
+      if (parsed.data.scope === 'user') {
+        const before = this.profile.entries();
+        // Checked like a dream's: nothing the profile already says, nothing the user rejected.
+        const { entry, added, entries } = this.profile.learn(parsed.data.text, parsed.data.why, { agentId: agent.id, from: agent.name });
+        if (added) {
+          this.publishProfile();
+          this.sawOwnProfile(agent, before, entries);
+        }
+        return added
+          ? { remembered: entry, scope: 'user', note: 'Saved to user.md; every agent gets it on its next turn, and the user can edit or delete it in AgentsCode.' }
+          : { remembered: entry, scope: 'user', duplicate: 'The user profile already says that; nothing was added.' };
+      }
       const before = this.homes.memory(agent);
       const { entry, added, entries } = this.homes.remember(agent, parsed.data.text, parsed.data.why);
       if (added) {
@@ -747,7 +774,18 @@ export class AgentManager {
     }
     if (tool === 'forget') {
       const parsed = forgetInput.safeParse(args);
-      if (!parsed.success) throw new HttpError(400, 'Give the id of the memory entry to forget.');
+      if (!parsed.success) throw new HttpError(400, 'Give the id of the entry to forget, and scope "agent" or "user".');
+      if (parsed.data.scope === 'user') {
+        const before = this.profile.entries();
+        const target = before.find(e => e.id === parsed.data.id);
+        if (!target) throw new HttpError(404, 'No profile entry with that id.');
+        // The profile is everyone's: an agent removes only what it saved itself; the rest is the user's call.
+        if (target.agentId !== agent.id) throw new HttpError(403, 'You can only forget profile entries you saved. Ask the user to change this one in AgentsCode (About you, in the sidebar).');
+        const { entry, entries } = this.profile.forget(target.id);
+        this.publishProfile();
+        this.sawOwnProfile(agent, before, entries);
+        return { forgot: entry, scope: 'user' };
+      }
       const before = this.homes.memory(agent);
       const { entry, entries } = this.homes.forget(agent, parsed.data.id);
       this.publishMemory(agent.id, entries);
@@ -876,7 +914,8 @@ export class AgentManager {
             const sections = contextSections(live, view(), context);
             const keys = sectionKeys(sections);
             const seen = this.homes.seen(live);
-            const changed = CONTEXT_SECTIONS.filter(name => seen[name] !== keys[name]);
+            // A section the session never saw that is still empty (a profile nobody has written yet) tells it nothing.
+            const changed = CONTEXT_SECTIONS.filter(name => seen[name] !== keys[name] && !(seen[name] === undefined && !sections[name]));
             if (!changed.length) return prepared;
             this.homes.setSeen(live, keys);
             // A session from before sections were tracked has seen none of them, nor the memory guidance.
@@ -924,11 +963,40 @@ export class AgentManager {
       console.error(`[agents] could not read ${agent.name}'s soul.md:`, (err as Error).message);
     }
     const { entries, omitted } = capMemory(agent.name, this.readMemory(agent));
+    const profile = capProfile(this.readProfile());
     return {
       memory: entries,
       memoryOmitted: omitted,
+      profile: profile.entries,
+      profileOmitted: profile.omitted,
       projects: agent.projectId === null ? this.projectFolders() : undefined,
     };
+  }
+
+  /** user.md as it is now; a change made outside the app (a hand edit) is sent to the app. */
+  private readProfile(): ProfileEntry[] {
+    const entries = this.profile.entries();
+    const version = JSON.stringify(entries);
+    const known = this.profileVersion;
+    this.profileVersion = version;
+    if (known !== undefined && known !== version) this.hub.broadcast({ type: 'profile', profile: this.profile.view() });
+    return entries;
+  }
+
+  /**
+   * The agent changed the profile itself, so it already knows. If its session was up to date, mark
+   * the new profile as seen for it alone; every other agent gets it on its next turn.
+   */
+  private sawOwnProfile(agent: Agent, before: ProfileEntry[], after: ProfileEntry[]): void {
+    const seen = this.homes.seen(agent);
+    const key = (entries: ProfileEntry[]) => {
+      const { entries: kept, omitted } = capProfile(entries);
+      return sectionKey(profileSection(kept, omitted));
+    };
+    // A session that never saw the section has seen it empty, which is what an empty profile says.
+    const was = seen.user ?? (before.length ? undefined : key([]));
+    if (was !== key(before)) return;
+    this.homes.setSeen(agent, { ...seen, user: key(after) });
   }
 
   /** memory.md as it is now; a change made outside the app (a hand edit) is sent to the app. */
@@ -1013,6 +1081,81 @@ export class AgentManager {
       dreamingOn: this.dreamer.groupStats(agents, 'on'),
       dreamingOff: this.dreamer.groupStats(agents, 'off'),
     };
+  }
+
+  // ---- the user profile ----------------------------------------------------
+
+  profileView(): UserProfile {
+    const view = this.profile.view();
+    this.profileVersion = JSON.stringify(view.entries);
+    return view;
+  }
+
+  /** The user adds an entry in the app. */
+  addProfile(body: Partial<MemoryPatch>): UserProfile {
+    const { added } = this.profile.add(body?.text, body?.why, {});
+    if (!added) throw new HttpError(409, 'The profile already says that.');
+    return this.publishProfile();
+  }
+
+  updateProfile(entryId: string, patch: Partial<MemoryPatch>): UserProfile {
+    this.profile.update(entryId, patch?.text, patch?.why);
+    return this.publishProfile();
+  }
+
+  forgetProfile(entryId: string): UserProfile {
+    this.profile.forget(entryId);
+    return this.publishProfile();
+  }
+
+  /**
+   * Accept or reject a proposal. Accepting a promotion also removes the memory entries it replaces,
+   * from each agent that still has them as they were: every agent reads the profile now.
+   */
+  decideProfile(proposalId: string, action: unknown): UserProfile {
+    if (action !== 'accept' && action !== 'reject') throw new HttpError(400, 'Accept or reject the proposal.');
+    const { proposal } = this.profile.decide(proposalId, action);
+    if (action === 'accept') {
+      for (const source of proposal.sources ?? []) {
+        const agent = this.store.agents.get(source.agentId);
+        const entry = agent ? this.homes.memory(agent).find(e => e.id === source.entryId) : undefined;
+        if (!agent || !entry || entry.text !== source.text) continue;
+        const { entries } = this.homes.forget(agent, entry.id);
+        this.publishMemory(agent.id, entries);
+      }
+    }
+    return this.publishProfile();
+  }
+
+  /**
+   * Offer what two or more agents both remember as a profile proposal (see findPromotions). Plain
+   * code, no model call; only agents with dreaming on take part, as they agreed to learn.
+   */
+  promote(): void {
+    try {
+      const memories = [...this.store.agents.values()]
+        .filter(agent => agent.dreaming)
+        .map(agent => ({ agentId: agent.id, agentName: agent.name, entries: this.homes.memory(agent) }))
+        .filter(m => m.entries.length);
+      if (memories.length < 2) return;
+      let added = 0;
+      for (const draft of findPromotions(memories, this.profile)) {
+        try {
+          this.profile.propose(draft);
+          added++;
+        } catch { /* full, or a secret: skip it */ }
+      }
+      if (added) this.publishProfile();
+    } catch (err) {
+      console.error('[profile] promotion failed:', (err as Error).message);
+    }
+  }
+
+  private publishProfile(): UserProfile {
+    const view = this.profile.view();
+    this.profileVersion = JSON.stringify(view.entries);
+    this.hub.broadcast({ type: 'profile', profile: view });
+    return view;
   }
 
   private publishMemory(agentId: string, entries: MemoryEntry[]): void {
