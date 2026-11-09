@@ -90,3 +90,27 @@ test('the same message delivered twice marks the second turn as a repeat', () =>
   ]);
   assert.deepEqual([...repeats], ['t3']);
 });
+
+test('an openui-lang block only comes alive in the agent\'s own words, never in a teammate\'s message', async () => {
+  const { openUiLive } = await import('../web/openuiTrust.ts');
+  assert.equal(openUiLive(true, false), true, 'the agent\'s own reply draws its UI');
+  assert.equal(openUiLive(true, true), false, 'a teammate\'s buttons would answer as the user: they stay code');
+  assert.equal(openUiLive(false, false), false);
+});
+
+test('a delegation this agent sent stands on its own, so it stays in view when the work folds', async () => {
+  const { groupTurnItems, foldableWork, keptInView, isOutgoingDelegation } = await import('../web/activity.ts');
+  const sent = msg({ id: 'd', fromAgentId: 'b', toAgentId: 'a', delegation: { kind: 'review', task: 'Review it.', acceptanceCriteria: '' } });
+  const out: Entry = { ...entry(sent), agentId: 'b' };
+  const got: Entry = { ...entry(msg({ id: 'i', fromAgentId: 'a', toAgentId: 'b', delegation: { kind: 'review', task: 'x', acceptanceCriteria: '' } })), agentId: 'b' };
+  assert.equal(isOutgoingDelegation(out), true);
+  assert.equal(isOutgoingDelegation(got), false, 'one sent to this agent is not its card');
+  const tool: Entry = { id: 't', agentId: 'b', kind: 'tool', text: '', ts: 1, tool: { id: 't', name: 'Read', input: { file_path: '/x' }, status: 'done' } as never };
+  const prose: Entry = { id: 'p', agentId: 'b', kind: 'agent', text: 'Delegated the review.', ts: 3 };
+  const later: Entry = { ...tool, id: 't2', ts: 2 };
+  const items = groupTurnItems([tool, out, later, prose]);
+  assert.deepEqual(items.map(i => i.type), ['activity', 'delegation', 'activity', 'prose']);
+  const fold = foldableWork(items);
+  assert.deepEqual(fold, { start: 0, end: 2 }, 'the card is inside the work that folds');
+  assert.deepEqual(keptInView(items, fold).map(i => i.type), ['delegation'], 'but stays in view under the fold');
+});

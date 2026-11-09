@@ -23,6 +23,8 @@ export type TurnItem =
   | { type: 'memory'; entry: Entry }
   | { type: 'dream'; entry: Entry }
   | { type: 'walkthrough'; entry: Entry }
+  /** A delegation this agent sent: a card that follows the work to its report (PeerMessages.tsx). */
+  | { type: 'delegation'; entry: Entry }
   | { type: 'activity'; entries: Entry[] };
 
 /** The span of a turn's items that folds away once the agent has answered for it. */
@@ -80,6 +82,11 @@ export function isActivity(entry: Entry): boolean {
   return entry.kind === 'system' || entry.kind === 'peer';
 }
 
+/** A delegation this agent sent, which stands on its own so its live status stays in view. */
+export function isOutgoingDelegation(entry: Entry): boolean {
+  return entry.kind === 'peer' && Boolean(entry.peer?.delegation) && entry.peer!.fromAgentId === entry.agentId;
+}
+
 /** A turn item's identity, stable as the group it names grows. */
 export function turnItemKey(item: TurnItem): string {
   return item.type === 'activity' ? item.entries[0].id : item.entry.id;
@@ -107,6 +114,9 @@ export function groupTurnItems(entries: Entry[]): TurnItem[] {
     } else if (isWalkthroughTool(entry)) {
       flush();
       items.push({ type: 'walkthrough', entry });
+    } else if (isOutgoingDelegation(entry)) {
+      flush();
+      items.push({ type: 'delegation', entry });
     } else if (isActivity(entry)) {
       run.push(entry);
     } else if (entry.kind === 'agent' && entry.text.trim()) {
@@ -136,7 +146,7 @@ export function foldableWork(items: TurnItem[]): WorkFold | undefined {
 
 /** The items of a closed fold that stay in view under its line: what the agent remembered, forgot or dreamed. */
 export function keptInView(items: TurnItem[], fold: WorkFold | undefined): TurnItem[] {
-  return fold ? items.slice(fold.start, fold.end + 1).filter(item => item.type === 'memory' || item.type === 'dream' || item.type === 'walkthrough') : [];
+  return fold ? items.slice(fold.start, fold.end + 1).filter(item => item.type === 'memory' || item.type === 'dream' || item.type === 'walkthrough' || item.type === 'delegation') : [];
 }
 
 export function toolCategory(tool: ToolCall): WorkKind {

@@ -33,7 +33,7 @@ import { Popover } from '../mono/Popover.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { MessageImages } from './ImageViews.tsx';
-import { Comms, PeerTrailRow, PeerTurnBlock } from './PeerMessages.tsx';
+import { Comms, DelegationCard, PeerTrailRow, PeerTurnBlock } from './PeerMessages.tsx';
 import { commsIndex, repeatedPromptTurns } from '../peerText.ts';
 
 /**
@@ -823,6 +823,7 @@ function TurnItemView({ item, active, selfId, underLine }: { item: TurnItem; act
   if (item.type === 'memory') return <div className="px-4"><MemoryLine entry={item.entry} /></div>;
   if (item.type === 'dream') return <div className="px-4"><DreamLine entry={item.entry} /></div>;
   if (item.type === 'walkthrough') return <div className="px-4"><WalkthroughCard entry={item.entry} agentId={selfId} /></div>;
+  if (item.type === 'delegation') return <div className="px-4"><DelegationCard message={item.entry.peer!} /></div>;
   if (item.type === 'prose') {
     return (
       <div data-chat-message={item.entry.id} data-chat-message-role="assistant" className={`min-w-0 px-4 pb-1 text-content ${underLine ? 'pt-1' : 'pt-3'}`}>
@@ -848,6 +849,7 @@ function FoldItemView({ item, selfId }: { item: TurnItem; selfId: string }) {
   if (item.type === 'memory') return <MemoryLine entry={item.entry} />;
   if (item.type === 'dream') return <DreamLine entry={item.entry} />;
   if (item.type === 'walkthrough') return <WalkthroughCard entry={item.entry} agentId={selfId} />;
+  if (item.type === 'delegation') return <DelegationCard message={item.entry.peer!} />;
   if (item.type === 'prose') return <div className="py-1"><Markdown text={item.entry.text} /></div>;
   return <ActivityPhaseGroup entries={item.entries} active={false} selfId={selfId} />;
 }

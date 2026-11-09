@@ -76,10 +76,16 @@ function DeliveryNote({ message }: { message: PeerMessage }) {
   return null;
 }
 
-/** Scroll to the card of the delegation a report answers, and put focus on it. */
-function showCard(id: string): void {
-  const card = document.querySelector<HTMLElement>(`[data-peer-card="${CSS.escape(id)}"]`);
-  if (!card) return;
+/**
+ * Go to the delegation a report answers: its card, scrolled into view and focused, when it is on
+ * screen; otherwise (scrolled out of the loaded history, say) its thread in Comms.
+ */
+function showDelegation(asked: PeerMessage): void {
+  const card = document.querySelector<HTMLElement>(`[data-peer-card="${CSS.escape(asked.id)}"]`);
+  if (!card) {
+    openToSide({ kind: 'comms', conversationId: asked.conversationId });
+    return;
+  }
   card.scrollIntoView({ behavior: 'smooth', block: 'center' });
   card.focus({ preventScroll: true });
 }
@@ -89,16 +95,18 @@ function Answers({ report }: { report: PeerMessage }) {
   const { byId } = useContext(Comms);
   const asked = report.replyTo ? byId.get(report.replyTo) : undefined;
   if (!asked?.delegation) return null;
-  const onScreen = typeof document !== 'undefined' && Boolean(document.querySelector(`[data-peer-card="${CSS.escape(asked.id)}"]`));
   return (
     <p className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] text-content/45">
       <CornerDownRight aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
       <span className="shrink-0">Answers</span>
-      {onScreen ? (
-        <button type="button" onClick={() => showCard(asked.id)} className="min-w-0 truncate rounded text-left text-content/65 underline decoration-content/20 underline-offset-2 hover:text-content">
-          {taskTitle(asked.delegation.task)}
-        </button>
-      ) : <span className="min-w-0 truncate text-content/65">{taskTitle(asked.delegation.task)}</span>}
+      <button
+        type="button"
+        title="Show the request this answers"
+        onClick={() => showDelegation(asked)}
+        className="min-w-0 truncate rounded text-left text-content/65 underline decoration-content/20 underline-offset-2 hover:text-content"
+      >
+        {taskTitle(asked.delegation.task)}
+      </button>
     </p>
   );
 }
@@ -121,7 +129,7 @@ function MessageBody({ message, channel, extra }: { message: PeerMessage; channe
   return (
     <>
       {expanded ? (
-        <div id={bodyId} className="mt-1.5 min-w-0 text-[13px]"><Markdown text={full} /></div>
+        <div id={bodyId} className="mt-1.5 min-w-0 text-[13px]"><Markdown inert text={full} /></div>
       ) : (
         <p id={bodyId} className="mt-1 line-clamp-3 min-w-0 break-words font-sans text-[13.5px] leading-5.5 text-content/85">{preview}</p>
       )}
@@ -223,11 +231,11 @@ export function DelegationCard({ message }: { message: PeerMessage }) {
       <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-content/85">{taskTitle(delegation.task)}</p>
       {open ? (
         <div id={detailId} className="mt-1.5 min-w-0 text-[13px]">
-          <Markdown text={messageMarkdown(message)} />
+          <Markdown inert text={messageMarkdown(message)} />
           {report?.report ? (
             <div className="mt-2 border-t border-content/8 pt-2">
               <p className="mb-1 text-[12px] text-content/45">Report from {report.fromName}, {clock(report.ts)}</p>
-              <Markdown text={messageMarkdown(report)} />
+              <Markdown inert text={messageMarkdown(report)} />
             </div>
           ) : null}
         </div>
@@ -277,7 +285,7 @@ export function PeerTrailRow({ message, selfId }: { message: PeerMessage; selfId
       </button>
       {open ? (
         <div id={detailId} className="min-w-0 pb-2 text-[13px]">
-          <Markdown text={messageMarkdown(message)} />
+          <Markdown inert text={messageMarkdown(message)} />
           {message.report ? <Answers report={message} /> : null}
           <div className="-ml-1 flex items-center gap-1 pt-1 text-xs">
             <OpenThread message={message} channel={channel} />

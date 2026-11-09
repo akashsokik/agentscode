@@ -564,7 +564,7 @@ function MessageCard({ message, answered, agents, now }: { message: PeerMessage;
             </div>
           ) : message.report ? (
             <div>
-              <Markdown text={message.report.summary} />
+              <Markdown inert text={message.report.summary} />
               {message.report.evidence.trim() ? (
                 <Section label="Evidence">
                   <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-content/5 px-2.5 py-2 font-mono text-[12px] leading-5 text-content/60">{message.report.evidence}</pre>
@@ -572,7 +572,7 @@ function MessageCard({ message, answered, agents, now }: { message: PeerMessage;
               ) : null}
             </div>
           ) : (
-            <Markdown text={message.text} />
+            <Markdown inert text={message.text} />
           )}
         </CollapsibleBody>
       </div>
