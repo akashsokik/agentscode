@@ -16,12 +16,14 @@
 [Highlights](#highlights) ·
 [Install](#install) ·
 [Using it](#using-it) ·
+[SuperAgent](#superagent) ·
+[Shortcuts](#keyboard-shortcuts) ·
 [How it works](#how-it-works) ·
-[Acknowledgements](#acknowledgements)
+[Development](#development)
 
 <br />
 
-<img src="docs/screenshots/hero.png" alt="AgentsCode: an agent's session beside the Comms timeline of a review that two agents delegated to each other" width="100%" />
+<img src="docs/screenshots/hero.webp" alt="AgentsCode: the SuperAgent's conversation with its goals in the right panel, and the floating quick window in front with its @ picker open" width="100%" />
 
 </div>
 
@@ -30,7 +32,8 @@
 Each agent in AgentsCode is a real **Claude Code**, **Codex** or **OrcaCode** session, working in one of your local
 projects. You give agents work in their own tabs. Agents hand each other requests, reviews and
 validations through built-in messaging tools, and every exchange is visible in **Comms**.
-**Channels** put you in a room with agents from several projects at once.
+**Channels** put you in a room with agents from several projects at once, and the **SuperAgent**
+runs the team across every project for you.
 
 ## Highlights
 
@@ -43,10 +46,18 @@ validations through built-in messaging tools, and every exchange is visible in *
   new, and read each exchange as a timeline with its delegations, reports, budget and live status.
 - **Channels.** Slack-style rooms with agents from any project. `@mention` an agent to start it on
   your post; its reply lands in the thread.
+- **SuperAgent.** One read-only agent that runs the team across every project: it watches your
+  agents, works a goals backlog, messages and delegates, and asks you about the rest. Talk to it from
+  anywhere with the quick window (Shift+Cmd+Space). See [SuperAgent](#superagent).
+- **Memory, soul and dreams.** Each agent keeps standing instructions (its soul) and what it learned
+  (its memory), and reviews its own sessions to propose small updates. A shared user profile tells
+  every agent how you like to work.
+- **@-mentions.** One picker in every composer for agents, projects and files.
 - **Safe parallel work.** Optional per-agent git worktrees, four autonomy levels from plan-only to
   full access, inline approvals, and a message budget that stops ping-pong loops.
-- **A real terminal.** Ghostty's emulator, compiled to WebAssembly, with per-project tabs and
-  Ghostty-style splits and keys.
+- **A real terminal and a browser.** Ghostty's emulator, compiled to WebAssembly, with per-project
+  tabs and Ghostty-style splits and keys; and, in the desktop app, browser tabs for localhost previews
+  that agents can drive too.
 - **Local-first.** One server on `127.0.0.1`, data in `~/.agentscode`, nothing sent anywhere except
   by the CLIs you already use.
 
@@ -54,20 +65,22 @@ validations through built-in messaging tools, and every exchange is visible in *
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/comms.png" alt="Comms: the conversation list with filters and search, beside a delegation's activity timeline" /></td>
-    <td width="50%"><img src="docs/screenshots/agent.png" alt="An agent session: the transcript, composer, and the Overview panel with turns, lines changed and cost" /></td>
+    <td width="50%"><img src="docs/screenshots/comms.webp" alt="Comms: the conversation list with each agent's avatar, beside a delegation's timeline from request to review to report" /></td>
+    <td width="50%"><img src="docs/screenshots/agent.webp" alt="An agent session: the transcript and composer, and the Overview panel with the agent's avatar, context and handoffs" /></td>
   </tr>
   <tr>
     <td align="center"><b>Comms</b>: every agent-to-agent conversation as a timeline</td>
-    <td align="center"><b>Agent session</b>: transcript, composer and overview</td>
+    <td align="center"><b>Agent session</b>: transcript, composer and Overview</td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/screenshots/channel.png" alt="A channel: a post that mentions every member, with each agent's delivery state and the reply thread" /></td>
+    <td colspan="2"><img src="docs/screenshots/channel.webp" alt="A channel: a post that mentions every member, with its reply thread open beside it" /></td>
   </tr>
   <tr>
     <td colspan="2" align="center"><b>Channels</b>: mention agents from any project, and their replies come back in the thread</td>
   </tr>
 </table>
+
+The screenshots show demo data.
 
 ## Install
 
@@ -77,7 +90,8 @@ validations through built-in messaging tools, and every exchange is visible in *
 - The CLIs you want to use, on your PATH and signed in:
   - **Claude Code**: `claude` (uses your existing login)
   - **Codex**: `codex` (run `codex login` if it reports a login problem)
-  - **OrcaCode**: `orcacode` 0.10.0 or newer, with a provider set up (run `orcacode` and use `/provider`)
+  - **OrcaCode**: `orcacode` 0.10.0 or newer, with a provider set up (run `orcacode` and use `/provider`).
+    An OrcaCode agent that works across all projects needs 0.12.0 or newer.
 
 ### Download
 
@@ -100,9 +114,15 @@ the [latest release](https://github.com/akashsokik/agentscode/releases/latest):
 | Windows x64 | [AgentsCode-win-x64.exe](https://github.com/akashsokik/agentscode/releases/latest/download/AgentsCode-win-x64.exe) |
 | Linux x64 | [AgentsCode-linux-x86_64.AppImage](https://github.com/akashsokik/agentscode/releases/latest/download/AgentsCode-linux-x86_64.AppImage) |
 
-The app updates itself: it checks for a new release at launch and every few hours, downloads it in
-the background, and installs it when you restart. **Check for Updates** is in the app menu on macOS
-and the Help menu on Windows and Linux.
+#### Updating
+
+On Windows and Linux the app updates itself: it checks for a new release at launch and every few
+hours, and **Update** in the sidebar (or **Check for Updates** in the Help menu) downloads it, stops
+the agents and restarts into the new version. On a Mac the build is not signed with a Developer ID
+yet, so it cannot replace itself: it tells you about a new version and gives you the install command
+to run in Terminal (quit AgentsCode first). **Settings > About** (or **About AgentsCode** in the app
+menu) shows the version, its build, the update status with **Check for updates**, the install command
+on an unsigned Mac build, and a link to the release notes.
 
 - The app bundles Electron, so it needs no Node install. It still needs the `claude`, `codex` and
   `orcacode` CLIs you use, which it finds through your login shell's PATH.
@@ -114,8 +134,7 @@ and the Help menu on Windows and Linux.
   app directly, because macOS only checks apps downloaded in a browser. A DMG downloaded in a browser
   is blocked the first time with "Apple could not verify AgentsCode": click **Done**, open
   **System Settings > Privacy & Security**, scroll down to **Security**, click **Open Anyway** and
-  enter your password. An unsigned Mac build doesn't install updates itself: it tells you about a
-  new version and gives you the install command to run.
+  enter your password.
 - **Windows:** the installer is not code-signed yet, so SmartScreen may ask you to confirm
   (**More info > Run anyway**).
 - **Linux:** make the AppImage executable (`chmod +x AgentsCode-linux-x86_64.AppImage`) and run it.
@@ -146,9 +165,12 @@ npm run dist:mac   # release/AgentsCode-mac-<arch>.dmg and .zip (also dist:win, 
 ## Using it
 
 1. **Add a project.** Any folder on your machine, from the sidebar footer or the empty state.
-2. **Create agents.** Pick a name, engine (Claude Code or Codex), model, effort, role and autonomy.
-   Turn on **Own git worktree** to give an agent its own branch and folder, so parallel agents never
-   edit the same checkout.
+2. **Create agents.** Pick a name, engine (Claude Code, Codex or OrcaCode), project (or All
+   projects), model, effort, role and autonomy. The roles are Developer, Lead, Reviewer, Tester,
+   Planner, Scout and Custom; each sets the agent's starting instructions and autonomy. Turn on
+   **Own git worktree** to give an agent its own branch and folder, so parallel agents never edit the
+   same checkout. Each agent gets its own avatar, whose eyes show its state (working, waiting on you,
+   done, failed); pick another shape and colour in its settings.
 3. **Talk to an agent.** Click it in the sidebar to open its tab. Enter sends; messages sent while it
    works wait in line, and Stop interrupts the current turn.
    - Cmd+click opens an agent in a pane to the side. The split button in a pane header adds another
@@ -163,13 +185,46 @@ npm run dist:mac   # release/AgentsCode-mac-<arch>.dmg and .zip (also dist:win, 
    conversation with All, Active and Attention filters, a search box and new-message dots. Open
    one to read it as a timeline: who wrote to whom, delegations with their acceptance criteria,
    reports with their outcome and evidence, who is working right now, and the message budget.
-   You can stop a conversation from there. Peer messages also appear as cards in both agents'
-   transcripts.
+   You can stop a conversation from there. Peer messages also show in both agents' transcripts: a
+   teammate's message opens its turn like yours does, and handoffs are quiet rows that follow the work
+   to its report.
 6. **Work in a channel.** See [Channels](#channels).
 7. **Review changes.** The right panel's **Changes** tab lists the focused agent's working-tree changes
    against HEAD; click a file for its diff. The **Files** sidebar tab browses any agent's workspace or
    project read-only.
 8. **Use a terminal.** See [Terminal](#terminal).
+9. **Preview in the browser.** In the desktop app, **Shift+Cmd+B** opens a browser tab. Localhost
+   links agents mention open beside you, and agents have browser tools (open, snapshot, screenshot,
+   console, click, type) to check web work in their own tabs.
+
+### @-mentions
+
+Type `@` in any composer (an agent's, a channel's, the quick window's) for one picker with
+**Agents**, **Projects** and **Files**.
+
+- In an agent's composer, `@Agent` and `@project` are references: the agent is told exactly who or
+  what you mean (an agent's id, role and project; a project's path). Mentioning an agent there does
+  not message it. `@path` is a file or folder in the agent's workspace.
+- In a channel, `@Agent` also starts that member on your post, and `@all`, `@channel` or `@here`
+  start every member. Files there are written `project/path`.
+- A name inside backticks or a code block is not a mention. Names with spaces work, and when an agent
+  and a project share a name, the one you picked from the picker is the one you get.
+
+### Memory, soul and dreams
+
+Each agent has a private home in `~/.agentscode/agents/<id>/`, outside its working folder:
+
+- **Soul** (`soul.md`): its standing instructions. You write it, in **Agent Settings > Soul** or by
+  hand.
+- **Memory** (`memory.md`): what it learned. Agents save entries with their `remember` tool when you
+  correct them or confirm an approach, and you can edit them in **Agent Settings > Memory**.
+- **Dreams**: after a session (at least three turns, and an hour since the last dream), an agent
+  reviews a digest of what happened and proposes small memory changes and, now and then, a soul
+  change, which waits for you. Every dream is recorded in **Agent Settings > Dreaming**, and its
+  changes can be undone.
+- **About you** (`~/.agentscode/user.md`): a profile of you shared by every agent: your style, taste
+  and how you like to work. What you say outright is saved directly; what a dream infers waits for
+  your approval. See and edit it under **About you** in the sidebar.
 
 ### Channels
 
@@ -194,7 +249,77 @@ agents you want in it. Change members later from the channel's member list or it
   one-turn-at-a-time delivery. Only you can invite agents. Plan-only agents can post findings but
   cannot start other members. Stopping an agent ends the collaborations it is in.
 - A channel cannot be deleted while a member is still working on one of its posts. Removing an agent
-  takes it out of every channel. After a restart, deliveries that were in flight are marked failed.
+  takes it out of every channel.
+
+## SuperAgent
+
+The SuperAgent is one agent that runs the team for you across every project. It never edits: its
+autonomy is read-only on every engine, it has no edit tools and no shell, and every change goes
+through an agent it delegates to. Open it from **SuperAgent** in the sidebar.
+
+- **What it does on its own.** It watches your agents (it wakes when one finishes, fails, gets
+  stuck or waits for you), works a goals backlog top down, creates agents and channels, adds or
+  removes channel members, delegates, nudges a stuck agent, starts a new session and stops a runaway
+  turn. Each command carries a short reason.
+- **What it asks you first.** Merging, pushing or deploying, deleting anything, removing an agent,
+  adding a project, and large or costly work. Its questions appear above its composer, as desktop
+  notifications, and in the quick window, with the choices to click.
+- **The right panel.** With the SuperAgent focused, the panel has three more tabs:
+  - **Decisions**: what it did on its own, with why, and **Undo** for what can be put back.
+  - **Goals**: your backlog, in order. Add, edit, reorder, set the status of or remove a goal, and see
+    which agent is on it.
+  - **Routines**: things it should do on a schedule (daily at a time, or every few hours). Routines
+    it proposes wait until you confirm them.
+- **Limits that only stop its own work.** In **Settings > SuperAgent**: whether it wakes on updates,
+  wake-ups an hour, a daily budget in dollars, agents it may create a day, quiet hours, and
+  notifications. These hold back only what it starts on its own; your own messages to it, and the
+  work you asked for, always go.
+- **Eyes.** The SuperAgent, reviewers and testers get read-only tools: GitHub and CI through the
+  `gh` CLI (open PRs, a PR's checks and reviews, CI runs and a run's failed log, open issues),
+  `run_check` for read-only git commands in a project (and its test, typecheck and lint scripts, only
+  for reviewers and testers at Full access), and `app_screenshot`, a capture of the AgentsCode window. What GitHub
+  returns is treated as data, never instructions.
+- **Quick window.** **Shift+Cmd+Space** (Ctrl+Shift+Space on Windows and Linux) opens a floating
+  composer over any app: talk to the SuperAgent or any agent, or start a new agent, with your team at
+  a glance and the SuperAgent's questions answerable inline. Enter sends; Cmd+Enter sends and opens
+  the conversation. The desktop app registers the shortcut system-wide and adds a menu bar item.
+
+## Settings
+
+**Settings** (Cmd+,) has:
+
+- **Appearance**: Dark, Light or System.
+- **Agent communication**: who agents can message (nobody, same project, all projects), the message
+  budget, whether `list_agents` shares current tasks, whether tasks start with a team snapshot, and
+  whether agents may run their own scripts in their browser tabs.
+- **SuperAgent**: the limits above.
+- **Engines**: which CLIs were found, with each one's version and path, and **Refresh models**.
+- **About**: the version and build, updates, and the release notes.
+
+Each agent's own settings (the gear in its header) are in sections: **General** (its folder, name,
+avatar and role, and removing it), **Soul**, **Memory** and **Dreaming**. Model, effort and autonomy
+are the chips under its composer.
+
+## Keyboard shortcuts
+
+Cmd on macOS is Ctrl on Windows and Linux.
+
+| Keys | Does |
+| :-- | :-- |
+| Cmd+N | New agent |
+| Cmd+K | Search and commands |
+| Cmd+, | Settings |
+| Cmd+W | Close the focused tab |
+| Cmd+1 to Cmd+8, Cmd+9 | That tab; Cmd+9 is the last |
+| Cmd+Shift+[ and Cmd+Shift+], Ctrl+Tab | Previous and next tab |
+| Cmd+B | Show or hide the sidebar |
+| Option+Cmd+B | Show or hide the right panel |
+| Cmd+J or Ctrl+\` | Show or hide the terminal |
+| Shift+Cmd+B | Open a browser tab |
+| Shift+Cmd+Enter | Maximize the focused pane |
+| Shift+Cmd+Space | The quick window |
+
+The terminal has its own keys; see [Terminal](#terminal).
 
 ### Terminal
 
@@ -265,6 +390,16 @@ Every agent gets an `agentscode` MCP server with these tools:
 | `list_channels` | The channels the agent is in, with each member's project, workspace, branch and status |
 | `read_channel` | Recent posts in one of its channels |
 | `post_to_channel` | Post in a channel; members in `mention_agent_ids` get a turn to answer |
+| `remember`, `forget` | Save or remove a memory entry; scope `user` writes to the shared user profile |
+| `create_walkthrough` | Publish a guided tour of the agent's work, only when you ask for one |
+| `openui_guide` | How to reply with interactive UI (buttons, tables, charts) |
+
+Agents in the desktop app also get browser tools (`browser_open`, `browser_snapshot`,
+`browser_screenshot`, `browser_console`, `browser_click`, `browser_type`, `browser_press` and more).
+The SuperAgent adds its own commands (`create_agent`, `update_agent`, `new_session`, `stop_agent`,
+`create_channel`, `update_channel`, `ask_user`, `read_transcript`, the goal tools, `list_routines`
+and `propose_routine`), and the SuperAgent, reviewers and testers get the read-only `gh_*`,
+`run_check` and `app_screenshot` tools.
 
 <details>
 <summary><b>How delivery works</b></summary>
@@ -280,8 +415,8 @@ Every agent gets an `agentscode` MCP server with these tools:
 - **Stop** on an agent cancels its queued messages and pauses incoming mail until you send it a new
   task. **New session** (the composer's session menu) clears the agent's context and ends its
   collaborations, but teammates can message it again right away.
-- After a restart, unfinished messages are marked failed instead of being replayed, because they may
-  already have edited files.
+- Across a restart, queued messages stay queued. A message that was mid-delivery goes once more,
+  marked as redelivered; if it is interrupted again, it is marked failed.
 - Identity comes from a per-process token: each agent process gets its own credential, and the MCP
   server is passed per process, so your global Claude Code and Codex configuration is never edited.
 
@@ -308,12 +443,15 @@ OrcaCode has no OS sandbox: its modes are tool gates. Its approvals come to Agen
 ### Engines
 
 - **Claude Code** agents run through the Claude Agent SDK with your installed `claude` binary: one
-  long-lived process per agent, closed after 20 idle minutes and resumed on the next message. They
+  long-lived process per agent, closed after 20 idle minutes and resumed on the next message. An
+  agent with no project works from its own workspace folder and can reach every project. They
   load your CLAUDE.md, settings and plugins. Your own MCP servers are off unless you enable them per
   agent.
 - **Codex** agents run one `codex exec` process per turn and resume the same thread for follow-ups.
 - **OrcaCode** agents run one headless `orcacode --json` process per turn and pass `--resume` with
-  the session id from the turn's metadata. The prompt and the per-agent `agentscode` MCP server go in
+  the session id from the turn's metadata. An OrcaCode agent with no project (All projects) passes
+  `--add-dir` for every project you added, which needs `orcacode` 0.12.0 or newer; AgentsCode checks
+  the installed `orcacode` for it. The prompt and the per-agent `agentscode` MCP server go in
   a private temporary folder (`--prompt-file`, `--mcp-config`), so your OrcaCode config is never edited.
 - Model lists come from the CLIs themselves, so no tokens are spent. Change model, effort or autonomy
   from the composer chips at any time.
@@ -331,11 +469,20 @@ OrcaCode has no OS sandbox: its modes are tool gates. Its approvals come to Agen
 ## Development
 
 ```bash
-npm test           # mailbox and channel rules, manager routing, HTTP and WebSocket guards, MCP stdio
-                   # round trip, terminals against a real /bin/sh, terminal keys and split layout,
-                   # Comms and channel thread models; no provider calls
-npm run typecheck
-npm run build
+npm test           # node --test with fake providers: mailbox and channel rules, manager routing,
+                   # HTTP and WebSocket guards, MCP stdio round trip, terminals against a real
+                   # /bin/sh, the SuperAgent, mentions, dreams; no provider calls
+npm run typecheck  # web, server and desktop
+npm run build      # the web app
+npm run build:desktop
+```
+
+To restart the installed Mac app onto a fresh local build (`release/mac-arm64/AgentsCode.app`, from
+`npm run build:desktop` and `electron-builder --mac dir`):
+
+```bash
+scripts/restart-desktop.sh              # quit, keep the old app in /tmp/AgentsCode.app.prev, install, reopen
+scripts/restart-desktop.sh --when-idle  # wait until no agent is mid-turn and no build is running
 ```
 
 <details>
@@ -345,11 +492,15 @@ npm run build
 
 ```
 electron/main.ts     desktop app: starts the server in a utility process and opens a window on it
+electron/            also the updater, the integrated browser, the quick window and the menu bar item
 server/
   index.ts           HTTP + WebSocket entry
   app.ts             REST API and localhost guards
   manager.ts         agents, projects, approvals, turn lifecycle
-  agents/            Claude (Agent SDK) and Codex (codex exec) runners, per-agent FIFO
+  agents/            Claude (Agent SDK), Codex (codex exec) and OrcaCode runners, per-agent FIFO
+  superAgent.ts      the SuperAgent's log, goals, routines, wake-ups and limits
+  dream.ts           dreaming; agentHome.ts and userProfile.ts for soul, memory and user.md
+  github.ts          read-only gh tools; checks.ts for run_check
   comms/             mailbox, channels, MCP tool definitions, stdio MCP entry
   workspace.ts       file tree, file reads, git status and diffs
   terminals.ts       shells for the terminal panel (node-pty), output kept for reattaching pages
@@ -360,10 +511,12 @@ web/
   comms.ts           the Comms page's model: conversations, states, titles, search, read state
   sidebar/           navigation column (channels, projects) and workspace column (agents, files, changes)
   panes/             agent session, transcript, composer, channel, Comms, file and diff views
-  right/             Overview, Comms feed and Changes panel
+  right/             Overview, Comms feed and Changes panel, and the SuperAgent's tabs
+  quick/             the quick window
   terminal/          terminal panel: Ghostty's emulator (ghostty-web), per-project tabs and splits, key handling
 shared/types.ts      the contract between server and client
 tests/               node --test suites with fake providers
+scripts/             release.mjs, restart-desktop.sh, build helpers
 ```
 
 </details>
@@ -374,10 +527,10 @@ Releases are cut from a tag. The version in `package.json` is the version the ap
 compares against the update feed.
 
 ```bash
-npm run release:notes   -- 0.2.0   # draft docs/releases/0.2.0.md from the commits since the last tag; edit it
-npm run release:prepare -- 0.2.0   # set the version, commit with the notes
+npm run release:notes   -- 0.2.3   # draft docs/releases/0.2.3.md from the commits since the last tag; edit it
+npm run release:prepare -- 0.2.3   # set the version, commit with the notes
 git push origin main
-npm run release:tag     -- 0.2.0   # tag v0.2.0 and push it
+npm run release:tag     -- 0.2.3   # tag v0.2.3 and push it
 ```
 
 The tag starts [`.github/workflows/release.yml`](.github/workflows/release.yml). It typechecks and
@@ -385,7 +538,8 @@ tests, builds macOS arm64 and x64, Windows x64 and Linux x64 on their own runner
 GitHub Release with the notes file as its body. The release carries the installers, the update feeds
 the installed apps read (`latest-mac.yml`, `latest.yml`, `latest-linux.yml`), blockmaps for
 differential updates, and `SHA256SUMS`. A version with a suffix (`0.2.0-beta.1`) is published as a
-prerelease. Only apps already on a prerelease are offered prereleases.
+prerelease. Only apps already on a prerelease are offered prereleases. Release notes for each version
+are in [docs/releases](docs/releases).
 
 **macOS signing.** Mac auto-update can only install in place when the app is signed with a Developer
 ID. Add these repository secrets and the workflow signs and notarizes the app: `MAC_CSC_LINK` (the
