@@ -98,6 +98,8 @@ export class BrowserHost {
    * it hang; in this one they do not. Elsewhere the app quits with its window, so there is none.
    */
   private holder: BrowserWindow | null = null;
+  /** Set by shutdown(): the app is quitting, so no new tab and no holder window. */
+  private quitting = false;
   private configured = false;
 
   private options: Options;
@@ -172,6 +174,7 @@ export class BrowserHost {
   }
 
   private make(id: string, agentId: string | null): Tab {
+    if (this.quitting) throw new BrowserError('AgentsCode is quitting.');
     const view = new WebContentsView({
       webPreferences: { session: this.session, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
     });
@@ -190,7 +193,7 @@ export class BrowserHost {
     wc.on('will-redirect', event => guard(event, event.url));
     wc.on('will-frame-navigate', event => { if (!event.isMainFrame) guard(event, event.url); });
     wc.setWindowOpenHandler(({ url }) => {
-      if (!blockedReason(url, this.options.appPort)) {
+      if (!this.quitting && !blockedReason(url, this.options.appPort)) {
         const opened = this.create(newId(), url, tab.agentId);
         this.send({ type: 'opened', tab: this.state(opened), side: true });
       }
@@ -387,7 +390,7 @@ export class BrowserHost {
   private parent(create = true): BrowserWindow | null {
     if (this.attachedTo && !this.attachedTo.isDestroyed()) return this.attachedTo;
     if (this.holder && !this.holder.isDestroyed()) return this.holder;
-    if (!create || process.platform !== 'darwin') return null;
+    if (!create || this.quitting || process.platform !== 'darwin') return null;
     this.holder = new BrowserWindow({ show: false, width: DEFAULT_SIZE.width, height: DEFAULT_SIZE.height, skipTaskbar: true, focusable: false, webPreferences: { backgroundThrottling: false } });
     return this.holder;
   }
@@ -424,6 +427,18 @@ export class BrowserHost {
     for (const id of [...this.tabs.keys()]) this.destroy(id);
     if (this.holder && !this.holder.isDestroyed()) this.holder.destroy();
     this.holder = null;
+  }
+
+  /**
+   * The app is quitting: close every tab and the holder, and make neither again. Electron quits
+   * once its last window closes, and a holder made while it closes them (detachWindow, from the
+   * app window's close) never closes, so the quit hung for good: the server already stopped, the
+   * process alive, Cmd+Q ignored, and a reopened window blank. Call it before Electron closes
+   * the windows, that is in before-quit and before-quit-for-update.
+   */
+  shutdown(): void {
+    this.quitting = true;
+    this.closeAll();
   }
 
   // ---- The agents' side (electron/bridge.ts) ----

@@ -6,7 +6,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
+import { app, autoUpdater as nativeUpdater, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
 import { isLocalUrl } from '../shared/browser.ts';
 import { BrowserError, BrowserHost, type Rect } from './browser.ts';
 import { BrowserBridge } from './bridge.ts';
@@ -357,13 +357,20 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('will-quit', stopSuperBridge);
   app.on('before-quit', (event) => {
-    if (!server) return;
+    if (!server) {
+      // The quit goes through, and Electron closes the windows next. Close the browser tabs
+      // first, or the window's close parks them in a new holder window and the quit never ends.
+      browser.shutdown();
+      return;
+    }
     event.preventDefault();
     if (quitting) return;
     // Stop the agents, then quit again. The second quit goes through normally (no server left), so
     // the quit events fire and a downloaded update installs on the way out.
     void stopServer().then(() => app.quit());
   });
+  // Installing an update closes the windows before before-quit fires. The holder is macOS only.
+  if (process.platform === 'darwin') nativeUpdater.on('before-quit-for-update', () => browser.shutdown());
   void app.whenReady().then(async () => {
     setMenu();
     serveUpdates();
