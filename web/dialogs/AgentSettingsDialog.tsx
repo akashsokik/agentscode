@@ -15,6 +15,7 @@ import { Group, Row, Select } from '../mono/settings.tsx';
 import { DreamingSection, SoulProposalGroup } from './Dreaming.tsx';
 import { RemoveAgentDialog } from './RemoveAgentDialog.tsx';
 import { submitKey } from './submitKey.ts';
+import { IS_MAC } from '../platform.ts';
 import { openingSection, rememberedSection, rememberSection, SECTIONS, sectionForKey, type AgentSettingsSection } from '../settingsSections.ts';
 
 export type { AgentSettingsSection };
@@ -108,7 +109,6 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
         <div
           role="tablist"
           aria-label="Agent settings sections"
-          aria-orientation="vertical"
           onKeyDown={event => onKey(event, true)}
           className="flex shrink-0 gap-0.5 overflow-x-auto border-b border-content/7 p-2 sm:w-36 sm:flex-col sm:overflow-visible sm:border-b-0 sm:border-r"
         >
@@ -122,13 +122,13 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
               aria-selected={section === item.id}
               aria-controls={`${ids}-panel`}
               tabIndex={section === item.id ? 0 : -1}
-              title={`${item.label} (${navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl'}+${index + 1})`}
+              title={`${item.label} (${IS_MAC ? 'Cmd' : 'Ctrl'}+${index + 1})`}
               onClick={() => setSection(item.id)}
               className={`flex shrink-0 items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors ${section === item.id ? 'bg-selection text-content' : 'text-content/60 hover:bg-content/5 hover:text-content'}`}
             >
               <span>{item.label}</span>
               {item.id === 'memory' && memoryCount ? <span className="text-[11px] tabular-nums text-content/40">{memoryCount}</span> : null}
-              {item.id === 'soul' && proposal ? <span aria-label="A soul change is waiting" className="size-1.5 rounded-full bg-accent" /> : null}
+              {item.id === 'soul' && proposal ? <><span aria-hidden className="size-1.5 rounded-full bg-accent" /><span className="sr-only">, a soul change is waiting</span></> : null}
             </button>
           ))}
         </div>
