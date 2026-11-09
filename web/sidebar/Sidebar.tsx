@@ -21,7 +21,7 @@ import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
-import { AGENT_GROUP_LABEL, agentsSummary, groupAgents, railAgents, railAgentStatus, railAgentTask, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
+import { AGENT_GROUP_LABEL, agentsSummary, groupAgents, railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
 import { openAsks, openSuper } from '../super.ts';
 import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
 import { AvatarStack } from '../ui/AvatarStack.tsx';
@@ -415,7 +415,7 @@ function RowMore({ label, open: isOpen, onClick }: { label: string; open: boolea
       aria-expanded={isOpen}
       onClick={onClick}
       className={cx(
-        'absolute right-1 top-1 grid size-6 place-items-center rounded-md text-content/55 transition-opacity duration-150 hover:bg-content/8 hover:text-content focus-visible:opacity-100',
+        'absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-md text-content/55 transition-opacity duration-150 hover:bg-content/8 hover:text-content focus-visible:opacity-100',
         isOpen ? 'bg-content/8 opacity-100' : 'opacity-0 group-hover:opacity-100',
       )}
     >
@@ -465,22 +465,14 @@ function AgentRailMark({ status, compact = false }: { status: RailAgentStatus; c
 }
 
 /**
- * An agent with no project in the navigation column; it works across all projects. One line while it
- * is idle: avatar, name, how long ago. While it works or waits on you the row takes a second quiet
- * line with what it is on, and gives it back when it is done.
+ * An agent with no project in the navigation column; it works across all projects. One line: avatar,
+ * name, and how it is doing (a spinner with the time it has worked, how long ago, or the needs-you
+ * mark).
  */
 function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: boolean; actions: SidebarActions }) {
   const pending = usePendingApproval(agent.id);
-  const from = useApp(s => (agent.currentTask?.source === 'agent' ? s.snapshot?.agents.find(a => a.id === agent.currentTask?.fromAgentId)?.name : undefined));
   const now = useNow();
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
-  const task = railAgentTask(agent, pending, from);
-  const state = (
-    <span className={cx('flex shrink-0 items-center group-hover:hidden group-has-[[data-card-more]:focus-visible]:hidden', menu && 'hidden')}>
-      <AgentStateMark agent={agent} pending={pending} now={now} />
-    </span>
-  );
-  const name = <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', agent.unread ? 'font-semibold text-content' : 'font-medium')}>{agent.name}</span>;
   return (
     <div className="group relative" onContextMenu={e => openContextMenu(e, setMenu)}>
       <button
@@ -488,21 +480,14 @@ function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: bo
         onClick={e => openRailAgent(agent, e)}
         title={`${agent.name}, works across all projects. Click to open, Cmd+click to open beside, right-click for more.`}
         aria-current={selected ? 'page' : undefined}
-        className={cx(
-          task
-            ? 'grid w-full min-w-0 grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 rounded-md px-2 py-1.5 text-left transition-[background-color,color,padding] duration-150 group-hover:pr-7 group-focus-within:pr-7'
-            : railRow(Boolean(menu)),
-          task && menu && 'pr-7',
-          railRowState(selected || Boolean(menu)),
-        )}
+        className={cx(railRow(Boolean(menu)), railRowState(selected || Boolean(menu)))}
       >
         <AgentAvatar agent={agent} className="size-5" />
-        {task ? (
-          <span className="flex min-w-0 flex-col">
-            <span className="flex h-5 min-w-0 items-center gap-2 text-content/90">{name}{state}</span>
-            <span className="min-w-0 truncate text-[11.5px] font-normal leading-4 text-content/45">{task}</span>
-          </span>
-        ) : <>{name}{state}</>}
+        <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', agent.unread ? 'font-semibold text-content' : 'font-medium')}>{agent.name}</span>
+        {/* How it is doing, in the same place on every row; the ... button takes the spot on hover. */}
+        <span className={cx('flex shrink-0 items-center group-hover:hidden group-has-[[data-card-more]:focus-visible]:hidden', menu && 'hidden')}>
+          <AgentStateMark agent={agent} pending={pending} now={now} />
+        </span>
       </button>
       <RowMore label={`${agent.name} actions`} open={Boolean(menu)} onClick={e => toggleMenu(e, setMenu)} />
       {menu ? <AgentMenu agent={agent} anchor={menu} actions={actions} onClose={() => setMenu(null)} /> : null}

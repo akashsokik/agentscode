@@ -63,11 +63,3 @@ export function agentsSummary(agents: readonly Pick<Agent, 'id' | 'status'>[], p
   const needs = agents.filter(a => a.status === 'waiting' || pendingIds.has(a.id)).length;
   return { needsYou: needs, working: agents.some(a => a.status === 'working' && !pendingIds.has(a.id)) };
 }
-
-/** An agent's row takes a second line, saying what it is on, only while it is working or waiting on you. */
-export function railAgentTask(agent: Pick<Agent, 'status' | 'activity' | 'currentTask'>, pending: boolean, fromName?: string): string | null {
-  if (!pending && agent.status !== 'working' && agent.status !== 'waiting') return null;
-  const task = agent.currentTask?.summary?.trim() || agent.activity?.trim();
-  if (!task) return null;
-  return fromName ? `from ${fromName}: ${task}` : task;
-}
