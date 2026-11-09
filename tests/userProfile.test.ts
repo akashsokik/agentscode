@@ -10,6 +10,7 @@ import { createApp } from '../server/app.ts';
 import { buildDigest, dream, Dreamer, dreamLine } from '../server/dream.ts';
 import { HttpError } from '../server/errors.ts';
 import { capProfile, PROFILE_LIMIT, parseProfile, ProfileStore, renderProfile, sameFact } from '../server/userProfile.ts';
+import { profileCountsText, undoState } from '../web/dreams.ts';
 import { FakeDreamEngine, harness, projectDir, settle, tempDir } from './helpers.ts';
 
 function status(error: unknown): number {
@@ -49,6 +50,9 @@ test('sameFact matches the same fact in other words, and not facts that only sha
   assert.ok(!sameFact('Use pnpm.', 'Never use emojis.'));
   assert.ok(!sameFact('Run tests with vitest in the web project.', 'Deploy the web project with vercel.'));
   assert.ok(!sameFact('Fix the bug.', 'Fix the test.'), 'generic coding words tie nothing together');
+  assert.ok(!sameFact('Always use tabs.', 'Never use tabs.'), 'a reversal is not the same fact');
+  assert.ok(!sameFact('Always indent with tabs.', "Don't indent with tabs."));
+  assert.ok(sameFact('Never use tabs.', 'The user does not want tabs.'), 'two ways of saying no still match');
 });
 
 test('the store: duplicates, secrets and the cap; proposals are checked against entries, waiting ones and rejections', () => {
@@ -245,7 +249,8 @@ test('a dream adds what the user said outright, proposes what it inferred, and r
   assert.equal(waiting.kind, 'dream');
   assert.equal(waiting.dreamId, record.id);
   assert.match(waiting.text, /Keep replies short/);
-  assert.equal(dreamLine(record), 'Dreamed: no changes, learned 1 thing about you, 1 about you to review');
+  assert.equal(dreamLine(record), 'Dreamed: no changes, learned 1 thing about you, 1 about you to review in Settings');
+  assert.equal(dreamLine({ ...record, status: 'rolled-back', error: 'Rolled back: memory is over its limit.' }), 'Dreamed: changes rolled back (memory is over its limit), learned 1 thing about you, 1 about you to review in Settings');
   assert.ok(!fs.existsSync(path.join(homes.path(agent.id), 'memory.md')), 'memory is untouched');
 
   // The next dream is shown the profile, and the same fact again is refused.
@@ -253,6 +258,22 @@ test('a dream adds what the user said outright, proposes what it inferred, and r
   const again = await dream({ homes, agent, entries, engine: fake.engine, reason: 'manual', profile });
   assert.match(fake.requests[1].prompt, /- Never use emojis in anything written for the user\./);
   assert.deepEqual(again!.record.profile?.map(o => o.reason), ['the profile already says it', 'already waiting for approval', 'evidence is not from the user or a confirmed result']);
+});
+
+test('a reversal the user says outright is added, not refused as what the profile already says', async () => {
+  const { homes, profile, agent, fake } = dreamFixture();
+  profile.add('Always indent with tabs.', '', {});
+  const entries = [
+    entry('user', 'Format the config', 0), entry('turn', '', 0, { turn: { source: 'user' } }),
+    entry('agent', 'Indented the config with tabs.', 1), entry('done', 'Formatted it.', 1),
+    entry('user', 'No, never indent with tabs in any project.', 2),
+  ];
+  fake.replies.length = 0;
+  fake.replies.push(JSON.stringify({ memory: [], user: [{ text: 'Never indent with tabs.', why: 'The user corrected it.', evidence: [digestId(entries, 'never indent')] }], soul: null, diary: '', corrections: [] }));
+  const outcome = await dream({ homes, agent, entries, engine: fake.engine, reason: 'manual', profile });
+  assert.deepEqual(outcome!.record.profile?.map(o => o.result), ['applied']);
+  // Dreams only add: the old entry stays until the user deletes it.
+  assert.deepEqual(profile.entries().map(e => e.text), ['Always indent with tabs.', 'Never indent with tabs.']);
 });
 
 test('undoing a dream removes what it added about the user and its proposals, but keeps what the user edited or added since', async () => {
@@ -313,7 +334,7 @@ test('a rejected promotion is not offered again, and agents with dreaming off ta
   assert.throws(() => t.manager.decideProfile(proposal.id, 'maybe'), e => status(e) === 400);
 
   await t.call(t.adaRunner, 'remember', { text: 'Prefers pnpm over npm.' });
-  await t.call(t.novaRunner, 'remember', { text: 'The user prefers pnpm, not npm.' });
+  await t.call(t.novaRunner, 'remember', { text: 'The user prefers pnpm over npm.' });
   await t.manager.update(t.nova.id, { dreaming: false });
   t.manager.promote();
   assert.equal(t.manager.profileView().proposals.length, 0);
@@ -360,4 +381,16 @@ test('the memory tools carry the scope, and the guidance says when to use it', a
   const { remembered } = await t.call(t.adaRunner, 'remember', { text: 'The web app builds with vite.' }) as { remembered: MemoryEntry };
   assert.ok(fs.readFileSync(path.join(t.ada.home, 'memory.md'), 'utf8').includes(remembered.id));
   await assert.rejects(t.call(t.adaRunner, 'remember', { text: 'x', scope: 'team' }), e => status(e) === 400);
+});
+
+test('the app offers Undo for a dream that only changed the profile, and counts what it learned', () => {
+  const learned = { id: 'd2', status: 'applied', ops: [], profile: [{ text: 'No emojis.', result: 'applied' as const }, { text: 'Short replies.', result: 'proposed' as const }] };
+  const memory = { id: 'd1', status: 'applied', ops: [{ op: 'add', text: 'x', result: 'applied' as const }] };
+  // Newest first: a profile-only dream does not block undoing an earlier memory dream, and is undoable itself.
+  assert.deepEqual(undoState([learned, memory], 'd2'), { can: true });
+  assert.deepEqual(undoState([learned, memory], 'd1'), { can: true });
+  assert.deepEqual(undoState([{ ...learned, profile: [{ text: 'x', result: 'rejected' as const }] }], 'd2'), { can: false, why: 'It changed nothing.' });
+  assert.deepEqual(undoState([{ ...learned, undoneAt: 1 }], 'd2'), { can: false, why: 'Already undone.' });
+  assert.equal(profileCountsText(learned.profile), 'learned 1 about you, 1 to review');
+  assert.equal(profileCountsText([]), '');
 });

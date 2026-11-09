@@ -93,12 +93,20 @@ export function capProfile(entries: ProfileEntry[]): { entries: ProfileEntry[]; 
   return { entries: entries.slice(0, kept), omitted: entries.length - kept };
 }
 
+/** Whether a text says not to do something: never, not, no, don't, avoid, without. */
+function negative(text: string): boolean {
+  return /\b(?:never|not|no|none|nothing|don'?t|doesn'?t|won'?t|shouldn'?t|avoid|without|stop)\b|n't\b/i.test(text.replace(/[\u2018\u2019]/g, "'"));
+}
+
 /**
  * Whether two short texts state the same fact, by their distinctive words (see distinctive): they
  * share at least two (one when either has only one), covering most of the shorter text and a fair
- * part of the longer. Plain code, so promotion and the duplicate checks never call a model.
+ * part of the longer, and both say to do it or both say not to. Plain code, so promotion and the duplicate checks never call a model.
  */
 export function sameFact(a: string, b: string): boolean {
+  // distinctive drops "never", "not" and "always", so "Always use tabs" and "Never use tabs" share
+  // every word: a fact and its reversal are never the same.
+  if (negative(a) !== negative(b)) return false;
   const wa = distinctive(a);
   const wb = distinctive(b);
   if (!wa.length || !wb.length) return false;

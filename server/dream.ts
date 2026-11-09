@@ -900,17 +900,18 @@ export function renderDream(record: DreamRecord): string {
 /** The transcript line: "Dreamed: +2 -1 ~1, soul change proposed". */
 export function dreamLine(record: DreamRecord): string {
   if (record.status === 'failed') return `Dreamed: failed (${record.error ?? 'unknown error'})`;
-  if (record.status === 'rolled-back') return `Dreamed: changes rolled back (${(record.error ?? 'Rolled back.').replace(/^Rolled back: /, '').replace(/\.$/, '')})`;
+  const learned = record.profile?.filter(o => o.result === 'applied').length ?? 0;
+  const proposed = record.profile?.filter(o => o.result === 'proposed').length ?? 0;
+  // What it learned about the user stands even when its memory changes were rolled back.
+  const about = [
+    learned ? `learned ${learned} ${learned === 1 ? 'thing' : 'things'} about you` : '',
+    proposed ? `${proposed} about you to review in Settings` : '',
+  ].filter(Boolean).map(part => `, ${part}`).join('');
+  if (record.status === 'rolled-back') return `Dreamed: changes rolled back (${(record.error ?? 'Rolled back.').replace(/^Rolled back: /, '').replace(/\.$/, '')})${about}`;
   const applied = record.ops.filter(o => o.result === 'applied');
   const count = (kinds: DreamOpKind[]) => applied.filter(o => kinds.includes(o.op)).length;
   const parts = [['+', count(['add'])], ['-', count(['remove'])], ['~', count(['update', 'merge'])]] as const;
   const changes = parts.filter(([, n]) => n > 0).map(([sign, n]) => `${sign}${n}`).join(' ') || 'no changes';
-  const learned = record.profile?.filter(o => o.result === 'applied').length ?? 0;
-  const proposed = record.profile?.filter(o => o.result === 'proposed').length ?? 0;
-  const about = [
-    learned ? `learned ${learned} ${learned === 1 ? 'thing' : 'things'} about you` : '',
-    proposed ? `${proposed} about you to review` : '',
-  ].filter(Boolean).map(part => `, ${part}`).join('');
   return `Dreamed: ${changes}${about}${record.soul?.status === 'pending' ? ', soul change proposed' : ''}`;
 }
 
