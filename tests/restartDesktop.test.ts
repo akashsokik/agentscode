@@ -133,3 +133,55 @@ test('--when-idle restarts after two idle checks in a row', async () => {
     assert.equal(w.installed(), 'new');
   } finally { w.cleanup(); }
 });
+
+test('if the current app cannot be moved aside, nothing is copied into it and the old app reopens (exit 1)', async () => {
+  const w = world('exits');
+  const prev = w.env.AGENTSCODE_PREV;
+  // A leftover .prev that cannot be removed: rm -rf fails, so the app must not be replaced.
+  fs.mkdirSync(path.join(prev, 'stuck'), { recursive: true });
+  fs.chmodSync(prev, 0o555);
+  try {
+    const { code, out } = await w.run();
+    assert.equal(code, 1, out);
+    assert.match(out, /Could not move the current app/);
+    assert.doesNotMatch(out, /Restarted onto/);
+    assert.equal(fs.existsSync(path.join(w.app, 'AgentsCode.app')), false, 'no nested copy inside the old bundle');
+    assert.equal(w.installed(), 'old');
+    assert.equal(fs.readFileSync(w.opened, 'utf8').trim(), w.app, 'the old app is reopened');
+    assert.equal(fs.existsSync(w.env.AGENTSCODE_LOCK), false);
+  } finally {
+    fs.chmodSync(prev, 0o755);
+    w.cleanup();
+  }
+});
+
+test('with no app installed, a restart does nothing', async () => {
+  const w = world('exits');
+  try {
+    fs.rmSync(w.app, { recursive: true });
+    const { code, out } = await w.run();
+    assert.equal(code, 1);
+    assert.match(out, /No app at .* to replace/);
+    assert.equal(fs.existsSync(w.app), false);
+    assert.equal(fs.existsSync(w.opened), false);
+  } finally { w.cleanup(); }
+});
+
+test('a lock left by a waiter that is gone is taken over; one held by a live waiter is not', async () => {
+  const w = world('exits');
+  try {
+    fs.mkdirSync(w.env.AGENTSCODE_LOCK);
+    fs.writeFileSync(path.join(w.env.AGENTSCODE_LOCK, 'pid'), String(process.pid));
+    const held = await w.run();
+    assert.equal(held.code, 0);
+    assert.match(held.out, /Another restart is waiting/);
+    assert.equal(w.installed(), 'old');
+    // The waiter is gone (a pid nothing runs as): its lock is stale.
+    fs.writeFileSync(path.join(w.env.AGENTSCODE_LOCK, 'pid'), '999999');
+    const stale = await w.run();
+    assert.equal(stale.code, 0, stale.out);
+    assert.match(stale.out, /Taking over a stale lock \(999999\)/);
+    assert.equal(w.installed(), 'new');
+    assert.equal(fs.existsSync(w.env.AGENTSCODE_LOCK), false, 'released when done');
+  } finally { w.cleanup(); }
+});
