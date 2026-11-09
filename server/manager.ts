@@ -236,15 +236,25 @@ export class AgentManager {
       },
     });
     this.mailbox = new Mailbox(store, {
-      // Mail to the SuperAgent (reports, replies) waits while its wake-ups are off, in quiet hours or
-      // over budget, as its updates do; your own messages to it never wait.
-      ready: id => this.store.agents.has(id) && !this.runners.get(id)?.busy && !(id === this.superId() && this.watcher.held()),
+      ready: id => this.store.agents.has(id) && !this.runners.get(id)?.busy,
       send: (id, text, task) => {
         this.clearIdleTimer(id);
-        // A turn started by mail counts against its wake budget like an update.
-        if (id === this.superId()) this.superStore.noteWake();
+        // A turn started by mail about work the SuperAgent began on its own counts against its wake
+        // budget like an update; mail about work you asked for does not.
+        if (id === this.superId() && !this.userWork(task.messageId)) this.superStore.noteWake();
         this.runnerFor(this.agent(id)).send(text, task);
       },
+      // Mail to the SuperAgent waits while it may not take a turn. Work you asked for (a conversation it
+      // began in a turn you gave it) waits only on the daily budget; the rest on every wake-up limit.
+      // Your own messages never go through here, so they never wait.
+      hold: (id, message, conversation) => {
+        if (id !== this.superId()) return null;
+        const reason = this.mailHold(conversation);
+        if (reason) this.watcher.noteHeld(message.id, reason);
+        return reason;
+      },
+      userTurn: id => this.store.agents.get(id)?.role === 'super' && this.store.agents.get(id)?.currentTask?.source === 'user',
+      keepOnRestart: message => message.toAgentId === this.superId(),
       changed: message => this.publishMessage(message),
       conversationChanged: conversation => this.hub.broadcast({ type: 'conversation', conversation }),
       inChannel: (channelId, agentId) => this.channels.isMember(channelId, agentId),
@@ -908,6 +918,8 @@ export class AgentManager {
   }
 
   private publishMessage(message: PeerMessage): void {
+    // Mail to or from the SuperAgent changes what waits for it.
+    if (message.toAgentId === this.superId()) setImmediate(() => this.publishSuper());
     this.channels.messageChanged(message);
     // Channel messages show in the channel; the sender's transcript has its post_to_channel call.
     const parties = message.channelId ? [message.toAgentId] : [message.fromAgentId, message.toAgentId];
@@ -1151,7 +1163,7 @@ export class AgentManager {
   }
 
   superView(): SuperState {
-    return this.superStore.view(this.superId());
+    return { ...this.superStore.view(this.superId()), held: this.heldMail() };
   }
 
   private publishSuper(): SuperState {
@@ -1461,13 +1473,38 @@ export class AgentManager {
     else this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} hit a problem`, untrusted: `${asked}Error: ${clip(result.error ?? 'Something went wrong.', 400)}` });
   }
 
+  /** Why mail in this conversation may not start a SuperAgent turn now, or null. */
+  private mailHold(conversation: Conversation | undefined): string | null {
+    return conversation?.userStarted ? this.watcher.dailyHeld() : this.watcher.held();
+  }
+
+  /** Whether a peer message belongs to work the user asked the SuperAgent for. */
+  private userWork(messageId: string | undefined): boolean {
+    const message = messageId ? this.store.messages.find(m => m.id === messageId) : undefined;
+    return Boolean(message && this.store.conversations.find(c => c.id === message.conversationId)?.userStarted);
+  }
+
+  /** Mail to the SuperAgent waiting now, and why (the first reason), for the app. */
+  private heldMail(): SuperState['held'] {
+    const superId = this.superId();
+    if (!superId) return null;
+    let count = 0;
+    let reason = '';
+    for (const m of this.store.messages) {
+      if (m.toAgentId !== superId || m.status !== 'queued') continue;
+      const why = this.mailHold(this.store.conversations.find(c => c.id === m.conversationId));
+      if (!why) continue;
+      count++;
+      reason ||= why;
+    }
+    return count ? { count, reason } : null;
+  }
+
   /** Every minute: send what waits if it may go now, and report agents stuck in a turn or on the user. */
   private superTick(): void {
     const superId = this.superId();
     if (!superId) return;
     this.watcher.morning();
-    // Held mail goes once quiet hours end or a new hour's budget begins.
-    this.mailbox.drain(superId);
     const now = Date.now();
     for (const agent of this.store.agents.values()) {
       if (agent.role === 'super') continue;
@@ -1487,7 +1524,10 @@ export class AgentManager {
         if (agent) this.watcher.note({ agentId: agent.id, key, text: `${agent.name} has waited ${Math.round((now - approval.createdAt) / 60_000)} minutes for the user to answer`, untrusted: approval.title });
       }
     }
-    this.watcher.flush();
+    // An update takes the wake slot first; held mail follows once that turn ends (its ready()
+    // drain), or here on a later minute, so a mail backlog never crowds out the update about it.
+    if (!this.watcher.flush()) this.mailbox.drain(superId);
+    this.publishSuper();
   }
 
   // ---- the user profile ----------------------------------------------------

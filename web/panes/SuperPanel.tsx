@@ -19,10 +19,17 @@ import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 /** Open questions above the composer; empty, it takes no room. */
 export function SuperInbox() {
   const asks = useApp(s => s.snapshot?.super.asks);
+  const held = useApp(s => s.snapshot?.super.held);
   const waiting = openAsks(asks);
-  if (!waiting.length) return null;
+  if (!waiting.length && !held) return null;
   return (
     <div data-super-inbox className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-3 pb-2">
+      {/* Mail it may not take a turn for yet: never silent, so work you asked for never stalls unseen. */}
+      {held ? (
+        <p role="status" data-super-held className="rounded-lg border border-content/10 bg-content/3 px-3 py-2 font-sans text-[12px] text-content/65">
+          {heldText(held)}
+        </p>
+      ) : null}
       {waiting.map(ask => <AskCard key={ask.id} ask={ask} />)}
     </div>
   );
@@ -80,18 +87,20 @@ export function SuperLogSidebar({ id, over, focused, onClose }: { id: string; ov
   const close = useRef(onClose);
   close.current = onClose;
 
-  // Over the conversation it is a popover: focus moves into it when it opens, and goes back to the
-  // header's toggle when it closes, however it closes (Hide, Escape, a click outside).
+  // Over the conversation it is a popover: focus moves into it when it opens.
   useEffect(() => {
-    if (!over) return;
-    root.current?.querySelector<HTMLElement>('[data-super-log-hide]')?.focus({ preventScroll: true });
+    if (over) root.current?.querySelector<HTMLElement>('[data-super-log-hide]')?.focus({ preventScroll: true });
+  }, [over]);
+  // However it closes, in either mode (Hide, Escape, a click outside), focus that fell to the page
+  // goes back to the header's toggle.
+  useEffect(() => {
     const panel = root.current;
     return () => {
       if (panel?.isConnected) return;
       const toggle = document.querySelector<HTMLElement>('[data-super-log-toggle]');
       if (toggle && (document.activeElement === document.body || !document.activeElement)) toggle.focus({ preventScroll: true });
     };
-  }, [over]);
+  }, []);
 
   // Escape or a click outside closes it. Escape is heard as it bubbles (as ChannelThread's), only
   // while this pane has focus, never when something inside it already handled Escape (an edit box
@@ -195,6 +204,14 @@ function GoalsView() {
   const goals = useApp(s => s.snapshot?.super.goals);
   const projects = useApp(s => s.snapshot?.projects) ?? [];
   const { open, done } = goalSections(goals);
+  const list = useRef<HTMLOListElement>(null);
+  const addBox = useRef<HTMLTextAreaElement>(null);
+  // After a goal is removed, focus moves to the row now in its place, or the add box when none is.
+  const focusAfterRemove = (index: number) => requestAnimationFrame(() => requestAnimationFrame(() => {
+    const rows = list.current?.querySelectorAll<HTMLElement>('[data-goal]');
+    const next = rows?.[Math.min(index, rows.length - 1)]?.querySelector<HTMLElement>('select, button');
+    (next ?? addBox.current)?.focus({ preventScroll: true });
+  }));
   const [text, setText] = useState('');
   const [projectId, setProjectId] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -210,6 +227,7 @@ function GoalsView() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 border-b border-stroke px-3 py-2.5">
         <textarea
+          ref={addBox}
           aria-label="New goal"
           value={text}
           rows={2}
@@ -230,8 +248,8 @@ function GoalsView() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {open.length ? (
-          <ol aria-label="Open goals">
-            {open.map((goal, i) => <GoalItem key={goal.id} goal={goal} index={i} last={i === open.length - 1} />)}
+          <ol ref={list} aria-label="Open goals">
+            {open.map((goal, i) => <GoalItem key={goal.id} goal={goal} index={i} last={i === open.length - 1} onRemoved={() => focusAfterRemove(i)} />)}
           </ol>
         ) : (
           <div className="flex flex-col items-center px-6 pb-6 pt-10 text-center">
@@ -254,7 +272,7 @@ function GoalsView() {
   );
 }
 
-function GoalItem({ goal, index, last }: { goal: SuperGoal; index: number; last: boolean }) {
+function GoalItem({ goal, index, last, onRemoved }: { goal: SuperGoal; index: number; last: boolean; onRemoved?: () => void }) {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === goal.projectId));
   const agent = useApp(s => (goal.agentId ? s.snapshot?.agents.find(a => a.id === goal.agentId) : undefined));
   const [editing, setEditing] = useState(false);
@@ -310,7 +328,13 @@ function GoalItem({ goal, index, last }: { goal: SuperGoal; index: number; last:
           ) : null}
           <IconButton ref={editButton} icon={Pencil} label={`Edit ${named}`} disabled={busy} onClick={() => { setText(goal.text); setEditing(true); }} />
           {confirming ? (
-            <button type="button" aria-label={`Confirm removing ${named}`} disabled={busy} onClick={() => void run(() => api.removeGoal(goal.id))} className="h-5 rounded px-1.5 text-[11px] font-medium text-danger transition-colors hover:bg-selection-hover disabled:opacity-30">
+            <button
+              type="button"
+              // The confirm takes focus, so a keyboard press of Remove can be confirmed with Enter.
+              autoFocus
+              aria-label={`Confirm removing ${named}`}
+              disabled={busy}
+              onClick={async () => { if (await run(() => api.removeGoal(goal.id))) onRemoved?.(); }} className="h-5 rounded px-1.5 text-[11px] font-medium text-danger transition-colors hover:bg-selection-hover disabled:opacity-30">
               Remove?
             </button>
           ) : <IconButton icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => setConfirming(true)} />}
@@ -403,4 +427,9 @@ function useParentWidth(ref: React.RefObject<HTMLElement | null>): number {
     return () => observer.disconnect();
   }, [ref]);
   return width;
+}
+
+/** "2 messages waiting: quiet hours". */
+function heldText(held: { count: number; reason: string }): string {
+  return `${held.count} ${held.count === 1 ? 'message' : 'messages'} to the SuperAgent waiting: ${held.reason}. ${held.reason === 'the daily budget is used' ? 'Raise the budget in Settings, or they go tomorrow.' : 'They go when it may take a turn again; work you asked it for does not wait on these limits.'}`;
 }

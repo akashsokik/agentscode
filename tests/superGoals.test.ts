@@ -129,7 +129,7 @@ test('an agent coming free with queued goals wakes the SuperAgent, but only thro
   t.manager.updateSettings({ superQuietFrom: '00:00', superQuietTo: '00:00' });
   // No hourly budget: nothing goes.
   t.manager.updateSettings({ superMaxWakesPerHour: 0 });
-  assert.equal(t.watcher.blocked(), 'the hourly budget is used');
+  assert.equal(t.watcher.blocked(), 'the hourly wake budget is used');
   assert.equal(t.watcher.flush(), false);
   // Wake-ups off: nothing goes.
   t.manager.updateSettings({ superMaxWakesPerHour: 6, superWake: false });
@@ -231,40 +231,120 @@ test('the user manages goals over HTTP: add, edit, reorder, remove', async () =>
   }
 });
 
-test('mail to the SuperAgent waits while it may not wake, and goes once, counted, when it may', async () => {
+const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+const quietNow = () => ({ superQuietFrom: hhmm(new Date(Date.now() - 3_600_000)), superQuietTo: hhmm(new Date(Date.now() + 3_600_000)) });
+
+/** The newest report to `to`, from `from`. */
+const reportTo = (t: Awaited<ReturnType<typeof team>>, to: string, from: string) => [...t.store.messages].reverse().find(m => m.toAgentId === to && m.fromAgentId === from && m.report);
+
+test('work you asked the SuperAgent for never waits: its reports come through wake-ups off, quiet hours and no budget, uncounted, hop after hop', async () => {
   const t = await team();
   t.runner.complete();
-  await t.call('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'Write the notes.', acceptance_criteria: 'Notes exist.' }).catch(() => {});
-  // A delegation from the SuperAgent, with a turn to send it from.
-  t.manager.send(t.sup.id, 'Hand out the notes.');
+  t.manager.updateSettings({ superWake: false, superMaxWakesPerHour: 0, ...quietNow() });
+  // You ask; it delegates to Ada in your turn.
+  t.manager.send(t.sup.id, 'Get the release notes written, then reviewed.');
   await settle();
-  const receipt = await t.call('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'Write the notes.', acceptance_criteria: 'Notes exist.' }) as { id: string };
+  const toAda = await t.call('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'Write the notes.', acceptance_criteria: 'Notes exist.' }) as { id: string; conversationId: string };
+  assert.equal(t.store.conversations.find(c => c.id === toAda.conversationId)?.userStarted, true);
+  t.runner.complete();
+  await settle();
+  const ada = t.runners.get(t.ada.id)!.at(-1)!;
+  await t.manager.commsTool(ada.ctx.commsToken!, 'report_result', { message_id: toAda.id, outcome: 'done', summary: 'Written.', evidence: 'notes.md' });
+  ada.complete(true, 'Reported.');
+  await settle();
+  const first = reportTo(t, t.sup.id, t.ada.id)!;
+  assert.notEqual(first.status, 'queued', 'delivered despite every wake-up limit');
+  assert.equal(t.runner.sent.at(-1)!.task?.messageId, first.id);
+  // Second hop: from that report's turn it sends the review to Bo; Bo's report comes through too.
+  const toBo = await t.call('delegate_task', { to_agent_id: t.bo.id, kind: 'review', task: 'Review the notes.', acceptance_criteria: 'Findings.' }) as { id: string };
+  t.runner.complete();
+  await settle();
+  const bo = t.runners.get(t.bo.id)!.at(-1)!;
+  await t.manager.commsTool(bo.ctx.commsToken!, 'report_result', { message_id: toBo.id, outcome: 'passed', summary: 'Fine.', evidence: 'read it' });
+  bo.complete(true, 'Reported.');
+  await settle();
+  const second = reportTo(t, t.sup.id, t.bo.id)!;
+  assert.notEqual(second.status, 'queued');
+  assert.equal(t.runner.sent.at(-1)!.task?.messageId, second.id);
+  assert.equal(new SuperStore(t.store.dataDir).wakesSince(Date.now() - 60_000), 0, 'none of it counts as a wake-up');
+  assert.equal(t.manager.superView().held, null);
+});
+
+test('mail about work it began on its own waits on the wake-up limits, is shown as waiting, and is told in the next update', async () => {
+  const t = await team();
+  t.runner.complete();
+  // An update turn (not yours): in it, it delegates to Ada.
+  t.watcher.note({ agentId: t.ada.id, key: 'x', text: 'Ada is free' });
+  assert.equal(t.watcher.flush(), true);
+  await settle();
+  const toAda = await t.call('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'Tidy the docs.', acceptance_criteria: 'Tidy.' }) as { id: string; conversationId: string };
+  assert.equal(t.store.conversations.find(c => c.id === toAda.conversationId)?.userStarted, undefined);
   t.runner.complete();
   await settle();
   const sentBefore = t.runner.sent.length;
-  t.manager.updateSettings({ superWake: false, superMaxWakesPerHour: 0 });
-  // Ada reports while the SuperAgent may not wake.
+  t.manager.updateSettings({ superWake: false });
   const ada = t.runners.get(t.ada.id)!.at(-1)!;
-  await t.manager.commsTool(ada.ctx.commsToken!, 'report_result', { message_id: receipt.id, outcome: 'done', summary: 'Notes written.', evidence: 'notes.md' });
+  await t.manager.commsTool(ada.ctx.commsToken!, 'report_result', { message_id: toAda.id, outcome: 'done', summary: 'Tidied.', evidence: 'docs/' });
   ada.complete(true, 'Reported.');
   await settle();
-  assert.equal(t.runner.sent.length, sentBefore, 'no SuperAgent turn starts');
-  const report = t.store.messages.find(m => m.toAgentId === t.sup.id && m.report);
-  assert.equal(report?.status, 'queued');
-  // Your own message always goes.
+  const report = reportTo(t, t.sup.id, t.ada.id)!;
+  assert.equal(report.status, 'queued');
+  assert.equal(t.runner.sent.length, sentBefore, 'no turn starts');
+  assert.deepEqual(t.manager.superView().held, { count: 1, reason: 'wake-ups are off' });
+  // Your own message still goes, and the report still waits after it.
   t.manager.send(t.sup.id, 'Status?');
   await settle();
-  assert.equal(t.runner.sent.at(-1)!.text.includes('Status?'), true);
   t.runner.complete();
   await settle();
-  assert.equal(report?.status, 'queued', 'still held after your turn');
-  // Wake-ups on with a budget: it goes, once, and counts against the hour.
-  t.manager.updateSettings({ superWake: true, superMaxWakesPerHour: 6 });
+  assert.equal(report.status, 'queued');
+  // Wake-ups on: it goes once, counted.
+  t.manager.updateSettings({ superWake: true });
   await settle();
-  assert.equal(report?.status, 'delivering');
-  assert.equal(t.runner.sent.filter(s => s.task?.messageId === report!.id).length, 1);
-  assert.equal(t.manager.superView().agentId, t.sup.id);
-  assert.equal(new SuperStore(t.store.dataDir).wakesSince(Date.now() - 60_000), 1);
+  assert.equal(report.status, 'delivering');
+  assert.equal(t.runner.sent.filter(x => x.task?.messageId === report.id).length, 1);
+  assert.equal(new SuperStore(t.store.dataDir).wakesSince(Date.now() - 60_000), 2, 'the update and the report');
+  t.runner.complete();
+  await settle();
+  // The next update says it waited, and why.
+  t.watcher.note({ agentId: t.bo.id, key: 'y', text: 'Bo is free' });
+  assert.equal(t.watcher.flush(), true);
+  assert.match(t.runner.sent.at(-1)!.text, /While you could not take a turn \(wake-ups are off\), 1 message to you waited/);
+});
+
+test('the daily budget holds mail of both kinds and says so; held mail survives a restart', async () => {
+  const t = await team();
+  t.runner.complete();
+  // Your turn delegates to Ada; an update turn delegates to Bo.
+  t.manager.send(t.sup.id, 'Write the notes.');
+  await settle();
+  const mine = await t.call('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'Notes.', acceptance_criteria: 'Done.' }) as { id: string };
+  t.runner.complete();
+  t.watcher.note({ agentId: t.bo.id, key: 'z', text: 'Bo is free' });
+  assert.ok(t.watcher.flush());
+  await settle();
+  const its = await t.call('delegate_task', { to_agent_id: t.bo.id, kind: 'review', task: 'Look around.', acceptance_criteria: 'Notes.' }) as { id: string };
+  t.runner.complete();
+  await settle();
+  // The day's spending passes the budget.
+  t.manager.updateSettings({ superDailyBudgetUsd: 1 });
+  t.watcher.held();
+  t.store.agents.get(t.sup.id)!.costUsd += 5;
+  for (const [runner, id] of [[t.runners.get(t.ada.id)!.at(-1)!, mine.id], [t.runners.get(t.bo.id)!.at(-1)!, its.id]] as const) {
+    await t.manager.commsTool(runner.ctx.commsToken!, 'report_result', { message_id: id, outcome: 'done', summary: 'Done.', evidence: 'x' });
+    runner.complete(true, 'Reported.');
+  }
+  await settle();
+  assert.deepEqual(t.manager.superView().held, { count: 2, reason: 'the daily budget is used' });
+  // A restart keeps them queued, in open conversations, instead of failing them.
+  const mailbox = (t.manager as unknown as { mailbox: { recover(): void } }).mailbox;
+  mailbox.recover();
+  const held = t.store.messages.filter(m => m.toAgentId === t.sup.id && m.report);
+  assert.deepEqual(held.map(m => m.status), ['queued', 'queued']);
+  assert.ok(held.every(m => !t.store.conversations.find(c => c.id === m.conversationId)!.stopped));
+  // A bigger budget lets them through, one turn at a time.
+  t.manager.updateSettings({ superDailyBudgetUsd: 100 });
+  await settle();
+  assert.equal(held.filter(m => m.status === 'delivering').length, 1);
 });
 
 test('goal undo refuses when the goal is gone or would repeat an open one; update_goal needs something to change', async () => {

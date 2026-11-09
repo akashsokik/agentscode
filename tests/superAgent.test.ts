@@ -233,7 +233,7 @@ test('the watcher batches, waits while busy, in quiet hours or over budget, and 
   watcher.note({ agentId: 'a2', key: 'turn:a2', text: 'Bo hit a problem' });
   assert.equal(watcher.flush(), true);
   watcher.note({ agentId: 'a2', key: 'turn:a2b', text: 'Bo hit another problem' });
-  assert.equal(watcher.blocked(), 'the hourly budget is used');
+  assert.equal(watcher.blocked(), 'the hourly wake budget is used');
   now += 3_600_001;
   assert.equal(watcher.flush(), true, 'a new hour, a new budget');
   // Over the day's budget, updates wait for tomorrow.
@@ -308,7 +308,7 @@ test('the app sets it up, answers it and undoes its decisions over HTTP', async 
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/super`;
   const post = (url: string, body: unknown = {}) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   try {
-    assert.deepEqual(await (await fetch(base)).json(), { agentId: null, asks: [], log: [], goals: [] });
+    assert.deepEqual(await (await fetch(base)).json(), { agentId: null, asks: [], log: [], goals: [], held: null });
     const created = await (await post(base)).json() as Agent;
     assert.equal(created.role, 'super');
     assert.equal((await post(base)).status, 409);

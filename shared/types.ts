@@ -273,6 +273,8 @@ export interface SuperState {
   log: SuperAction[];
   /** The goals backlog, in order. */
   goals: SuperGoal[];
+  /** Mail to the SuperAgent waiting until it may take a turn, and why; null when none waits. */
+  held?: { count: number; reason: string } | null;
 }
 
 // ---- dreaming -----------------------------------------------------------------
@@ -498,6 +500,11 @@ export interface Conversation {
   messageLimit: number; // 0 means unlimited
   stopped: boolean;
   createdAt: number;
+  /**
+   * Started by the SuperAgent in a turn the user gave it (or from mail in such a conversation): work
+   * the user asked for, whose mail never waits on the SuperAgent's wake-up limits.
+   */
+  userStarted?: boolean;
 }
 
 export const DEFAULT_MESSAGE_LIMIT = 12;

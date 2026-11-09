@@ -13,6 +13,12 @@ export interface Delivery {
   inChannel?(channelId: string, agentId: string): boolean;
   /** The turn prompt for a channel message, with the channel's members and recent posts. */
   channelPrompt?(message: PeerMessage): string;
+  /** Why this message may not start a turn yet (it waits, queued), or null. */
+  hold?(agentId: string, message: PeerMessage, conversation: Conversation): string | null;
+  /** The agent is in a turn the user gave it: conversations it starts now are the user's work. */
+  userTurn?(agentId: string): boolean;
+  /** A queued message that outlives a restart, still queued (mail held for the SuperAgent). */
+  keepOnRestart?(message: PeerMessage): boolean;
 }
 
 type Metadata = Pick<PeerMessage, 'delegation' | 'report' | 'channelId' | 'postId'>;
@@ -38,14 +44,20 @@ export class Mailbox {
 
   /** After a restart nothing is running. Never replay a message that might already have edited files. */
   recover(): void {
+    // Held mail stays queued, and its conversations open, to be delivered when it may be.
+    const kept = new Set<string>();
     for (const message of this.store.messages) {
+      if (message.status === 'queued' && this.delivery.keepOnRestart?.(message)) {
+        kept.add(message.conversationId);
+        continue;
+      }
       if (message.status === 'queued' || message.status === 'delivering') {
         message.status = 'failed';
         message.error = 'AgentsCode restarted before this was handled. Ask the agent to send it again.';
         this.delivery.changed(message);
       }
     }
-    for (const conversation of this.store.conversations) conversation.stopped = true;
+    for (const conversation of this.store.conversations) if (!kept.has(conversation.id)) conversation.stopped = true;
     this.store.flush();
   }
 
@@ -205,7 +217,10 @@ export class Mailbox {
     }
     conversation ??= this.roots.get(fromId);
     if (!conversation) {
-      conversation = { id: randomUUID(), startedBy: fromId, messageLimit: this.store.settings.messageLimit, stopped: false, createdAt: Date.now() };
+      conversation = {
+        id: randomUUID(), startedBy: fromId, messageLimit: this.store.settings.messageLimit, stopped: false, createdAt: Date.now(),
+        ...(this.delivery.userTurn?.(fromId) ? { userStarted: true } : {}),
+      };
       this.store.conversations.push(conversation);
       this.roots.set(fromId, conversation);
       this.delivery.conversationChanged(conversation);
@@ -249,16 +264,24 @@ export class Mailbox {
   /** Start the next queued message for an agent, if it is free. */
   drain(id: string): void {
     if (this.closed || this.stoppedAgents.has(id) || this.active.has(id) || !this.delivery.ready(id)) return;
-    const message = this.store.messages.find(m => m.toAgentId === id && m.status === 'queued');
-    if (!message) return;
-    const conversation = this.store.conversations.find(c => c.id === message.conversationId);
-    if (!conversation || conversation.stopped || !this.store.agents.has(message.fromAgentId) || !this.store.agents.has(id)) {
-      message.status = 'cancelled';
-      message.error = 'The collaboration ended or a teammate was removed.';
-      this.publish(message);
-      setImmediate(() => this.drain(id));
-      return;
+    // The oldest message that may go now; one that has to wait (hold) keeps its place in the queue.
+    let message: PeerMessage | undefined;
+    let conversation: Conversation | undefined;
+    for (const candidate of this.store.messages) {
+      if (candidate.toAgentId !== id || candidate.status !== 'queued') continue;
+      const found = this.store.conversations.find(c => c.id === candidate.conversationId);
+      if (!found || found.stopped || !this.store.agents.has(candidate.fromAgentId) || !this.store.agents.has(id)) {
+        candidate.status = 'cancelled';
+        candidate.error = 'The collaboration ended or a teammate was removed.';
+        this.publish(candidate);
+        continue;
+      }
+      if (this.delivery.hold?.(id, candidate, found)) continue;
+      message = candidate;
+      conversation = found;
+      break;
     }
+    if (!message || !conversation) return;
     this.active.set(id, message);
     message.status = 'delivering';
     this.publish(message);
