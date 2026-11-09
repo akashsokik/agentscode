@@ -121,9 +121,9 @@ test('app_screenshot: desktop only; in the app it asks main for the window, save
   const requests: { op: string; args: Record<string, unknown> }[] = [];
   const fake = { available: true, request: async (_agent: string, op: string, args: Record<string, unknown>) => { requests.push({ op, args }); return { path: args.path, width: 1440, height: 900, window: args.window }; } } as unknown as BrowserBridge;
   Object.defineProperty(t.manager, 'browser', { value: fake });
-  const shot = await t.call(t.rhea.id, 'app_screenshot', { agent: 'Ada' }) as { path: string; width: number };
+  const shot = await t.call(t.rhea.id, 'app_screenshot', { agent: 'Rhea' }) as { path: string; width: number };
   assert.equal(requests[0].op, 'app_screenshot');
-  assert.equal(requests[0].args.openAgent, t.ada.id);
+  assert.equal(requests[0].args.openAgent, t.rhea.id);
   assert.equal(path.dirname(shot.path), path.join(t.rhea.home, 'screens'));
   assert.equal(shot.width, 1440);
   await assert.rejects(t.call(t.ada.id, 'app_screenshot', {}), e => status(e) === 403);
@@ -140,7 +140,7 @@ test('a reviewer or tester with a project looks only within what it may already 
   await settle();
   const requests: Record<string, unknown>[] = [];
   Object.defineProperty(t.manager, 'browser', { value: { available: true, request: async (_a: string, _op: string, args: Record<string, unknown>) => { requests.push(args); return { path: args.path }; } } });
-  // Not Ada (another project, not visible to Tess), not a channel Tess is not in.
+  // Not Ada (only the SuperAgent opens other agents' tabs), not a channel Tess is not in.
   await assert.rejects(t.call(tess.id, 'app_screenshot', { agent: 'Ada' }), e => status(e) === 403);
   await assert.rejects(t.call(tess.id, 'app_screenshot', { channel: '#web-secret' }), e => status(e) === 403 && /member/.test((e as Error).message));
   assert.deepEqual(requests, [], 'the window never moved');
@@ -159,4 +159,21 @@ test('a reviewer or tester with a project looks only within what it may already 
   const wide = await t.call(t.rhea.id, 'gh_prs', {}) as { results: { project: string }[] };
   assert.deepEqual(wide.results.map(r => r.project), ['web', 'api']);
   assert.ok(secret.id);
+});
+
+test('a project failing on GitHub is a note for that project; the others still come back', async () => {
+  const t = await team();
+  const manager = t.manager as unknown as { gitRemote: (dir: string) => Promise<string | null> };
+  manager.gitRemote = async dir => (dir.endsWith('web') ? 'git@github.com:me/web.git' : 'git@github.com:me/api.git');
+  t.setReply(args => { if (args.includes('me/api')) throw Object.assign(new Error('x'), { stderr: 'please run gh auth login' }); return '[]'; });
+  const out = await t.call(t.rhea.id, 'gh_issues', {}) as { results: { project: string; error?: string; untrusted?: unknown }[] };
+  assert.deepEqual(out.results.map(r => [r.project, Boolean(r.untrusted), r.error ?? null]), [['web', true, null], ['api', false, 'gh is not logged in. The user can run `gh auth login`.']]);
+});
+
+test('reviewers and testers open only their own tab, under any team setting', async () => {
+  const t = await team();
+  Object.defineProperty(t.manager, 'browser', { value: { available: true, request: async (_a: string, _op: string, args: Record<string, unknown>) => ({ path: args.path }) } });
+  // Awareness "all" (the default): Ada is visible, yet her tab is the SuperAgent's to open.
+  await assert.rejects(t.call(t.rhea.id, 'app_screenshot', { agent: 'Ada' }), e => status(e) === 403);
+  await t.call(t.rhea.id, 'app_screenshot', { agent: 'Rhea' });
 });

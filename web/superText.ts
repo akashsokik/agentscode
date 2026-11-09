@@ -1,5 +1,5 @@
 /** The SuperAgent's words for the page. Pure, so it is tested directly. */
-import type { Agent, GoalStatus, SuperAction, SuperAsk, SuperGoal } from '../shared/types.ts';
+import type { Agent, GoalStatus, RoutineSchedule, SuperAction, SuperAsk, SuperGoal } from '../shared/types.ts';
 
 /** Questions the SuperAgent asked that wait for the user, newest first. */
 export function openAsks(asks: readonly SuperAsk[] | undefined): SuperAsk[] {
@@ -94,4 +94,9 @@ export function heldText(held: { count: number; reason: string }): string {
   const what = `${held.count} ${held.count === 1 ? 'message' : 'messages'} to the SuperAgent waiting: ${held.reason}.`;
   const then = held.reason === 'the daily budget is used' ? 'Raise the budget in Settings, or they go tomorrow.' : 'They go when it may take a turn again.';
   return `${what} ${then} Only work it started on its own waits; your messages and the work you asked for always go.`;
+}
+
+/** "Daily at 09:00", "Every 6 hours". */
+export function scheduleLabel(schedule: RoutineSchedule): string {
+  return schedule.kind === 'daily' ? `Daily at ${schedule.at}` : `Every ${schedule.hours} ${schedule.hours === 1 ? 'hour' : 'hours'}`;
 }

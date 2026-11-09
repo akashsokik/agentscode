@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 import { HttpError } from '../server/errors.ts';
 import { harness, projectDir, settle } from './helpers.ts';
@@ -167,8 +168,17 @@ test('a restart settles running agents and unfinished mail', async () => {
   const { AgentManager } = await import('../server/manager.ts');
   const store = new Store(h.store.dataDir);
   store.load();
-  const restarted = new AgentManager(store, { broadcast: () => {} }, { claude: { available: true, path: null, version: null }, codex: { available: true, path: null, version: null }, orcacode: { available: true, path: null, version: null } });
+  const { FakeRunner } = await import('./helpers.ts');
+  const runners: InstanceType<typeof FakeRunner>[] = [];
+  const restarted = new AgentManager(store, { broadcast: () => {} }, { claude: { available: true, path: null, version: null }, codex: { available: true, path: null, version: null }, orcacode: { available: true, path: null, version: null } }, {
+    createRunner: ctx => { const runner = new FakeRunner(ctx); runners.push(runner); return runner; },
+    worktreesRoot: path.join(h.dir, 'worktrees-2'),
+  });
   restarted.init();
   assert.equal(store.agents.get(h.ada.id)?.status, 'idle');
-  assert.ok(store.messages.every(m => m.status === 'failed'));
+  // Ada's message to Bo was not lost: it goes to Bo once the restarted app is up.
+  await settle();
+  const help = store.messages.find(m => m.text === 'Help')!;
+  assert.equal(help.status, 'delivering');
+  assert.ok(runners.some(r => r.ctx.agent().id === h.bo.id && r.sent.some(s => s.task?.messageId === help.id)));
 });

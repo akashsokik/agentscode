@@ -225,7 +225,9 @@ export type SuperUndo =
   | { kind: 'channel'; channelId: string; before: { name: string; topic: string; memberIds: string[] } }
   | { kind: 'agent'; agentId: string; before: { name: string; role: AgentRole; model: string; effort: string } }
   /** A goal as it was before (null: the SuperAgent added it, so undo removes it). */
-  | { kind: 'goal'; goalId: string; before: SuperGoal | null };
+  | { kind: 'goal'; goalId: string; before: SuperGoal | null }
+  /** A routine the SuperAgent proposed: undo withdraws it. */
+  | { kind: 'routine'; routineId: string };
 
 /** One thing the SuperAgent did on its own, for the decision log. */
 export interface SuperAction {
@@ -266,6 +268,29 @@ export interface SuperGoal {
   doneAt?: number;
 }
 
+/** When a routine runs: every day at a local time ("HH:MM"), or every N hours. */
+export type RoutineSchedule = { kind: 'daily'; at: string } | { kind: 'every'; hours: number };
+
+/**
+ * Something the SuperAgent does on a schedule, in the user's words: at its time it becomes an update
+ * for the SuperAgent, so every wake limit and the daily budget apply. The user adds routines; the
+ * SuperAgent may only propose one, which waits until the user confirms it.
+ */
+export interface SuperRoutine {
+  id: string;
+  name: string;
+  projectId: string | null;
+  instruction: string;
+  schedule: RoutineSchedule;
+  enabled: boolean;
+  /** Proposed by the SuperAgent and not yet confirmed: it never runs until the user confirms. */
+  proposed?: boolean;
+  why?: string;
+  by: 'user' | 'super';
+  createdAt: number;
+  lastRunAt?: number;
+}
+
 export interface SuperState {
   /** The SuperAgent's agent id, or null before it is set up. */
   agentId: string | null;
@@ -275,6 +300,8 @@ export interface SuperState {
   log: SuperAction[];
   /** The goals backlog, in order. */
   goals: SuperGoal[];
+  /** Scheduled routines, oldest first. */
+  routines: SuperRoutine[];
   /** Mail to the SuperAgent waiting until it may take a turn, and why; null when none waits. */
   held?: { count: number; reason: string } | null;
 }
@@ -493,6 +520,8 @@ export interface PeerMessage {
   /** Set when an agent mentioned the recipient in a channel post (postId), or answered one. */
   channelId?: string;
   postId?: string;
+  /** It was being handled when AgentsCode restarted, so it is delivered once more; the recipient may have started on it. */
+  redelivered?: boolean;
 }
 
 /** A chain of peer messages started by one task. All its messages share one budget. */

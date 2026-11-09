@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { GoalStatus, Settings, SuperAction, SuperAsk, SuperGoal, SuperState } from '../shared/types.ts';
+import type { GoalStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperGoal, SuperRoutine, SuperState } from '../shared/types.ts';
 import { HttpError } from './errors.ts';
 import { inQuietHours, validQuietTime } from '../shared/superAgent.ts';
 
@@ -48,6 +48,7 @@ interface Stored {
   /** The local day of the last morning brief. */
   briefDay?: string;
   goals: SuperGoal[];
+  routines: SuperRoutine[];
 }
 
 export class SuperStore {
@@ -64,9 +65,10 @@ export class SuperStore {
         ...(raw.autoSpend && typeof raw.autoSpend.usd === 'number' && typeof raw.autoSpend.day === 'string' ? { autoSpend: raw.autoSpend } : {}),
         ...(typeof raw.briefDay === 'string' ? { briefDay: raw.briefDay } : {}),
         goals: Array.isArray(raw.goals) ? raw.goals.filter(validGoal) : [],
+        routines: Array.isArray(raw.routines) ? raw.routines.filter(validRoutine) : [],
       };
     } catch {
-      return { asks: [], log: [], wakes: [], goals: [] };
+      return { asks: [], log: [], wakes: [], goals: [], routines: [] };
     }
   }
 
@@ -78,6 +80,7 @@ export class SuperStore {
       ...(stored.autoSpend ? { autoSpend: stored.autoSpend } : {}),
       ...(stored.briefDay ? { briefDay: stored.briefDay } : {}),
       goals: orderGoals(stored.goals),
+      routines: stored.routines,
     };
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     fs.writeFileSync(`${this.file}.tmp`, `${JSON.stringify(next)}\n`);
@@ -85,8 +88,74 @@ export class SuperStore {
   }
 
   view(agentId: string | null): SuperState {
-    const { asks, log, goals } = this.read();
-    return { agentId, asks, log, goals };
+    const { asks, log, goals, routines } = this.read();
+    return { agentId, asks, log, goals, routines };
+  }
+
+  // ---- routines -----------------------------------------------------------------------------
+
+  routines(): SuperRoutine[] {
+    return this.read().routines;
+  }
+
+  /** The user's routine is on at once; one the SuperAgent proposes waits, off, until the user confirms it. */
+  addRoutine(input: { name: unknown; instruction: unknown; projectId: string | null; schedule: unknown; why?: unknown }, by: SuperRoutine['by'], now = Date.now()): SuperRoutine {
+    const stored = this.read();
+    if (stored.routines.length >= MAX_ROUTINES) throw new HttpError(409, `${MAX_ROUTINES} routines exist already. Remove one first.`);
+    const name = routineText(input.name, 80, 'Give the routine a name.');
+    if (stored.routines.some(r => r.name.toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'A routine with that name exists already.');
+    const why = typeof input.why === 'string' && input.why.trim() ? input.why.replace(/\s+/g, ' ').trim().slice(0, 500) : undefined;
+    const routine: SuperRoutine = {
+      id: randomUUID().slice(0, 8), name, projectId: input.projectId, instruction: routineText(input.instruction, 1000, 'Say what the SuperAgent should do.'),
+      schedule: routineSchedule(input.schedule), enabled: by === 'user', ...(by === 'super' ? { proposed: true } : {}), ...(why ? { why } : {}), by, createdAt: now,
+    };
+    this.write({ ...stored, routines: [...stored.routines, routine] });
+    return routine;
+  }
+
+  /** Change a routine (the user). confirm turns a proposal into a routine that runs. */
+  updateRoutine(id: string, patch: { name?: unknown; instruction?: unknown; projectId?: string | null; schedule?: unknown; enabled?: unknown; confirm?: unknown }): SuperRoutine {
+    const stored = this.read();
+    const old = stored.routines.find(r => r.id === id);
+    if (!old) throw new HttpError(404, 'No routine with that id.');
+    const next: SuperRoutine = { ...old };
+    if (patch.name !== undefined) {
+      next.name = routineText(patch.name, 80, 'Give the routine a name.');
+      if (stored.routines.some(r => r.id !== id && r.name.toLowerCase() === next.name.toLowerCase())) throw new HttpError(409, 'A routine with that name exists already.');
+    }
+    if (patch.instruction !== undefined) next.instruction = routineText(patch.instruction, 1000, 'Say what the SuperAgent should do.');
+    if (patch.projectId !== undefined) next.projectId = patch.projectId;
+    if (patch.schedule !== undefined) next.schedule = routineSchedule(patch.schedule);
+    if (patch.confirm === true) { delete next.proposed; next.enabled = true; }
+    if (patch.enabled !== undefined) {
+      if (typeof patch.enabled !== 'boolean') throw new HttpError(400, 'A routine is on or off: true or false.');
+      if (patch.enabled && next.proposed) throw new HttpError(409, 'Confirm the proposed routine first.');
+      next.enabled = patch.enabled;
+    }
+    this.write({ ...stored, routines: stored.routines.map(r => (r.id === id ? next : r)) });
+    return next;
+  }
+
+  removeRoutine(id: string): SuperRoutine {
+    const stored = this.read();
+    const routine = stored.routines.find(r => r.id === id);
+    if (!routine) throw new HttpError(404, 'No routine with that id.');
+    this.write({ ...stored, routines: stored.routines.filter(r => r.id !== id) });
+    return routine;
+  }
+
+  /** The routines due now, each marked as run, so it is news once per slot. */
+  takeDueRoutines(now: Date): { routine: SuperRoutine; dueAt: number }[] {
+    const stored = this.read();
+    const due = stored.routines.flatMap(routine => {
+      const dueAt = routineDue(routine, now);
+      return dueAt === null ? [] : [{ routine, dueAt }];
+    });
+    if (due.length) {
+      const ran = new Set(due.map(d => d.routine.id));
+      this.write({ ...stored, routines: stored.routines.map(r => (ran.has(r.id) ? { ...r, lastRunAt: now.getTime() } : r)) });
+    }
+    return due;
   }
 
   // ---- goals --------------------------------------------------------------------------------
@@ -288,6 +357,54 @@ function validGoal(raw: unknown): raw is SuperGoal {
 }
 
 /** One line: a goal is a short statement, so newlines and runs of space are folded (the inputs are single-line too). */
+export const MAX_ROUTINES = 30;
+
+/** "daily at 09:00", "every 6 hours". */
+export function scheduleText(schedule: RoutineSchedule): string {
+  return schedule.kind === 'daily' ? `daily at ${schedule.at}` : `every ${schedule.hours} ${schedule.hours === 1 ? 'hour' : 'hours'}`;
+}
+
+function routineText(raw: unknown, max: number, empty: string): string {
+  if (typeof raw !== 'string') throw new HttpError(400, empty);
+  const text = raw.replace(/\s+/g, ' ').trim();
+  if (!text) throw new HttpError(400, empty);
+  if (text.length > max) throw new HttpError(400, `Keep it under ${max} characters.`);
+  return text;
+}
+
+/** A schedule as the app or the SuperAgent sent it: daily at "HH:MM", or every 1 to 168 hours. */
+export function routineSchedule(raw: unknown): RoutineSchedule {
+  const s = raw as Partial<{ kind: string; at: unknown; hours: unknown }> | null;
+  if (s?.kind === 'daily' && validQuietTime(s.at)) return { kind: 'daily', at: String(s.at).trim() };
+  if (s?.kind === 'every' && typeof s.hours === 'number' && Number.isInteger(s.hours) && s.hours >= 1 && s.hours <= 168) return { kind: 'every', hours: s.hours };
+  throw new HttpError(400, 'A schedule is daily at a time like 09:00, or every 1 to 168 hours.');
+}
+
+function validRoutine(raw: unknown): raw is SuperRoutine {
+  const r = raw as Partial<SuperRoutine> | null;
+  if (!r || typeof r.id !== 'string' || typeof r.name !== 'string' || typeof r.instruction !== 'string' || typeof r.enabled !== 'boolean' || typeof r.createdAt !== 'number') return false;
+  if (r.projectId !== null && typeof r.projectId !== 'string') return false;
+  try { routineSchedule(r.schedule); } catch { return false; }
+  return r.by === 'user' || r.by === 'super';
+}
+
+/**
+ * When a routine is due at `now`, or null: daily at its time once that time has passed today and it
+ * has not run since; every N hours once N hours have passed since it last ran (or was made). A
+ * missed slot runs once, not once per slot missed. Proposals and routines turned off never run.
+ */
+export function routineDue(routine: SuperRoutine, now: Date): number | null {
+  if (!routine.enabled || routine.proposed) return null;
+  const last = routine.lastRunAt ?? routine.createdAt;
+  if (routine.schedule.kind === 'every') {
+    const at = last + routine.schedule.hours * 3_600_000;
+    return now.getTime() >= at ? at : null;
+  }
+  const [h, m] = routine.schedule.at.split(':').map(Number);
+  const slot = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).getTime();
+  return now.getTime() >= slot && last < slot ? slot : null;
+}
+
 function goalText(raw: unknown): string {
   const text = String(raw ?? '').replace(/\s+/g, ' ').trim();
   if (!text) throw new HttpError(400, 'Say what the goal is.');

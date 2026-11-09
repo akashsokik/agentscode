@@ -154,16 +154,28 @@ test('stop cancels queued mail and pauses the agent until a user task', async ()
   assert.equal(delivered.length, 1);
 });
 
-test('recover fails unfinished mail instead of replaying it', () => {
+test('recover keeps unfinished mail: queued stays queued, mid-delivery goes once more, marked; a second restart fails it', () => {
   const { store, mailbox } = setup([agent('a'), agent('b')]);
-  store.conversations.push({ id: 'c1', startedBy: 'a', messageLimit: 12, stopped: false, createdAt: 0 });
+  store.conversations.push(
+    { id: 'c1', startedBy: 'a', messageLimit: 12, stopped: false, createdAt: 0 },
+    { id: 'c2', startedBy: 'a', messageLimit: 12, stopped: false, createdAt: 0 },
+  );
   store.messages.push(
     { id: 'm1', conversationId: 'c1', fromAgentId: 'a', fromName: 'A', toAgentId: 'b', toName: 'B', text: 'x', expectsReply: true, ts: 0, status: 'queued' },
     { id: 'm2', conversationId: 'c1', fromAgentId: 'a', fromName: 'A', toAgentId: 'b', toName: 'B', text: 'y', expectsReply: true, ts: 0, status: 'delivering' },
+    { id: 'm3', conversationId: 'c2', fromAgentId: 'a', fromName: 'A', toAgentId: 'b', toName: 'B', text: 'z', expectsReply: true, ts: 0, status: 'delivered' },
   );
   mailbox.recover();
-  assert.deepEqual(store.messages.map(m => m.status), ['failed', 'failed']);
-  assert.equal(store.conversations[0].stopped, true);
+  assert.deepEqual(store.messages.map(m => [m.status, m.redelivered ?? false]), [['queued', false], ['queued', true], ['delivered', false]]);
+  assert.equal(store.conversations[0].stopped, false, 'mail still to go keeps its conversation open');
+  assert.equal(store.conversations[1].stopped, true, 'one with nothing left ends, as before');
+  assert.match(deliveryPrompt(store.messages[1]), /^Redelivered after AgentsCode restarted/);
+  assert.doesNotMatch(deliveryPrompt(store.messages[0]), /Redelivered/);
+  // Interrupted again while being redelivered: it fails rather than loop.
+  store.messages[1].status = 'delivering';
+  mailbox.recover();
+  assert.equal(store.messages[1].status, 'failed');
+  assert.match(store.messages[1].error!, /restarted twice/);
 });
 
 test('delivery prompts frame peer text as context with the reply instructions', () => {

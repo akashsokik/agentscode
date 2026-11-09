@@ -60,16 +60,17 @@ import { ScopedRunner, type ExecutionContext } from './agents/scoped.ts';
 import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
 import {
-  addGoalInput, agentCommandInput, askUserInput, completeGoalInput, updateGoalInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
+  addGoalInput, agentCommandInput, proposeRoutineInput, askUserInput, completeGoalInput, updateGoalInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
   SUPER_TOOLS, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool,
-  appScreenshotInput, EYES_TOOLS, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
+  appScreenshotInput, EYES_TOOLS, runCheckInput, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
 } from './comms/tools.ts';
 import { capJson, GH_UNTRUSTED, GhError, ghArgs, logTail, repoFromRemote, runGh, type Exec } from './github.ts';
+import { CHECK_UNTRUSTED, CheckError, runCheck, type CheckExec } from './checks.ts';
 import { IDLE_PROCESS_MS, PORT } from './config.ts';
 import { defaultDreamEngine, Dreamer, type DreamEngine } from './dream.ts';
 import { capProfile, findPromotions, ProfileStore } from './userProfile.ts';
-import { STUCK_WAITING_MS, STUCK_WORKING_MS, SUPER_NAME, SuperStore, SuperWatcher, validQuietTime } from './superAgent.ts';
+import { scheduleText, STUCK_WAITING_MS, STUCK_WORKING_MS, SUPER_NAME, SuperStore, SuperWatcher, validQuietTime } from './superAgent.ts';
 import { HttpError } from './errors.ts';
 import type { Broadcaster } from './hub.ts';
 import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, emptyModels } from './models.ts';
@@ -135,6 +136,8 @@ export interface ManagerOptions {
   /** How gh runs (tests pass a fake), and how a project's git remote is read. */
   ghExec?: Exec;
   gitRemote?: (projectPath: string) => Promise<string | null>;
+  /** How run_check runs its commands; tests pass a fake. */
+  checkExec?: CheckExec;
 }
 
 /** Longest model id kept; OrcaCode's `provider::vendor/model:variant` ids run long. */
@@ -192,6 +195,9 @@ export class AgentManager {
   /** The desktop app's browser, for agents' browser_* tools (server/browserBridge.ts). */
   readonly browser: BrowserBridge;
   private ghExec: Exec | undefined;
+  private checkExec: CheckExec | undefined;
+  /** Folders with a run_check in progress. */
+  private checksRunning = new Set<string>();
   private gitRemote: (projectPath: string) => Promise<string | null>;
 
   constructor(store: Store, hub: Broadcaster, engines: Record<EngineKind, EngineInfo>, options: ManagerOptions = {}) {
@@ -220,6 +226,7 @@ export class AgentManager {
     this.idleProcessMs = options.idleProcessMs ?? IDLE_PROCESS_MS;
     this.browser = options.browser ?? new BrowserBridge();
     this.ghExec = options.ghExec;
+    this.checkExec = options.checkExec;
     this.gitRemote = options.gitRemote ?? (async dir => {
       const result = await gitRun(dir, ['remote', 'get-url', 'origin'], 5000);
       return result.ok ? result.stdout.trim() : null;
@@ -266,7 +273,6 @@ export class AgentManager {
         return reason;
       },
       userTurn: id => this.store.agents.get(id)?.role === 'super' && this.store.agents.get(id)?.currentTask?.source === 'user',
-      keepOnRestart: message => message.toAgentId === this.superId(),
       changed: message => this.publishMessage(message),
       conversationChanged: conversation => this.hub.broadcast({ type: 'conversation', conversation }),
       inChannel: (channelId, agentId) => this.channels.isMember(channelId, agentId),
@@ -312,6 +318,8 @@ export class AgentManager {
     }
     this.refreshProjects();
     this.store.save();
+    // Mail that outlived a restart (see Mailbox.recover) goes now.
+    setImmediate(() => this.mailbox.drainAll());
     // The SuperAgent's minute: updates that waited for it to be idle, and agents stuck too long.
     this.superTimer = setInterval(() => this.superTick(), 60_000);
     this.superTimer.unref?.();
@@ -1270,6 +1278,15 @@ export class AgentManager {
       return { asked: ask, note: 'The user sees it in AgentsCode; their answer arrives as a later turn. Do not wait or ask again.' };
     }
     if (tool === 'list_goals') return { goals: this.superStore.goals() };
+    if (tool === 'list_routines') return { routines: this.superStore.routines() };
+    if (tool === 'propose_routine') {
+      const parsed = proposeRoutineInput.safeParse(args);
+      if (!parsed.success) return fail('Give a name, a schedule (daily at "HH:MM", or every 1 to 168 hours), an optional project, the instruction and a why.');
+      const input = parsed.data;
+      const routine = this.superStore.addRoutine({ name: input.name, instruction: input.instruction, projectId: input.project ? this.projectRef(input.project).id : null, schedule: input.schedule, why: input.why }, 'super');
+      this.recordSuper({ tool, why: input.why, undo: { kind: 'routine', routineId: routine.id }, summary: `Proposed the routine "${routine.name}" (${scheduleText(routine.schedule)})` });
+      return { proposed: routine, note: 'It waits for the user to confirm it in the Routines tab; it never runs before that.' };
+    }
     if (tool === 'add_goal') {
       const parsed = addGoalInput.safeParse(args);
       if (!parsed.success) return fail('Give the goal in up to 500 characters, an optional project, and a why.');
@@ -1441,6 +1458,23 @@ export class AgentManager {
     return this.publishSuper();
   }
 
+  // The user's routines: add (on at once), change, confirm a proposal, turn on or off, remove.
+
+  addRoutine(body: { name?: unknown; instruction?: unknown; projectId?: unknown; schedule?: unknown }): SuperState {
+    this.superStore.addRoutine({ name: body?.name, instruction: body?.instruction, projectId: this.goalProject(body?.projectId), schedule: body?.schedule }, 'user');
+    return this.publishSuper();
+  }
+
+  updateRoutine(id: string, body: { name?: unknown; instruction?: unknown; projectId?: unknown; schedule?: unknown; enabled?: unknown; confirm?: unknown }): SuperState {
+    this.superStore.updateRoutine(id, { ...body, ...(body?.projectId !== undefined ? { projectId: this.goalProject(body.projectId) } : { projectId: undefined }) });
+    return this.publishSuper();
+  }
+
+  removeRoutine(id: string): SuperState {
+    this.superStore.removeRoutine(id);
+    return this.publishSuper();
+  }
+
   /**
    * The user answers a SuperAgent question: a click on an option, their own words, or (null) put
    * aside. An answer goes to the SuperAgent as the user's message, which it is.
@@ -1477,6 +1511,12 @@ export class AgentManager {
       this.updateChannel(undo.channelId, { ...undo.before, memberIds: undo.before.memberIds.filter(m => this.store.agents.has(m)) });
     } else if (undo.kind === 'goal') {
       this.superStore.restoreGoal(undo.goalId, undo.before);
+    } else if (undo.kind === 'routine') {
+      // Withdraw a proposal; one the user confirmed since is theirs now.
+      const routine = this.superStore.routines().find(r => r.id === undo.routineId);
+      if (!routine) throw new HttpError(409, 'That routine was removed since.');
+      if (!routine.proposed) throw new HttpError(409, 'The user confirmed that routine, so it is theirs now. Change it in the Routines tab.');
+      this.superStore.removeRoutine(routine.id);
     } else {
       if (!this.store.agents.has(undo.agentId)) throw new HttpError(409, 'That agent is gone.');
       await this.update(undo.agentId, undo.before);
@@ -1544,6 +1584,11 @@ export class AgentManager {
     const superId = this.superId();
     if (!superId) return;
     this.watcher.morning();
+    // Routines that are due become updates, so every wake limit and the daily budget apply.
+    for (const { routine, dueAt } of this.superStore.takeDueRoutines(new Date())) {
+      const project = routine.projectId ? this.store.projects.get(routine.projectId)?.name : undefined;
+      this.watcher.note({ agentId: 'routine', key: `routine:${routine.id}:${dueAt}`, text: `Routine "${routine.name}"${project ? ` for ${project}` : ''}, as the user set it up: ${routine.instruction}` });
+    }
     const now = Date.now();
     for (const agent of this.store.agents.values()) {
       if (agent.role === 'super') continue;
@@ -1857,6 +1902,27 @@ export class AgentManager {
   private async eyesTool(agent: Agent, tool: EyesTool, args: Record<string, unknown>): Promise<unknown> {
     const bad = (message: string) => { throw new HttpError(400, message); };
     if (tool === 'app_screenshot') return this.appScreenshot(agent, args);
+    if (tool === 'run_check') {
+      const parsed = runCheckInput.safeParse(args);
+      if (!parsed.success) return bad(`Give a project and one of the checks: ${parsed.error.issues.slice(0, 2).map(i => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
+      const { project: ref, command, ...options } = parsed.data;
+      const project = this.eyesProject(agent, ref); // the same scope as the GitHub tools
+      // In the caller's own worktree for that project when it has one, so it checks its own code.
+      const cwd = agent.worktree && agent.projectId === project.id ? agent.worktree.cwd : project.path;
+      // One check per folder at a time: a slow test run is never stacked by a retry.
+      if (this.checksRunning.has(cwd)) throw new HttpError(409, `A check is already running in ${project.name}. Wait for it to finish.`);
+      this.checksRunning.add(cwd);
+      try {
+        // npm scripts are the project's own code: only an agent already at Full access may run them.
+        const result = await runCheck(cwd, command, { ...options, scripts: agent.autonomy === 'full' && agent.role !== 'super' }, this.checkExec);
+        const { output, ...rest } = result;
+        return { about: CHECK_UNTRUSTED, project: project.name, ...rest, untrusted: { output } };
+      } catch (error) {
+        throw new HttpError(error instanceof CheckError ? 403 : 500, (error as Error).message);
+      } finally {
+        this.checksRunning.delete(cwd);
+      }
+    }
     const run = async (gh: string[]) => {
       try {
         return await runGh(gh, this.ghExec);
@@ -1880,11 +1946,16 @@ export class AgentManager {
       const scope = this.eyesProjects(agent);
       const projects = parsed.data.project ? [this.eyesProject(agent, parsed.data.project)] : scope === 'all' ? [...this.store.projects.values()] : scope;
       // In parallel, so many projects stay within the tool's time.
+      // Each project on its own: one that fails (gh logged out, a timeout) is a note, not the end of the rest.
       const results = await Promise.all(projects.map(async project => {
         const repo = await this.projectRepo(project);
         if (!repo) return { project: project.name, note: 'No GitHub remote (origin): skipped.' };
-        const out = capJson(await run(tool === 'gh_prs' ? ghArgs.prs(repo) : ghArgs.issues(repo)));
-        return { project: project.name, repo, ...outside(tool === 'gh_prs' ? 'pullRequests' : 'issues', out) };
+        try {
+          const out = capJson(await run(tool === 'gh_prs' ? ghArgs.prs(repo) : ghArgs.issues(repo)));
+          return { project: project.name, repo, ...outside(tool === 'gh_prs' ? 'pullRequests' : 'issues', out) };
+        } catch (error) {
+          return { project: project.name, repo, error: (error as Error).message };
+        }
       }));
       return { about: GH_UNTRUSTED, results };
     }
@@ -1931,9 +2002,8 @@ export class AgentManager {
     let openAgent: string | undefined;
     if (input.agent) {
       const target = this.teammateOrSelf(input.agent);
-      if (!isSuper && target.id !== agent.id && !this.mailbox.teammates(agent.id).some(t => t.id === target.id)) {
-        throw new HttpError(403, `${target.name} is not visible to you under the team setting, so you cannot open its tab.`);
-      }
+      // Only the SuperAgent reads other agents' transcripts (read_transcript), so only it opens their tabs.
+      if (!isSuper && target.id !== agent.id) throw new HttpError(403, 'You can open only your own tab; other agents\' transcripts are for the SuperAgent.');
       openAgent = target.id;
     }
     let openChannel: string | undefined;
