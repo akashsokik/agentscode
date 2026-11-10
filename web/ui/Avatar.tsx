@@ -1,12 +1,12 @@
 /**
- * Agent avatars: a soft flat shape in one colour, no outline and no gradient, with two small dark
- * eyes set a little off centre so it looks somewhere. Inline SVG on a 32px grid, crisp from 14 to
- * 40px. The eyes carry the mood (avatar.css): an occasional blink, a glance while working, a look
- * up while it waits for you, half-closed when the last turn failed. Motion stops for reduced motion.
+ * Agent avatars: a flat tilted shape in one colour, no outline and no gradient, with two dark pill
+ * eyes set high and to one side, turned with the body. Inline SVG on a 32px grid, crisp from 14 to
+ * 96px. The eyes carry the mood (styles.css): an occasional blink, a glance while working, a look
+ * up while it waits for you, flattened to dashes when the last turn failed. Motion stops for reduced motion.
  * Decorative: the agent's name always sits beside it.
  */
 import type { Agent } from '../../shared/types.ts';
-import { AVATAR_FILL, AVATAR_INK, agentLook, avatarDelay, avatarMood, avatarParts, isSmallAvatar, type AvatarLook, type AvatarMood } from '../../shared/avatar.ts';
+import { AVATAR_FILL, AVATAR_INK, agentLook, avatarDelay, avatarEyeTransform, avatarMood, avatarParts, isSmallAvatar, type AvatarLook, type AvatarMood } from '../../shared/avatar.ts';
 
 export { AVATAR_FILL };
 
@@ -41,13 +41,11 @@ export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-
       style={{ ['--avatar-delay' as string]: avatarDelay(seed) }}
     >
       {parts.map((part, i) => (part.kind === 'body' ? <path key={i} d={part.d} fill={part.fill} /> : null))}
-      {/* The pills move as one (glance, look up); each blinks or flattens to a dash on its own. */}
+      {/* The pills move as one (glance, look up) in the outer group; the inner one turns them with the body. Each blinks or flattens to a dash on its own. */}
       <g className="avatar-eyes">
-        {parts.map((part, i) => {
-          if (part.kind === 'eye') return <rect key={i} className="avatar-eye" x={part.x} y={part.y} width={part.w} height={part.h} rx={part.w / 2} fill={AVATAR_INK} />;
-          if (part.kind === 'happy') return <path key={i} d={part.d} fill="none" stroke={AVATAR_INK} strokeWidth={part.width} strokeLinecap="round" />;
-          return null;
-        })}
+        <g transform={avatarEyeTransform(look)}>
+          {parts.map((part, i) => (part.kind === 'eye' ? <rect key={i} className="avatar-eye" x={part.x} y={part.y} width={part.w} height={part.h} rx={part.w / 2} fill={AVATAR_INK} /> : null))}
+        </g>
       </g>
     </svg>
   );

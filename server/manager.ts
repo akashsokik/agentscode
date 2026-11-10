@@ -1,4 +1,4 @@
-import { agentLook, assignLooks, cleanLook, freshLook, isSuperPair } from '../shared/avatar.ts';
+import { agentLook, assignLooks, cleanLook, freshLook, isSuperPair, migrateLooks } from '../shared/avatar.ts';
 import { alignHints, findMentions, mentionContext, parseHints, type MentionAgent, type MentionProject, type MentionRef } from '../shared/mentions.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -318,6 +318,11 @@ export class AgentManager {
       agent.currentTask = null;
       agent.queued = 0;
       agent.turnStartedAt = null;
+    }
+    // Looks stored under the first set's shape names move to this set's, colour and eyes kept.
+    for (const [id, look] of migrateLooks([...this.store.agents.values()])) {
+      const agent = this.store.agents.get(id);
+      if (agent) agent.avatar = look;
     }
     // Agents from before avatars get a distinct look once (shared/avatar.ts).
     for (const [id, look] of assignLooks([...this.store.agents.values()])) {
