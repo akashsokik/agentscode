@@ -3,12 +3,12 @@
  * small choices, no boxes; the chosen one carries the selection fill. Saved with the dialog.
  */
 import type { ReactNode } from 'react';
-import { AVATAR_COLORS, AVATAR_EYES, AVATAR_SHAPE_NAMES, AVATAR_SHAPES, freshLook, isSuperPair, type AvatarLook } from '../../shared/avatar.ts';
+import { AGENT_SHAPES, AVATAR_COLORS, AVATAR_EYES, AVATAR_SHAPE_NAMES, freshLook, isSuperPair, type AvatarLook } from '../../shared/avatar.ts';
 import { AVATAR_FILL, AvatarGlyph } from '../ui/Avatar.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 
 const SHAPE_NAMES = AVATAR_SHAPE_NAMES;
-const EYE_NAMES: Record<AvatarLook['eyes'], string> = { round: 'Eyes centred', tall: 'Eyes low and left', wide: 'Eyes high and right' };
+const EYE_NAMES: Record<AvatarLook['eyes'], string> = { round: 'Eyes where the shape puts them', tall: 'Eyes lower and left', wide: 'Eyes to the right' };
 
 function Choice({ selected, label, onPick, disabled = false, children }: { selected: boolean; label: string; onPick: () => void; disabled?: boolean; children: ReactNode }) {
   return (
@@ -35,7 +35,7 @@ export function AvatarPicker({ look, others, onChange }: { look: AvatarLook; oth
         <SecondaryButton onClick={() => onChange(freshLook(others))}>Shuffle</SecondaryButton>
       </div>
       <div role="radiogroup" aria-label="Shape" className="flex flex-wrap gap-0.5">
-        {AVATAR_SHAPES.map(shape => (
+        {AGENT_SHAPES.map(shape => (
           <Choice key={shape} label={isSuperPair({ shape, color: look.color }) ? `${SHAPE_NAMES[shape]} (the SuperAgent's in this colour)` : SHAPE_NAMES[shape]} disabled={isSuperPair({ shape, color: look.color })} selected={look.shape === shape} onPick={() => onChange({ ...look, shape })}>
             <AvatarGlyph look={{ ...look, shape }} animate={false} className="size-5" />
           </Choice>
