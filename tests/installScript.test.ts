@@ -78,6 +78,19 @@ test('the app running under its old name, AgentsCode.app, also stops the install
   assert.equal(r.downloaded, false);
 });
 
+test('the app running as Podcode.app (the 0.3.0 spelling, kept by an in-app update) also stops the install', MAC_ONLY, async () => {
+  const r = await run(dir => path.join(dir, 'Podcode.app'));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /PodCode is running from .*\/Applications\/Podcode\.app\. Quit it/);
+  assert.equal(r.downloaded, false);
+});
+
+test('a running app elsewhere whose name differs only in case is still not the installed one', MAC_ONLY, async () => {
+  const r = await run(() => '/tmp/podcode.app.prev');
+  assert.doesNotMatch(r.out, /is running from/);
+  assert.equal(r.downloaded, true, r.out);
+});
+
 test('a release with PodCode assets is downloaded under the new name', MAC_ONLY, async () => {
   const r = await run(() => null, undefined, 'aaaa  PodCode-mac-arm64.zip\nbbbb  PodCode-mac-x64.zip');
   assert.match(r.requests, /\/PodCode-mac-(arm64|x64)\.zip/, r.out);

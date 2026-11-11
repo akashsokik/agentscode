@@ -73,7 +73,15 @@ main() {
   local running
   running="$(lsappinfo info -only bundlepath -app com.agentscode.app 2>/dev/null |
     sed -n 's/^"LSBundlePath"="\(.*\)"$/\1/p' || true)"
-  if [[ "$running" == "$app" || "$running" == "$legacy" ]]; then
+  # macOS volumes are case-insensitive by default, so /Applications/Podcode.app (0.3.0's spelling,
+  # which an in-app update keeps) is the same bundle as $app: compare without case. nocasematch
+  # is in bash 3.2, macOS's /bin/bash; it is set back as it was.
+  local is_running=0 nocase_was=0
+  shopt -q nocasematch && nocase_was=1
+  shopt -s nocasematch
+  if [[ -n "$running" && ( "$running" == "$app" || "$running" == "$legacy" ) ]]; then is_running=1; fi
+  [[ "$nocase_was" == 1 ]] || shopt -u nocasematch
+  if [[ "$is_running" == 1 ]]; then
     fail "PodCode is running from $running. Quit it (Cmd+Q) and run this again."
   fi
 
