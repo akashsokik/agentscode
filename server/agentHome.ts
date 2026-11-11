@@ -9,7 +9,7 @@ import { archiveAgentHome, type ArchivedAgent } from './agentArchive.ts';
 // - soul.md is its standing instructions. The user writes it (in the app or by hand); Agent.instructions
 //   mirrors it so the app can show it.
 // - memory.md is what it learned: entries it saved with the remember tool, or that the user edited in
-//   the app. AgentsCode writes the file, in a form a person can read.
+//   the app. Podcode writes the file, in a form a person can read.
 // - workspace/ is where an agent with no project works. Its cwd is this folder, not the home, so
 //   soul.md and memory.md sit outside it: edit tools that are auto-accepted inside the cwd (and Codex's
 //   workspace-write sandbox) cannot reach them.
@@ -32,7 +32,7 @@ export function workspacePath(home: string): string {
 }
 
 /**
- * The files in an agent's home that only AgentsCode (and the user) write, by their top-level name:
+ * The files in an agent's home that only Podcode (and the user) write, by their top-level name:
  * soul.md, memory.md, a soul proposal, the dream records and state, the prompt bookkeeping and
  * history/. Anything else in the home (notes an agent saved there before it had a workspace) is not
  * reserved. Case-insensitive, as macOS file names are.
@@ -149,7 +149,7 @@ export function renderMemory(name: string, entries: MemoryEntry[]): string {
   const lines = [
     `# What ${name} remembers`,
     '',
-    `AgentsCode keeps this file. ${name} adds entries with the remember tool and removes them with forget; you can edit or delete them in the app.`,
+    `Podcode keeps this file. ${name} adds entries with the remember tool and removes them with forget; you can edit or delete them in the app.`,
   ];
   for (const entry of entries) {
     const when = new Date(entry.createdAt).toISOString().replace(/\.\d{3}Z$/, 'Z');

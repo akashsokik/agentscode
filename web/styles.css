@@ -1551,7 +1551,7 @@ html.layout-inset.theme-light .dialog-scrim {
   }
 }
 
-/* ---- AgentsCode -------------------------------------------------------- */
+/* ---- Podcode -------------------------------------------------------- */
 
 /* Transcript text is selectable even though the app chrome is not. */
 .agent-transcript {
@@ -1559,7 +1559,7 @@ html.layout-inset.theme-light .dialog-scrim {
 }
 
 /*
- * MonoCode's .agent-markdown rules target streamdown's data attributes; AgentsCode
+ * MonoCode's .agent-markdown rules target streamdown's data attributes; Podcode
  * renders with react-markdown, so the same values are applied to plain elements.
  * Quotes use a fill instead of MonoCode's one-sided accent bar.
  */

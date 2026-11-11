@@ -9,14 +9,14 @@ import path from 'node:path';
 // attached to a server it did not start. Until main says hello, the browser is unavailable; main may
 // say it before this side listens, so the server asks with a ping once it does.
 
-/** app_screenshot captures AgentsCode's own window (electron/appShot.ts), not a browser tab; it rides the same bridge. */
+/** app_screenshot captures Podcode's own window (electron/appShot.ts), not a browser tab; it rides the same bridge. */
 export const BROWSER_OPS = ['open', 'list', 'close', 'snapshot', 'screenshot', 'console', 'click', 'type', 'press', 'eval', 'app_screenshot'] as const;
 export type BrowserOp = (typeof BROWSER_OPS)[number];
 
 /** Ops that change a page or run code in it; plan-only agents may not use them. */
 export const BROWSER_WRITE_OPS: readonly BrowserOp[] = ['click', 'type', 'press', 'eval', 'close'];
 
-export const BROWSER_UNAVAILABLE = 'The browser needs the AgentsCode desktop app.';
+export const BROWSER_UNAVAILABLE = 'The browser needs the Podcode desktop app.';
 export const BRIDGE_VERSION = 1;
 export const BRIDGE_TOKEN_FILE = 'browser-bridge.token';
 export const BRIDGE_HEADER = 'x-agentscode-bridge';

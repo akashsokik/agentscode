@@ -222,7 +222,7 @@ function DiffStep({ step }: { step: WalkthroughStep }) {
   );
 }
 
-/** A command and its output as the agent reported them; AgentsCode does not rerun or check them. */
+/** A command and its output as the agent reported them; Podcode does not rerun or check them. */
 function CommandStep({ step, agentName }: { step: WalkthroughStep; agentName: string }) {
   return (
     <div className="overflow-hidden rounded-lg border border-content/10 bg-content/[0.03]">

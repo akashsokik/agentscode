@@ -5,7 +5,7 @@ import { OPENUI_COMPONENTS } from '../shared/openui.ts';
 import { openuiGuide, openuiLibrary } from '../server/openuiGuide.ts';
 import { chartSource, clickOutcome, sortRows } from '../web/openui/charts.ts';
 
-test('the guide lists every AgentsCode component and the AgentsCode rules', () => {
+test('the guide lists every Podcode component and the Podcode rules', () => {
   const guide = openuiGuide();
   for (const name of Object.keys(OPENUI_COMPONENTS)) assert.match(guide, new RegExp(`\\b${name}\\(`), name);
   assert.match(guide, /```openui-lang/);

@@ -189,7 +189,7 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
                   </Row>
                 ) : (
                   <>
-                    <Row label="Avatar" description="How it looks across AgentsCode. Shuffle for one no other agent has." />
+                    <Row label="Avatar" description="How it looks across Podcode. Shuffle for one no other agent has." />
                     <AvatarPicker look={look} others={others} onChange={setLook} />
                   </>
                 )}

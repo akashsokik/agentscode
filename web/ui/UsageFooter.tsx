@@ -172,7 +172,7 @@ export function UsageFooter({ fallback }: { fallback: ReactNode }) {
       usage => setReadings(r => ({ ...r, [kind]: { usage, fetching: false } })),
       (error: unknown) => {
         if (error instanceof ApiError && error.status === 404) setMissing(true);
-        setReadings(r => ({ ...r, [kind]: { usage: r[kind]?.usage ?? { windows: [], error: 'Could not reach AgentsCode for usage.' }, fetching: false } }));
+        setReadings(r => ({ ...r, [kind]: { usage: r[kind]?.usage ?? { windows: [], error: 'Could not reach Podcode for usage.' }, fetching: false } }));
       },
     );
   }, []);

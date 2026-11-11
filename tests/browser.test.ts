@@ -14,12 +14,12 @@ test('typed addresses become URLs: local hosts get http, others https, and non-a
   assert.equal(normalizeAddress(''), null);
 });
 
-test('the browser opens only http(s), and never AgentsCode itself', () => {
+test('the browser opens only http(s), and never Podcode itself', () => {
   assert.equal(blockedReason('http://localhost:3000/', 4320), null);
   assert.equal(blockedReason('https://example.com/', 4320), null);
-  assert.match(blockedReason('http://127.0.0.1:4320/api/state', 4320)!, /AgentsCode itself/);
-  assert.match(blockedReason('http://localhost:4320/', 4320)!, /AgentsCode itself/);
-  assert.match(blockedReason('http://[::1]:4320/', 4320)!, /AgentsCode itself/);
+  assert.match(blockedReason('http://127.0.0.1:4320/api/state', 4320)!, /Podcode itself/);
+  assert.match(blockedReason('http://localhost:4320/', 4320)!, /Podcode itself/);
+  assert.match(blockedReason('http://[::1]:4320/', 4320)!, /Podcode itself/);
   assert.match(blockedReason('file:///tmp/x.html', 4320)!, /http and https/);
   assert.match(blockedReason('data:text/html,hi', 4320)!, /http and https/);
   assert.match(blockedReason('not a url', 4320)!, /valid URL/);

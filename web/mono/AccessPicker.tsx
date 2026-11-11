@@ -1,5 +1,5 @@
 // Vendored from MonoCode (features/sessions/ui/AccessPicker.tsx). The modes are
-// AgentsCode's autonomy levels; labels and hints follow MonoCode's where they match.
+// Podcode's autonomy levels; labels and hints follow MonoCode's where they match.
 import { AiIdea, ChevronDown, Lock, Pencil, Shield } from "./icons.tsx";
 import {
   useEffect,

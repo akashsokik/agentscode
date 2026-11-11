@@ -5,10 +5,10 @@ import { Code } from '../mono/icons.tsx';
 import { toast } from '../store.ts';
 import { clickOutcome } from './charts.ts';
 import { OpenUIActionContext } from './context.ts';
-import { agentsCodeLibrary } from './library.tsx';
+import { podcodeLibrary } from './library.tsx';
 
 /**
- * An ```openui-lang block from an agent, drawn with AgentsCode's components. Buttons send their
+ * An ```openui-lang block from an agent, drawn with Podcode's components. Buttons send their
  * message to the agent whose transcript holds the block; elsewhere they say where to answer.
  */
 export default function OpenUIBlock({ source }: { source: string }) {
@@ -40,7 +40,7 @@ export default function OpenUIBlock({ source }: { source: string }) {
       {showSource ? (
         <pre className="overflow-x-auto rounded-lg border border-content/10 bg-content/[0.03] px-3.5 py-3 font-mono text-[var(--code-font-size)] leading-[1.6] text-content/75">{source}</pre>
       ) : (
-        <Renderer response={source} library={agentsCodeLibrary} onAction={onAction} onError={setErrors} publishObservability={false} />
+        <Renderer response={source} library={podcodeLibrary} onAction={onAction} onError={setErrors} publishObservability={false} />
       )}
       {problems.length ? (
         <figcaption className="mt-1.5 text-[11.5px] text-danger/90" title={problems.map(p => p.message).join('\n')}>

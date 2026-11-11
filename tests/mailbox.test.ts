@@ -169,7 +169,7 @@ test('recover keeps unfinished mail: queued stays queued, mid-delivery goes once
   assert.deepEqual(store.messages.map(m => [m.status, m.redelivered ?? false]), [['queued', false], ['queued', true], ['delivered', false]]);
   assert.equal(store.conversations[0].stopped, false, 'mail still to go keeps its conversation open');
   assert.equal(store.conversations[1].stopped, true, 'one with nothing left ends, as before');
-  assert.match(deliveryPrompt(store.messages[1]), /^Redelivered after AgentsCode restarted/);
+  assert.match(deliveryPrompt(store.messages[1]), /^Redelivered after Podcode restarted/);
   assert.doesNotMatch(deliveryPrompt(store.messages[0]), /Redelivered/);
   // Interrupted again while being redelivered: it fails rather than loop.
   store.messages[1].status = 'delivering';

@@ -154,7 +154,7 @@ test('agents\' browser tools: plan-only limits, the scripts setting, URL check, 
   const opened = await call(ada.id, 'browser_open', { url: 'localhost:3000' });
   assert.deepEqual(opened, { op: 'open', args: { url: 'http://localhost:3000/' } });
   for (const bad of ['file:///etc/passwd', 'javascript:alert(1)', 'not a url']) await assert.rejects(call(ada.id, 'browser_open', { url: bad }), /not a web address/, bad);
-  await assert.rejects(call(ada.id, 'browser_open', { url: 'http://127.0.0.1:4320/' }), /does not open AgentsCode itself/);
+  await assert.rejects(call(ada.id, 'browser_open', { url: 'http://127.0.0.1:4320/' }), /does not open Podcode itself/);
   assert.equal((await call(ada.id, 'browser_open', { url: 'example.com/docs' })).args.url, 'https://example.com/docs');
 
   const shot = await call(ada.id, 'browser_screenshot', { tab_id: 't1' });

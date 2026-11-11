@@ -5,7 +5,7 @@ import { cx, StatusLabel, type Tone } from '../ui/common.tsx';
 import { MermaidDiagram } from '../ui/MermaidDiagram.tsx';
 import { chartSource, sortRows } from './charts.ts';
 
-// AgentsCode's OpenUI components, drawn with the app's own classes: theme greys, the app font,
+// Podcode's OpenUI components, drawn with the app's own classes: theme greys, the app font,
 // its status hues for Status only. Schemas and descriptions come from shared/openui.ts.
 
 type Props<N extends OpenUIComponentName> = Parameters<ComponentRenderer<import('zod').infer<(typeof OPENUI_COMPONENTS)[N]['props']>>>[0];
@@ -132,7 +132,7 @@ function ActionButton({ label, action, variant }: { label: string; action?: unkn
   );
 }
 
-export const agentsCodeLibrary = createLibrary({
+export const podcodeLibrary = createLibrary({
   root: OPENUI_ROOT,
   components: (Object.keys(OPENUI_COMPONENTS) as OpenUIComponentName[]).map(name => defineComponent({
     name,

@@ -1,4 +1,4 @@
-// AgentsCode release commands. The order is notes, prepare, tag, and each command checks the one
+// Podcode release commands. The order is notes, prepare, tag, and each command checks the one
 // before it ran.
 //
 //   npm run release:notes   -- <version>   draft docs/releases/<version>.md from the commits since the last tag
@@ -64,12 +64,12 @@ function draftNotes() {
 
 | File | Platform |
 | :-- | :-- |
-| AgentsCode-mac-arm64.dmg | macOS, Apple silicon |
-| AgentsCode-mac-x64.dmg | macOS, Intel |
-| AgentsCode-win-x64.exe | Windows x64 |
-| AgentsCode-linux-x86_64.AppImage | Linux x64 |
+| Podcode-mac-arm64.dmg | macOS, Apple silicon |
+| Podcode-mac-x64.dmg | macOS, Intel |
+| Podcode-win-x64.exe | Windows x64 |
+| Podcode-linux-x86_64.AppImage | Linux x64 |
 
-An installed AgentsCode updates itself. Verify downloads against \`SHA256SUMS\`.
+An installed Podcode updates itself. Verify downloads against \`SHA256SUMS\`.
 ` +
     (prev ? `\n**Full changelog:** https://github.com/${REPO}/compare/${prev}...${tag}\n` : '');
   mkdirSync(path.dirname(notes), { recursive: true });
@@ -89,8 +89,8 @@ function prepare() {
     execFileSync('npm', ['version', version, '--no-git-tag-version', '--allow-same-version'], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
   }
   git('add', 'package.json', 'package-lock.json', notesRel);
-  git('commit', '-q', '-m', `chore(release): AgentsCode v${version}`);
-  console.log(`committed: chore(release): AgentsCode v${version}`);
+  git('commit', '-q', '-m', `chore(release): Podcode v${version}`);
+  console.log(`committed: chore(release): Podcode v${version}`);
   console.log(`next: git push origin ${branch} && npm run release:tag -- ${version}`);
 }
 
@@ -99,7 +99,7 @@ function tagAndPush() {
   if (packageVersion() !== version) die(`package.json is at ${packageVersion()}, not ${version}; run: npm run release:prepare -- ${version}`);
   if (!existsSync(notes)) die(`${notesRel} is missing`);
   if (tagExists(tag)) die(`tag ${tag} already exists`);
-  git('tag', '-a', tag, '-m', `AgentsCode v${version}`);
+  git('tag', '-a', tag, '-m', `Podcode v${version}`);
   git('push', 'origin', tag);
   console.log(`pushed ${tag}; the release workflow is building it: https://github.com/${REPO}/actions/workflows/release.yml`);
 }

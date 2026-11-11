@@ -58,7 +58,7 @@ test('/clear runs alone, and /new and /reset are other names for it', () => {
   assert.equal(builtinCommand('/review'), undefined);
 });
 
-test('the command picker puts AgentsCode first and lands exact names on top', () => {
+test('the command picker puts Podcode first and lands exact names on top', () => {
   const commands: ComposerCommand[] = [
     ...BUILTIN_COMMANDS,
     { name: 'review', description: 'Review a change', scope: 'user', source: 'claude' },
