@@ -368,7 +368,7 @@ function CleanupDialog({ projects, onClose }: { projects: WorkProject[]; onClose
                         />
                         <Who id={f.agentId} name={f.agentName} size="size-3.5" />
                         <span className="min-w-0 truncate font-mono text-[11.5px] text-content/70" title={f.path}>{shortPath(f.path, home)}</span>
-                        <span className={`ml-auto shrink-0 ${f.dirty ? 'text-warning' : 'text-content/40'}`}>{folderNote(f)}</span>
+                        <span className={`ml-auto shrink-0 ${f.dirty ? 'text-content/70' : 'text-content/40'}`}>{folderNote(f)}</span>
                       </div>
                       {asking ? (
                         <div className="mb-1 ml-6 flex items-center gap-2 rounded-md bg-content/5 px-2 py-1.5 text-[12px] text-content/70">
