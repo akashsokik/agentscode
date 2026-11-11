@@ -31,6 +31,8 @@ PREV=${PODCODE_PREV:-${AGENTSCODE_PREV:-/tmp/PodCode.app.prev}}
 NEW=${PODCODE_NEW_BUILD:-${AGENTSCODE_NEW_BUILD:-$ROOT/release/mac-arm64/PodCode.app}}
 PORT=${PODCODE_PORT:-${AGENTSCODE_PORT:-4320}}
 LOCK=${PODCODE_LOCK:-${AGENTSCODE_LOCK:-/tmp/podcode-restart-waiter.lock}}
+# The lock an AgentsCode-era copy of this script takes; a live waiter holding it counts too.
+LEGACY_LOCK=${PODCODE_LEGACY_LOCK:-/tmp/agentscode-restart-waiter.lock}
 TICK=${PODCODE_TICK:-${AGENTSCODE_TICK:-1}}
 
 say() { echo "$(date '+%H:%M:%S') $*"; }
@@ -113,6 +115,10 @@ take_lock() {
   say "Taking over a stale lock (${holder:-no pid})."
   rm -rf "$LOCK" && mkdir "$LOCK" 2>/dev/null
 }
+legacy_holder=$(cat "$LEGACY_LOCK/pid" 2>/dev/null)
+if [ -n "$legacy_holder" ] && kill -0 "$legacy_holder" 2>/dev/null; then
+  say "Another restart is waiting ($LEGACY_LOCK); leaving it to that one."; exit 0
+fi
 if ! take_lock; then say "Another restart is waiting ($LOCK); leaving it to that one."; exit 0; fi
 echo $$ > "$LOCK/pid"
 trap 'rm -rf "$LOCK"' EXIT

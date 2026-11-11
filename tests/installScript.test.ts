@@ -84,6 +84,12 @@ test('a release with PodCode assets is downloaded under the new name', MAC_ONLY,
   assert.doesNotMatch(r.requests, /AgentsCode-mac-/);
 });
 
+test('a 0.3.0 release, with Podcode assets, is downloaded by that name', MAC_ONLY, async () => {
+  const r = await run(() => null, undefined, 'aaaa  Podcode-mac-arm64.zip\nbbbb  Podcode-mac-x64.zip');
+  assert.match(r.requests, /\/Podcode-mac-(arm64|x64)\.zip/, r.out);
+  assert.doesNotMatch(r.requests, /(PodCode|AgentsCode)-mac-/);
+});
+
 test('a release from before the rename falls back to the AgentsCode asset', MAC_ONLY, async () => {
   const r = await run(() => null, undefined, 'aaaa  AgentsCode-mac-arm64.zip\nbbbb  AgentsCode-mac-x64.zip');
   assert.match(r.requests, /\/AgentsCode-mac-(arm64|x64)\.zip/, r.out);

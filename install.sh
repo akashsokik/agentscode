@@ -84,11 +84,15 @@ main() {
 
   curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" ||
     fail "could not download $base/SHA256SUMS"
-  # Releases before 0.3.0 (and AGENTSCODE_VERSION set to one of them) name their assets AgentsCode-*.
-  local asset="PodCode-mac-$arch.zip"
-  if ! awk -v name="$asset" '$2 == name { found = 1 } END { exit !found }' "$tmp/SHA256SUMS"; then
-    asset="AgentsCode-mac-$arch.zip"
-  fi
+  # Assets are PodCode-* from this spelling on; 0.3.0 named them Podcode-*, and releases before it
+  # (or PODCODE_VERSION set to one of them) AgentsCode-*. Take the first the release lists.
+  local asset="" name
+  for name in "PodCode-mac-$arch.zip" "Podcode-mac-$arch.zip" "AgentsCode-mac-$arch.zip"; do
+    if awk -v name="$name" '$2 == name { found = 1 } END { exit !found }' "$tmp/SHA256SUMS"; then
+      asset="$name"; break
+    fi
+  done
+  [[ -n "$asset" ]] || asset="PodCode-mac-$arch.zip"
 
   printf 'Downloading %s\n' "$asset"
   curl -fL --progress-bar -o "$tmp/$asset" "$base/$asset" ||
@@ -107,7 +111,7 @@ main() {
   mkdir "$tmp/unpacked"
   tar -xf "$tmp/$asset" -C "$tmp/unpacked" || fail "could not unpack $asset"
   local unpacked
-  for unpacked in "$tmp/unpacked/PodCode.app" "$tmp/unpacked/AgentsCode.app" ""; do
+  for unpacked in "$tmp/unpacked/PodCode.app" "$tmp/unpacked/Podcode.app" "$tmp/unpacked/AgentsCode.app" ""; do
     [[ -z "$unpacked" || -d "$unpacked" ]] && break
   done
   [[ -n "$unpacked" ]] || fail "$asset does not contain PodCode.app"

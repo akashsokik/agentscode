@@ -1,4 +1,4 @@
-# Plan: AgentsCode becomes Podcode
+# Plan: AgentsCode becomes PodCode
 
 Status: plan only, nothing changed yet. Written 2026-11-11 against `main` at f137f8c (0.2.6 is the
 latest release) and orca-site `main` at 6e67cd4. The launch plan is separate, in okikorg/orca-marketing

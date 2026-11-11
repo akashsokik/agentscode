@@ -54,6 +54,7 @@ function world(quit: 'exits' | 'hangs' | 'holds') {
     AGENTSCODE_PREV: path.join(dir, 'PodCode.app.prev'),
     AGENTSCODE_NEW_BUILD: build,
     AGENTSCODE_LOCK: path.join(dir, 'lock'),
+    PODCODE_LEGACY_LOCK: path.join(dir, 'legacy-lock'),
     AGENTSCODE_TICK: '0.01',
   };
   const run = (...args: string[]) => new Promise<{ code: number; out: string }>(resolve => {
@@ -122,6 +123,20 @@ test('no build, or another restart already waiting: nothing happens', MAC_ONLY, 
     assert.match(locked.out, /Another restart is waiting/);
     assert.equal(w.isAlive(app), true);
     assert.equal(fs.existsSync(w.env.AGENTSCODE_LOCK), true, 'the other waiter keeps its lock');
+  } finally { w.cleanup(); }
+});
+
+test('a live waiter holding the AgentsCode-era lock counts as another restart waiting', MAC_ONLY, async () => {
+  const w = world('exits');
+  const app = w.pid();
+  try {
+    fs.mkdirSync(w.env.PODCODE_LEGACY_LOCK);
+    fs.writeFileSync(path.join(w.env.PODCODE_LEGACY_LOCK, 'pid'), String(process.pid));
+    const r = await w.run('--when-idle');
+    assert.equal(r.code, 0);
+    assert.match(r.out, /Another restart is waiting \(.*legacy-lock\)/);
+    assert.equal(w.isAlive(app), true);
+    assert.equal(fs.existsSync(w.env.AGENTSCODE_LOCK), false, 'its own lock was not taken');
   } finally { w.cleanup(); }
 });
 
