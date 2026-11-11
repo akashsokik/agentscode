@@ -36,7 +36,7 @@ function world(statuses: string[], options: { minutes?: string } = {}) {
   const dir = tempDir('notarize');
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
-  const app = path.join(dir, 'release', 'mac-arm64', 'Podcode.app');
+  const app = path.join(dir, 'release', 'mac-arm64', 'PodCode.app');
   fs.mkdirSync(path.join(app, 'Contents'), { recursive: true });
   const calls = path.join(dir, 'calls.log');
   const queue = path.join(dir, 'statuses');
@@ -66,12 +66,12 @@ test('submit records the id without waiting; wait polls until Accepted, then sta
   const saved = JSON.parse(fs.readFileSync(path.join(w.state, 'state.json'), 'utf8'));
   assert.equal(saved.id, 'sub-123');
   assert.deepEqual([saved.tag, saved.arch, saved.commit], ['v0.2.6', 'arm64', COMMIT]);
-  assert.ok(fs.existsSync(path.join(w.state, 'Podcode.zip')));
-  assert.match(w.calls(), /notarytool submit .*Podcode\.zip --no-wait --output-format json/);
+  assert.ok(fs.existsSync(path.join(w.state, 'PodCode.zip')));
+  assert.match(w.calls(), /notarytool submit .*PodCode\.zip --no-wait --output-format json/);
   const res = await w.run('wait', w.app, w.state, w.minutes);
   assert.equal(res.code, 0, res.out);
   assert.match(res.out, /In Progress[\s\S]*Accepted/);
-  assert.match(w.calls(), /stapler staple .*Podcode\.app[\s\S]*stapler validate/);
+  assert.match(w.calls(), /stapler staple .*PodCode\.app[\s\S]*stapler validate/);
   assert.match(fs.readFileSync(path.join(w.dir, 'summary.md'), 'utf8'), /submission id sub-123[\s\S]*Notarized and stapled/);
   for (const secret of Object.values(creds)) assert.ok(!res.out.includes(secret) && !sub.out.includes(secret), 'no secret in the output');
 });

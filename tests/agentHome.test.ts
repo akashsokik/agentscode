@@ -218,7 +218,7 @@ test("edit tools may not write an agent's own home files, in any mode; its works
   const workspace = path.join(home, 'workspace');
   fs.mkdirSync(workspace, { recursive: true });
   const denied = (tool: string, input: Record<string, unknown>) => ownFileProblem(home, workspace, tool, input);
-  assert.match(denied('Write', { file_path: path.join(home, 'soul.md') })!, /only Podcode and the user edit/);
+  assert.match(denied('Write', { file_path: path.join(home, 'soul.md') })!, /only PodCode and the user edit/);
   assert.ok(denied('Edit', { file_path: '../memory.md' }), 'relative to the cwd');
   assert.ok(denied('MultiEdit', { file_path: path.join(home, 'history', 'memory-x.md') }));
   assert.ok(denied('Write', { file_path: path.join(fs.realpathSync(home), 'dreams.jsonl') }), 'through the real path too');
@@ -544,7 +544,7 @@ test('memory.md round-trips, including text that looks like markup', () => {
     'DB_PASSWORD=${DB_PASSWORD}',
     "token = os.environ['GITHUB_TOKEN']",
     'secret: ${{ secrets.NPM_TOKEN }} in the workflow',
-    'password: see 1Password item "Podcode GitHub"',
+    'password: see 1Password item "PodCode GitHub"',
     'The token budget is 4000 tokens; max_tokens: 4096',
     'Test fixture MyComponentWithVeryLongName2Test3Case4Props is fine',
     'The password is stored in the macOS keychain',
@@ -558,7 +558,7 @@ test('memory.md round-trips, including text that looks like markup', () => {
     'TOKEN=process.env["TOKEN"]',
     "PASS=os.getenv('PASS')",
     'password: stored in the keychain',
-    'password: keychain item Podcode',
+    'password: keychain item PodCode',
     // Base64 image data is a picture, not a key.
     'Base64 image prefix iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk',
   ]) assert.ok(!looksSecret(text), text);

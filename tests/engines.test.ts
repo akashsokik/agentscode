@@ -8,7 +8,7 @@ import { COMMS_SERVER } from '../server/config.ts';
 import { COMMS_TOOLS, codexCommsConfig, commsMcpConfig, createCommsMcpServer } from '../server/comms/tools.ts';
 
 const base: Agent = {
-  id: 'a1', name: 'Ada', engine: 'codex', projectIds: ['p1'], worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: '', effort: '',
+  id: 'a1', name: 'Ada', engine: 'codex', projectIds: ['p1'], worktree: null, home: '/tmp/podcode-test/agents/a1', dreaming: true, model: '', effort: '',
   autonomy: 'edits', useMcp: false, role: 'dev', instructions: '', status: 'idle', activity: '',
   currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
   costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null,
@@ -33,15 +33,15 @@ test('codex gets the comms server per process, with the worktree git dir writabl
   const args = codexArgs({ ...base, worktree }, 'secret-token');
   const config = args.find(a => a.startsWith(`mcp_servers.${COMMS_SERVER}=`));
   assert.ok(config, 'the MCP override uses the shared server name');
-  assert.match(config!, /AGENTSCODE_TOKEN="secret-token"/);
+  assert.match(config!, /PODCODE_TOKEN="secret-token"/);
   assert.ok(args.includes('sandbox_workspace_write.writable_roots=["/r/.git"]'));
   assert.equal(codexCommsConfig('t'), config!.replace('secret-token', 't'));
 });
 
 test('the comms MCP launch config passes the token and endpoint by env only', () => {
   const config = commsMcpConfig('tok');
-  assert.equal(config.env.AGENTSCODE_TOKEN, 'tok');
-  assert.match(config.env.AGENTSCODE_TOOLS_URL, /^http:\/\/127\.0\.0\.1:\d+\/api\/comms$/);
+  assert.equal(config.env.PODCODE_TOKEN, 'tok');
+  assert.match(config.env.PODCODE_TOOLS_URL, /^http:\/\/127\.0\.0\.1:\d+\/api\/comms$/);
   assert.ok(config.args[0].endsWith('mcp.ts'));
 });
 

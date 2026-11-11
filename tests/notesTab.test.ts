@@ -160,7 +160,7 @@ test('mentions count chats, messages, handoffs and channel posts, and not tool o
   store.channels.set('ch1', { id: 'ch1', name: 'release' } as never);
   store.posts.set('ch1', [
     { id: 'p1', channelId: 'ch1', ts: 3000, from: 'agent', agentId: 'a-fen', fromName: 'Fen', kind: 'post', text: 'Recorded ACH-D12 replacing ACH-D11.', to: [] } as ChannelPost,
-    { id: 'p2', channelId: 'ch1', ts: 3001, from: 'system', fromName: 'Podcode', kind: 'event', text: 'ACH-D7 event', to: [] } as ChannelPost,
+    { id: 'p2', channelId: 'ch1', ts: 3001, from: 'system', fromName: 'PodCode', kind: 'event', text: 'ACH-D7 event', to: [] } as ChannelPost,
   ]);
   const counts = mentions.counts();
   assert.equal(counts.get('ACH-D7'), 3, 'two chat entries and one message; the tool call does not count');
@@ -269,7 +269,7 @@ test('get returns the whole entry with its links split and its citations', () =>
   assert.equal(detail.mentions, 1);
   assert.equal(detail.citations[0].who, 'Fen');
   assert.equal(detail.addedBy, undefined, 'a hand-written entry has no added-by');
-  assert.equal(api.get('ACH-N1').addedBy, 'Ada', 'added-by, recorded by Podcode, comes through');
+  assert.equal(api.get('ACH-N1').addedBy, 'Ada', 'added-by, recorded by PodCode, comes through');
   assert.throws(() => api.get('ACH-D99'), /no note or decision ACH-D99/);
   assert.throws(() => api.get('nonsense'), /Give an id/);
 });

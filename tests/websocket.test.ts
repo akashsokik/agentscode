@@ -84,12 +84,12 @@ test('sockets from other origins are refused', async () => {
 
 test('the built app is served for client routes, the API keeps JSON 404s', async () => {
   const dist = tempDir('dist');
-  fs.writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>Podcode</title>');
+  fs.writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>PodCode</title>');
   const { server, port } = await boot(dist);
   try {
     const page = await fetch(`http://127.0.0.1:${port}/some/client/route`);
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /Podcode/);
+    assert.match(await page.text(), /PodCode/);
     const missing = await fetch(`http://127.0.0.1:${port}/api/nope`);
     assert.equal(missing.status, 404);
     assert.deepEqual(await missing.json(), { error: 'Not found.' });

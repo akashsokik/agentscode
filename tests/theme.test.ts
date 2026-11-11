@@ -16,7 +16,7 @@ test('the stored theme resolves the same in every window: light, dark, or the sy
 
 test('a window that stays open (the quick window) follows a theme change made in another one', async () => {
   // Just enough of a browser for web/theme.ts: storage, a media query, and the <html> class list.
-  const store = new Map<string, string>([['agentscode:theme', 'dark']]);
+  const store = new Map<string, string>([['podcode:theme', 'dark']]);
   const classes = new Set<string>();
   const win = new EventTarget() as EventTarget & Record<string, unknown>;
   const media = Object.assign(new EventTarget(), { matches: false });
@@ -35,11 +35,11 @@ test('a window that stays open (the quick window) follows a theme change made in
     await import(themeModule);
     assert.equal(classes.has('theme-light'), false, 'opens dark, as saved');
     // The main window saves light: the storage event reaches this window.
-    store.set('agentscode:theme', 'light');
-    win.dispatchEvent(Object.assign(new Event('storage'), { key: 'agentscode:theme' }));
+    store.set('podcode:theme', 'light');
+    win.dispatchEvent(Object.assign(new Event('storage'), { key: 'podcode:theme' }));
     assert.equal(classes.has('theme-light'), true, 'turns light live');
     // Back to system on a dark Mac, missed as an event: coming to the front catches it.
-    store.set('agentscode:theme', 'system');
+    store.set('podcode:theme', 'system');
     win.dispatchEvent(new Event('focus'));
     assert.equal(classes.has('theme-light'), false);
     // The system turns light: the media query follows.

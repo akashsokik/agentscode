@@ -22,11 +22,11 @@ function world(quit: 'exits' | 'hangs' | 'holds') {
   const pidFile = path.join(dir, 'app.pid');
   const serverUp = path.join(dir, 'server.up');
   const opened = path.join(dir, 'opened');
-  const app = path.join(dir, 'Applications', 'Podcode.app');
-  const build = path.join(dir, 'release', 'Podcode.app');
+  const app = path.join(dir, 'Applications', 'PodCode.app');
+  const build = path.join(dir, 'release', 'PodCode.app');
   for (const [root, mark] of [[app, 'old'], [build, 'new']] as const) {
     fs.mkdirSync(path.join(root, 'Contents', 'MacOS'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'Contents', 'MacOS', 'Podcode'), '#!/bin/sh\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(root, 'Contents', 'MacOS', 'PodCode'), '#!/bin/sh\n', { mode: 0o755 });
     fs.writeFileSync(path.join(root, 'build.txt'), mark);
   }
   const launch = () => {
@@ -51,7 +51,7 @@ function world(quit: 'exits' | 'hangs' | 'holds') {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
     AGENTSCODE_APP: app,
-    AGENTSCODE_PREV: path.join(dir, 'Podcode.app.prev'),
+    AGENTSCODE_PREV: path.join(dir, 'PodCode.app.prev'),
     AGENTSCODE_NEW_BUILD: build,
     AGENTSCODE_LOCK: path.join(dir, 'lock'),
     AGENTSCODE_TICK: '0.01',
@@ -74,7 +74,7 @@ test('a normal quit: the new build goes in, the old one is kept, and the app is 
     assert.equal(code, 0, out);
     assert.equal(w.isAlive(before), false);
     assert.equal(w.installed(), 'new');
-    assert.equal(fs.readFileSync(path.join(w.dir, 'Podcode.app.prev', 'build.txt'), 'utf8'), 'old');
+    assert.equal(fs.readFileSync(path.join(w.dir, 'PodCode.app.prev', 'build.txt'), 'utf8'), 'old');
     assert.equal(fs.readFileSync(w.opened, 'utf8').trim(), w.app);
     assert.match(out, /Restarted onto/);
     assert.equal(fs.existsSync(w.env.AGENTSCODE_LOCK), false, 'the lock is released');
@@ -147,7 +147,7 @@ test('if the current app cannot be moved aside, nothing is copied into it and th
     assert.equal(code, 1, out);
     assert.match(out, /Could not move the current app/);
     assert.doesNotMatch(out, /Restarted onto/);
-    assert.equal(fs.existsSync(path.join(w.app, 'Podcode.app')), false, 'no nested copy inside the old bundle');
+    assert.equal(fs.existsSync(path.join(w.app, 'PodCode.app')), false, 'no nested copy inside the old bundle');
     assert.equal(w.installed(), 'old');
     assert.equal(fs.readFileSync(w.opened, 'utf8').trim(), w.app, 'the old app is reopened');
     assert.equal(fs.existsSync(w.env.AGENTSCODE_LOCK), false);

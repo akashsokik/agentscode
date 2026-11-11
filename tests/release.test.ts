@@ -6,13 +6,13 @@ import { mergeMacYml } from '../scripts/release/merge-mac-yml.mjs';
 
 const feed = (arch: string, hash: string) => `version: 0.2.0
 files:
-  - url: Podcode-mac-${arch}.zip
+  - url: PodCode-mac-${arch}.zip
     sha512: ${hash}zip
     size: 100
-  - url: Podcode-mac-${arch}.dmg
+  - url: PodCode-mac-${arch}.dmg
     sha512: ${hash}dmg
     size: 200
-path: Podcode-mac-${arch}.zip
+path: PodCode-mac-${arch}.zip
 sha512: ${hash}zip
 releaseDate: '2026-11-07T00:00:00.000Z'
 `;
@@ -20,10 +20,10 @@ releaseDate: '2026-11-07T00:00:00.000Z'
 test('mergeMacYml lists both architectures and keeps the first file\'s top-level fields', () => {
   const merged: string = mergeMacYml(feed('arm64', 'a'), feed('x64', 'b'));
   for (const name of ['arm64.zip', 'arm64.dmg', 'x64.zip', 'x64.dmg']) {
-    assert.match(merged, new RegExp(`- url: Podcode-mac-${name.replace('.', '\\.')}\\n`));
+    assert.match(merged, new RegExp(`- url: PodCode-mac-${name.replace('.', '\\.')}\\n`));
   }
-  assert.match(merged, /- url: Podcode-mac-x64\.zip\n    sha512: bzip\n    size: 100\n/);
-  assert.match(merged, /^path: Podcode-mac-arm64\.zip$/m);
+  assert.match(merged, /- url: PodCode-mac-x64\.zip\n    sha512: bzip\n    size: 100\n/);
+  assert.match(merged, /^path: PodCode-mac-arm64\.zip$/m);
   assert.match(merged, /^releaseDate: /m);
   // The file entries stay inside files:, before the top-level keys.
   assert.ok(merged.indexOf('x64.dmg') < merged.indexOf('\npath:'));

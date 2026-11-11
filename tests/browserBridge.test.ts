@@ -119,12 +119,12 @@ test('the socket token is private to the user, fresh each start, and checked in 
 test('browser calls read as short rows, and a screenshot row finds its file', () => {
   assert.equal(browserSummary('open', { url: 'http://localhost:3000/login' }), 'localhost:3000/login');
   assert.equal(browserSummary('type', { ref: 'e4', text: 'ada@example.com', submit: true }), 'e4 "ada@example.com" and Enter');
-  assert.deepEqual(presentTool({ name: 'mcp__agentscode__browser_open', summary: 'localhost:3000/login', status: 'ok' }), { action: 'Opened', target: 'localhost:3000/login' });
+  assert.deepEqual(presentTool({ name: 'mcp__podcode__browser_open', summary: 'localhost:3000/login', status: 'ok' }), { action: 'Opened', target: 'localhost:3000/login' });
   assert.deepEqual(presentTool({ name: 'agentscode.browser_snapshot', summary: 'agentscode.browser_snapshot', status: 'ok' }), { action: 'Read page', target: '' });
-  const clicked = { name: 'mcp__agentscode__browser_click', summary: 'e12', status: 'ok' as const, output: JSON.stringify({ url: 'http://localhost:3000/', title: 'Home', input: 'synthetic' }) };
+  const clicked = { name: 'mcp__podcode__browser_click', summary: 'e12', status: 'ok' as const, output: JSON.stringify({ url: 'http://localhost:3000/', title: 'Home', input: 'synthetic' }) };
   assert.deepEqual(presentTool(clicked), { action: 'Clicked', target: 'e12 (synthetic input)' });
   assert.deepEqual(presentTool({ ...clicked, output: JSON.stringify({ url: 'x', title: 'y', input: 'trusted' }) }), { action: 'Clicked', target: 'e12' });
-  const shot = { name: 'mcp__agentscode__browser_screenshot', summary: 't1', status: 'ok' as const, output: JSON.stringify({ path: '/Users/me/.agentscode/agents/x/browser/2026-11-08T13-00-00-000Z-t1.png', width: 1280, height: 800 }) };
+  const shot = { name: 'mcp__podcode__browser_screenshot', summary: 't1', status: 'ok' as const, output: JSON.stringify({ path: '/Users/me/.agentscode/agents/x/browser/2026-11-08T13-00-00-000Z-t1.png', width: 1280, height: 800 }) };
   assert.equal(browserScreenshot(shot), '2026-11-08T13-00-00-000Z-t1.png');
   assert.equal(browserScreenshot({ ...shot, status: 'error' }), null);
   assert.equal(browserScreenshot({ ...shot, output: JSON.stringify({ path: '/x/../../etc/passwd' }) }), null);
@@ -154,7 +154,7 @@ test('agents\' browser tools: plan-only limits, the scripts setting, URL check, 
   const opened = await call(ada.id, 'browser_open', { url: 'localhost:3000' });
   assert.deepEqual(opened, { op: 'open', args: { url: 'http://localhost:3000/' } });
   for (const bad of ['file:///etc/passwd', 'javascript:alert(1)', 'not a url']) await assert.rejects(call(ada.id, 'browser_open', { url: bad }), /not a web address/, bad);
-  await assert.rejects(call(ada.id, 'browser_open', { url: 'http://127.0.0.1:4320/' }), /does not open Podcode itself/);
+  await assert.rejects(call(ada.id, 'browser_open', { url: 'http://127.0.0.1:4320/' }), /does not open PodCode itself/);
   assert.equal((await call(ada.id, 'browser_open', { url: 'example.com/docs' })).args.url, 'https://example.com/docs');
 
   const shot = await call(ada.id, 'browser_screenshot', { tab_id: 't1' });
@@ -211,10 +211,10 @@ test('the bridge socket takes main only: right token, no Origin; then requests f
   });
   try {
     assert.equal(await refused({}), true, 'no token');
-    assert.equal(await refused({ 'x-agentscode-bridge': 'b'.repeat(64) }), true, 'wrong token');
-    assert.equal(await refused({ 'x-agentscode-bridge': token, Origin: `http://127.0.0.1:${port}` }), true, 'a page, even the app\'s own');
+    assert.equal(await refused({ 'x-podcode-bridge': 'b'.repeat(64) }), true, 'wrong token');
+    assert.equal(await refused({ 'x-podcode-bridge': token, Origin: `http://127.0.0.1:${port}` }), true, 'a page, even the app\'s own');
 
-    const ws = new WebSocket(url, { headers: { 'x-agentscode-bridge': token } });
+    const ws = new WebSocket(url, { headers: { 'x-podcode-bridge': token } });
     const pings: unknown[] = [];
     ws.on('message', data => {
       const message = JSON.parse(String(data));

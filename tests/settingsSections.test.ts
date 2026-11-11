@@ -20,7 +20,7 @@ test('the last section is remembered per agent, and bad storage is ignored', () 
   assert.equal(rememberedSection('a', storage), 'memory');
   assert.equal(rememberedSection('b', storage), 'soul');
   assert.equal(rememberedSection('c', storage), undefined);
-  store.set('agentscode:agent-settings-section', '{not json');
+  store.set('podcode:agent-settings-section', '{not json');
   assert.equal(rememberedSection('a', storage), undefined);
   rememberSection('a', 'general', undefined);
 });

@@ -302,7 +302,7 @@ test('agents add, read and search notes through the tools, and see the index in 
 
 test('codes are assigned on load to projects from before codes, and a seed file in the data folder is applied once', async () => {
   const dir = tempDir('state');
-  const dataDir = path.join(dir, '.agentscode');
+  const dataDir = path.join(dir, '.podcode');
   fs.mkdirSync(path.join(dataDir, 'projects'), { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'projects', 'codes.json'), JSON.stringify({ 'docs-site': 'DOC' }));
   const projects = ['acme-web-app', 'docs-site', 'lonely'].map((name, i) => ({ id: `p${i}`, name, path: projectDir(dir, name), createdAt: 0, exists: true, isGit: false }));

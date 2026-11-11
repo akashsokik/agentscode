@@ -101,7 +101,7 @@ test('the stdio comms MCP server reaches the IDE as the calling agent', async ()
     const transport = new StdioClientTransport({
       command: config.command,
       args: config.args,
-      env: { ...config.env, AGENTSCODE_TOOLS_URL: `http://127.0.0.1:${port}/api/comms`, PATH: process.env.PATH ?? '' },
+      env: { ...config.env, PODCODE_TOOLS_URL: `http://127.0.0.1:${port}/api/comms`, PATH: process.env.PATH ?? '' },
       stderr: 'pipe',
     });
     const client = new Client({ name: 'agent', version: '1.0.0' });

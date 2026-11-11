@@ -8,7 +8,7 @@ import { AgentManager } from '../server/manager.ts';
 import { Store } from '../server/store.ts';
 
 export function tempDir(prefix: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `agentscode-${prefix}-`));
+  return fs.mkdtempSync(path.join(os.tmpdir(), `podcode-${prefix}-`));
 }
 
 export const tick = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -82,8 +82,8 @@ export interface Harness {
 
 export function harness(engines: Partial<Record<EngineKind, EngineInfo>> = {}, options: { idleProcessMs?: number } = {}): Harness {
   const dir = tempDir('state');
-  // Named like the real ~/.agentscode: a dot folder, which Express refuses to serve files from unless told.
-  const store = new Store(path.join(dir, '.agentscode'));
+  // Named like the real ~/.podcode: a dot folder, which Express refuses to serve files from unless told.
+  const store = new Store(path.join(dir, '.podcode'));
   store.load();
   const events: ServerEvent[] = [];
   const runners = new Map<string, FakeRunner[]>();

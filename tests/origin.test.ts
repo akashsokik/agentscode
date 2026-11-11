@@ -4,14 +4,14 @@ import { isLocalOrigin } from '../server/app.ts';
 
 const ports = [4320, 5174];
 
-test('only Podcode\'s own pages may write or open sockets', () => {
+test('only PodCode\'s own pages may write or open sockets', () => {
   // No Origin: same-origin navigations and non-browser clients.
   assert.equal(isLocalOrigin(undefined, ports), true);
   for (const origin of ['http://127.0.0.1:4320', 'http://localhost:4320', 'http://[::1]:4320', 'http://localhost:5174']) {
     assert.equal(isLocalOrigin(origin, ports), true, origin);
   }
   for (const origin of [
-    'http://localhost:3000', // a dev server, in the user's browser or Podcode's browser tab
+    'http://localhost:3000', // a dev server, in the user's browser or PodCode's browser tab
     'http://127.0.0.1:8080',
     'http://localhost', // port 80
     'https://localhost:4320', // the app is never served over https

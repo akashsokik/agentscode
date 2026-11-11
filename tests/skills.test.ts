@@ -7,7 +7,7 @@ import { MAX_LISTED_FILES, listProjectFiles } from '../server/fileList.ts';
 import { commandBody, discoverCommands, parseFrontmatter } from '../server/skills.ts';
 
 function tree(files: Record<string, string>): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agentscode-skills-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'podcode-skills-'));
   for (const [rel, text] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     fs.writeFileSync(path.join(root, rel), text);

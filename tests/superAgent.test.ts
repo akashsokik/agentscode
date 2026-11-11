@@ -27,29 +27,29 @@ test('on Claude the SuperAgent has only read tools: no Edit, Write, Bash, Notebo
   for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'Agent', 'Task']) assert.ok(!policy.tools!.includes(tool), tool);
   assert.equal(policy.strictMcpConfig, true, 'even with MCP servers on');
   assert.equal(policy.permissionMode, 'default', 'nothing to edit, so no plan mode to leave');
-  assert.ok(policy.allowedTools!.includes('mcp__agentscode__create_agent'));
-  assert.ok(policy.allowedTools!.includes('mcp__agentscode__browser_snapshot'));
-  for (const tool of ['browser_click', 'browser_type', 'browser_press', 'browser_eval']) assert.ok(!policy.allowedTools!.includes(`mcp__agentscode__${tool}`), tool);
+  assert.ok(policy.allowedTools!.includes('mcp__podcode__create_agent'));
+  assert.ok(policy.allowedTools!.includes('mcp__podcode__browser_snapshot'));
+  for (const tool of ['browser_click', 'browser_type', 'browser_press', 'browser_eval']) assert.ok(!policy.allowedTools!.includes(`mcp__podcode__${tool}`), tool);
   // The backup lock in canUseTool.
-  for (const tool of ['Edit', 'Write', 'Bash', 'Agent', 'mcp__agentscode__browser_click', 'mcp__other__write_file']) assert.equal(superMayUse(tool), false, tool);
-  for (const tool of ['Read', 'Grep', 'mcp__agentscode__delegate_task', 'mcp__agentscode__ask_user']) assert.equal(superMayUse(tool), true, tool);
+  for (const tool of ['Edit', 'Write', 'Bash', 'Agent', 'mcp__podcode__browser_click', 'mcp__other__write_file']) assert.equal(superMayUse(tool), false, tool);
+  for (const tool of ['Read', 'Grep', 'mcp__podcode__delegate_task', 'mcp__podcode__ask_user']) assert.equal(superMayUse(tool), true, tool);
 
   // Every other agent is as before.
   const dev = claudeToolPolicy({ role: 'dev', autonomy: 'readonly', useMcp: false }, true);
   assert.equal(dev.tools, undefined);
   assert.equal(dev.permissionMode, 'plan');
-  assert.ok(!dev.allowedTools!.includes('mcp__agentscode__create_agent'));
+  assert.ok(!dev.allowedTools!.includes('mcp__podcode__create_agent'));
 });
 
 test('on Codex and OrcaCode the SuperAgent runs read-only, and only its MCP server offers the commands', () => {
   const superAgent = { role: 'super', autonomy: 'readonly', model: '', effort: '', sessionId: null, worktree: null } as unknown as Agent;
   const args = codexArgs(superAgent, 'tok');
   assert.ok(args.includes('sandbox_mode="read-only"'));
-  assert.ok(args.some(a => a.includes('AGENTSCODE_EXECUTIVE="1"')));
-  assert.ok(!codexArgs({ ...superAgent, role: 'dev' }, 'tok').some(a => a.includes('AGENTSCODE_EXECUTIVE')));
+  assert.ok(args.some(a => a.includes('PODCODE_EXECUTIVE="1"')));
+  assert.ok(!codexArgs({ ...superAgent, role: 'dev' }, 'tok').some(a => a.includes('PODCODE_EXECUTIVE')));
   assert.ok(orcacodeArgs(superAgent, { prompt: '/tmp/p' }).includes('--read-only'));
-  assert.match(orcacodeMcpConfig('tok', true), /AGENTSCODE_EXECUTIVE/);
-  assert.doesNotMatch(orcacodeMcpConfig('tok'), /AGENTSCODE_EXECUTIVE/);
+  assert.match(orcacodeMcpConfig('tok', true), /PODCODE_EXECUTIVE/);
+  assert.doesNotMatch(orcacodeMcpConfig('tok'), /PODCODE_EXECUTIVE/);
 });
 
 // ---- one SuperAgent ----------------------------------------------------------------------------------

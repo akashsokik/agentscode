@@ -73,7 +73,7 @@ test('shutdown closes every tab and the holder, and no holder appears as the win
 test('while quitting, no new tab can be made', () => {
   const { host } = hostWithWindow();
   host.shutdown();
-  assert.throws(() => host.create('late', ''), /Podcode is quitting/);
+  assert.throws(() => host.create('late', ''), /PodCode is quitting/);
   assert.deepEqual(host.list(), []);
 });
 

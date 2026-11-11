@@ -17,7 +17,7 @@ import { helpListsAddDir, orcacodeAddDir } from '../server/config.ts';
 import { engineProblem, ORCACODE_MIN_VERSION, ORCACODE_NO_ADD_DIR, orcacodeModelValue, splitOrcacodeModel, versionBelow } from '../shared/engines.ts';
 
 const base: Agent = {
-  id: 'a1', name: 'Ada', engine: 'orcacode', projectIds: ['p1'], worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: '', effort: '',
+  id: 'a1', name: 'Ada', engine: 'orcacode', projectIds: ['p1'], worktree: null, home: '/tmp/podcode-test/agents/a1', dreaming: true, model: '', effort: '',
   autonomy: 'ask', useMcp: false, role: 'dev', instructions: '', status: 'idle', activity: '',
   currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
   costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null,
@@ -47,7 +47,7 @@ test('orcacode resume, model, effort and images are passed as separate arguments
 test('the comms server goes to orcacode as one --mcp-config entry with the token in env', () => {
   const config = JSON.parse(orcacodeMcpConfig('secret-token'));
   assert.deepEqual(Object.keys(config), [COMMS_SERVER]);
-  assert.equal(config[COMMS_SERVER].env.AGENTSCODE_TOKEN, 'secret-token');
+  assert.equal(config[COMMS_SERVER].env.PODCODE_TOKEN, 'secret-token');
   assert.ok(Array.isArray(config[COMMS_SERVER].args) && typeof config[COMMS_SERVER].command === 'string');
 });
 
@@ -183,7 +183,7 @@ test('the OrcaCode runner runs a turn: session, tools, approval over stdin, usag
   const first = r.run();
   assert.match(first.prompt, /You are Ada/);
   assert.ok(first.prompt.includes(ORCACODE_COMMS_NOTE));
-  assert.equal(JSON.parse(first.mcp!)[COMMS_SERVER].env.AGENTSCODE_TOKEN, 'tok-1');
+  assert.equal(JSON.parse(first.mcp!)[COMMS_SERVER].env.PODCODE_TOKEN, 'tok-1');
   // The private folder with the prompt and token is gone after the turn.
   assert.equal(fs.existsSync(path.dirname(first.args[first.args.indexOf('--prompt-file') + 1])), false);
 
@@ -202,7 +202,7 @@ test('the SuperAgent on OrcaCode never runs a shell command: it is refused witho
   assert.equal(r.approvals.length, 0);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'decision.txt'), 'utf8')), { type: 'approval', id: 'approval-1', decision: 'deny' });
   assert.ok(r.run().args.includes('--read-only'));
-  assert.equal(JSON.parse(r.run().mcp!)[COMMS_SERVER].env.AGENTSCODE_EXECUTIVE, '1');
+  assert.equal(JSON.parse(r.run().mcp!)[COMMS_SERVER].env.PODCODE_EXECUTIVE, '1');
 });
 
 test('a denied approval is written as deny, and a turn that runs out of steps says so', async () => {

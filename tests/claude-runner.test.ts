@@ -9,7 +9,7 @@ import { COMMS_TOOLS } from '../server/comms/tools.ts';
 import { settle } from './helpers.ts';
 
 const agent: Agent = {
-  id: 'a1', name: 'Ada', engine: 'claude', projectIds: ['p1'], worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: 'sonnet', effort: '',
+  id: 'a1', name: 'Ada', engine: 'claude', projectIds: ['p1'], worktree: null, home: '/tmp/podcode-test/agents/a1', dreaming: true, model: 'sonnet', effort: '',
   autonomy: 'ask', useMcp: false, role: 'dev', instructions: 'Prefer small diffs.', status: 'idle', activity: '',
   currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
   costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null,
@@ -70,7 +70,7 @@ test('the Claude runner wires the comms server, instructions and turn results', 
   const options = captured.options!;
   const servers = options.mcpServers as Record<string, { env: Record<string, string> }>;
   assert.deepEqual(Object.keys(servers), [COMMS_SERVER]);
-  assert.equal(servers[COMMS_SERVER].env.AGENTSCODE_TOKEN, 'tok-123');
+  assert.equal(servers[COMMS_SERVER].env.PODCODE_TOKEN, 'tok-123');
   assert.deepEqual(options.allowedTools, COMMS_TOOLS.map(name => `mcp__${COMMS_SERVER}__${name}`));
   assert.equal(options.permissionMode, 'default');
   assert.equal(options.strictMcpConfig, true);
@@ -309,7 +309,7 @@ test('a SuperAgent session gets only read tools, its commands, none of the user\
   assert.ok((options.allowedTools as string[]).includes(`mcp__${COMMS_SERVER}__create_agent`));
   assert.ok(!(options.allowedTools as string[]).includes(`mcp__${COMMS_SERVER}__browser_eval`));
   const servers = options.mcpServers as Record<string, { env: Record<string, string> }>;
-  assert.equal(servers[COMMS_SERVER].env.AGENTSCODE_EXECUTIVE, '1');
+  assert.equal(servers[COMMS_SERVER].env.PODCODE_EXECUTIVE, '1');
   const signal = new AbortController().signal;
   for (const tool of ['Bash', 'Edit', 'Write', 'mcp__other__write']) {
     const decision = await options.canUseTool(tool, {}, { signal, suggestions: [] });

@@ -1005,7 +1005,7 @@ test('turning dreaming off stops a dream that is thinking, and it writes nothing
   assert.ok(!h.manager.entries(ada.id).some(e => e.text.startsWith('Dreamed:')));
 });
 
-test('a dream stopped because Podcode is closing records no failure', async () => {
+test('a dream stopped because PodCode is closing records no failure', async () => {
   const h = harness();
   const project = h.manager.addProject({ path: projectDir(h.dir, 'app') });
   const ada = await h.manager.create({ name: 'Ada', engine: 'claude', projectId: project.id });

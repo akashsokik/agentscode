@@ -65,11 +65,11 @@ test('repos come from GitHub remotes; output and logs are capped with a note', (
 
 test('the SuperAgent, reviewers and testers have the looking tools; developers do not', () => {
   const policy = (role: Agent['role']) => claudeToolPolicy({ role, autonomy: 'ask', useMcp: false }, true).allowedTools!;
-  for (const role of ['super', 'reviewer', 'tester'] as const) assert.ok(policy(role).includes('mcp__agentscode__gh_runs') && policy(role).includes('mcp__agentscode__app_screenshot'), role);
-  assert.ok(!policy('dev').includes('mcp__agentscode__gh_runs'));
+  for (const role of ['super', 'reviewer', 'tester'] as const) assert.ok(policy(role).includes('mcp__podcode__gh_runs') && policy(role).includes('mcp__podcode__app_screenshot'), role);
+  assert.ok(!policy('dev').includes('mcp__podcode__gh_runs'));
   const reviewer = { role: 'reviewer', autonomy: 'ask', model: '', effort: '', sessionId: null, worktree: null } as unknown as Agent;
-  assert.ok(codexArgs(reviewer, 'tok').some(a => a.includes('AGENTSCODE_EYES="1"')));
-  assert.ok(!codexArgs({ ...reviewer, role: 'dev' }, 'tok').some(a => a.includes('AGENTSCODE_EYES')));
+  assert.ok(codexArgs(reviewer, 'tok').some(a => a.includes('PODCODE_EYES="1"')));
+  assert.ok(!codexArgs({ ...reviewer, role: 'dev' }, 'tok').some(a => a.includes('PODCODE_EYES')));
 });
 
 // ---- through the server --------------------------------------------------------------------------

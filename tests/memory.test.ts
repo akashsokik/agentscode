@@ -3,8 +3,8 @@ import test from 'node:test';
 import { memoryDate, soulPath } from '../web/memory.ts';
 
 test('the soul sits in the agent home as soul.md', () => {
-  assert.equal(soulPath('/Users/me/.agentscode/agents/a1'), '/Users/me/.agentscode/agents/a1/soul.md');
-  assert.equal(soulPath('/Users/me/.agentscode/agents/a1/'), '/Users/me/.agentscode/agents/a1/soul.md');
+  assert.equal(soulPath('/Users/me/.podcode/agents/a1'), '/Users/me/.podcode/agents/a1/soul.md');
+  assert.equal(soulPath('/Users/me/.podcode/agents/a1/'), '/Users/me/.podcode/agents/a1/soul.md');
 });
 
 test('memory dates read as today, yesterday, a day this year, or a day in another year', () => {

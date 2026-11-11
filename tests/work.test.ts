@@ -321,7 +321,7 @@ test('cleanup lists merged work only: never main or backup/*, never a live agent
   git(repo, 'worktree', 'add', '-q', '-b', 'feat/locked', locked, 'feat/a');
   git(repo, 'worktree', 'lock', locked);
   const fresh = path.join(home, 'wt-fresh');
-  // A worktree another tool made, outside AgentsCode's data folder: never AgentsCode's to remove.
+  // A worktree another tool made, outside PodCode's data folder: never PodCode's to remove.
   const foreign = path.join(dir, 'other-tool', 'wt');
   git(repo, 'worktree', 'add', '-q', '-b', 'feat/foreign', foreign, 'feat/a');
   git(repo, 'worktree', 'add', '-q', fresh, 'feat/fresh');
@@ -336,7 +336,7 @@ test('cleanup lists merged work only: never main or backup/*, never a live agent
   assert.ok(!folders.has(fs.realpathSync(locked)), 'a locked worktree');
   assert.ok(!folders.has(fs.realpathSync(fresh)), 'a branch made from main and never used is new, not merged');
   assert.ok(!folders.has(repo), 'never the project\'s own folder');
-  assert.ok(!folders.has(fs.realpathSync(foreign)), 'never a worktree made outside AgentsCode');
+  assert.ok(!folders.has(fs.realpathSync(foreign)), 'never a worktree made outside PodCode');
   const branches = view.cleanup.branches.map(b => b.name);
   assert.ok(!branches.includes('main') && !branches.includes('backup/pre-x') && !branches.includes('feat/fresh'));
   assert.ok(!branches.includes('feat/live') && !branches.includes('feat/locked'), 'still checked out in a folder that stays');
