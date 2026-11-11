@@ -545,6 +545,11 @@ export interface Conversation {
   startedBy: string; // agent id of the first sender
   messageLimit: number; // 0 means unlimited
   stopped: boolean;
+  /**
+   * Who stopped it: 'user' for Stop in Comms or stopping an agent. Absent on conversations stopped
+   * before this was recorded, which includes ones an earlier build closed on every restart.
+   */
+  stoppedBy?: 'user';
   createdAt: number;
   /**
    * Started by the SuperAgent in a turn the user gave it (or from mail in such a conversation): work
