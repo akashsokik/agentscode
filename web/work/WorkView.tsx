@@ -160,7 +160,7 @@ function MergeRow({ m, project, wide }: { m: WorkMerge; project: WorkProject; wi
             ['Merged', <>{new Date(m.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} into {project.defaultBranch}{m.hash ? <span className="font-mono text-content/45">{m.hash.slice(0, 7)}</span> : null}</>],
             ['By', who ? <><Who id={m.agentIds[0]} name={m.names[0]} size="size-3.5" />{who}<OpenChat agentId={m.agentIds[0]} /></> : <span className="text-content/45">Not recorded</span>],
             ['Review', m.reviewer ? `${m.reviewer}, approved` : <span className="text-content/45">Not recorded</span>],
-            ['History', m.rewritten ? (m.hash ? `rewritten; now ${m.hash.slice(0, 7)}, same files` : 'rewritten and folded in with others') : 'as merged'],
+            ['History', m.evidence.kind === 'backup' ? `rewritten; the original is kept in ${m.evidence.backup}` : m.rewritten ? (m.hash ? `rewritten; now ${m.hash.slice(0, 7)}, same files` : 'rewritten; its files are on main') : 'as merged'],
             ['GitHub', m.pushed === true ? <span className="text-success">pushed</span> : m.pushed === false ? 'not pushed yet' : <span className="text-content/45">not known</span>],
           ]}
           chips={m.refs.length || m.conversationId ? <>{m.refs.map(id => <RefChip key={id} id={id} />)}<TaskChip conversationId={m.conversationId} /></> : undefined}
@@ -347,6 +347,9 @@ function folderNote(f: CleanupFolder): string {
   if (f.reason === 'missing') return 'folder already gone';
   const real = f.changes.changed + f.changes.untracked - f.changes.links;
   if (real) return `${real} ${real === 1 ? 'file' : 'files'} uncommitted`;
+  // Ignored files git never saw (.env and the like) go with the folder: name them.
+  if (f.changes.ignored.length) return `ignored: ${f.changes.ignored.slice(0, 2).join(', ')}${f.changes.ignored.length > 2 ? ` +${f.changes.ignored.length - 2}` : ''}`;
+  if (f.changes.built) return 'clean (build output)';
   if (f.changes.links) return 'clean (a linked folder)';
   return f.reason === 'detached' ? 'detached, clean' : 'clean';
 }
@@ -409,7 +412,7 @@ function CleanupDialog({ projects, onClose }: { projects: WorkProject[]; onClose
                       <Box on={branches.has(key)} label={`Delete branch ${b.name}`} onToggle={() => flip(branches, key, setBranches)} />
                       <Who name={b.agentName} size="size-3.5" />
                       <span className="min-w-0 truncate font-mono text-[11.5px]">{b.name}</span>
-                      <span className="ml-auto shrink-0 text-content/40">{b.inFolder ? 'goes with its folder' : b.by === 'record' ? 'merged by record' : 'merged'}</span>
+                      <span className="ml-auto shrink-0 text-content/40" title={b.backup ? `Its commits stay in ${b.backup}` : undefined}>{b.inFolder ? 'goes with its folder' : b.backup ? `kept in ${b.backup}` : b.by === 'record' ? 'merged by record' : 'merged'}</span>
                     </div>
                   );
                 })}
@@ -456,7 +459,7 @@ function CleanupDialog({ projects, onClose }: { projects: WorkProject[]; onClose
             <AlertCircle aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
             <span>
               {byRecord ? 'After a history rewrite, git no longer sees some of these branches as merged; AgentsCode knows from its merge and review records, so they wait for your OK here. ' : ''}
-              Removing a folder deletes its files (a linked node_modules is only unlinked), so it always waits for you. Nothing here is pushed, and main is never touched.
+              Only merges with proof their work is on main are listed. Removing a folder deletes its files, ignored ones too (a linked node_modules is only unlinked), so it always waits for you; folders with uncommitted or ignored files ask twice. Nothing here is pushed, and main is never touched.
             </span>
           </p>
         ) : null}

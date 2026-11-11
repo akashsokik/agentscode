@@ -57,11 +57,12 @@ test('only read-only git commands are allowed for the view', () => {
   for (const args of [
     ['reflog', 'show', 'refs/heads/main'], ['worktree', 'list', '--porcelain'], ['rev-list', '--count', 'a..b'], ['log', '-1'],
     ['status', '--porcelain'], ['rev-parse', '--show-toplevel'], ['merge-base', '--is-ancestor', 'a', 'b'], ['for-each-ref', 'refs/heads'],
-    ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'],
+    ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], ['merge-base', 'a', 'b'],
+    ['diff', '--no-ext-diff', '--no-textconv', '--quiet', 'a', 'b', '--', 'f'],
   ]) assert.ok(isReadOnlyGit(args), args.join(' '));
   for (const args of [
     ['fetch'], ['pull'], ['push'], ['worktree', 'remove', 'x'], ['worktree', 'prune'], ['worktree', 'list'], ['branch', '-D', 'x'], ['status'],
-    ['merge-base', 'a', 'b'], ['reset', '--hard'], ['checkout', 'x'], ['gc'], ['reflog', 'expire'], ['log', '--output=/tmp/x'], ['update-ref', 'x', 'y'],
+    ['merge-base', '--fork-point', 'a'], ['diff', 'a', 'b'], ['diff', '--no-ext-diff', '--quiet', 'a', 'b'], ['reset', '--hard'], ['checkout', 'x'], ['gc'], ['reflog', 'expire'], ['log', '--output=/tmp/x'], ['update-ref', 'x', 'y'],
     ['symbolic-ref', 'HEAD', 'refs/heads/x'], ['symbolic-ref', '--short', 'HEAD', 'refs/remotes/x'], ['config', 'x', 'y'],
   ]) assert.equal(isReadOnlyGit(args), false, args.join(' '));
 });
@@ -301,7 +302,7 @@ test('in progress: ahead and behind main, changes, last commit; symlinks are not
   assert.equal(d.last?.subject, 'd two');
   assert.equal(d.agentName, 'Fen', 'owner from the folder being under its home');
   assert.equal(d.state, 'open');
-  assert.deepEqual(countChanges('?? node_modules\n M a.ts\n?? b.txt\n', wt), { changed: 1, untracked: 2, links: 1 });
+  assert.deepEqual(countChanges('?? node_modules\n M a.ts\n?? b.txt\n!! dist/\n!! .env\n', wt), { changed: 1, untracked: 2, links: 1, built: 1, ignored: ['.env'] });
 });
 
 test('cleanup lists merged work only: never main or backup/*, never a live agent\'s worktree, a locked one or a new branch; dirty folders flagged', async () => {
@@ -409,4 +410,135 @@ test('the cleanup route refuses a cross-origin write', async () => {
   } finally {
     server.close();
   }
+});
+
+// ---- evidence before cleanup (Rhea's review of 579d48e) -------------------------------------------
+
+test('a merge undone by a reset is not merged: no merged row, no branch, no folder for cleanup', async () => {
+  const { dir, repo, project } = setup();
+  const home = path.join(dir, 'data', 'agents', 'fen', 'workspace');
+  fs.mkdirSync(home, { recursive: true });
+  const wt = path.join(home, 'wt-u');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/u', wt, 'main');
+  commit(wt, 'u.txt', 'u', 'work on u');
+  merge(repo, 'feat/u', 'Merge feat/u (Fen): u');
+  const svc = service(dir);
+  const before = await svc.project(project, true);
+  assert.ok(before.merged.some(m => m.branch === 'feat/u'));
+  git(repo, 'reset', '-q', '--hard', 'HEAD~1');
+  const view = await service(dir).project(project, true);
+  assert.ok(!view.merged.some(m => m.branch === 'feat/u'), 'the undone merge is not listed as merged');
+  assert.ok(!view.cleanup.branches.some(b => b.name === 'feat/u'), 'its branch is not offered for deletion');
+  assert.ok(!view.cleanup.folders.some(f => fs.realpathSync(f.path) === fs.realpathSync(wt)), 'nor its folder');
+  assert.ok(view.inProgress.some(b => b.branch === 'feat/u'), 'it is work in progress again');
+  const tried = await service(dir).cleanup(project, { projectId: 'p1', folders: [wt], branches: ['feat/u'] });
+  assert.deepEqual(tried.removed, { folders: [], branches: [] });
+});
+
+test('a merge kept only in a backup ref from before a rewrite counts, and says where its commits are', async () => {
+  const { dir, repo, base, project } = setup();
+  const before = await service(dir).project(project);
+  const mergeA = before.merged.find(m => m.branch === 'feat/a')!.originalHash;
+  // Rewrite main without the old commits: feat/a's merge kept as one commit with its files, then a commit
+  // that changes them (as when private text was removed), so feat/b and feat/c are neither on main nor the same.
+  git(repo, 'branch', '-f', 'backup/pre-x', 'main');
+  const a = git(repo, 'commit-tree', git(repo, 'rev-parse', `${mergeA}^{tree}`), '-p', base, '-m', 'A');
+  git(repo, 'update-ref', 'refs/heads/main', a);
+  git(repo, 'reset', '-q', '--hard', 'main');
+  fs.writeFileSync(path.join(repo, 'README.md'), 'rewritten\n');
+  git(repo, 'commit', '-qam', 'rewritten history');
+  const view = await service(dir).project(project, true);
+  const c = view.merged.find(m => m.branch === 'feat/c');
+  assert.deepEqual(c?.evidence, { kind: 'backup', backup: 'backup/pre-x' }, 'kept in the backup, which holds feat/a\'s merge, proven on main');
+  assert.equal(view.cleanup.branches.find(b => b.name === 'feat/c')?.backup, 'backup/pre-x');
+  assert.equal(view.merged.find(m => m.branch === 'feat/a')?.evidence.kind, 'content');
+});
+
+test('a folder an agent is working in is never listed, whether or not it is its recorded worktree', async () => {
+  const { dir, repo, project } = setup();
+  const home = path.join(dir, 'data', 'agents', 'cy', 'workspace');
+  fs.mkdirSync(home, { recursive: true });
+  const wt = path.join(home, 'wt-a');
+  git(repo, 'worktree', 'add', '-q', wt, 'feat/a');
+  const agents = [{ id: 'cy', name: 'Cy', role: 'dev', status: 'working', worktree: null, workingIn: { projectId: 'p1', root: fs.realpathSync(path.join(wt)), branch: 'feat/a', at: 1 } }] as unknown as Agent[];
+  const view = await service(dir, agents).project(project, true);
+  assert.ok(!view.cleanup.folders.some(f => fs.realpathSync(f.path) === fs.realpathSync(wt)));
+});
+
+test('ignored files: build output is noted, anything else (.env) makes the folder need a second yes', async () => {
+  const { dir, repo, project } = setup();
+  // Ignore rules every worktree shares (feat/a and feat/b have no .gitignore of their own).
+  fs.appendFileSync(path.join(repo, '.git', 'info', 'exclude'), 'dist/\n.env\n');
+  const home = path.join(dir, 'data', 'agents', 'fen', 'workspace');
+  fs.mkdirSync(home, { recursive: true });
+  const built = path.join(home, 'wt-built');
+  git(repo, 'worktree', 'add', '-q', built, 'feat/a');
+  fs.mkdirSync(path.join(built, 'dist'));
+  fs.writeFileSync(path.join(built, 'dist', 'app.js'), 'x');
+  const secret = path.join(home, 'wt-secret');
+  git(repo, 'worktree', 'add', '-q', secret, 'feat/b');
+  fs.writeFileSync(path.join(secret, '.env'), 'TOKEN=1');
+  const svc = service(dir);
+  const view = await svc.project(project, true);
+  const folders = new Map(view.cleanup.folders.map(f => [fs.realpathSync(f.path), f]));
+  assert.equal(folders.get(fs.realpathSync(built))!.dirty, false, 'only build output: not dirty');
+  assert.equal(folders.get(fs.realpathSync(built))!.changes.built, 1);
+  assert.equal(folders.get(fs.realpathSync(secret))!.dirty, true, '.env: dirty');
+  assert.deepEqual(folders.get(fs.realpathSync(secret))!.changes.ignored, ['.env']);
+  const builtListed = folders.get(fs.realpathSync(built))!.path;
+  const result = await svc.cleanup(project, { projectId: 'p1', folders: [built, secret], branches: [] });
+  assert.deepEqual(result.removed.folders, [builtListed]);
+  assert.ok(fs.existsSync(path.join(secret, '.env')), 'the .env folder stays without a second yes');
+});
+
+test('a folder with another worktree inside it is never listed, so "Remove anyway" cannot take it', async () => {
+  const { dir, repo, project } = setup();
+  const home = path.join(dir, 'data', 'agents', 'fen', 'workspace');
+  fs.mkdirSync(home, { recursive: true });
+  const outer = path.join(home, 'wt-outer');
+  git(repo, 'worktree', 'add', '-q', outer, 'feat/a');
+  const inner = path.join(outer, 'nested');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/inner', inner, 'main');
+  commit(inner, 'i.txt', 'i', 'inner work');
+  const svc = service(dir);
+  const view = await svc.project(project, true);
+  assert.ok(!view.cleanup.folders.some(f => fs.realpathSync(f.path) === fs.realpathSync(outer)));
+  const tried = await svc.cleanup(project, { projectId: 'p1', folders: [outer], forceFolders: [outer], branches: [] });
+  assert.deepEqual(tried.removed.folders, []);
+  assert.ok(fs.existsSync(path.join(inner, 'i.txt')));
+});
+
+test('branch names that look like options are deleted as names, never read as options', async () => {
+  const { dir, repo, project } = setup();
+  git(repo, 'update-ref', 'refs/heads/-p', git(repo, 'rev-parse', 'feat/a'));
+  const svc = service(dir);
+  const view = await svc.project(project, true);
+  assert.ok(view.cleanup.branches.some(b => b.name === '-p'));
+  const result = await svc.cleanup(project, { projectId: 'p1', folders: [], branches: ['-p'] });
+  assert.deepEqual(result.removed.branches, ['-p']);
+  assert.equal(git(repo, 'for-each-ref', 'refs/heads/-p'), '');
+  assert.ok(git(repo, 'rev-parse', 'feat/a'), 'feat/a is untouched');
+});
+
+test('a worktree whose folder is gone: only its own record is removed, and only inside the data folder', async () => {
+  const { dir, repo, project } = setup();
+  const home = path.join(dir, 'data', 'agents', 'fen', 'workspace');
+  fs.mkdirSync(home, { recursive: true });
+  const gone = path.join(home, 'wt-gone');
+  git(repo, 'worktree', 'add', '-q', gone, 'feat/a');
+  const kept = path.join(home, 'wt-kept');
+  git(repo, 'worktree', 'add', '-q', kept, 'feat/b');
+  const outside = path.join(dir, 'outside-gone');
+  git(repo, 'worktree', 'add', '-q', outside, 'feat/c');
+  fs.rmSync(gone, { recursive: true, force: true });
+  fs.rmSync(outside, { recursive: true, force: true });
+  const svc = service(dir);
+  const view = await svc.project(project, true);
+  const missing = view.cleanup.folders.filter(f => f.reason === 'missing').map(f => path.basename(f.path));
+  assert.deepEqual(missing, ['wt-gone'], 'the one outside the data folder is not listed');
+  const result = await svc.cleanup(project, { projectId: 'p1', folders: [view.cleanup.folders.find(f => f.reason === 'missing')!.path, outside], branches: [] });
+  assert.equal(result.removed.folders.length, 1);
+  const left = git(repo, 'worktree', 'list', '--porcelain');
+  assert.ok(!left.includes('wt-gone'));
+  assert.ok(left.includes('wt-kept') && left.includes('outside-gone'), 'other records are intact');
 });

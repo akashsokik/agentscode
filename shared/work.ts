@@ -45,6 +45,8 @@ export interface WorkMerge {
   rewritten: boolean;
   /** On origin's main: yes, no, or not known (a rewrite hid it and nothing after it tells). */
   pushed: boolean | null;
+  /** Why it counts as on main now: the commit itself, the same files on main, or kept in a backup ref from before a rewrite. */
+  evidence: { kind: 'main' | 'content' | 'backup'; backup?: string };
   conversationId?: string;
   refs: string[];
 }
@@ -81,6 +83,10 @@ export interface FolderChanges {
   untracked: number;
   /** Untracked entries that are only symlinks (a linked node_modules): removing the folder removes the link, never what it points to. */
   links: number;
+  /** Ignored build output (dist/, out/ and the like), rebuilt by a build. */
+  built: number;
+  /** Other ignored files (.env and the like), by path: git never saw them, and removing the folder deletes them. */
+  ignored: string[];
 }
 
 export interface CleanupFolder {
@@ -99,6 +105,8 @@ export interface CleanupBranch {
   name: string;
   /** Merged by our records (needed after a rewrite) or by git itself. */
   by: 'record' | 'git';
+  /** Its commits are kept in this backup ref (from before a rewrite), so deleting the branch loses none. */
+  backup?: string;
   /** It is checked out in this listed folder, so it goes once the folder does. */
   inFolder?: string;
   agentName?: string;

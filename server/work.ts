@@ -36,7 +36,9 @@ const READ_COMMANDS: Record<string, (args: string[]) => boolean> = {
   log: () => true,
   status: a => a.includes('--porcelain'),
   'rev-parse': () => true,
-  'merge-base': a => a[1] === '--is-ancestor',
+  'merge-base': a => a[1] === '--is-ancestor' || (a.length === 3 && !a[1].startsWith('-') && !a[2].startsWith('-')),
+  // Comparing content only, with no external diff or textconv program, and no output file.
+  diff: a => a.includes('--no-ext-diff') && a.includes('--no-textconv') && (a.includes('--quiet') || a.includes('--name-only')),
   'for-each-ref': () => true,
   // Reading: exactly one ref named, so it can never be the two-argument form that sets one.
   'symbolic-ref': a => a.includes('--short') && a.slice(1).filter(x => !x.startsWith('-')).length === 1,
@@ -75,12 +77,17 @@ export const readGit: GitRunner = (args, cwd) => {
 
 /** Cleanup's git: removing one worktree or deleting one branch, nothing else. */
 const writeGit: GitRunner = (args, cwd) => {
-  const ok = (args[0] === 'worktree' && args[1] === 'remove') || (args[0] === 'branch' && args[1] === '-D' && args.length === 3);
+  const ok = (args[0] === 'worktree' && args[1] === 'remove' && args.at(-2) === '--') || (args[0] === 'branch' && args[1] === '-D' && args[2] === '--' && args.length === 4);
   if (!ok) return Promise.reject(new Error(`Not a cleanup command: git ${args.join(' ')}`));
   return runGit(args, cwd);
 };
 
 // ---- merge records ---------------------------------------------------------------------------
+
+export interface MergeEvidence {
+  kind: 'main' | 'content' | 'backup';
+  backup?: string;
+}
 
 export interface MergeRecord {
   /** The merge commit as made. */
@@ -151,10 +158,13 @@ export interface WorktreeEntry {
   prunable: boolean;
 }
 
+/** `git worktree list --porcelain` (with -z: fields end in NUL, entries in two), so no path or name is misread. */
 export function parseWorktrees(text: string): WorktreeEntry[] {
+  const z = text.includes('\0');
+  const blocks = z ? text.split('\0\0') : text.split(/\n\n+/);
   const out: WorktreeEntry[] = [];
-  for (const block of text.split(/\n\n+/)) {
-    const lines = block.split('\n').filter(Boolean);
+  for (const block of blocks) {
+    const lines = block.split(z ? '\0' : '\n').filter(Boolean);
     const at = lines.find(l => l.startsWith('worktree '));
     if (!at) continue;
     const get = (key: string) => lines.find(l => l === key || l.startsWith(`${key} `));
@@ -169,22 +179,38 @@ export function parseWorktrees(text: string): WorktreeEntry[] {
   return out;
 }
 
-/** `git status --porcelain` counted: changed tracked files, untracked entries, and which of those are symlinks. */
+/** Ignored folders that are build output, rebuilt by a build: noted, but not a reason to ask twice. */
+const BUILD_OUTPUT = new Set(['dist', 'out', 'build', 'release', 'coverage', 'node_modules', '.vite', '.turbo', '.next', '.cache', '.DS_Store']);
+
+/**
+ * `git status --porcelain --ignored` counted: changed tracked files, untracked entries (and which of
+ * those are symlinks), ignored build output, and other ignored files by name (.env and the like),
+ * which removing the folder would delete without git ever having seen them.
+ */
 export function countChanges(porcelain: string, folder: string): FolderChanges {
   let changed = 0;
   let untracked = 0;
   let links = 0;
+  let built = 0;
+  const ignored: string[] = [];
   for (const line of porcelain.split('\n')) {
     if (!line.trim()) continue;
-    if (line.startsWith('??')) {
+    const rel = line.slice(3).replace(/\/$/, '');
+    if (line.startsWith('!!')) {
+      if (BUILD_OUTPUT.has(rel.split('/')[0])) built++; else ignored.push(rel);
+    } else if (line.startsWith('??')) {
       untracked++;
-      const rel = line.slice(3).replace(/\/$/, '');
       try { if (fs.lstatSync(path.join(folder, rel)).isSymbolicLink()) links++; } catch { /* gone */ }
     } else {
       changed++;
     }
   }
-  return { changed, untracked, links };
+  return { changed, untracked, links, built, ignored: ignored.slice(0, 20) };
+}
+
+/** Changes that removing the folder would lose: edits, untracked files beyond symlinks, or ignored files that are not build output. */
+export function hasLosses(c: FolderChanges): boolean {
+  return c.changed > 0 || c.untracked > c.links || c.ignored.length > 0;
 }
 
 const realOrSelf = (p: string) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
@@ -243,6 +269,8 @@ async function neverUsed(git: GitRunner, branch: string, cwd: string): Promise<b
 
 export class WorkService {
   private cache = new Map<string, { at: number; view: WorkProject }>();
+  /** A build already running for a project, so polls arriving together share it. */
+  private building = new Map<string, Promise<WorkProject>>();
   private records: MergeRecords;
   private git: GitRunner;
   private ctx: WorkContext;
@@ -263,14 +291,20 @@ export class WorkService {
   async project(project: Project, fresh = false): Promise<WorkProject> {
     const hit = this.cache.get(project.id);
     if (!fresh && hit && Date.now() - hit.at < this.ttlMs) return hit.view;
-    let view: WorkProject;
-    try {
-      view = await this.build(project);
-    } catch (err) {
-      view = { ...this.empty(project, null), error: (err as Error).message.slice(0, 300) };
-    }
-    this.cache.set(project.id, { at: Date.now(), view });
-    return view;
+    const running = this.building.get(project.id);
+    if (running && !fresh) return running;
+    const job = (async () => {
+      let view: WorkProject;
+      try {
+        view = await this.build(project);
+      } catch (err) {
+        view = { ...this.empty(project, null), error: (err as Error).message.slice(0, 300) };
+      }
+      this.cache.set(project.id, { at: Date.now(), view });
+      return view;
+    })();
+    this.building.set(project.id, job);
+    try { return await job; } finally { if (this.building.get(project.id) === job) this.building.delete(project.id); }
   }
 
   private empty(project: Project, defaultBranch: string | null): WorkProject {
@@ -292,7 +326,7 @@ export class WorkService {
       defaultBranch = current.out.trim() || 'main';
     }
     const remote = (await this.git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${defaultBranch}`], root)).ok ? `origin/${defaultBranch}` : null;
-    const worktrees = parseWorktrees((await this.git(['worktree', 'list', '--porcelain'], root)).out);
+    const worktrees = parseWorktrees((await this.git(['worktree', 'list', '--porcelain', '-z'], root)).out);
     return { root, defaultBranch, remote, worktrees };
   }
 
@@ -334,16 +368,78 @@ export class WorkService {
   }
 
   /**
+   * Evidence that a recorded merge's work is on main now (H1: a record alone is never enough):
+   * - main: the merge commit is on main;
+   * - content: a commit on main has exactly its files (a rewrite kept it as one commit), or every
+   *   file the branch changed is the same on main today (a rewrite folded it in with others);
+   * - backup: its tip is kept in a backup/* ref that is main from before a rewrite (one holding a
+   *   merge with main or content evidence), so deleting the branch loses no commit (ALL-N2).
+   * A merge undone by a reset has none of these and is left out everywhere.
+   */
+  private async evidence(records: MergeRecord[], mapped: Map<string, string | null>, defaultBranch: string, root: string): Promise<Map<string, MergeEvidence>> {
+    const out = new Map<string, MergeEvidence>();
+    const pending: MergeRecord[] = [];
+    for (const r of records) {
+      const now = mapped.get(r.hash);
+      if (now === r.hash) out.set(r.hash, { kind: 'main' });
+      else if (now) out.set(r.hash, { kind: 'content' });
+      else if (await this.sameFilesOnMain(r.tip, defaultBranch, root)) out.set(r.hash, { kind: 'content' });
+      else pending.push(r);
+    }
+    if (!pending.length) return out;
+    const refs = await this.git(['for-each-ref', '--format=%(refname:short)', 'refs/heads/backup/'], root);
+    const proven = records.filter(r => out.has(r.hash));
+    const backups: string[] = [];
+    for (const b of refs.out.split('\n').filter(Boolean)) {
+      for (const r of proven) if (await this.ancestor(r.hash, `refs/heads/${b}`, root)) { backups.push(b); break; }
+    }
+    for (const r of pending) {
+      for (const b of backups) if (await this.ancestor(r.tip, `refs/heads/${b}`, root)) { out.set(r.hash, { kind: 'backup', backup: b }); break; }
+    }
+    return out;
+  }
+
+  /** Every file the branch changed since it left main is the same on main today. */
+  private async sameFilesOnMain(tip: string, defaultBranch: string, root: string): Promise<boolean> {
+    const base = await this.git(['merge-base', tip, `refs/heads/${defaultBranch}`], root);
+    if (!base.ok) return false;
+    const files = await this.git(['diff', '--no-ext-diff', '--no-textconv', '--name-only', base.out.trim(), tip], root);
+    const list = files.out.split('\n').filter(Boolean);
+    if (!files.ok || !list.length) return false;
+    return (await this.git(['diff', '--no-ext-diff', '--no-textconv', '--quiet', tip, `refs/heads/${defaultBranch}`, '--', ...list], root)).ok;
+  }
+
+  /**
    * The branches whose tips are in some recorded merge: the branch merged itself, or a branch that
    * went in through it (feat/x merged into feat/y, feat/y merged into main). By branch name, the
    * latest such record.
    */
   private async mergedBranches(records: MergeRecord[], cwd: string): Promise<Map<string, MergeRecord>> {
     const out = new Map<string, MergeRecord>();
-    for (const r of [...records].sort((a, b) => a.at - b.at)) {
-      const merged = await this.git(['for-each-ref', '--merged', r.tip, '--format=%(refname:short)', 'refs/heads'], cwd);
-      if (!merged.ok) continue; // the tip is gone from the repository
-      for (const name of merged.out.split('\n').filter(Boolean)) out.set(name, r);
+    if (!records.length) return out;
+    // One for-each-ref for all tips at once (several --merged are a union), in chunks for long lists.
+    const merged = new Map<string, string>();
+    const latest = [...records].sort((a, b) => b.at - a.at);
+    for (let i = 0; i < latest.length; i += 100) {
+      const chunk = latest.slice(i, i + 100);
+      const list = await this.git(['for-each-ref', ...chunk.flatMap(r => ['--merged', r.tip]), '--format=%(refname:short)%1f%(objectname)', 'refs/heads'], cwd);
+      if (!list.ok) {
+        // A tip git no longer has makes the whole call fail: ask for each tip on its own instead.
+        for (const r of chunk) {
+          const one = await this.git(['for-each-ref', '--merged', r.tip, '--format=%(refname:short)%1f%(objectname)', 'refs/heads'], cwd);
+          for (const line of one.out.split('\n').filter(Boolean)) { const [n, o] = line.split('\x1f'); merged.set(n, o); }
+        }
+        continue;
+      }
+      for (const line of list.out.split('\n').filter(Boolean)) { const [n, o] = line.split('\x1f'); merged.set(n, o); }
+    }
+    // Which record: the latest merge of that very branch, else the latest merge whose tip holds it.
+    for (const [name, tip] of merged) {
+      const own = latest.find(r => r.branch === name && (r.tip === tip));
+      if (own) { out.set(name, own); continue; }
+      for (const r of latest) {
+        if (r.tip === tip || await this.ancestor(tip, r.tip, cwd)) { out.set(name, r); break; }
+      }
     }
     return out;
   }
@@ -365,10 +461,11 @@ export class WorkService {
     const agents = this.ctx.agents();
     const messages = this.ctx.messages();
     const byName = (name: string) => agents.find(a => a.name.toLowerCase() === name.toLowerCase());
-    const records = await this.captureMerges(facts);
-    const byRecord = await this.mergedBranches(records, root);
+    const allRecords = await this.captureMerges(facts);
     const dataDir = realOrSelf(this.ctx.dataDir);
-    const usable = async (branch: string) => branch !== defaultBranch && !branch.startsWith('backup/') && !(await neverUsed(this.git, branch, root));
+    const fresh = new Map<string, Promise<boolean>>();
+    const isNew = (branch: string) => { if (!fresh.has(branch)) fresh.set(branch, neverUsed(this.git, branch, root)); return fresh.get(branch)!; };
+    const usable = async (branch: string) => branch !== defaultBranch && !branch.startsWith('backup/') && !(await isNew(branch));
 
     // main's recent history, with the trees to match rewritten merges by their files.
     const log = await this.git(['log', '--first-parent', '-200', '--format=%H%x1f%T%x1f%P%x1f%s%x1f%ct', defaultBranch], root);
@@ -388,10 +485,14 @@ export class WorkService {
 
     // Where each recorded merge is on main now: itself, or the rewritten commit with the same files.
     const mapped = new Map<string, string | null>();
-    for (const r of records) {
+    for (const r of allRecords) {
       if (onMain.has(r.hash) || await this.ancestor(r.hash, defaultBranch, root)) mapped.set(r.hash, r.hash);
       else mapped.set(r.hash, history.find(c => c.tree === r.tree)?.hash ?? null);
     }
+    // A record counts only with evidence that its work is on main now (a merge undone by a reset has none).
+    const evidence = await this.evidence(allRecords, mapped, defaultBranch, root);
+    const records = allRecords.filter(r => evidence.has(r.hash));
+    const byRecord = await this.mergedBranches(records, root);
     /**
      * On origin's main: the merge's commit as it is on main now is not among the local-only ones. A
      * merge a rewrite folded in with others has no commit of its own: it is on GitHub when a later
@@ -412,14 +513,17 @@ export class WorkService {
       const now = mapped.get(r.hash) ?? null;
       return {
         branch: r.branch, at: r.at, names: r.names, agentIds: ids(r.names), ...(r.reviewer ? { reviewer: r.reviewer } : {}),
-        hash: now, originalHash: r.hash, rewritten: now !== r.hash, pushed: pushedOf(r),
+        hash: now, originalHash: r.hash, rewritten: now !== r.hash, pushed: pushedOf(r), evidence: evidence.get(r.hash)!,
         ...(r.conversationId ? { conversationId: r.conversationId } : {}), refs: r.refs,
       };
     });
 
     // Branches checked out somewhere: in progress, or merged and left behind.
     const realRoot = realOrSelf(root);
-    const liveWorktrees = new Set(agents.flatMap(a => (a.worktree ? [realOrSelf(a.worktree.path)] : [])));
+    // Where agents are working: their recorded worktrees, and wherever their tools last ran. A folder
+    // with either in it (or another worktree inside it) is never listed for cleanup.
+    const busyPlaces = agents.flatMap(a => [...(a.worktree ? [realOrSelf(a.worktree.path)] : []), ...(a.workingIn ? [realOrSelf(a.workingIn.root)] : [])]);
+    const otherWorktrees = worktrees.map(w => realOrSelf(w.path));
     const inProgress: WorkBranch[] = [];
     const folders: CleanupFolder[] = [];
     for (const wt of worktrees) {
@@ -427,17 +531,19 @@ export class WorkService {
       if (main && (!wt.branch || wt.branch === defaultBranch)) continue;
       const agent = this.owner(wt.path, agents);
       if (wt.prunable || !fs.existsSync(wt.path)) {
-        if (!main && !wt.locked && inside(path.resolve(wt.path), path.resolve(this.ctx.dataDir))) folders.push({ path: wt.path, branch: wt.branch, ...(agent ? { agentId: agent.id, agentName: agent.name } : {}), reason: 'missing', changes: { changed: 0, untracked: 0, links: 0 }, dirty: false });
+        // git gives real paths (/private/var on macOS), so compare with the data folder's real path.
+        if (!main && !wt.locked && inside(path.resolve(wt.path), dataDir)) folders.push({ path: wt.path, branch: wt.branch, ...(agent ? { agentId: agent.id, agentName: agent.name } : {}), reason: 'missing', changes: { changed: 0, untracked: 0, links: 0, built: 0, ignored: [] }, dirty: false });
         continue;
       }
-      const status = await this.git(['status', '--porcelain', '--untracked-files=normal'], wt.path);
+      const status = await this.git(['status', '--porcelain', '--untracked-files=normal', '--ignored'], wt.path);
       const changes = countChanges(status.out, wt.path);
-      const dirty = changes.changed > 0 || changes.untracked > changes.links;
+      const dirty = hasLosses(changes);
       const head = wt.head ?? '';
       const record = wt.branch && await usable(wt.branch) ? byRecord.get(wt.branch) ?? null : null;
       // On main by git, unless it is a branch that never had work of its own (just made from main).
-      const gitMerged = head ? await this.ancestor(head, defaultBranch, root) && !(wt.branch && await neverUsed(this.git, wt.branch, root)) : false;
-      const isLive = liveWorktrees.has(realOrSelf(wt.path));
+      const gitMerged = head ? await this.ancestor(head, defaultBranch, root) && !(wt.branch && await isNew(wt.branch)) : false;
+      const folderReal = realOrSelf(wt.path);
+      const isLive = busyPlaces.some(p => inside(p, folderReal)) || otherWorktrees.some(p => p !== folderReal && inside(p, folderReal));
       // Only folders AgentsCode made: under its data folder, or an agent's recorded worktree; never
       // a worktree another tool or the user made elsewhere.
       const ours = inside(realOrSelf(wt.path), dataDir) || agents.some(a => a.worktree && realOrSelf(a.worktree.path) === realOrSelf(wt.path));
@@ -449,9 +555,9 @@ export class WorkService {
         continue;
       }
       if (!wt.branch || record || gitMerged) continue;
-      const counts = await this.git(['rev-list', '--left-right', '--count', `${defaultBranch}...${wt.branch}`], root);
+      const counts = await this.git(['rev-list', '--left-right', '--count', `refs/heads/${defaultBranch}...refs/heads/${wt.branch}`], root);
       const [behind, ahead] = counts.out.trim().split(/\s+/).map(Number);
-      const last = await this.git(['log', '-1', '--format=%h%x1f%s%x1f%ct', wt.branch], root);
+      const last = await this.git(['log', '-1', '--format=%h%x1f%s%x1f%ct', `refs/heads/${wt.branch}`], root);
       const [lh, ls, lt] = last.out.trim().split('\x1f');
       const info = fromMessages(wt.branch, messages, agents);
       // Working: its owner is mid-turn in this very folder (its worktree, or where its tools last ran).
@@ -461,7 +567,7 @@ export class WorkService {
         branch: wt.branch, folder: wt.path, inPlace: main,
         ...(agent ? { agentId: agent.id, agentName: agent.name } : {}),
         state, ...(info.reviewer || info.reviewing ? { reviewer: info.reviewer ?? info.reviewing } : {}),
-        ahead: ahead || 0, behind: behind || 0, changed: changes.changed, untracked: changes.untracked - changes.links,
+        ahead: ahead || 0, behind: behind || 0, changed: changes.changed, untracked: changes.untracked - changes.links + changes.ignored.length,
         ...(lh ? { last: { hash: lh, subject: ls ?? '', at: Number(lt) * 1000 } } : {}),
         ...(info.conversationId ? { conversationId: info.conversationId } : {}), refs: info.refs.filter(this.ctx.knownRef),
       });
@@ -476,12 +582,13 @@ export class WorkService {
       if (!name || !tip || name === defaultBranch || name.startsWith('backup/')) continue;
       const at = checkedOut.get(name);
       if (at && !folders.some(f => f.path === at)) continue; // still in use somewhere
-      const fresh = await neverUsed(this.git, name, root);
-      const record = fresh ? null : byRecord.get(name) ?? null;
-      const gitMerged = !record && !fresh && await this.ancestor(tip, defaultBranch, root);
+      const isFresh = await isNew(name);
+      const record = isFresh ? null : byRecord.get(name) ?? null;
+      const gitMerged = !record && !isFresh && await this.ancestor(tip, defaultBranch, root);
       if (!record && !gitMerged) continue;
       const names = record?.names ?? [];
-      branches.push({ name, by: record ? 'record' : 'git', ...(at ? { inFolder: at } : {}), ...(names[0] ? { agentName: names[0] } : {}) });
+      const proof = record ? evidence.get(record.hash) : undefined;
+      branches.push({ name, by: record ? 'record' : 'git', ...(proof?.backup ? { backup: proof.backup } : {}), ...(at ? { inFolder: at } : {}), ...(names[0] ? { agentName: names[0] } : {}) });
     }
 
     // The graph (ACH-D18): about 20 commits of main and the open branches, in topological order, with
@@ -542,18 +649,21 @@ export class WorkService {
         if (ok) result.removed.folders.push(folder.path); else result.skipped.push({ item: folder.path, why: 'could not find its record in the repository' });
         continue;
       }
-      // --force only for a folder whose only extras are symlinks, or one the user confirmed twice.
-      const forced = folder.dirty || folder.changes.untracked > 0;
-      const removed = await writeGit(['worktree', 'remove', ...(forced ? ['--force'] : []), folder.path], facts.root);
+      // Checked again right before removing it: anything that appeared since the list needs the second yes too.
+      const now = countChanges((await readGit(['status', '--porcelain', '--untracked-files=normal', '--ignored'], folder.path)).out, folder.path);
+      if (hasLosses(now) && !force.has(realOrSelf(folder.path))) { result.skipped.push({ item: folder.path, why: 'it has uncommitted or ignored files now; confirm it again to remove it' }); continue; }
+      // --force only for a folder whose only extras are symlinks or build output, or one the user confirmed twice.
+      const forced = hasLosses(now) || now.untracked > 0 || now.built > 0;
+      const removed = await writeGit(['worktree', 'remove', ...(forced ? ['--force'] : []), '--', folder.path], facts.root);
       if (removed.ok) result.removed.folders.push(folder.path); else result.skipped.push({ item: folder.path, why: 'git could not remove it' });
     }
-    const after = parseWorktrees((await readGit(['worktree', 'list', '--porcelain'], facts.root)).out);
+    const after = parseWorktrees((await readGit(['worktree', 'list', '--porcelain', '-z'], facts.root)).out);
     for (const raw of request.branches ?? []) {
       const name = String(raw);
       const branch = fresh.cleanup.branches.find(b => b.name === name);
       if (!branch || name === facts.defaultBranch || name.startsWith('backup/')) { result.skipped.push({ item: name, why: 'not on the cleanup list now' }); continue; }
       if (after.some(w => w.branch === name)) { result.skipped.push({ item: name, why: 'still checked out in a folder' }); continue; }
-      const deleted = await writeGit(['branch', '-D', name], facts.root);
+      const deleted = await writeGit(['branch', '-D', '--', name], facts.root);
       if (deleted.ok) result.removed.branches.push(name); else result.skipped.push({ item: name, why: 'git could not delete it' });
     }
     this.cache.delete(project.id);
