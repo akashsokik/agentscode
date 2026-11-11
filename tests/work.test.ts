@@ -542,3 +542,42 @@ test('a worktree whose folder is gone: only its own record is removed, and only 
   assert.ok(!left.includes('wt-gone'));
   assert.ok(left.includes('wt-kept') && left.includes('outside-gone'), 'other records are intact');
 });
+
+test('a merge undone after a backup was taken is not merged: a backup counts only when main itself was rewritten (A2)', async () => {
+  const { dir, repo, project } = setup();
+  const home = path.join(dir, 'data', 'agents', 'fen', 'workspace');
+  fs.mkdirSync(home, { recursive: true });
+  for (const name of ['v', 'u']) {
+    const wt = path.join(home, `wt-${name}`);
+    git(repo, 'worktree', 'add', '-q', '-b', `feat/${name}`, wt, 'main');
+    commit(wt, `${name}.txt`, name, `work on ${name}`);
+    merge(repo, `feat/${name}`, `Merge feat/${name} (Fen): ${name}`);
+  }
+  const svc = service(dir);
+  await svc.project(project, true);
+  git(repo, 'branch', 'backup/before-undo', 'main');
+  git(repo, 'reset', '-q', '--hard', 'HEAD~1');
+  const view = await service(dir).project(project, true);
+  assert.ok(!view.merged.some(m => m.branch === 'feat/u'), 'not merged, though backup/before-undo holds it');
+  assert.ok(view.merged.some(m => m.branch === 'feat/v' && m.evidence.kind === 'main'), 'feat/v is still on main');
+  assert.ok(view.inProgress.some(b => b.branch === 'feat/u'), 'feat/u is in progress again');
+  assert.ok(!view.cleanup.branches.some(b => b.name === 'feat/u'));
+  assert.ok(!view.cleanup.folders.some(f => f.branch === 'feat/u'));
+  assert.equal(view.cleanup.branches.find(b => b.name === 'feat/v')?.evidence, 'main', 'a plain merge reads as merged, not "by record"');
+});
+
+test('file names are never pathspec magic: ":!x.txt" cannot exclude itself from the content proof (A3)', async () => {
+  const { dir, repo, project } = setup();
+  git(repo, 'checkout', '-q', '-b', 'feat/p', 'main');
+  commit(repo, 'y.txt', 'y', 'y');
+  commit(repo, ':!x.txt', 'only on the branch', 'odd name');
+  git(repo, 'checkout', '-q', 'main');
+  merge(repo, 'feat/p', 'Merge feat/p (Fen): p');
+  await service(dir).project(project, true);
+  // Undo the merge, then bring only y.txt to main by another route.
+  git(repo, 'reset', '-q', '--hard', 'HEAD~1');
+  commit(repo, 'y.txt', 'y', 'y on main');
+  const view = await service(dir).project(project, true);
+  assert.ok(!view.merged.some(m => m.branch === 'feat/p'), '":!x.txt" is not on main, so the branch is not proven');
+  assert.ok(!view.cleanup.branches.some(b => b.name === 'feat/p'));
+});

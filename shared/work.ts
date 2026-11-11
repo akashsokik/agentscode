@@ -107,6 +107,8 @@ export interface CleanupBranch {
   by: 'record' | 'git';
   /** Its commits are kept in this backup ref (from before a rewrite), so deleting the branch loses none. */
   backup?: string;
+  /** For one merged by record: on main as merged, on main by its files (after a rewrite), or kept in a backup ref. */
+  evidence?: 'main' | 'content' | 'backup';
   /** It is checked out in this listed folder, so it goes once the folder does. */
   inFolder?: string;
   agentName?: string;

@@ -404,7 +404,7 @@ function CleanupDialog({ projects, onClose }: { projects: WorkProject[]; onClose
             {projects.length > 1 ? <p className="pb-1 text-[12.5px] font-medium text-content">{p.name}</p> : null}
             {p.cleanup.branches.length ? (
               <>
-                <Label count={`${p.cleanup.branches.length}${p.cleanup.branches.some(b => b.by === 'record') ? ', merged by our records' : ''}`}>Branches</Label>
+                <Label count={`${p.cleanup.branches.length}${p.cleanup.branches.some(b => b.by === 'record' && b.evidence !== 'main') ? ', some merged by our records' : ''}`}>Branches</Label>
                 {p.cleanup.branches.map(b => {
                   const key = `${p.projectId}\n${b.name}`;
                   return (
@@ -412,7 +412,7 @@ function CleanupDialog({ projects, onClose }: { projects: WorkProject[]; onClose
                       <Box on={branches.has(key)} label={`Delete branch ${b.name}`} onToggle={() => flip(branches, key, setBranches)} />
                       <Who name={b.agentName} size="size-3.5" />
                       <span className="min-w-0 truncate font-mono text-[11.5px]">{b.name}</span>
-                      <span className="ml-auto shrink-0 text-content/40" title={b.backup ? `Its commits stay in ${b.backup}` : undefined}>{b.inFolder ? 'goes with its folder' : b.backup ? `kept in ${b.backup}` : b.by === 'record' ? 'merged by record' : 'merged'}</span>
+                      <span className="ml-auto shrink-0 text-content/40" title={b.backup ? `Its commits stay in ${b.backup}` : undefined}>{b.inFolder ? 'goes with its folder' : b.backup ? `kept in ${b.backup}` : b.evidence === 'content' ? 'merged, history rewritten' : 'merged'}</span>
                     </div>
                   );
                 })}

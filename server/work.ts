@@ -26,7 +26,8 @@ export const GRAPH_ROWS = 20;
 
 /** Git with nothing that runs another program or takes optional locks. */
 const GIT_FLAGS = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.untrackedCache=false'];
-const GIT_ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' };
+// GIT_LITERAL_PATHSPECS: a file name is only ever a name (":!x" is not an exclude, "*" not a glob).
+const GIT_ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_LITERAL_PATHSPECS: '1' };
 
 /** The git commands the view may run: each reads, none writes refs, the index, config or the network. */
 const READ_COMMANDS: Record<string, (args: string[]) => boolean> = {
@@ -95,6 +96,8 @@ export interface MergeRecord {
   tree: string;
   /** The branch's tip when it was merged (the merge's second parent). */
   tip: string;
+  /** main as it was when merged into (the merge's first parent); absent on records from before it was kept. */
+  parent?: string;
   branch: string;
   at: number;
   subject: string;
@@ -361,7 +364,8 @@ export class WorkService {
       const tip = parents?.split(' ')[1];
       if (!tree || !tip) continue;
       const refs = [...new Set([...info.refs, ...findRefIds(subject ?? '', this.ctx.knownRef).map(r => r.id)])].filter(this.ctx.knownRef);
-      found.push({ hash, tree, tip, branch, at, subject: subject ?? '', names: namesInMergeSubject(subject ?? ''), refs, ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
+      const parent = parents?.split(' ')[0];
+      found.push({ hash, tree, tip, ...(parent ? { parent } : {}), branch, at, subject: subject ?? '', names: namesInMergeSubject(subject ?? ''), refs, ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
     }
     this.records.merge(root, found.filter(r => r.tree || known.has(r.hash)));
     return this.records.list(root);
@@ -394,6 +398,10 @@ export class WorkService {
       for (const r of proven) if (await this.ancestor(r.hash, `refs/heads/${b}`, root)) { backups.push(b); break; }
     }
     for (const r of pending) {
+      // Only when main itself was rewritten past this merge (its first parent is no longer on main). A
+      // merge undone by a reset has its first parent still on main, so a backup of it is not evidence.
+      const parent = r.parent ?? ((await this.git(['rev-parse', '--verify', '--quiet', `${r.hash}^1`], root)).out.trim() || null);
+      if (!parent || await this.ancestor(parent, `refs/heads/${defaultBranch}`, root)) continue;
       for (const b of backups) if (await this.ancestor(r.tip, `refs/heads/${b}`, root)) { out.set(r.hash, { kind: 'backup', backup: b }); break; }
     }
     return out;
@@ -588,7 +596,7 @@ export class WorkService {
       if (!record && !gitMerged) continue;
       const names = record?.names ?? [];
       const proof = record ? evidence.get(record.hash) : undefined;
-      branches.push({ name, by: record ? 'record' : 'git', ...(proof?.backup ? { backup: proof.backup } : {}), ...(at ? { inFolder: at } : {}), ...(names[0] ? { agentName: names[0] } : {}) });
+      branches.push({ name, by: record ? 'record' : 'git', ...(proof ? { evidence: proof.kind } : {}), ...(proof?.backup ? { backup: proof.backup } : {}), ...(at ? { inFolder: at } : {}), ...(names[0] ? { agentName: names[0] } : {}) });
     }
 
     // The graph (ACH-D18): about 20 commits of main and the open branches, in topological order, with
