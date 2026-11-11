@@ -76,6 +76,7 @@ const PILL: Record<RefState, string> = {
 export function statusWords(summary: Pick<RefSummary, 'state' | 'status'>): string | null {
   if (summary.state === 'note') return null;
   if (summary.state === 'active') return 'In force';
+  if (/^outdated by /i.test(summary.status)) return 'Outdated';
   return /^replaced by /i.test(summary.status) || !summary.status ? 'Replaced' : summary.status;
 }
 

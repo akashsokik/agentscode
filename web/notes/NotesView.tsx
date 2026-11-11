@@ -145,14 +145,14 @@ function SectionLabel({ label, count, className = 'px-1.5 pb-1.5 pt-3.5' }: { la
 /** One entry in the list: chip, title, date; who below, and what it replaced or what replaced it. */
 function Row({ entry, words = [], hint }: { entry: RefSummary; words?: readonly string[]; hint?: ReactNode }) {
   const old = entry.state === 'replaced';
-  const extra = entry.replacedBy ? ['Replaced by', entry.replacedBy] : entry.replaces ? ['Replaces', entry.replaces] : null;
+  const extra = entry.replacedBy ? [entry.kind === 'N' ? 'Outdated by' : 'Replaced by', entry.replacedBy] : entry.replaces ? ['Replaces', entry.replaces] : null;
   return (
     <>
       <button
         type="button"
         data-note-row={entry.id}
         onClick={() => openNote(entry.id)}
-        aria-label={`${kindWord(entry.kind)} ${entry.id}: ${entry.title}${old ? ', replaced' : ''}`}
+        aria-label={`${kindWord(entry.kind)} ${entry.id}: ${entry.title}${old ? (entry.kind === 'N' ? ', outdated' : ', replaced') : ''}`}
         className={`grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-[7px] px-1.5 py-[7px] text-left font-sans text-[13px] transition-colors hover:bg-content/5 focus-visible:bg-content/7 focus-visible:outline-none ${old ? 'opacity-50' : ''}`}
       >
         <StaticChip summary={entry} />
@@ -331,7 +331,8 @@ function DetailBody({ detail }: { detail: RefDetail }) {
     ))}</span>]);
   }
   if (isDecision) rows.push(['Replaces', detail.replaces ? <RefWithTitle id={detail.replaces} /> : <span className="text-content/35">Nothing</span>]);
-  if (detail.replacedBy) rows.push(['Replaced by', <RefWithTitle id={detail.replacedBy} />]);
+  if (!isDecision && detail.replaces) rows.push(['Replaces', <RefWithTitle id={detail.replaces} />]);
+  if (detail.replacedBy) rows.push([isDecision ? 'Replaced by' : 'Outdated by', <RefWithTitle id={detail.replacedBy} />]);
   return (
     <>
       <div className="px-0 pb-1 pt-3.5">

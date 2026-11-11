@@ -65,7 +65,8 @@ const PREFERRED_CODES = 'codes.json';
 
 const HEADING = /^##\s+([A-Z][A-Z0-9]{1,5})-([DN])(\d{1,6})\s+(\S.*?)\s*$/;
 const FIELD = /^-\s*(decided by|author|added by|date|why|status|links)\s*:\s*(.*?)\s*$/i;
-const REPLACED = /^replaced by\s+([A-Za-z][A-Za-z0-9]{1,5}-D\d{1,6})\b/i;
+/** "replaced by ACH-D9" on a decision, "outdated by ACH-N4" on a note. */
+const REPLACED = /^(?:replaced|outdated) by\s+([A-Za-z][A-Za-z0-9]{1,5}-[DN]\d{1,6})\b/i;
 
 function flat(text: unknown): string {
   return String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -159,8 +160,10 @@ export function renderRef(entry: RefEntry): string {
   if (entry.kind === 'D') {
     lines.push(`- why: ${entry.why}`);
     lines.push(`- status: ${entry.status}`);
-  } else if (entry.why) {
-    lines.push(`- why: ${entry.why}`);
+  } else {
+    if (entry.why) lines.push(`- why: ${entry.why}`);
+    // A note has a status only once a newer one outdates it.
+    if (entry.status) lines.push(`- status: ${entry.status}`);
   }
   lines.push(`- links:${entry.links.length ? ` ${entry.links.join(', ')}` : ''}`);
   for (let i = 1; i < lines.length; i++) lines[i] = lines[i].trimEnd();
@@ -178,7 +181,7 @@ function header(code: string, kind: RefKind): string {
 }
 
 /** addedBy is the caller's identity, set by the server, never taken from tool input. */
-export interface NoteInput { title: unknown; body: unknown; author: unknown; addedBy: string; links?: unknown; date?: string }
+export interface NoteInput { title: unknown; body: unknown; author: unknown; addedBy: string; links?: unknown; date?: string; /** A note in the same project this one corrects. */ replaces?: unknown }
 export interface DecisionInput { title: unknown; decision: unknown; why: unknown; decidedBy: unknown; addedBy: string; replaces?: unknown; links?: unknown; date?: string }
 
 function checkText(value: unknown, limit: number, what: string, required: boolean, multiline = false): string {
@@ -335,18 +338,20 @@ export class ProjectRefs {
     let text = this.read(code, kind);
     const existing = parseRefs(text, code, kind);
     let target: RefEntry | undefined;
+    const what = kind === 'D' ? 'decision' : 'note';
     if (replaces !== undefined) {
+      // A decision replaces a decision, a note outdates a note, always in the same project.
       const ref = parseRefId(replaces);
-      if (!ref) throw new HttpError(400, 'replaces takes a decision id such as ACH-D7.');
-      if (ref.kind !== 'D') throw new HttpError(400, `${ref.id} is a note; only decisions are replaced.`);
-      if (ref.code !== code) throw new HttpError(400, `${ref.id} belongs to ${ref.code}; a decision can only replace one in the same project.`);
+      if (!ref) throw new HttpError(400, `replaces takes a ${what} id such as ${code}-${kind}7.`);
+      if (ref.kind !== kind) throw new HttpError(400, `${ref.id} is a ${ref.kind === 'D' ? 'decision' : 'note'}; a ${what} can only replace a ${what}.`);
+      if (ref.code !== code) throw new HttpError(400, `${ref.id} belongs to ${ref.code}; a ${what} can only replace one in the same project.`);
       target = existing.find(e => e.id === ref.id);
-      if (!target) throw new HttpError(404, `There is no decision ${ref.id}.`);
-      if (target.replacedBy || !/^active$/i.test(target.status)) throw new HttpError(409, `${ref.id} is already ${target.status}.`);
+      if (!target) throw new HttpError(404, `There is no ${what} ${ref.id}.`);
+      if (!isCurrent(target)) throw new HttpError(409, `${ref.id} is already ${target.status}.`);
     }
     const num = this.nextNumber(code, kind, text);
     const entry = make(`${code}-${kind}${num}`, num);
-    if (target) text = markReplaced(text, target.id, entry.id);
+    if (target) text = markReplaced(text, target.id, `${kind === 'D' ? 'replaced' : 'outdated'} by ${entry.id}`);
     if (!text.trim()) text = header(code, kind);
     text = `${text.replace(/\n*$/, '\n')}\n${renderRef(entry)}`;
     // The counter first: a crash between the two writes leaves a gap, never a reused id.
@@ -357,7 +362,8 @@ export class ProjectRefs {
 
   addNote(code: string, input: NoteInput): RefEntry {
     const make = noteMaker(code, input);
-    return this.append(code, 'N', make);
+    const replaces = input.replaces === undefined || input.replaces === null || input.replaces === '' ? undefined : String(input.replaces);
+    return this.append(code, 'N', make, replaces);
   }
 
   /**
@@ -414,7 +420,7 @@ export class ProjectRefs {
 
   counts(code: string): { decisions: number; active: number; notes: number } {
     const decisions = this.entries(code, 'D');
-    return { decisions: decisions.length, active: decisions.filter(d => isActive(d)).length, notes: this.entries(code, 'N').length };
+    return { decisions: decisions.length, active: decisions.filter(d => isActive(d)).length, notes: this.entries(code, 'N').filter(isCurrent).length };
   }
 
   /** The compact index of one project: active decisions, then notes, then replaced ones; newest first in each. */
@@ -478,17 +484,23 @@ export function isActive(entry: RefEntry): boolean {
   return entry.kind === 'D' && !entry.replacedBy && /^active$/i.test(entry.status);
 }
 
+/** A decision in force, or a note nothing has outdated (a note's status is set only when one has). */
+export function isCurrent(entry: RefEntry): boolean {
+  return entry.kind === 'D' ? isActive(entry) : !entry.replacedBy && !entry.status;
+}
+
 /** Index lines for entries, capped at `limit` characters with a note of how many were left out. */
 export function refIndex(entries: RefEntry[], limit = INDEX_LIMIT): string {
   const newest = (a: RefEntry, b: RefEntry) => b.num - a.num;
   const ordered = [
     ...entries.filter(e => e.kind === 'D' && isActive(e)).sort(newest),
-    ...entries.filter(e => e.kind === 'N').sort(newest),
-    ...entries.filter(e => e.kind === 'D' && !isActive(e)).sort(newest),
+    ...entries.filter(e => e.kind === 'N' && isCurrent(e)).sort(newest),
+    // Replaced decisions and outdated notes last.
+    ...entries.filter(e => !isCurrent(e)).sort(newest),
   ];
   const line = (e: RefEntry) => {
     const title = e.title.length > 100 ? `${e.title.slice(0, 99)}...` : e.title;
-    const status = e.kind === 'N' ? 'note' : isActive(e) ? 'active' : e.status;
+    const status = isCurrent(e) ? (e.kind === 'N' ? 'note' : 'active') : e.status;
     // Who decided is a claim; who added it is recorded by the server.
     const who = [e.kind === 'D' && e.by ? `decided by ${e.by}` : '', e.addedBy ? `added by ${e.addedBy}` : ''].filter(Boolean).join(', ');
     return `- ${e.id} ${title} (${status}${who ? `; ${who}` : ''})`;
@@ -507,8 +519,8 @@ export function refIndex(entries: RefEntry[], limit = INDEX_LIMIT): string {
   return lines.join('\n');
 }
 
-/** Set the status line of one block to "replaced by", adding the line if a hand edit dropped it. */
-function markReplaced(text: string, oldId: string, newId: string): string {
+/** Set the status line of one block ("replaced by ..." or "outdated by ..."), adding the line if there is none. */
+function markReplaced(text: string, oldId: string, status: string): string {
   const lines = text.split('\n');
   const start = lines.findIndex(line => {
     const heading = HEADING.exec(line);
@@ -524,11 +536,11 @@ function markReplaced(text: string, oldId: string, newId: string): string {
     if (!FIELD.test(trimmed)) break;
     lastField = i;
     if (/^-\s*status\s*:/i.test(trimmed)) {
-      lines[i] = `- status: replaced by ${newId}`;
+      lines[i] = `- status: ${status}`;
       return lines.join('\n');
     }
   }
-  lines.splice(lastField + 1, 0, `- status: replaced by ${newId}`);
+  lines.splice(lastField + 1, 0, `- status: ${status}`);
   return lines.join('\n');
 }
 
@@ -568,4 +580,41 @@ export function deriveCode(project: { name: string; path: string }, taken: Set<s
   for (const code of candidates) if (!blocked(code)) return code;
   for (let n = 2; n < 1000; n++) if (!blocked(`${base}${n}`)) return `${base}${n}`;
   throw new Error('No free project code.');
+}
+
+/** Words too common to say what a task is about. */
+const STOP = new Set(('the and for with that this from into onto when then than what which while where have has had will would should could '
+  + 'must make made keep only once every each them they their there here your yours about after before also just more most some such '
+  + 'over under very does done doing using used task work agent agents please need needs want wants like file files code change changes').split(' '));
+
+/** The words that say what a text is about: four letters or more, lower case, a plural "s" dropped. */
+export function topicWords(text: string): Set<string> {
+  const words = String(text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !STOP.has(w));
+  return new Set(words.map(w => (w.length > 4 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w)));
+}
+
+export const HINT_MAX = 5;
+
+/**
+ * Decisions in force whose titles share words with a task: at least two words, or the one word
+ * of a one-word title. Best match first, then newest; ids the text already names are left
+ * out. A cheap word match, not a search: it only points the receiver at what to check.
+ */
+export function matchDecisions(decisions: RefEntry[], text: string, max = HINT_MAX): RefEntry[] {
+  const words = topicWords(text);
+  const named = new Set((String(text ?? '').toUpperCase().match(/\b[A-Z][A-Z0-9]{1,5}-D\d{1,6}\b/g) ?? []));
+  const scored = decisions.flatMap(d => {
+    if (!isActive(d) || named.has(d.id)) return [];
+    const title = topicWords(d.title);
+    const score = [...title].filter(w => words.has(w)).length;
+    return score >= 2 || (score === 1 && title.size === 1) ? [{ d, score }] : [];
+  });
+  return scored.sort((a, b) => b.score - a.score || b.d.num - a.d.num).slice(0, max).map(s => s.d);
+}
+
+/** The line added to a task or message: which decisions in force to check, or '' when none match. */
+export function decisionHint(matches: RefEntry[]): string {
+  if (!matches.length) return '';
+  const clipTitle = (t: string) => (t.length > 50 ? `${t.slice(0, 49)}...` : t);
+  return `Decisions in force that may apply (check with ref_get): ${matches.map(d => `${d.id} ${clipTitle(d.title)}`).join('; ')}.`;
 }

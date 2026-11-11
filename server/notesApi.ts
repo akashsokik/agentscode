@@ -1,5 +1,5 @@
 import { HttpError } from './errors.ts';
-import { ALL_CODE, isActive, isCode, parseRefId, type ProjectRefs, type RefEntry } from './projectRefs.ts';
+import { ALL_CODE, isActive, isCode, isCurrent, parseRefId, type ProjectRefs, type RefEntry } from './projectRefs.ts';
 import type { RefMentions } from './refMentions.ts';
 import { queryWords, sourceLine, splitLinks, type RefDetail, type RefProject, type RefSearchHit, type RefState, type RefsIndex, type RefSummary } from '../shared/refs.ts';
 import type { Project } from '../shared/types.ts';
@@ -18,9 +18,10 @@ export interface NotesSource {
   projects: () => Iterable<Project>;
 }
 
+/** An outdated note reads like a replaced decision: under Replaced, faded. */
 function state(entry: RefEntry): RefState {
-  if (entry.kind === 'N') return 'note';
-  return isActive(entry) ? 'active' : 'replaced';
+  if (!isCurrent(entry)) return 'replaced';
+  return entry.kind === 'N' ? 'note' : 'active';
 }
 
 function gist(text: string): string {
@@ -40,14 +41,16 @@ export class NotesApi {
     return codes.map(code => {
       const project = live.find(p => p.code === code);
       const decisions = refs.entries(code, 'D');
+      const notes = refs.entries(code, 'N');
+      const outdated = notes.filter(n => !isCurrent(n)).length;
       const replaced = decisions.filter(d => !isActive(d)).length;
       return {
         code,
         name: project?.name ?? (code === ALL_CODE ? 'All projects' : refs.projectInfo(code)?.name ?? code),
         ...(project ? { projectId: project.id } : {}),
         decisions: decisions.length - replaced,
-        notes: refs.entries(code, 'N').length,
-        replaced,
+        notes: notes.length - outdated,
+        replaced: replaced + outdated,
       };
     });
   }

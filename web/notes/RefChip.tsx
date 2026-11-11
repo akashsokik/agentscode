@@ -157,7 +157,7 @@ function RefCard({ id, anchor, refId, onEnter, onLeave, onClose }: {
       </div>
       <h3 className="mt-2 text-[13px] font-semibold leading-5">{summary.title}</h3>
       {summary.gist ? <p className="mt-1 text-[12px] leading-[1.45] text-content/55">{summary.gist}</p> : null}
-      {summary.replacedBy ? <p className="mt-1 text-[12px] text-content/55">Replaced by <span className="font-mono">{summary.replacedBy}</span></p> : null}
+      {summary.replacedBy ? <p className="mt-1 text-[12px] text-content/55">{summary.kind === 'N' ? 'Outdated by' : 'Replaced by'} <span className="font-mono">{summary.replacedBy}</span></p> : null}
       <div className="mt-2.5 flex min-w-0 items-center gap-1.5 text-[11px] text-content/45">
         <WhoAvatar name={summary.by} className="size-3.5" />
         <span className="truncate">{summary.by}{summary.date ? `, ${shortDate(summary.date)}` : ''}</span>

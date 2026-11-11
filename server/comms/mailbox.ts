@@ -171,7 +171,8 @@ export class Mailbox {
     return this.enqueue(fromId, toId, text, expectsReply, undefined, { channelId, postId });
   }
 
-  delegate(fromId: string, toId: string, delegation: Delegation): PeerMessage {
+  /** `hint` is a last line for the receiver (decisions in force to check), not part of the delegation. */
+  delegate(fromId: string, toId: string, delegation: Delegation, hint = ''): PeerMessage {
     this.requireLead(fromId);
     // The SuperAgent is read-only so it can never edit; delegating is how its work gets done.
     const from = this.agent(fromId);
@@ -181,6 +182,7 @@ export class Mailbox {
       delegation.project ? `Project: ${delegation.project}` : '',
       `Acceptance criteria:\n${delegation.acceptanceCriteria}`,
       delegation.context ? `Context and references:\n${delegation.context}` : '',
+      hint,
     ].filter(Boolean).join('\n\n');
     return this.enqueue(fromId, toId, text, true, undefined, { delegation });
   }

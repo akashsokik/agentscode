@@ -66,6 +66,8 @@ export const noteAddInput = z.object({
   project: refProject,
   title: z.string().trim().min(1).max(REF_TITLE_LIMIT),
   body: z.string().trim().min(1).max(REF_BODY_LIMIT),
+  /** A note in the same project this one corrects; it is marked "outdated by" the new one. */
+  replaces: refId.optional(),
   links: refLinks,
 });
 export const decisionAddInput = z.object({
@@ -293,7 +295,7 @@ export function createCommsMcpServer(call: CommsHandler, options: { executive?: 
     inputSchema: forgetInput.shape,
   }, args => invoke('forget', args));
   server.registerTool('note_add', {
-    description: 'Add a note to a project\'s shared notes (notes.md), which every agent sees in its index: a finding, a how-to, a known problem. project is a code (ACH), a project name, or ALL for something that holds across projects. AgentsCode assigns the id (ACH-N4); notes are never edited or deleted by tools. No secrets.',
+    description: 'Add a note to a project\'s shared notes (notes.md), which every agent sees in its index: a finding, a how-to, a known problem. project is a code (ACH), a project name, or ALL for something that holds across projects. AgentsCode assigns the id (ACH-N4); notes are never edited or deleted by tools. To correct a wrong or outdated note, add the new one with replaces set to the old id (ACH-N3): the old one is marked "outdated by". No secrets.',
     inputSchema: noteAddInput.shape,
   }, args => invoke('note_add', args));
   server.registerTool('decision_add', {
@@ -462,7 +464,7 @@ export function codexCommsConfig(token: string, executive = false, eyes = false)
 }
 
 export const COMMS_INSTRUCTIONS = [
-  `AgentsCode gives you ${COMMS_SERVER} MCP tools to work with teammate agents: list_agents, send_message, reply, read_messages, set_task_summary, delegate_task, list_delegations, report_result, list_channels, read_channel and post_to_channel. remember and forget keep your own memory, and with scope "user" the user profile every agent shares. create_walkthrough publishes a guided tour of your work, only when the user asks for one. Project notes and decisions (ids like ACH-D7, ALL-N2) are shared by every agent: check the active decisions before changing what they cover, read entries with ref_get and ref_search, and record what the user decides with decision_add (replaces marks an old one replaced) and useful findings with note_add.`,
+  `AgentsCode gives you ${COMMS_SERVER} MCP tools to work with teammate agents: list_agents, send_message, reply, read_messages, set_task_summary, delegate_task, list_delegations, report_result, list_channels, read_channel and post_to_channel. remember and forget keep your own memory, and with scope "user" the user profile every agent shares. create_walkthrough publishes a guided tour of your work, only when the user asks for one. Project notes and decisions (ids like ACH-D7, ALL-N2), shared by every agent, use note_add, decision_add, ref_get and ref_search; how to use them is below.`,
   'Replies can also include interactive UI (metrics, tables, charts, status, buttons the user clicks to answer you) in ```openui-lang blocks. Use it when the user would rather see or click than read; call openui_guide once for the syntax first.',
   'In the desktop app you have your own browser: browser_open a page (e.g. your dev server), browser_snapshot to read it, then browser_click, browser_type and browser_press to use it, browser_screenshot to see it and browser_console for errors. Use it to check web work the way the user would.',
   'AgentsCode draws ```mermaid code blocks as diagrams in your replies, channel posts and walkthroughs (flowchart, sequenceDiagram, architecture-beta, classDiagram, erDiagram, stateDiagram). Use one when a flow, a sequence of calls or an architecture is clearer as a picture than as prose. In architecture-beta, services are placed by edge sides: connect each neighbour of a service on a different side (L, R, T, B), or two land on the same spot.',
