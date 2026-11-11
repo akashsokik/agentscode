@@ -268,7 +268,7 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
       </header>
 
       {!snapshot ? (
-        <p className="px-5 pb-1 pt-4 text-[13px] text-content/45">{connection === 'closed' ? 'Waiting for AgentsCode on this machine…' : 'Connecting to AgentsCode…'}</p>
+        <p className="px-5 pb-1 pt-4 text-[13px] text-content/45">{connection === 'closed' ? 'Waiting for Podcode on this machine…' : 'Connecting to Podcode…'}</p>
       ) : (
         <>
           <TeamStrip agents={agents} onOpen={onOpenAgent} />

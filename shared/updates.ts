@@ -31,7 +31,7 @@ export type DesktopUpdates = {
   onChange(callback: (snapshot: UpdateSnapshot) => void): () => void;
   /** Check for Updates: looks now and reports the outcome in a dialog, as the app menu's item does. */
   check(): Promise<void>;
-  /** The app menu's About AgentsCode: calls back to open Settings at About. */
+  /** The app menu's About Podcode: calls back to open Settings at About. */
   onShowAbout(callback: () => void): () => void;
 };
 

@@ -67,7 +67,7 @@ test('a thread counts replies, lists each participant once and knows its last re
     p({ id: 'u1', threadId: 'r', ts: NOON + 2 * MIN }),
     p({ id: 'a2', ...ada, threadId: 'r', ts: NOON + 3 * MIN }),
     p({ id: 'b1', ...bo, threadId: 'r', ts: NOON + 4 * MIN }),
-    p({ id: 'ev', from: 'system', fromName: 'AgentsCode', kind: 'event', threadId: 'r', ts: NOON + 5 * MIN }),
+    p({ id: 'ev', from: 'system', fromName: 'Podcode', kind: 'event', threadId: 'r', ts: NOON + 5 * MIN }),
     p({ id: 'next', ts: NOON + 6 * MIN }),
   ];
   const { main, threads } = buildThreads(posts);
@@ -89,19 +89,19 @@ test('posts group under one header for the same author within five minutes', () 
   assert.equal(continuesGroup(first, p({ id: '6', ts: NOON + MIN })), false, 'the user is another author');
   assert.equal(continuesGroup(first, p({ id: '7', ...ada, kind: 'error', ts: NOON + MIN })), false, 'problems keep their label');
   assert.equal(continuesGroup(first, p({ id: '8', ...ada, kind: 'needs_you', ts: NOON + MIN })), false, 'approval requests keep their label');
-  assert.equal(continuesGroup(p({ id: 'e', from: 'system', fromName: 'AgentsCode', kind: 'event' }), p({ id: '9', from: 'system', fromName: 'AgentsCode', kind: 'event', ts: NOON + MIN })), false, 'events never group');
+  assert.equal(continuesGroup(p({ id: 'e', from: 'system', fromName: 'Podcode', kind: 'event' }), p({ id: '9', from: 'system', fromName: 'Podcode', kind: 'event', ts: NOON + MIN })), false, 'events never group');
   const late = p({ id: 'late', ...ada, ts: new Date(2026, 10, 4, 23, 58).getTime() });
   assert.equal(continuesGroup(late, p({ id: 'next-day', ...ada, ts: new Date(2026, 10, 5, 0, 1).getTime() })), false, 'a new day starts a new header');
 });
 
 test('an event is never a thread root, and replies pointing at one stay in the main list', () => {
-  const event = p({ id: 'ev', from: 'system', fromName: 'AgentsCode', kind: 'event' });
+  const event = p({ id: 'ev', from: 'system', fromName: 'Podcode', kind: 'event' });
   const posts = [
     event,
     p({ id: 'legacy', ...ada, kind: 'reply', inReplyTo: 'ev' }),
     p({ id: 'deeper', ...bo, inReplyTo: 'legacy' }),
     p({ id: 'pointed', ...ada, threadId: 'ev' }),
-    p({ id: 'stray', from: 'system', fromName: 'AgentsCode', kind: 'event', inReplyTo: 'legacy' }),
+    p({ id: 'stray', from: 'system', fromName: 'Podcode', kind: 'event', inReplyTo: 'legacy' }),
   ];
   const byId = new Map(posts.map(post => [post.id, post]));
   assert.equal(threadRootId(posts[1], byId), null, 'a chain that reaches an event has no root');

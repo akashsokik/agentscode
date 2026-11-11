@@ -14,7 +14,7 @@ export function versionBelow(a: string, b: string): boolean {
 }
 
 /** Why an OrcaCode without --add-dir cannot work on all projects or several, and what fixes it. */
-export const ORCACODE_NO_ADD_DIR = 'This OrcaCode cannot work in more than one project: its file tools only reach the folder it runs in. Give the agent one project, or once an OrcaCode with --add-dir is out, run `orcacode update` and restart AgentsCode.';
+export const ORCACODE_NO_ADD_DIR = 'This OrcaCode cannot work in more than one project: its file tools only reach the folder it runs in. Give the agent one project, or once an OrcaCode with --add-dir is out, run `orcacode update` and restart Podcode.';
 
 /**
  * Why a new agent cannot use this engine, or null when it can. OrcaCode's file tools only take
@@ -25,7 +25,7 @@ export function engineProblem(engine: EngineKind, info: EngineInfo | undefined, 
   if (!info?.available) return `${ENGINE_LABELS[engine]} is not installed on this machine.`;
   if (engine !== 'orcacode') return null;
   if (info.version && versionBelow(info.version, ORCACODE_MIN_VERSION)) {
-    return `OrcaCode ${ORCACODE_MIN_VERSION} or newer is needed (found ${info.version}). Run \`orcacode update\`, then restart AgentsCode.`;
+    return `OrcaCode ${ORCACODE_MIN_VERSION} or newer is needed (found ${info.version}). Run \`orcacode update\`, then restart Podcode.`;
   }
   if (beyondOneFolder && !info.addDir) return ORCACODE_NO_ADD_DIR;
   return null;

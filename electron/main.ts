@@ -1,7 +1,7 @@
 /**
- * The AgentsCode desktop app: a window on the AgentsCode server. It starts the bundled server
+ * The Podcode desktop app: a window on the Podcode server. It starts the bundled server
  * (compiled to out/server) in an Electron utility process and opens a window once it listens.
- * When an AgentsCode server already answers on the port (say `npm run dev`), the window opens
+ * When a Podcode server already answers on the port (say `npm run dev`), the window opens
  * on that one instead, so two servers never share ~/.agentscode. Ported from Agent Office.
  */
 import { execFileSync } from 'node:child_process';
@@ -15,6 +15,13 @@ import { startSuperBridge, stopSuperBridge } from './superTray.ts';
 import { QuickWindow } from './quickWindow.ts';
 import { captureApp } from './appShot.ts';
 
+// The app was called AgentsCode before 0.3.0, and Electron names the userData folder after the app.
+// That folder holds the window's localStorage (layout, drafts), the integrated browser's logins
+// (persist:agentscode-browser) and the single-instance lock. Keeping its old name means an update
+// keeps all of that, and an old AgentsCode.app and Podcode.app can never run at once. Set before
+// anything reads userData, and before requestSingleInstanceLock below.
+app.setPath('userData', path.join(app.getPath('appData'), 'AgentsCode'));
+
 const PORT = Number(process.env.PORT ?? 4320);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 /** How long the server gets to stop its agents before the app quits anyway. */
@@ -22,7 +29,7 @@ const SHUTDOWN_GRACE_MS = 8000;
 /** How long a fresh server gets to start listening before the app gives up. */
 const START_TIMEOUT_MS = 60_000;
 /** The line server/index.ts logs once it listens. */
-const READY_LINE = 'AgentsCode is open at';
+const READY_LINE = 'Podcode is open at';
 
 let server: UtilityProcess | null = null;
 let window: BrowserWindow | null = null;
@@ -52,7 +59,7 @@ function useLoginShellPath(): void {
   }
 }
 
-/** True when an AgentsCode server already answers on the port. */
+/** True when a Podcode server already answers on the port. */
 async function serverAnswers(): Promise<boolean> {
   try {
     const res = await fetch(`${ORIGIN}/api/state`, { signal: AbortSignal.timeout(1500) });
@@ -74,7 +81,7 @@ function markReady(): void {
 
 function startServer(): void {
   server = utilityProcess.fork(path.join(import.meta.dirname, '..', 'server', 'index.js'), [], {
-    serviceName: 'AgentsCode Server',
+    serviceName: 'Podcode Server',
     stdio: 'pipe',
     // The server runs agents' comms tools with this binary, as plain Node (server/config.ts).
     env: { ...process.env, AGENTSCODE_NODE: process.execPath },
@@ -96,7 +103,7 @@ function startServer(): void {
     if (ready || !server) return clearInterval(poll);
     if (Date.now() - started > START_TIMEOUT_MS) {
       clearInterval(poll);
-      dialog.showErrorBox('AgentsCode could not start', `The server did not answer on port ${PORT} within a minute.`);
+      dialog.showErrorBox('Podcode could not start', `The server did not answer on port ${PORT} within a minute.`);
       app.exit(1);
       return;
     }
@@ -150,7 +157,7 @@ function onServerExit(code: number): void {
     return;
   }
   void serverAnswers().then(up => {
-    // Another AgentsCode server took the port first (it came back while ours started): use it.
+    // Another Podcode server took the port first (it came back while ours started): use it.
     if (up) {
       markReady();
       bridge.useSocket();
@@ -159,14 +166,14 @@ function onServerExit(code: number): void {
     }
     const tail = recentOutput.join('').trim().split('\n').slice(-8).join('\n');
     dialog.showErrorBox(
-      ready ? 'AgentsCode stopped' : 'AgentsCode could not start',
-      `The AgentsCode server exited with code ${code}.${tail ? `\n\n${tail}` : ''}`,
+      ready ? 'Podcode stopped' : 'Podcode could not start',
+      `The Podcode server exited with code ${code}.${tail ? `\n\n${tail}` : ''}`,
     );
     app.exit(1);
   });
 }
 
-/** About AgentsCode: Settings > About in the window (version, build, updates), else the native panel. */
+/** About Podcode: Settings > About in the window (version, build, updates), else the native panel. */
 function showAbout(): void {
   if (!window || window.isDestroyed()) {
     app.showAboutPanel();
@@ -249,7 +256,7 @@ function isRect(value: unknown): value is Rect {
   return Boolean(r) && [r!.x, r!.y, r!.width, r!.height].every(n => typeof n === 'number' && Number.isFinite(n));
 }
 
-/** The bridge behind window.agentscodeDesktop.browser (web/browser.ts). Only the AgentsCode page may call it. */
+/** The bridge behind window.agentscodeDesktop.browser (web/browser.ts). Only the Podcode page may call it. */
 function registerBrowserIpc(): void {
   ipcMain.handle('browser:call', async (event, op: unknown, raw: unknown) => {
     if (!window || event.sender !== window.webContents || !fromApp(event)) throw new Error('Not allowed.');
@@ -292,7 +299,7 @@ function showWindow(): void {
     height: 900,
     minWidth: 960,
     minHeight: 600,
-    title: 'AgentsCode',
+    title: 'Podcode',
     // The dark theme's base colour (web/styles.css), so the window never flashes white.
     backgroundColor: '#171717',
     // MonoCode's window: no title bar, the traffic lights inside the left column's 40px header.
@@ -343,7 +350,7 @@ function showWindow(): void {
   void window.loadURL(ORIGIN);
 }
 
-/** Only the AgentsCode page itself may use the desktop bridge. */
+/** Only the Podcode page itself may use the desktop bridge. */
 function fromApp(event: IpcMainInvokeEvent | IpcMainEvent): boolean {
   try {
     return new URL(event.senderFrame?.url ?? '').origin === ORIGIN;

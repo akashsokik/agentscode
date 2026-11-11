@@ -3,11 +3,11 @@
   "version": "0.2.6",
   "private": true,
   "type": "module",
-  "productName": "AgentsCode",
-  "description": "An IDE where Claude Code, Codex and OrcaCode agents work side by side and talk to each other.",
+  "productName": "Podcode",
+  "description": "The desktop app where Claude Code, Codex and OrcaCode coding agents work side by side and message each other.",
   "license": "MIT",
-  "author": "AgentsCode",
-  "homepage": "https://orcapods.ai/agentscode",
+  "author": "Podcode",
+  "homepage": "https://podcode.orcapods.ai",
   "repository": {
     "type": "git",
     "url": "https://github.com/akashsokik/agentscode.git"
@@ -35,7 +35,7 @@
   },
   "build": {
     "appId": "com.agentscode.app",
-    "productName": "AgentsCode",
+    "productName": "Podcode",
     "artifactName": "${productName}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"

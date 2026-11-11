@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs the AgentsCode desktop app on macOS from the GitHub release.
+# Installs the Podcode desktop app on macOS from the GitHub release.
 #
 #   curl -fsSL https://raw.githubusercontent.com/akashsokik/agentscode/main/install.sh | bash
 #
@@ -10,7 +10,7 @@
 # The script checks the download against the release's SHA256SUMS and the app's code signature
 # before it replaces anything.
 #
-# Run it again to update. Quit AgentsCode first.
+# Run it again to update. Quit Podcode first.
 #
 # Environment:
 #   AGENTSCODE_VERSION      install this version (for example 0.1.0) instead of the latest release
@@ -22,7 +22,7 @@ set -euo pipefail
 REPO="akashsokik/agentscode"
 
 fail() {
-  printf 'AgentsCode install: %s\n' "$1" >&2
+  printf 'Podcode install: %s\n' "$1" >&2
   exit 1
 }
 
@@ -42,7 +42,6 @@ main() {
   if [[ -n "${AGENTSCODE_VERSION:-}" ]]; then
     base="https://github.com/$REPO/releases/download/v${AGENTSCODE_VERSION#v}"
   fi
-  local asset="AgentsCode-mac-$arch.zip"
 
   local dir
   if [[ -n "${AGENTSCODE_INSTALL_DIR:-}" ]]; then
@@ -55,7 +54,10 @@ main() {
   mkdir -p "$dir"
   # An absolute path with no trailing slash, as LaunchServices reports a running app's.
   dir="$(CDPATH='' cd -- "$dir" && pwd)"
-  local app="$dir/AgentsCode.app"
+  local app="$dir/Podcode.app"
+  # Podcode was called AgentsCode until 0.3.0. Same app (same bundle id and data), older name: an
+  # install replaces it, and it counts as the app when checking whether it is running.
+  local legacy="$dir/AgentsCode.app"
 
   # Replacing the app under a running copy would break it. Quitting it stops its agents, so that
   # is left to the user. LaunchServices knows the app by its bundle id and where it runs from. A
@@ -66,8 +68,8 @@ main() {
   local running
   running="$(lsappinfo info -only bundlepath -app com.agentscode.app 2>/dev/null |
     sed -n 's/^"LSBundlePath"="\(.*\)"$/\1/p' || true)"
-  if [[ "$running" == "$app" ]]; then
-    fail "AgentsCode is running from $app. Quit it (Cmd+Q) and run this again."
+  if [[ "$running" == "$app" || "$running" == "$legacy" ]]; then
+    fail "Podcode is running from $running. Quit it (Cmd+Q) and run this again."
   fi
 
   local tmp
@@ -75,11 +77,17 @@ main() {
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" EXIT
 
+  curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" ||
+    fail "could not download $base/SHA256SUMS"
+  # Releases before 0.3.0 (and AGENTSCODE_VERSION set to one of them) name their assets AgentsCode-*.
+  local asset="Podcode-mac-$arch.zip"
+  if ! awk -v name="$asset" '$2 == name { found = 1 } END { exit !found }' "$tmp/SHA256SUMS"; then
+    asset="AgentsCode-mac-$arch.zip"
+  fi
+
   printf 'Downloading %s\n' "$asset"
   curl -fL --progress-bar -o "$tmp/$asset" "$base/$asset" ||
     fail "could not download $base/$asset"
-  curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" ||
-    fail "could not download $base/SHA256SUMS"
 
   local expected actual
   expected="$(awk -v name="$asset" '$2 == name { print $1 }' "$tmp/SHA256SUMS")"
@@ -93,28 +101,41 @@ main() {
   # symlinks with "Operation not permitted" (macOS 26, seen 2026-11-07).
   mkdir "$tmp/unpacked"
   tar -xf "$tmp/$asset" -C "$tmp/unpacked" || fail "could not unpack $asset"
-  [[ -d "$tmp/unpacked/AgentsCode.app" ]] || fail "$asset does not contain AgentsCode.app"
-  codesign --verify --deep --strict "$tmp/unpacked/AgentsCode.app" 2>/dev/null ||
+  local unpacked
+  for unpacked in "$tmp/unpacked/Podcode.app" "$tmp/unpacked/AgentsCode.app" ""; do
+    [[ -z "$unpacked" || -d "$unpacked" ]] && break
+  done
+  [[ -n "$unpacked" ]] || fail "$asset does not contain Podcode.app"
+  codesign --verify --deep --strict "$unpacked" 2>/dev/null ||
     fail "the code signature of the downloaded app does not verify"
+  # An older release unpacks as AgentsCode.app; install it under that name.
+  if [[ "$unpacked" == */AgentsCode.app ]]; then
+    app="$legacy"
+  fi
 
-  # Move the old app aside, then move the new one in, so a failure leaves the old app in place.
-  local old="$dir/.AgentsCode-replaced.app"
-  rm -rf "$old"
+  # Move the old app (under either name) aside, then move the new one in, so a failure leaves the
+  # old app in place.
+  local old="$dir/.Podcode-replaced.app" old_legacy="$dir/.AgentsCode-replaced.app"
+  rm -rf "$old" "$old_legacy"
   if [[ -e "$app" ]]; then
     mv "$app" "$old" || fail "could not move the existing $app aside"
   fi
-  if ! mv "$tmp/unpacked/AgentsCode.app" "$app"; then
+  if [[ "$app" != "$legacy" && -e "$legacy" ]]; then
+    mv "$legacy" "$old_legacy" || fail "could not move the existing $legacy aside"
+  fi
+  if ! mv "$unpacked" "$app"; then
     # A move across volumes copies, and a failed copy can leave part of the app behind.
     rm -rf "$app"
     [[ -e "$old" ]] && mv "$old" "$app"
+    [[ -e "$old_legacy" ]] && mv "$old_legacy" "$legacy"
     fail "could not move the new app into $app"
   fi
-  rm -rf "$old"
+  rm -rf "$old" "$old_legacy"
 
   local version
   version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || echo '?')"
-  printf 'Installed AgentsCode %s in %s\n' "$version" "$app"
-  if [[ "$dir" == "$HOME/Applications" && -e /Applications/AgentsCode.app ]]; then
+  printf 'Installed Podcode %s in %s\n' "$version" "$app"
+  if [[ "$dir" == "$HOME/Applications" && ( -e /Applications/Podcode.app || -e /Applications/AgentsCode.app ) ]]; then
     printf 'An older copy is still in /Applications and may still be blocked. Move it to the Bin so Spotlight and the Dock open this one.\n'
   fi
 

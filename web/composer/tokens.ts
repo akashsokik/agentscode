@@ -7,9 +7,9 @@ import { mentionStart } from '../../shared/mentions.ts';
  * directly.
  */
 
-// ---- AgentsCode's own commands ------------------------------------------------
+// ---- Podcode's own commands ------------------------------------------------
 
-/** Commands AgentsCode runs itself. They run only when they are the whole message. */
+/** Commands Podcode runs itself. They run only when they are the whole message. */
 export const BUILTIN_COMMANDS: ComposerCommand[] = [
   {
     name: 'clear',
@@ -189,7 +189,7 @@ function scopeRank(command: ComposerCommand): number {
   return 3;
 }
 
-/** Commands for the `/` picker: AgentsCode's first, then project, personal and plugin ones; fuzzy once typed. */
+/** Commands for the `/` picker: Podcode's first, then project, personal and plugin ones; fuzzy once typed. */
 export function rankCommands(commands: ComposerCommand[], query: string, limit = MAX_COMMANDS): ComposerCommand[] {
   const needle = query.trim().toLowerCase();
   if (!needle) {

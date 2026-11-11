@@ -5,7 +5,7 @@
  * agent tools (electron/cdp.ts) still read, click and capture it.
  *
  * Browser tabs share one session of their own, apart from the app's, with no preload, no Node, and
- * every permission prompt refused. They never load AgentsCode itself.
+ * every permission prompt refused. They never load Podcode itself.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -49,7 +49,7 @@ interface Tab {
 }
 
 interface Options {
-  /** The AgentsCode server's port, which browser tabs may never load. */
+  /** The Podcode server's port, which browser tabs may never load. */
   appPort: number;
   window: () => BrowserWindow | null;
 }
@@ -174,7 +174,7 @@ export class BrowserHost {
   }
 
   private make(id: string, agentId: string | null): Tab {
-    if (this.quitting) throw new BrowserError('AgentsCode is quitting.');
+    if (this.quitting) throw new BrowserError('Podcode is quitting.');
     const view = new WebContentsView({
       webPreferences: { session: this.session, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
     });

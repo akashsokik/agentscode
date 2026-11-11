@@ -6,7 +6,7 @@ import { checkEntry } from './agentHome.ts';
 import { distinctive } from './dream.ts';
 import { HttpError } from './errors.ts';
 
-// The user profile: what AgentsCode learned about the user, shared by every agent. Memory is one
+// The user profile: what Podcode learned about the user, shared by every agent. Memory is one
 // agent's; this is about the person (style, taste, how they like to work) and holds across projects.
 // It lives in the data dir, beside the agents' homes and outside every agent's cwd:
 //   user.md             the entries, in a form a person can read and edit
@@ -35,7 +35,7 @@ export function renderProfile(entries: ProfileEntry[]): string {
   const lines = [
     '# About the user',
     '',
-    'AgentsCode keeps this file and gives it to every agent. Agents add what they learn about you; edit or delete entries in the app (About you, in the sidebar). A hand edit here must keep each entry under its "## <id> (<time>)" heading: lines outside an entry are dropped on the next write.',
+    'Podcode keeps this file and gives it to every agent. Agents add what they learn about you; edit or delete entries in the app (About you, in the sidebar). A hand edit here must keep each entry under its "## <id> (<time>)" heading: lines outside an entry are dropped on the next write.',
   ];
   for (const entry of entries) {
     const when = new Date(entry.createdAt).toISOString().replace(/\.\d{3}Z$/, 'Z');

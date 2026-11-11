@@ -1,7 +1,7 @@
 /**
  * The SuperAgent's floating quick composer (web/quick): a small window over whatever app is in
  * front, opened by the system-wide shortcut or the menu bar. On macOS it is a non-activating panel,
- * so AgentsCode's main window stays where it is and no Space switches. Frameless and clear: the
+ * so Podcode's main window stays where it is and no Space switches. Frameless and clear: the
  * card draws the only surface. It opens on the screen the pointer is on, takes the card's height,
  * and hides on Esc or when it loses focus, keeping its draft for next time.
  */
@@ -48,13 +48,13 @@ export class QuickWindow {
       fullscreenable: false,
       skipTaskbar: true,
       alwaysOnTop: true,
-      // A non-activating panel on macOS: typing goes to it without bringing AgentsCode forward.
+      // A non-activating panel on macOS: typing goes to it without bringing Podcode forward.
       ...(mac ? { type: 'panel' as const } : {}),
       webPreferences: { preload: this.preload },
     });
     win.setAlwaysOnTop(true, 'floating');
     // A macOS panel already shows on every Space and over full-screen apps; setVisibleOnAllWorkspaces
-    // there would switch the process type and blink AgentsCode's windows and Dock icon.
+    // there would switch the process type and blink Podcode's windows and Dock icon.
     if (!mac) win.setVisibleOnAllWorkspaces(true);
     // Clicking anywhere else puts it away; the draft stays in the page.
     win.on('blur', () => {

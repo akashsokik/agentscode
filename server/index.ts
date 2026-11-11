@@ -24,7 +24,7 @@ const server = createServer(manager, hub, { distDir: DIST_DIR, terminals, bridge
 
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is busy. Is AgentsCode already running? Set PORT=... to use another port.`);
+    console.error(`Port ${PORT} is busy. Is Podcode already running? Set PORT=... to use another port.`);
     process.exit(1);
   }
   throw err;
@@ -36,7 +36,7 @@ server.listen(PORT, HOST, () => {
     `Codex ${codex.available ? `v${codex.version}` : 'not found'}`,
     `OrcaCode ${orcacode.available ? `v${orcacode.version}` : 'not found'}`,
   ].join(', ');
-  console.log(`AgentsCode is open at http://localhost:${PORT}  (${engines})`);
+  console.log(`Podcode is open at http://localhost:${PORT}  (${engines})`);
 });
 
 async function shutdown(): Promise<void> {
