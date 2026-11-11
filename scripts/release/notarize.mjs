@@ -1,8 +1,8 @@
 // Notarizes the signed Mac app without holding a runner on Apple's queue: submit, record the
 // submission id, poll for a bounded time, staple. The release workflow runs it in two steps.
 //
-//   node scripts/release/notarize.mjs submit <Podcode.app> <state-dir> <tag> <arch> <commit>
-//     Zips the signed app into <state-dir>/Podcode.zip, submits it with `notarytool submit
+//   node scripts/release/notarize.mjs submit <PodCode.app> <state-dir> <tag> <arch> <commit>
+//     Zips the signed app into <state-dir>/PodCode.zip, submits it with `notarytool submit
 //     --no-wait`, and writes <state-dir>/state.json ({ tag, arch, commit, id, submittedAt }). The
 //     workflow uploads <state-dir> as an artifact, so a re-run of the same build polls this
 //     submission (and staples this exact app) instead of building and submitting again.
@@ -13,7 +13,7 @@
 //     workflow submits afresh. A tag moved to another commit, or another arch's artifact, is
 //     never reused.
 //
-//   node scripts/release/notarize.mjs wait <Podcode.app> <state-dir> [minutes]
+//   node scripts/release/notarize.mjs wait <PodCode.app> <state-dir> [minutes]
 //     Polls `notarytool info <id>` every 30 seconds for up to <minutes> (default 40).
 //     Accepted: staples the ticket to the app and validates it. Invalid or Rejected: prints
 //     `notarytool log <id>` and fails. Still in progress at the deadline: fails with the id.
@@ -93,7 +93,7 @@ async function submit(app, stateDir, tag, arch, commit) {
   if (!/^[0-9a-f]{40}$/.test(commit ?? '')) fail(`submit needs the full commit (git rev-parse HEAD), got "${commit}".`);
   if (!existsSync(app)) fail(`No app at ${app}.`);
   mkdirSync(stateDir, { recursive: true });
-  const zip = path.join(stateDir, 'Podcode.zip');
+  const zip = path.join(stateDir, 'PodCode.zip');
   const zipped = await run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, zip]);
   if (zipped.code !== 0) fail(`Could not zip ${app}: ${zipped.stderr}`);
   const result = await notarytool(['submit', zip, '--no-wait', '--output-format', 'json'], { timeout: 30 * 60_000 });

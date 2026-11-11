@@ -3,10 +3,10 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "productName": "Podcode",
+  "productName": "PodCode",
   "description": "The desktop app where Claude Code, Codex and OrcaCode coding agents work side by side and message each other.",
   "license": "MIT",
-  "author": "Podcode",
+  "author": "PodCode",
   "homepage": "https://podcode.orcapods.ai",
   "repository": {
     "type": "git",
@@ -35,7 +35,7 @@
   },
   "build": {
     "appId": "com.agentscode.app",
-    "productName": "Podcode",
+    "productName": "PodCode",
     "artifactName": "${productName}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"

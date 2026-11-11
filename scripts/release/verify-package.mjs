@@ -1,4 +1,4 @@
-// Checks a packaged Podcode app before it ships: the pieces that are platform specific, and so
+// Checks a packaged PodCode app before it ships: the pieces that are platform specific, and so
 // easy to get wrong in a CI matrix, are there for the platform and architecture being built.
 //
 //   node scripts/release/verify-package.mjs <platform> <arch>     (darwin|win32|linux, arm64|x64)
@@ -20,7 +20,7 @@ function findResources() {
   for (const dir of readdirSync(release)) {
     const full = path.join(release, dir);
     if (!statSync(full).isDirectory()) continue;
-    const mac = path.join(full, 'Podcode.app', 'Contents', 'Resources');
+    const mac = path.join(full, 'PodCode.app', 'Contents', 'Resources');
     if (existsSync(mac)) return mac;
     const other = path.join(full, 'resources');
     if (existsSync(path.join(other, 'app'))) return other;

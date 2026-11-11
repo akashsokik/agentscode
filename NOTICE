@@ -1,8 +1,8 @@
-Podcode
+PodCode
 ==========
 
 The interface is built from MonoCode's UI (https://github.com/hardbeat920/monocode).
-MonoCode is a Tauri app whose frontend calls a Rust backend directly, so Podcode
+MonoCode is a Tauri app whose frontend calls a Rust backend directly, so PodCode
 vendors its portable primitives and rebuilds the rest from MonoCode's own markup.
 
 Vendored from MonoCode, in web/mono/ (import paths adjusted):
@@ -18,7 +18,7 @@ Vendored from MonoCode, in web/mono/ (import paths adjusted):
   - QuestionForm.tsx,             src/features/sessions/ui/QuestionForm.tsx,
     userQuestion.ts               src/features/sessions/model/userQuestion.ts
   - AccessPicker.tsx              src/features/sessions/ui/AccessPicker.tsx (modes mapped to
-                                  Podcode's autonomy levels)
+                                  PodCode's autonomy levels)
   - settings.tsx                  Toggle, Select, Segmented, Group and Row from
                                   src/features/settings/ui/SettingsView.tsx
   - ContextMeter.tsx              src/features/sessions/ui/ContextMeter.tsx (ring in the warning
@@ -91,11 +91,11 @@ Terminal panel:
     (https://github.com/ghostty-org/ghostty, MIT) compiled to WebAssembly.
   - node-pty (https://github.com/microsoft/node-pty), MIT, Copyright (c) 2012-2015
     Christopher Jeffrey, and Microsoft Corporation. Runs the shells on the server.
-Podcode uses Ghostty's emulator, not the Ghostty app, and is not affiliated with the
+PodCode uses Ghostty's emulator, not the Ghostty app, and is not affiliated with the
 Ghostty project.
 
 Claude and Codex names and logos are trademarks of their respective owners and
-are used only to identify those products. Podcode is not affiliated with,
+are used only to identify those products. PodCode is not affiliated with,
 endorsed by, or sponsored by Anthropic, OpenAI or the MonoCode authors.
 
 The engine runners and the agent-to-agent mailbox are ported from the author's
