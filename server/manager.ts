@@ -81,6 +81,7 @@ import { locate, type Place } from './whereabouts.ts';
 import { openuiGuide } from './openuiGuide.ts';
 import { ALL_CODE, ALL_INDEXES_LIMIT, decisionHint, deriveCode, isActive, isCode, isCurrent, matchDecisions, ProjectRefs, type RefEntry } from './projectRefs.ts';
 import { NotesApi } from './notesApi.ts';
+import { MergeRecords, WorkService } from './work.ts';
 import { RefMentions } from './refMentions.ts';
 import { BrowserBridge, BROWSER_WRITE_OPS, compactConsole, type BrowserOp } from './browserBridge.ts';
 import { blockedReason, normalizeAddress } from '../shared/browser.ts';
@@ -198,6 +199,8 @@ export class AgentManager {
   private refs: ProjectRefs;
   /** The Notes tab's read API over the notes and where each id is cited. */
   readonly notes: NotesApi;
+  /** The Work view: branches in progress, merges into main, the graph and cleanup (server/work.ts). */
+  readonly work: WorkService;
   /** The memory each agent's app view was last sent, to notice memory.md changing on disk. */
   private memoryVersions = new Map<string, string>();
   /** Dreaming: the gate, triggers, records, undo, soul proposals and the numbers. */
@@ -239,6 +242,13 @@ export class AgentManager {
     this.homes = new AgentHomes(path.join(store.dataDir, 'agents'));
     this.refs = new ProjectRefs(path.join(store.dataDir, 'projects'));
     this.notes = new NotesApi({ refs: this.refs, mentions: new RefMentions(store), projects: () => this.store.projects.values() });
+    this.work = new WorkService(new MergeRecords(path.join(store.dataDir, 'work')), {
+      agents: () => [...this.store.agents.values()],
+      messages: () => this.store.messages,
+      agentsDir: path.join(store.dataDir, 'agents'),
+      dataDir: store.dataDir,
+      knownRef: id => this.refs.get(id) !== null,
+    });
     this.profile = new ProfileStore(store.dataDir);
     this.superStore = new SuperStore(store.dataDir);
     this.watcher = new SuperWatcher({

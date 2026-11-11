@@ -14,6 +14,7 @@ import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
 import { Empty, HeaderButton, IconTab, Loading, TextButton } from '../ui/common.tsx';
 import { Bot, CheckCircle, CircleDot, Clock, DashboardSquare, FileDiff, Folder, GitBranch, ListBullet, MessageMultiple, PanelRight, RefreshCw, StickyNote, type IconComponent } from '../mono/icons.tsx';
 import { NotesView } from '../notes/NotesView.tsx';
+import { WorkPanel } from '../work/WorkView.tsx';
 import { Segmented } from '../mono/settings.tsx';
 import { MessageStatus } from '../panes/CommsPane.tsx';
 import { DecisionsView, GoalsView, RoutinesView, useSuperTabs } from '../panes/SuperPanel.tsx';
@@ -246,6 +247,7 @@ const PANEL_TABS: { view: Layout['rightView']; label: string; icon: IconComponen
   { view: 'comms', label: 'Comms', icon: MessageMultiple },
   { view: 'changes', label: 'Changes', icon: FileDiff },
   { view: 'notes', label: 'Notes', icon: StickyNote },
+  { view: 'work', label: 'Work', icon: GitBranch },
 ];
 
 /**
@@ -260,6 +262,7 @@ const SUPER_PANEL_TABS: { view: SuperView; label: string; icon: IconComponent }[
   { view: 'routines', label: 'Routines', icon: Clock },
   { view: 'comms', label: 'Comms', icon: MessageMultiple },
   { view: 'notes', label: 'Notes', icon: StickyNote },
+  { view: 'work', label: 'Work', icon: GitBranch },
 ];
 
 /** What a tab's count means, for its tooltip and a screen reader. */
@@ -352,6 +355,7 @@ export function RightPanel() {
           : view === 'goals' ? <GoalsView />
           : view === 'routines' ? <RoutinesView />
           : view === 'notes' ? <NotesView agent={agent} />
+          : view === 'work' ? <WorkPanel />
           : <CommsFeed agent={agent} />}
       </div>
       <ResizeHandle column={column} edge="left" label="Resize panel" />
