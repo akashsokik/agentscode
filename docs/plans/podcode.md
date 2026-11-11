@@ -82,7 +82,7 @@ Signing doesn't depend on the repo at all. The personal Developer ID (team A5VD5
 - Launch links are permanent, and the org is where Orca, Orcacode and the site already live.
 - 0.3.0 is then built with `publish.owner: okikorg, repo: podcode`, so new installs never depend on the redirect. Only 0.2.x installs use it, once, to reach 0.3.0.
 - One rule must hold forever: never create a repo named `agentscode` under akashsokik again.
-- An org repo signed with an individual's Developer ID works. The name in the signature changes when that membership is converted to an organization; the Team ID stays the same, so updates keep working.
+- An org repo signed with an individual's Developer ID works: the signature depends on the certificate in the Actions secrets, not on which GitHub account hosts the repo, so updates keep working.
 
 B is the low-effort middle. A is fine if launch is soon and the move can wait. Moving after launch costs the same mechanically, but then the launch links all go through the redirect.
 
@@ -118,7 +118,7 @@ Each step needs the user's go. Nothing is published, renamed or deployed before 
 | Path | `/podcode`. `agentscode.html` becomes `podcode.html`, `src/agentscode-main.tsx` becomes `src/podcode-main.tsx`, `AgentscodePage.tsx` becomes `PodcodePage.tsx`, and `src/content/agentscode.ts` becomes `src/content/podcode.ts` (constants `PODCODE_PATH`, `PODCODE_REPO`, ...). |
 | Routes | `vite.config.ts` `cleanHTMLRoutes`: `['/podcode', '/podcode.html']`. |
 | Redirects (`vercel.json`) | New: `/agentscode` to `/podcode`, permanent. Change the existing orcacode-host rule for `/agentscode` to point at `https://orcapods.ai/podcode`, so there's one hop, not two. |
-| Copy | Renamed throughout, always "Podcode", never bare "Orca" for the app, with "by Orca" / orcapods.ai visible. The lead is what Stably's Orca and the others don't do: agents **messaging each other** (Comms: send, delegate, report), **Channels** across projects, and the **SuperAgent**. Pair the name with what it is in the title, meta description and H1. Say nothing the README doesn't, so the README's lead is rewritten first in the app PR. |
+| Copy | Renamed throughout, always "Podcode", never bare "Orca" for the app, with "by Orca" / orcapods.ai visible. The lead is what makes Podcode different from running agents side by side: agents **messaging each other** (Comms: send, delegate, report), **Channels** across projects, and the **SuperAgent**. Pair the name with what it is in the title, meta description and H1. Say nothing the README doesn't, so the README's lead is rewritten first in the app PR. |
 | Downloads | Asset names `Podcode-mac-arm64.dmg`, `Podcode-mac-x64.dmg`, `Podcode-win-x64.exe`, `Podcode-linux-x86_64.AppImage`, on the new repo's `/releases/latest/download/`. |
 | Assets | `public/agentscode/` becomes `public/podcode/` (favicons, icons, screenshots). There's a new Open Graph image `og/podcode.jpg` with the name on it; the old image path keeps working for old shares. |
 | Generated files | `scripts/generate-static-html.mts` gets `{ path: '/podcode' }` and the llms.txt line. Regenerate the sitemap, llms.txt and static HTML with the site's own script, not by hand. |
