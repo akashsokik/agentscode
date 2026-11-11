@@ -24,6 +24,14 @@ name: release
 # Without them the app is ad-hoc signed: install.sh (curl, so no quarantine) installs it and it
 # opens directly; a browser download opens only after "Open Anyway" in System Settings. The app
 # offers new versions through the install command instead of installing them (electron/updater.ts).
+#
+# Notarization never holds a Mac runner on Apple's queue: the job signs the app, submits it with
+# `notarytool submit --no-wait` (scripts/release/notarize.mjs), saves the signed app and the
+# submission id as the artifact notary-<name>, polls for up to 40 minutes, then staples and builds
+# the dmg and zip from that exact app (electron-builder --prepackaged). If Apple has not answered by
+# then, the job fails with the submission id; "Re-run failed jobs" then finds the artifact and polls
+# the same submission instead of building and submitting again. A new dispatch of the tag can do
+# the same with the earlier run's id in notary_run_id. Invalid prints `notarytool log <id>`.
 
 on:
   push:
@@ -34,6 +42,10 @@ on:
       tag:
         description: "Existing v* tag to rebuild and republish"
         required: true
+        type: string
+      notary_run_id:
+        description: "Optional: id of an earlier run of this tag whose Mac notarization to keep polling (its signed app and submission id) instead of submitting again"
+        required: false
         type: string
 
 concurrency:
@@ -115,9 +127,13 @@ jobs:
     name: build ${{ matrix.name }}
     needs: [tag, check]
     runs-on: ${{ matrix.os }}
-    # Notarization waits on Apple, which usually takes minutes but can take hours (a new Developer
-    # ID team's first submissions especially), so the mac jobs get far longer than the build needs.
-    timeout-minutes: ${{ matrix.platform == 'darwin' && 180 || 45 }}
+    # The mac jobs build, then poll Apple for at most 40 minutes (a re-run picks up the same
+    # submission), so they get about twice what the build alone needs.
+    timeout-minutes: ${{ matrix.platform == 'darwin' && 90 || 45 }}
+    permissions:
+      contents: read
+      # Only to download an earlier run's notary artifact (workflow_dispatch notary_run_id).
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -165,10 +181,23 @@ jobs:
       - name: build app
         run: npm run build:desktop
 
+      # A re-run of a Mac job: the signed app and submission id an earlier attempt saved, if any.
+      - name: earlier notarization
+        if: matrix.platform == 'darwin'
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: notary-${{ matrix.name }}
+          path: notary
+          run-id: ${{ inputs.notary_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+
       - name: package
         env:
           BUILDER_ARGS: ${{ matrix.builder }}
           PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          TAG: ${{ needs.tag.outputs.tag }}
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -180,7 +209,28 @@ jobs:
           if [[ "$PLATFORM" == "darwin" ]]; then
             if [[ -n "$MAC_CSC_LINK" ]]; then
               export CSC_LINK="$MAC_CSC_LINK" CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
-              echo "signing with the Developer ID certificate; notarizing when the APPLE_* secrets are set"
+              if [[ -n "$APPLE_ID" ]]; then
+                # Sign only here; notarize.mjs submits, a later step waits, staples and packages.
+                commit="$(git rev-parse HEAD)"
+                # Reuse a saved submission only when it is this tag, arch and commit.
+                if node scripts/release/notarize.mjs reusable notary "$TAG" "$ARCH" "$commit"; then
+                  mkdir -p "release/mac-$ARCH"
+                  ditto -x -k notary/AgentsCode.zip "release/mac-$ARCH"
+                else
+                  rm -rf notary
+                  echo "signing with the Developer ID certificate; notarizing without holding the runner"
+                  # The zip target, not dir: packing for it writes app-update.yml (the updater feed)
+                  # into the app before it is signed. This zip is of the un-notarized app, so it goes;
+                  # the dmg and zip are built again from the stapled app after notarization.
+                  npx electron-builder --mac zip "--$ARCH" --publish never -c.mac.notarize=false
+                  rm -f release/AgentsCode-mac-*.zip release/AgentsCode-mac-*.zip.blockmap release/latest-mac.yml
+                  app="$(ls -d release/mac*/AgentsCode.app | head -n 1)"
+                  node scripts/release/notarize.mjs submit "$app" notary "$TAG" "$ARCH" "$commit"
+                fi
+                ls -la release
+                exit 0
+              fi
+              echo "signing with the Developer ID certificate; APPLE_* secrets are not set, so not notarizing"
             else
               # No certificate: ad-hoc sign, so Gatekeeper offers Open Anyway instead of calling the app damaged.
               unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
@@ -193,6 +243,45 @@ jobs:
           # shellcheck disable=SC2086
           npx electron-builder $BUILDER_ARGS --publish never ${extra[@]+"${extra[@]}"}
           ls -la release
+
+      # Saved before waiting, so a re-run of a job that timed out can poll the same submission.
+      - name: save notarization
+        if: matrix.platform == 'darwin' && hashFiles('notary/state.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: notary-${{ matrix.name }}
+          path: notary
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: notarize (wait, staple)
+        if: matrix.platform == 'darwin' && hashFiles('notary/state.json') != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          app="$(ls -d release/mac*/AgentsCode.app | head -n 1)"
+          node scripts/release/notarize.mjs wait "$app" notary 40
+
+      - name: package dmg and zip (notarized app)
+        if: matrix.platform == 'darwin' && hashFiles('notary/state.json') != ''
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          app="$(ls -d release/mac*/AgentsCode.app | head -n 1)"
+          # --prepackaged leaves the stapled app as it is (no re-signing, no notarization).
+          npx electron-builder --mac dmg zip "--$ARCH" --publish never --prepackaged "$app" -c.mac.notarize=false
+          ls -la release
+          # The zip is what auto-update downloads: its app has to carry the stapled ticket.
+          zip="$(ls release/AgentsCode-mac-*.zip | head -n 1)"
+          check="$(mktemp -d)"
+          ditto -x -k "$zip" "$check"
+          xcrun stapler validate "$check/AgentsCode.app"
+          rm -rf "$check"
 
       - name: verify package
         run: node scripts/release/verify-package.mjs ${{ matrix.platform }} ${{ matrix.arch }}
