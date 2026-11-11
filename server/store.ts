@@ -23,7 +23,7 @@ const MAX_POSTS = 1000;
 const MAX_MESSAGES = 2000;
 
 /**
- * All durable state lives in ~/.agentscode: one JSON file for agents, projects, settings,
+ * All durable state lives in ~/.podcode: one JSON file for agents, projects, settings,
  * channels and agent-to-agent mail, plus append-only JSONL files for each agent's
  * transcript and each channel's posts.
  */

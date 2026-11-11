@@ -1,5 +1,5 @@
 // Runs one scenario in one arm against a real AgentManager on a temp data dir and temp project.
-// Imported by run.ts only after it has pointed PORT and AGENTSCODE_HOME away from the user's app.
+// Imported by run.ts only after it has pointed PORT and PODCODE_HOME away from the user's app.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

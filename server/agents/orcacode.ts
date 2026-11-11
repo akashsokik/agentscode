@@ -45,7 +45,7 @@ function friendlyError(message: string): string {
   const flag = message.match(/unknown flag: (--?[\w-]+)/);
   // An All-projects agent on an OrcaCode that cannot reach other folders: say what fixes that.
   if (flag?.[1] === '--add-dir') return ORCACODE_NO_ADD_DIR;
-  if (flag) return `This OrcaCode does not know ${flag[1]}. Podcode needs OrcaCode ${ORCACODE_MIN_VERSION} or newer: run \`orcacode update\`, then restart Podcode.`;
+  if (flag) return `This OrcaCode does not know ${flag[1]}. PodCode needs OrcaCode ${ORCACODE_MIN_VERSION} or newer: run \`orcacode update\`, then restart PodCode.`;
   if (AUTH_PATTERN.test(message)) {
     return `OrcaCode could not authenticate with its model provider. Run \`orcacode\` in a terminal and check /provider or /settings, then send the message again. (${clip(message, 200)})`;
   }
@@ -263,7 +263,7 @@ export class OrcacodeRunner implements Runner {
 
     // The prompt and the MCP config (it holds the comms token) go in a private folder, not argv.
     this.cleanup();
-    this.tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentscode-orcacode-'));
+    this.tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'podcode-orcacode-'));
     const files = { prompt: path.join(this.tempDir, 'prompt.md'), mcp: this.ctx.commsToken ? path.join(this.tempDir, 'mcp.json') : undefined };
     fs.writeFileSync(files.prompt, prompt, { mode: 0o600 });
     if (files.mcp) fs.writeFileSync(files.mcp, orcacodeMcpConfig(this.ctx.commsToken!, this.ctx.agent().role === 'super', hasEyes(this.ctx.agent().role)), { mode: 0o600 });
@@ -428,7 +428,7 @@ export class OrcacodeRunner implements Runner {
       if (this.child === child && child.stdin?.writable) child.stdin.write(`${JSON.stringify({ type: 'approval', id, decision })}\n`);
     };
     // OrcaCode has no OS sandbox, so read-only still asks before a shell command, which could write.
-    // The SuperAgent never edits: anything gated but its own Podcode tools is refused unasked.
+    // The SuperAgent never edits: anything gated but its own PodCode tools is refused unasked.
     if (this.ctx.agent().role === 'super' && !tool.name.includes(COMMS_SERVER)) {
       write('deny');
       return;

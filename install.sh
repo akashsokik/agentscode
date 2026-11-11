@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs the Podcode desktop app on macOS from the GitHub release.
+# Installs the PodCode desktop app on macOS from the GitHub release.
 #
 #   curl -fsSL https://raw.githubusercontent.com/akashsokik/agentscode/main/install.sh | bash
 #
@@ -10,19 +10,24 @@
 # The script checks the download against the release's SHA256SUMS and the app's code signature
 # before it replaces anything.
 #
-# Run it again to update. Quit Podcode first.
+# Run it again to update. Quit PodCode first.
 #
 # Environment:
-#   AGENTSCODE_VERSION      install this version (for example 0.1.0) instead of the latest release
-#   AGENTSCODE_INSTALL_DIR  install into this folder instead of /Applications (or ~/Applications)
-#   AGENTSCODE_NO_OPEN=1    do not open the app after installing
+#   PODCODE_VERSION      install this version (for example 0.3.0) instead of the latest release
+#   PODCODE_INSTALL_DIR  install into this folder instead of /Applications (or ~/Applications)
+#   PODCODE_NO_OPEN=1    do not open the app after installing
+# The AGENTSCODE_* names from before the rename still work.
 
 set -euo pipefail
 
 REPO="akashsokik/agentscode"
+# The old AGENTSCODE_* settings still count when the PodCode ones are not set.
+PODCODE_VERSION="${PODCODE_VERSION:-${AGENTSCODE_VERSION:-}}"
+PODCODE_INSTALL_DIR="${PODCODE_INSTALL_DIR:-${AGENTSCODE_INSTALL_DIR:-}}"
+PODCODE_NO_OPEN="${PODCODE_NO_OPEN:-${AGENTSCODE_NO_OPEN:-}}"
 
 fail() {
-  printf 'Podcode install: %s\n' "$1" >&2
+  printf 'PodCode install: %s\n' "$1" >&2
   exit 1
 }
 
@@ -39,13 +44,13 @@ main() {
   fi
 
   local base="https://github.com/$REPO/releases/latest/download"
-  if [[ -n "${AGENTSCODE_VERSION:-}" ]]; then
-    base="https://github.com/$REPO/releases/download/v${AGENTSCODE_VERSION#v}"
+  if [[ -n "${PODCODE_VERSION:-}" ]]; then
+    base="https://github.com/$REPO/releases/download/v${PODCODE_VERSION#v}"
   fi
 
   local dir
-  if [[ -n "${AGENTSCODE_INSTALL_DIR:-}" ]]; then
-    dir="$AGENTSCODE_INSTALL_DIR"
+  if [[ -n "${PODCODE_INSTALL_DIR:-}" ]]; then
+    dir="$PODCODE_INSTALL_DIR"
   elif [[ -w /Applications ]]; then
     dir=/Applications
   else
@@ -54,8 +59,8 @@ main() {
   mkdir -p "$dir"
   # An absolute path with no trailing slash, as LaunchServices reports a running app's.
   dir="$(CDPATH='' cd -- "$dir" && pwd)"
-  local app="$dir/Podcode.app"
-  # Podcode was called AgentsCode until 0.3.0. Same app (same bundle id and data), older name: an
+  local app="$dir/PodCode.app"
+  # PodCode was called AgentsCode until 0.3.0. Same app (same bundle id and data), older name: an
   # install replaces it, and it counts as the app when checking whether it is running.
   local legacy="$dir/AgentsCode.app"
 
@@ -69,18 +74,18 @@ main() {
   running="$(lsappinfo info -only bundlepath -app com.agentscode.app 2>/dev/null |
     sed -n 's/^"LSBundlePath"="\(.*\)"$/\1/p' || true)"
   if [[ "$running" == "$app" || "$running" == "$legacy" ]]; then
-    fail "Podcode is running from $running. Quit it (Cmd+Q) and run this again."
+    fail "PodCode is running from $running. Quit it (Cmd+Q) and run this again."
   fi
 
   local tmp
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/agentscode-install.XXXXXX")"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/podcode-install.XXXXXX")"
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" EXIT
 
   curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" ||
     fail "could not download $base/SHA256SUMS"
   # Releases before 0.3.0 (and AGENTSCODE_VERSION set to one of them) name their assets AgentsCode-*.
-  local asset="Podcode-mac-$arch.zip"
+  local asset="PodCode-mac-$arch.zip"
   if ! awk -v name="$asset" '$2 == name { found = 1 } END { exit !found }' "$tmp/SHA256SUMS"; then
     asset="AgentsCode-mac-$arch.zip"
   fi
@@ -102,10 +107,10 @@ main() {
   mkdir "$tmp/unpacked"
   tar -xf "$tmp/$asset" -C "$tmp/unpacked" || fail "could not unpack $asset"
   local unpacked
-  for unpacked in "$tmp/unpacked/Podcode.app" "$tmp/unpacked/AgentsCode.app" ""; do
+  for unpacked in "$tmp/unpacked/PodCode.app" "$tmp/unpacked/AgentsCode.app" ""; do
     [[ -z "$unpacked" || -d "$unpacked" ]] && break
   done
-  [[ -n "$unpacked" ]] || fail "$asset does not contain Podcode.app"
+  [[ -n "$unpacked" ]] || fail "$asset does not contain PodCode.app"
   codesign --verify --deep --strict "$unpacked" 2>/dev/null ||
     fail "the code signature of the downloaded app does not verify"
   # An older release unpacks as AgentsCode.app; install it under that name.
@@ -115,7 +120,7 @@ main() {
 
   # Move the old app (under either name) aside, then move the new one in, so a failure leaves the
   # old app in place.
-  local old="$dir/.Podcode-replaced.app" old_legacy="$dir/.AgentsCode-replaced.app"
+  local old="$dir/.PodCode-replaced.app" old_legacy="$dir/.AgentsCode-replaced.app"
   rm -rf "$old" "$old_legacy"
   if [[ -e "$app" ]]; then
     mv "$app" "$old" || fail "could not move the existing $app aside"
@@ -134,12 +139,12 @@ main() {
 
   local version
   version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || echo '?')"
-  printf 'Installed Podcode %s in %s\n' "$version" "$app"
-  if [[ "$dir" == "$HOME/Applications" && ( -e /Applications/Podcode.app || -e /Applications/AgentsCode.app ) ]]; then
+  printf 'Installed PodCode %s in %s\n' "$version" "$app"
+  if [[ "$dir" == "$HOME/Applications" && ( -e /Applications/PodCode.app || -e /Applications/AgentsCode.app ) ]]; then
     printf 'An older copy is still in /Applications and may still be blocked. Move it to the Bin so Spotlight and the Dock open this one.\n'
   fi
 
-  if [[ -z "${AGENTSCODE_NO_OPEN:-}" ]]; then
+  if [[ -z "${PODCODE_NO_OPEN:-}" ]]; then
     open "$app"
   fi
 }

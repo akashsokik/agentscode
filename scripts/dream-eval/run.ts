@@ -99,9 +99,9 @@ const jsonlFile = path.join(OUT_ROOT, `${ts}.jsonl`);
 // (remember, forget, ...) call back on PORT, so it must be this run's endpoint and never the app's.
 const comms = await startCommsEndpoint();
 process.env.PORT = String(comms.port);
-process.env.AGENTSCODE_HOME = path.join(outDir, 'home');
+process.env.PODCODE_HOME = path.join(outDir, 'home');
 // Claude Code keeps its own per-project memory, which would carry lessons in every arm and write into
-// ~/.claude/projects. Off by default, so the eval measures Podcode memory (remember + dreams) alone.
+// ~/.claude/projects. Off by default, so the eval measures PodCode memory (remember + dreams) alone.
 const claudeAutoMemory = values['claude-auto-memory'];
 if (!claudeAutoMemory) process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
 const { runArm } = await import('./harness.ts');

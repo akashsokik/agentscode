@@ -1,13 +1,13 @@
 #!/bin/sh
-# Restart the installed Podcode (macOS) onto the newest build in release/mac-arm64: quit it,
-# keep the old app at /tmp/Podcode.app.prev, copy the new one in, open it.
+# Restart the installed PodCode (macOS) onto the newest build in release/mac-arm64: quit it,
+# keep the old app at /tmp/PodCode.app.prev, copy the new one in, open it.
 #
 #   scripts/restart-desktop.sh              restart now
 #   scripts/restart-desktop.sh --when-idle  wait until no agent is mid-turn and no build runs (two
 #                                           checks in a row, 30s apart; up to 4 hours), then restart
 #
 # Run it detached from the app (an agent's own process ends with the app). One waiter at a time:
-# the lock is /tmp/agentscode-restart-waiter.lock.
+# the lock is /tmp/podcode-restart-waiter.lock.
 #
 # Two ways it failed before, both handled here:
 # - The app is found by its bundle id through LaunchServices, not a process pattern: pgrep never
@@ -19,19 +19,19 @@
 #   hang: nothing is left to save, so the process is ended. If the server still answers,
 #   something else holds the quit (a dialog, say) and the app is left running, untouched.
 #
-# For tests, AGENTSCODE_APP, AGENTSCODE_PREV, AGENTSCODE_NEW_BUILD, AGENTSCODE_PORT, AGENTSCODE_LOCK
-# and AGENTSCODE_TICK (seconds per wait step, default 1) override the defaults.
+# For tests, PODCODE_APP, PODCODE_PREV, PODCODE_NEW_BUILD, PODCODE_PORT, PODCODE_LOCK and PODCODE_TICK
+# (seconds per wait step, default 1) override the defaults; the AGENTSCODE_* names still work.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BID=com.agentscode.app
-APP=${AGENTSCODE_APP:-/Applications/Podcode.app}
+APP=${PODCODE_APP:-${AGENTSCODE_APP:-/Applications/PodCode.app}}
 # Before 0.3.0 the app was AgentsCode.app, and an auto-update keeps that file name: restart that one
-# when there is no Podcode.app.
-if [ -z "${AGENTSCODE_APP:-}" ] && [ ! -e "$APP" ] && [ -e /Applications/AgentsCode.app ]; then APP=/Applications/AgentsCode.app; fi
-PREV=${AGENTSCODE_PREV:-/tmp/Podcode.app.prev}
-NEW=${AGENTSCODE_NEW_BUILD:-$ROOT/release/mac-arm64/Podcode.app}
-PORT=${AGENTSCODE_PORT:-4320}
-LOCK=${AGENTSCODE_LOCK:-/tmp/agentscode-restart-waiter.lock}
-TICK=${AGENTSCODE_TICK:-1}
+# when there is no PodCode.app.
+if [ -z "${PODCODE_APP:-${AGENTSCODE_APP:-}}" ] && [ ! -e "$APP" ] && [ -e /Applications/AgentsCode.app ]; then APP=/Applications/AgentsCode.app; fi
+PREV=${PODCODE_PREV:-${AGENTSCODE_PREV:-/tmp/PodCode.app.prev}}
+NEW=${PODCODE_NEW_BUILD:-${AGENTSCODE_NEW_BUILD:-$ROOT/release/mac-arm64/PodCode.app}}
+PORT=${PODCODE_PORT:-${AGENTSCODE_PORT:-4320}}
+LOCK=${PODCODE_LOCK:-${AGENTSCODE_LOCK:-/tmp/podcode-restart-waiter.lock}}
+TICK=${PODCODE_TICK:-${AGENTSCODE_TICK:-1}}
 
 say() { echo "$(date '+%H:%M:%S') $*"; }
 wait_ticks() { sleep "$(awk "BEGIN { print $1 * $TICK }")"; }
@@ -63,7 +63,7 @@ building() { pgrep -f "electron-builder|vite build --outDir|tsconfig.desktop.jso
 gone_within() { i=0; while [ "$i" -lt "$1" ]; do running || return 0; wait_ticks 1; i=$((i + 1)); done; ! running; }
 
 restart() {
-  if [ ! -x "$NEW/Contents/MacOS/Podcode" ]; then say "No build at $NEW; left as is."; return 1; fi
+  if [ ! -x "$NEW/Contents/MacOS/PodCode" ]; then say "No build at $NEW; left as is."; return 1; fi
   # A restart replaces an installed app; a first install is done by hand.
   if [ ! -d "$APP" ]; then say "No app at $APP to replace; install it by hand. Nothing changed."; return 1; fi
   # Only ask a running app to quit, so AppleScript never has to find or start it.
@@ -71,15 +71,15 @@ restart() {
   if ! gone_within 30; then
     # Still stopping its agents (the server has up to 8s), or held by something: give it longer.
     server_answers && gone_within 30
-    if running && ! server_gone; then say "Podcode is still running and its server still answers after 60s (a dialog may be open); left as is."; return 1; fi
+    if running && ! server_gone; then say "PodCode is still running and its server still answers after 60s (a dialog may be open); left as is."; return 1; fi
     if running; then
       pid=$(app_pid)
-      say "Podcode stopped its server but did not exit (the browser-holder quit hang); ending process ${pid:-?}."
+      say "PodCode stopped its server but did not exit (the browser-holder quit hang); ending process ${pid:-?}."
       if [ -n "$pid" ]; then
         kill -TERM "$pid" 2>/dev/null
         gone_within 10 || { kill -KILL "$pid" 2>/dev/null; gone_within 5; }
       fi
-      if running; then say "Podcode would not exit; left as is."; return 1; fi
+      if running; then say "PodCode would not exit; left as is."; return 1; fi
     fi
   fi
   wait_ticks 2 # its helpers finish exiting
@@ -90,7 +90,7 @@ restart() {
     open "$APP"
     return 1
   fi
-  if ! ditto "$NEW" "$APP" || [ ! -x "$APP/Contents/MacOS/Podcode" ]; then
+  if ! ditto "$NEW" "$APP" || [ ! -x "$APP/Contents/MacOS/PodCode" ]; then
     say "Copying the new build failed; putting the previous one back."
     rm -rf "$APP"
     mv "$PREV" "$APP"

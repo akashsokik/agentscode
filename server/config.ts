@@ -3,30 +3,34 @@ import { accessSync, constants, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { EngineInfo } from '../shared/types.ts';
+import { resolveDataDir } from './dataDir.ts';
+import { COMMS_SERVER_NAME } from '../shared/commsTools.ts';
 
-// The desktop app (electron/main.ts) passes this in. It is removed from the environment
-// so the commands agents run never inherit it.
+// The desktop app (electron/main.ts) passes this in, as PODCODE_NODE (AGENTSCODE_NODE from an older
+// build). Both are removed from the environment so the commands agents run never inherit them.
 function takeEnv(name: string): string | undefined {
-  const value = process.env[name];
-  delete process.env[name];
+  const value = process.env[`PODCODE_${name}`] || process.env[`AGENTSCODE_${name}`];
+  delete process.env[`PODCODE_${name}`];
+  delete process.env[`AGENTSCODE_${name}`];
   return value || undefined;
 }
-const desktopNode = takeEnv('AGENTSCODE_NODE');
+const desktopNode = takeEnv('NODE');
 
 export const PORT = Number(process.env.PORT ?? 4320);
 export const HOST = '127.0.0.1';
 /** The Vite dev server's port (vite.config.ts), whose pages call the API through its proxy during `npm run dev`. */
 export const DEV_WEB_PORT = 5174;
 /** Set by the desktop app when it starts this server itself; then no dev page is expected. */
-export const IN_DESKTOP_APP = Boolean(process.env.AGENTSCODE_NODE);
-export const DATA_DIR = process.env.AGENTSCODE_HOME ?? path.join(os.homedir(), '.agentscode');
+export const IN_DESKTOP_APP = Boolean(desktopNode);
+/** ~/.podcode (server/dataDir.ts), or PODCODE_HOME; ~/.agentscode until the first PodCode start moves it. */
+export const DATA_DIR = resolveDataDir();
 export const ROOT_DIR = path.resolve(import.meta.dirname, '..');
 export const DIST_DIR = path.join(ROOT_DIR, 'dist');
 /** The stdio MCP server each agent process starts to reach the comms tools. */
 export const COMMS_MCP_ENTRY = path.join(ROOT_DIR, 'server', 'comms', `mcp${path.extname(import.meta.filename)}`);
 /** The MCP server name. It appears in three places that must agree: the Claude mcpServers key,
  * the allowedTools prefix and the Codex -c mcp_servers.<name> override. */
-export const COMMS_SERVER = 'agentscode';
+export const COMMS_SERVER = COMMS_SERVER_NAME;
 
 /**
  * Runs this app's own Node scripts (the comms MCP server) as agent child processes. In the

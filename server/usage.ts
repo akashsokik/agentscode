@@ -284,7 +284,7 @@ export function fetchCodexUsage(binPath: string | null, timeoutMs = 20_000): Pro
       }
       if (buffer.length > 4 * 1024 * 1024) finish(new UsageError('Codex usage response was too large.'));
     });
-    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'agentscode', version: '0.1.0' }, capabilities: { experimentalApi: true } } });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'podcode', version: '0.1.0' }, capabilities: { experimentalApi: true } } });
   });
 }
 

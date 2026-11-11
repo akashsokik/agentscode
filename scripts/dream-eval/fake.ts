@@ -50,7 +50,7 @@ export class FakeAgent implements Runner {
     const body = await response.json() as { error?: string };
     this.ctx.hooks.entry({
       id: randomUUID(), kind: 'tool', text: '',
-      tool: { name: 'mcp__agentscode__remember', summary: response.ok ? `Remembered: ${text}` : `remember failed: ${body.error}`, status: response.ok ? 'ok' : 'error' },
+      tool: { name: 'mcp__podcode__remember', summary: response.ok ? `Remembered: ${text}` : `remember failed: ${body.error}`, status: response.ok ? 'ok' : 'error' },
     });
   }
 

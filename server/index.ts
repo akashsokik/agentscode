@@ -1,3 +1,5 @@
+// First: move the data folder to ~/.podcode if this is the first PodCode start (server/boot.ts).
+import './boot.ts';
 import { DATA_DIR, DIST_DIR, HOST, PORT, detectEngine } from './config.ts';
 import { attachParentPort, writeBridgeToken } from './browserBridge.ts';
 import { createServer } from './app.ts';
@@ -24,7 +26,7 @@ const server = createServer(manager, hub, { distDir: DIST_DIR, terminals, bridge
 
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is busy. Is Podcode already running? Set PORT=... to use another port.`);
+    console.error(`Port ${PORT} is busy. Is PodCode already running? Set PORT=... to use another port.`);
     process.exit(1);
   }
   throw err;
@@ -36,7 +38,7 @@ server.listen(PORT, HOST, () => {
     `Codex ${codex.available ? `v${codex.version}` : 'not found'}`,
     `OrcaCode ${orcacode.available ? `v${orcacode.version}` : 'not found'}`,
   ].join(', ');
-  console.log(`Podcode is open at http://localhost:${PORT}  (${engines})`);
+  console.log(`PodCode is open at http://localhost:${PORT}  (${engines})`);
 });
 
 async function shutdown(): Promise<void> {

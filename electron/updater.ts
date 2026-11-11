@@ -77,8 +77,8 @@ async function offerDownload(info: UpdateInfo): Promise<void> {
     buttons: ['Copy Install Command', 'Release Notes', 'Later'],
     defaultId: 0,
     cancelId: 2,
-    message: `Podcode ${info.version} is available`,
-    detail: `You have ${app.getVersion()}. To update, quit Podcode and run this in Terminal:\n\n${MAC_INSTALL_COMMAND}`,
+    message: `PodCode ${info.version} is available`,
+    detail: `You have ${app.getVersion()}. To update, quit PodCode and run this in Terminal:\n\n${MAC_INSTALL_COMMAND}`,
   });
   if (response === 0) clipboard.writeText(MAC_INSTALL_COMMAND);
   if (response === 1) void shell.openExternal(releaseNotesUrl(info.version));
@@ -108,7 +108,7 @@ export async function installUpdate(): Promise<void> {
     setSnapshot({ phase: 'available', progress: undefined, error: error instanceof Error ? error.message : String(error) });
     await showMessage({
       type: 'warning',
-      message: `Podcode could not update to ${available.version}`,
+      message: `PodCode could not update to ${available.version}`,
       detail: error instanceof Error ? error.message : String(error),
     });
   }
@@ -135,7 +135,7 @@ export async function checkForUpdates(manual = false): Promise<void> {
       return;
     }
     setSnapshot({ phase: 'current', availableVersion: undefined, error: undefined });
-    if (manual) await showMessage({ type: 'info', message: 'Podcode is up to date', detail: `You have version ${app.getVersion()}.` });
+    if (manual) await showMessage({ type: 'info', message: 'PodCode is up to date', detail: `You have version ${app.getVersion()}.` });
   } catch (error) {
     console.error('[updater] check failed:', error);
     // Keep an update already found; otherwise there is nothing to show in the sidebar.
@@ -143,7 +143,7 @@ export async function checkForUpdates(manual = false): Promise<void> {
     if (manual) {
       await showMessage({
         type: 'warning',
-        message: 'Podcode could not check for updates',
+        message: 'PodCode could not check for updates',
         detail: error instanceof Error ? error.message : String(error),
       });
     }
@@ -161,7 +161,7 @@ async function offerInstall(info: UpdateInfo): Promise<void> {
     buttons: ['Update Now', 'Later', 'Release Notes'],
     defaultId: 0,
     cancelId: 1,
-    message: `Podcode ${info.version} is available`,
+    message: `PodCode ${info.version} is available`,
     detail: `You have ${app.getVersion()}. Updating downloads it, stops running agents and restarts; they pick up where they left off. You can also update later from the sidebar.`,
   });
   if (response === 2) void shell.openExternal(releaseNotesUrl(info.version));
@@ -170,7 +170,7 @@ async function offerInstall(info: UpdateInfo): Promise<void> {
 
 /** Starts update checks: once shortly after launch, then every few hours. Packaged builds only. */
 export async function startUpdater(opts: Options): Promise<void> {
-  if (!app.isPackaged || process.env.AGENTSCODE_DISABLE_UPDATES) return;
+  if (!app.isPackaged || (process.env.PODCODE_DISABLE_UPDATES || process.env.AGENTSCODE_DISABLE_UPDATES)) return;
   // A Linux build that is not an AppImage (say, unpacked by hand) has nothing to update.
   if (process.platform === 'linux' && !process.env.APPIMAGE) return;
   options = opts;

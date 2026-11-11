@@ -12,8 +12,8 @@ export interface CommsEndpoint {
 /**
  * The one route agent processes call back on: the comms MCP server (remember, forget, and the team
  * tools) posts to http://127.0.0.1:$PORT/api/comms. This answers only that route, on a random local
- * port, so a real-engine run never reaches a Podcode app the user has open. It is not the
- * Podcode server: no UI, no REST API, no websocket.
+ * port, so a real-engine run never reaches a PodCode app the user has open. It is not the
+ * PodCode server: no UI, no REST API, no websocket.
  */
 export async function startCommsEndpoint(): Promise<CommsEndpoint> {
   let manager: AgentManager | null = null;
