@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { refsHeard } from './notes/refsState.ts';
 import type { Agent, AgentDreams, Approval, Channel, ChannelPost, Conversation, DreamStatsReport, Entry, MemoryEntry, PeerMessage, Project, ServerEvent, Snapshot, TerminalInfo } from '../shared/types.ts';
 import { api } from './api.ts';
 
@@ -235,6 +236,7 @@ function apply(snapshot: Snapshot, event: ServerEvent): Snapshot {
 }
 
 function handle(event: ServerEvent): void {
+  refsHeard(event);
   if (event.type === 'snapshot') {
     const known = Object.keys(state.entries);
     const channels = Object.keys(state.posts);

@@ -12,7 +12,8 @@ import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
 import { Empty, HeaderButton, IconTab, Loading, TextButton } from '../ui/common.tsx';
-import { Bot, CheckCircle, CircleDot, Clock, DashboardSquare, FileDiff, Folder, GitBranch, ListBullet, MessageMultiple, PanelRight, RefreshCw, type IconComponent } from '../mono/icons.tsx';
+import { Bot, CheckCircle, CircleDot, Clock, DashboardSquare, FileDiff, Folder, GitBranch, ListBullet, MessageMultiple, PanelRight, RefreshCw, StickyNote, type IconComponent } from '../mono/icons.tsx';
+import { NotesView } from '../notes/NotesView.tsx';
 import { Segmented } from '../mono/settings.tsx';
 import { MessageStatus } from '../panes/CommsPane.tsx';
 import { DecisionsView, GoalsView, RoutinesView, useSuperTabs } from '../panes/SuperPanel.tsx';
@@ -244,10 +245,12 @@ const PANEL_TABS: { view: Layout['rightView']; label: string; icon: IconComponen
   { view: 'overview', label: 'Overview', icon: DashboardSquare },
   { view: 'comms', label: 'Comms', icon: MessageMultiple },
   { view: 'changes', label: 'Changes', icon: FileDiff },
+  { view: 'notes', label: 'Notes', icon: StickyNote },
 ];
 
 /**
- * The SuperAgent's tabs: its Overview, then its own Decisions, Goals and Routines, then Comms. No
+ * The SuperAgent's tabs: its Overview, then its own Decisions, Goals and Routines, then Comms and the
+ * projects' Notes. No
  * Changes: it works across all projects and never edits, so it has no working tree of its own.
  */
 const SUPER_PANEL_TABS: { view: SuperView; label: string; icon: IconComponent }[] = [
@@ -256,6 +259,7 @@ const SUPER_PANEL_TABS: { view: SuperView; label: string; icon: IconComponent }[
   { view: 'goals', label: 'Goals', icon: CircleDot },
   { view: 'routines', label: 'Routines', icon: Clock },
   { view: 'comms', label: 'Comms', icon: MessageMultiple },
+  { view: 'notes', label: 'Notes', icon: StickyNote },
 ];
 
 /** What a tab's count means, for its tooltip and a screen reader. */
@@ -267,8 +271,8 @@ const COUNT_WORDS: Partial<Record<PanelView, (n: number) => string>> = {
 };
 
 /**
- * The right panel, with MonoCode's icon tabs: Overview, Comms and Changes for the focused agent; for
- * the SuperAgent, Overview, Decisions, Goals, Routines and Comms. The tabs follow the ARIA tabs
+ * The right panel, with MonoCode's icon tabs: Overview, Comms, Changes and Notes for the focused
+ * agent; for the SuperAgent, Overview, Decisions, Goals, Routines, Comms and Notes. The tabs follow the ARIA tabs
  * pattern: one tab stop, the arrow keys (and Home and End) move between them and open the one reached.
  */
 export function RightPanel() {
@@ -347,6 +351,7 @@ export function RightPanel() {
           : view === 'decisions' ? <DecisionsView />
           : view === 'goals' ? <GoalsView />
           : view === 'routines' ? <RoutinesView />
+          : view === 'notes' ? <NotesView agent={agent} />
           : <CommsFeed agent={agent} />}
       </div>
       <ResizeHandle column={column} edge="left" label="Resize panel" />

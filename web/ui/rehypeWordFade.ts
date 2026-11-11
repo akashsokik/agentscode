@@ -27,7 +27,8 @@ export function rehypeWordFade() {
       for (const child of parent.children) {
         if (child.type === 'text') {
           children.push(...wrap(child.value));
-        } else if (child.type === 'element' && UNIT_TAGS.has(child.tagName)) {
+        } else if (child.type === 'element' && (UNIT_TAGS.has(child.tagName) || child.properties?.dataRef !== undefined)) {
+          // A note or decision chip (rehypeRefChips) fades as one word.
           child.properties = { ...child.properties, dataWordFade: '' };
           children.push(child);
         } else {

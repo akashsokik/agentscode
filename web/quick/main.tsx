@@ -10,6 +10,7 @@ import { QUICK_MARGIN } from '../../shared/superAgent.ts';
 import { IS_DESKTOP_APP } from '../platform.ts';
 import { connect } from '../store.ts';
 import { QuickComposer } from './QuickComposer.tsx';
+import { chipsWithoutNotes } from '../notes/RefChip.tsx';
 import '../theme.ts';
 import '../styles.css';
 
@@ -36,6 +37,8 @@ function QuickWindowApp() {
   );
 }
 
+// No right panel here: id chips show their card but open nothing.
+chipsWithoutNotes();
 connect();
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

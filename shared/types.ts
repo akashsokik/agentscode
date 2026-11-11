@@ -870,6 +870,8 @@ export type ServerEvent =
   | { type: 'project'; project: Project }
   | { type: 'projectRemoved'; id: string }
   | { type: 'entry'; entry: Entry }
+  /** A note or decision was added (server/projectRefs.ts); the Notes tab and id chips read them again. */
+  | { type: 'refs' }
   | { type: 'message'; message: PeerMessage }
   | { type: 'conversation'; conversation: Conversation }
   | { type: 'channel'; channel: Channel }

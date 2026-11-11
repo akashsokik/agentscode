@@ -1979,3 +1979,37 @@ html.layout-inset.theme-light .dialog-scrim {
     animation: none;
   }
 }
+
+/* Note and decision id chips (web/notes/RefChip.tsx): a tinted fill, no border, no shadow.
+   Decisions take the link hue, notes the warning hue; a replaced decision is quiet grey. */
+.ref-chip {
+  --ref-hue: var(--link-color);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font: 500 11.5px/1 var(--font-mono);
+  vertical-align: 1px;
+  white-space: nowrap;
+  color: var(--ref-hue);
+  background: color-mix(in srgb, var(--ref-hue) 12%, transparent);
+  transition: background-color 150ms;
+}
+.ref-chip.ref-note { --ref-hue: var(--color-warning); }
+.ref-chip.ref-old {
+  color: color-mix(in srgb, var(--color-content) 45%, transparent);
+  background: color-mix(in srgb, var(--color-content) 5%, transparent);
+}
+.ref-chip.ref-small { height: 18px; font-size: 11px; vertical-align: 0; }
+.ref-chip svg { width: 12px; height: 12px; flex: none; }
+button.ref-chip { cursor: pointer; }
+button.ref-chip:hover, button.ref-chip[aria-expanded="true"] { background: color-mix(in srgb, var(--ref-hue) 22%, transparent); }
+button.ref-chip.ref-old:hover, button.ref-chip.ref-old[aria-expanded="true"] { background: color-mix(in srgb, var(--color-content) 10%, transparent); }
+button.ref-chip:focus-visible { outline: 2px solid color-mix(in srgb, var(--ref-hue) 60%, transparent); outline-offset: 1px; }
+.ref-mark {
+  color: inherit;
+  background: color-mix(in srgb, var(--color-warning) 22%, transparent);
+  border-radius: 3px;
+}

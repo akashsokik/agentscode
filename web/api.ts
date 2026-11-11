@@ -36,6 +36,7 @@ import type {
 } from '../shared/types.ts';
 import type { ComposerCommand, ProjectFileList } from '../shared/composer.ts';
 import type { MentionHint } from '../shared/mentions.ts';
+import type { RefDetail, RefSearchHit, RefsIndex } from '../shared/refs.ts';
 
 /** Where files and git commands run: an agent's workspace, or a project folder. */
 export type Root = { agent: string } | { project: string };
@@ -102,6 +103,9 @@ function rootQuery(root: Root, extra: Record<string, string> = {}): string {
 
 export const api = {
   state: () => request<Snapshot>('GET', '/api/state'),
+  refs: () => request<RefsIndex>('GET', '/api/refs'),
+  ref: (id: string) => request<RefDetail>('GET', `/api/refs/${encodeURIComponent(id)}`),
+  searchRefs: (q: string, code?: string) => request<{ hits: RefSearchHit[] }>('GET', `/api/refs/search?q=${encodeURIComponent(q)}${code ? `&code=${encodeURIComponent(code)}` : ''}`),
 
   createAgent: (input: CreateAgentRequest) => request<Agent>('POST', '/api/agents', input),
   updateAgent: (id: string, patch: AgentPatch) => request<Agent>('PATCH', `/api/agents/${id}`, patch),

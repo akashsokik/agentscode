@@ -3,6 +3,8 @@ import { findMentions, type MentionRef } from '../../shared/mentions.ts';
 import { open, setProject } from '../layout.ts';
 import { useApp } from '../store.ts';
 import { AgentAvatar } from './Avatar.tsx';
+import { withRefChips } from '../notes/RefChip.tsx';
+import { useNotes } from '../notes/refsState.ts';
 
 /**
  * Plain text with its @mentions as quiet inline chips: agents, projects, files, and @all, @channel
@@ -15,23 +17,25 @@ import { AgentAvatar } from './Avatar.tsx';
 export function MentionText({ text, refs, agentId }: { text: string; refs?: MentionRef[]; agentId?: string }) {
   const agents = useApp(s => s.snapshot?.agents);
   const projects = useApp(s => s.snapshot?.projects);
+  // Note and decision ids in the plain parts become chips once the known ids are loaded.
+  useNotes(s => s.idsKey);
   const mentions = useMemo(() => {
     const found = refs ?? findMentions(text, { agents: agents ?? [], projects: projects ?? [], channel: !agentId });
     // Stored refs index the text they were made from; drop any that no longer line up.
     return found.filter(m => m.start >= 0 && m.end <= text.length && text[m.start] === '@').sort((a, b) => a.start - b.start);
   }, [text, refs, agents, projects, agentId]);
-  if (!mentions.length) return <>{text}</>;
+  if (!mentions.length) return <>{withRefChips(text)}</>;
 
   const parts: ReactNode[] = [];
   let last = 0;
   for (const mention of mentions) {
     if (mention.start < last) continue;
-    if (mention.start > last) parts.push(text.slice(last, mention.start));
+    if (mention.start > last) parts.push(...withRefChips(text.slice(last, mention.start), `${last}:`));
     const shown = text.slice(mention.start, mention.end);
     parts.push(<Chip key={mention.start} mention={mention} shown={shown} agentId={agentId} />);
     last = mention.end;
   }
-  if (last < text.length) parts.push(text.slice(last));
+  if (last < text.length) parts.push(...withRefChips(text.slice(last), `${last}:`));
   return <>{parts}</>;
 }
 

@@ -80,6 +80,8 @@ import { gitRun, isDirectory, isInsideGitRepo, normalizeDir } from './projects.t
 import { locate, type Place } from './whereabouts.ts';
 import { openuiGuide } from './openuiGuide.ts';
 import { ALL_CODE, ALL_INDEXES_LIMIT, deriveCode, isActive, isCode, ProjectRefs, type RefEntry } from './projectRefs.ts';
+import { NotesApi } from './notesApi.ts';
+import { RefMentions } from './refMentions.ts';
 import { BrowserBridge, BROWSER_WRITE_OPS, compactConsole, type BrowserOp } from './browserBridge.ts';
 import { blockedReason, normalizeAddress } from '../shared/browser.ts';
 import { createWalkthrough, deleteWalkthrough, listWalkthroughs, readWalkthrough, summaryOf, walkthroughImage, walkthroughMarkdown, type StepRoot } from './walkthroughs.ts';
@@ -186,6 +188,8 @@ export class AgentManager {
   private homes: AgentHomes;
   /** Project notes and decisions, <dataDir>/projects/<CODE>/. */
   private refs: ProjectRefs;
+  /** The Notes tab's read API over the notes and where each id is cited. */
+  readonly notes: NotesApi;
   /** The memory each agent's app view was last sent, to notice memory.md changing on disk. */
   private memoryVersions = new Map<string, string>();
   /** Dreaming: the gate, triggers, records, undo, soul proposals and the numbers. */
@@ -226,6 +230,7 @@ export class AgentManager {
     this.channelAttachments = new Attachments(path.join(store.dataDir, 'channel-attachments'));
     this.homes = new AgentHomes(path.join(store.dataDir, 'agents'));
     this.refs = new ProjectRefs(path.join(store.dataDir, 'projects'));
+    this.notes = new NotesApi({ refs: this.refs, mentions: new RefMentions(store), projects: () => this.store.projects.values() });
     this.profile = new ProfileStore(store.dataDir);
     this.superStore = new SuperStore(store.dataDir);
     this.watcher = new SuperWatcher({
@@ -471,6 +476,8 @@ export class AgentManager {
 
   /** The agent added an entry itself; if its session was up to date, it need not be told again. */
   private sawOwnRefs(agent: Agent, before: string): void {
+    // Every add (note_add, decision_add, a lesson) passes here: the Notes tab and chips read them again.
+    this.hub.broadcast({ type: 'refs' });
     const seen = this.homes.seen(agent);
     if (seen.refs !== sectionKey(before) && !(seen.refs === undefined && !before)) return;
     this.homes.setSeen(agent, { ...seen, refs: sectionKey(this.refsText(agent)) });

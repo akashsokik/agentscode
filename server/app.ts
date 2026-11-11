@@ -236,6 +236,16 @@ export function createApp(
   app.post('/api/super/log/:actionId/undo', async (req, res) => {
     res.json(await manager.undoSuper(param(req, 'actionId')));
   });
+  // Project notes and decisions, read only: the Notes tab and the id chips.
+  app.get('/api/refs', (_req, res) => {
+    res.json(manager.notes.index());
+  });
+  app.get('/api/refs/search', (req, res) => {
+    res.json({ hits: manager.notes.search(query(req, 'q'), query(req, 'code') || undefined) });
+  });
+  app.get('/api/refs/:id', (req, res) => {
+    res.json(manager.notes.get(param(req, 'id')));
+  });
   app.get('/api/dream-stats', (_req, res) => {
     res.json(manager.dreamStats());
   });

@@ -50,7 +50,7 @@ export interface Layout {
   /** Column widths the user dragged to, in px; a column without one uses its default. */
   widths?: Partial<Record<ColumnKey, number>>;
   rightPanel: boolean;
-  rightView: 'overview' | 'comms' | 'changes';
+  rightView: 'overview' | 'comms' | 'changes' | 'notes';
   /** The right panel's tab while the SuperAgent has focus, the last one picked; Decisions until then. */
   superView?: SuperView;
   /** The right panel was shown for the SuperAgent once; after that, opening it leaves the panel as you left it. */
@@ -72,8 +72,8 @@ export interface Layout {
 
 export type ColumnKey = 'nav' | 'workspace' | 'panel';
 
-/** The right panel's tabs for the SuperAgent: its Overview, its own Decisions, Goals and Routines, and Comms. */
-export const SUPER_VIEWS = ['overview', 'decisions', 'goals', 'routines', 'comms'] as const;
+/** The right panel's tabs for the SuperAgent: its Overview, its own Decisions, Goals and Routines, Comms, and project Notes. */
+export const SUPER_VIEWS = ['overview', 'decisions', 'goals', 'routines', 'comms', 'notes'] as const;
 export type SuperView = (typeof SUPER_VIEWS)[number];
 
 const STORAGE_KEY = 'agentscode:layout';
@@ -313,6 +313,8 @@ export function setSuperView(superView: SuperView): void { set({ ...layout, righ
 /** The first time the SuperAgent opens, show the right panel (where its Decisions, Goals and Routines are); never again after. */
 export function showPanelForSuperOnce(): void { if (!layout.superPanelShown) set({ ...layout, rightPanel: true, superPanelShown: true }); }
 export function setRightView(rightView: Layout['rightView']): void { set({ ...layout, rightPanel: true, rightView }); }
+/** Show the Notes tab, for the SuperAgent and for every other agent. */
+export function showNotesPanel(): void { set({ ...layout, rightPanel: true, rightView: 'notes', superView: 'notes', superPanelShown: true }); }
 export function setTerminal(terminal: boolean): void { if (Boolean(layout.terminal) !== terminal) set({ ...layout, terminal }); }
 export function setTerminalHeight(terminalHeight: number | undefined): void { set({ ...layout, terminalHeight }); }
 export function setTerminalSplits(projectId: string, trees: SplitTree[]): void {

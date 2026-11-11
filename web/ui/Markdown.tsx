@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense } from 'react';
+import { lazy, memo, Suspense, useMemo } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -7,10 +7,15 @@ import { fencedSource, mermaidSource } from '../mermaid.ts';
 import { OPENUI_FENCES } from '../../shared/openuiFences.ts';
 import { rehypeWordFade } from './rehypeWordFade.ts';
 import { openUiLive } from '../openuiTrust.ts';
+import { rehypeRefChips } from './rehypeRefChips.ts';
+import { RefChip } from '../notes/RefChip.tsx';
+import { isKnownRef, useNotes } from '../notes/refsState.ts';
 
 const remarkPlugins = [remarkGfm];
-const rehypePlugins = [[rehypeHighlight, { detect: false }]] as never;
-const wordRehypePlugins = [[rehypeHighlight, { detect: false }], rehypeWordFade] as never;
+const refChips = [rehypeRefChips, { known: isKnownRef }];
+const rehypePlugins = [[rehypeHighlight, { detect: false }], refChips] as never;
+// Chips first, so word fading treats each chip as one word.
+const wordRehypePlugins = [[rehypeHighlight, { detect: false }], refChips, rehypeWordFade] as never;
 
 /** OpenUI loads with the first block that uses it. */
 const OpenUIBlock = lazy(() => import('../openui/OpenUIBlock.tsx'));
@@ -24,6 +29,11 @@ const link: Components['a'] = ({ node: _node, ...props }) => <a {...props} targe
 function componentsFor(fromAnotherAgent: boolean): Components {
   return {
     a: link,
+    span: ({ node, ...props }) => {
+      const ref = node?.properties?.dataRef;
+      if (typeof ref === 'string') return <RefChip id={ref} fade={node?.properties?.dataWordFade !== undefined} />;
+      return <span {...props} />;
+    },
     pre: ({ node, ...props }) => {
       const diagram = mermaidSource(node);
       if (diagram !== null) return <MermaidDiagram source={diagram} />;
@@ -50,11 +60,14 @@ export const Markdown = memo(function Markdown({ text, className = '', words = f
   /** Text from another agent: interactive blocks render as plain code. */
   inert?: boolean;
 }) {
+  // Text is parsed again when an id is added or removed, so new ids become chips in old messages.
+  const ids = useNotes(s => s.idsKey);
+  const rehype = useMemo(() => (words ? [...(wordRehypePlugins as unknown[])] : [...(rehypePlugins as unknown[])]) as never, [words, ids]);
   return (
     <div className={`agent-markdown min-w-0 font-sans text-sm leading-6 ${className}`}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={words ? wordRehypePlugins : rehypePlugins}
+        rehypePlugins={rehype}
         components={inert ? inertComponents : components}
       >
         {text}

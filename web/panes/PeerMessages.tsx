@@ -5,6 +5,7 @@
  * unboxed, as it does for you. What the agent sends while it works (a delegation, a note) is one
  * line in its work trail, like a tool call. Wording lives in web/peerText.ts.
  */
+import { RefText } from '../notes/RefChip.tsx';
 import { createContext, useContext, useId, useState, type ReactNode } from 'react';
 import type { PeerMessage } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
@@ -171,7 +172,7 @@ export function PeerBubble({ message, between = false, answered, arrivedAt, thre
         {expanded ? (
           <div id={bodyId} className="min-w-0"><Markdown inert text={full} /></div>
         ) : (
-          <p id={bodyId} className="line-clamp-3 min-w-0 whitespace-pre-wrap break-words text-sm leading-5.5">{preview}</p>
+          <p id={bodyId} className="line-clamp-3 min-w-0 whitespace-pre-wrap break-words text-sm leading-5.5"><RefText text={preview} /></p>
         )}
       </div>
       <div className="-ml-0.5 flex min-w-0 max-w-full flex-wrap items-center gap-x-1 gap-y-0.5 pt-1 text-xs">
@@ -278,7 +279,7 @@ export function DelegationRow({ message }: { message: PeerMessage }) {
       >
         <span className="shrink-0 text-content/50">Delegated {kindWords(delegation.kind).toLowerCase()} to</span>
         <span className="flex shrink-0 items-center gap-1 text-content/70"><AgentAvatar agent={recipient ?? { id: message.toAgentId }} className="size-3.5" />{message.toName}</span>
-        <span className="min-w-0 flex-1 truncate text-content/50 transition-colors duration-200 group-hover:text-content/75">{title}</span>
+        <span className="min-w-0 flex-1 truncate text-content/50 transition-colors duration-200 group-hover:text-content/75"><RefText inert text={title} /></span>
         <span className="ml-2 text-[12px]"><StateChip state={state} /></span>
       </button>
       {open ? (
@@ -340,7 +341,7 @@ export function PeerTrailRow({ message, selfId, lead = false, trailing }: {
           <AgentAvatar agent={other ?? { id: otherId }} animate={false} className="size-3.5" />
           <span className="shrink-0 text-content/50 transition-colors duration-200 group-hover:text-content/75">{phrase}</span>
           {outcome ? <span className="text-[12px]"><OutcomeChip words={outcome.words} tone={outcome.tone} /></span> : null}
-          {showPreview ? <span className="min-w-0 flex-1 truncate text-content/40 transition-colors duration-200 group-hover:text-content/65">{preview}</span> : null}
+          {showPreview ? <span className="min-w-0 flex-1 truncate text-content/40 transition-colors duration-200 group-hover:text-content/65"><RefText inert text={preview} /></span> : null}
         </button>
         {trailing}
       </div>
