@@ -145,8 +145,8 @@ notes.
   verify AgentsCode"; System Settings > Privacy & Security > Open Anyway), and they can't install a
   signed update themselves, so update one of those once by downloading the DMG again or running the
   install command above.
-  An AgentsCode install that updates itself to Podcode keeps its old file name in Applications
-  (`AgentsCode.app`) and is Podcode inside. Download the DMG again if you want the name to match.
+  When an AgentsCode install updates itself to Podcode, the app in Applications is renamed to
+  `Podcode.app`, but it doesn't reopen on its own that one time: open Podcode from Applications.
 - **Windows:** the installer is not code-signed yet, so SmartScreen may ask you to confirm
   (**More info > Run anyway**).
 - **Linux:** make the AppImage executable (`chmod +x Podcode-linux-x86_64.AppImage`) and run it.

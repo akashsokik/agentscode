@@ -51,9 +51,9 @@ Renaming the server would change every tool name. Specifically, it would:
 
 Users don't see the server name: the app already shows these calls as "Comms". **Recommendation: keep it.** Revisit only if it starts appearing in the UI. (The site test also expects "agentscode" in the page copy; that check changes to the new copy.)
 
-### Known cosmetic effect on Mac
+### What a Mac update from 0.2.x actually does (checked 2026-11-11)
 
-A Mac that auto-updates from 0.2.x keeps the file name `/Applications/AgentsCode.app`, because ShipIt installs at the running bundle's path. Inside, it's Podcode: the menu bar, Dock, About and windows all say Podcode. A fresh download, or `install.sh`, gives `Podcode.app`. **Recommendation: accept it.** Renaming a running, signed bundle ourselves is riskier than the cosmetic gain. The 0.3.0 release notes should say "drag the new DMG in if you'd like the file name to match". Check this on a real update during verification.
+Predicted here: the bundle keeps the file name `AgentsCode.app`. What happened on a real update from a signed 0.2.3: ShipIt **renamed the bundle to `/Applications/Podcode.app`** (0.3.0, Notarized Developer ID), and the data carried over (agents, settings, and userData still in `AgentsCode`, with no new `Podcode` folder). **But it did not relaunch:** the old ShipIt tried to relaunch through `/Applications/AgentsCode.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt`, which it had just moved (`posix_spawn: No such file or directory`). It happens once, on the rename update only, and lives in the 0.2.x app's updater, so 0.3.0 can't fix it. The README and the 0.3.0 notes tell people to open Podcode from Applications after that update.
 
 ### Windows and Linux
 
