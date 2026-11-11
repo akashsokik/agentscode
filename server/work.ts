@@ -5,6 +5,7 @@ import type { Agent, PeerMessage, Project } from '../shared/types.ts';
 import { findRefIds } from '../shared/refs.ts';
 import { layoutGraph } from '../shared/graph.ts';
 import { mentionsBranch, namesInMergeSubject, parseDecorations, type CleanupBranch, type CleanupFolder, type CleanupRequest, type CleanupResult, type FolderChanges, type WorkBranch, type WorkCommit, type WorkMerge, type WorkProject, type WorkState, type WorkView } from '../shared/work.ts';
+import { realPathThroughParents } from './dataDir.ts';
 import { HttpError } from './errors.ts';
 
 // The Work view's data (ACH-D17). Read only: every git command it runs for the view goes through
@@ -216,16 +217,7 @@ export function hasLosses(c: FolderChanges): boolean {
   return c.changed > 0 || c.untracked > c.links || c.ignored.length > 0;
 }
 
-/**
- * A folder's real path; for one that is gone, its nearest existing parent's real path plus the rest,
- * so a missing worktree git records under ~/.agentscode (now a link to ~/.podcode) still matches.
- */
-const realOrSelf = (p: string): string => {
-  const abs = path.resolve(p);
-  try { return fs.realpathSync(abs); } catch { /* resolve the parent */ }
-  const parent = path.dirname(abs);
-  return parent === abs ? abs : path.join(realOrSelf(parent), path.basename(abs));
-};
+const realOrSelf = realPathThroughParents;
 const inside = (child: string, parent: string) => child === parent || child.startsWith(parent + path.sep);
 
 export interface WorkContext {

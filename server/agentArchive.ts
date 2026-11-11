@@ -14,6 +14,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { realPathThroughParents } from './dataDir.ts';
 
 export interface ArchivedWorktree {
   /** Where it is now, relative to the archived folder. */
@@ -193,7 +194,9 @@ export function move(from: string, to: string, ops: MoveOps = realOps): void {
 function unregister(gitdir: string, inHome: (p: string) => boolean): void {
   const recorded = fs.readFileSync(path.join(gitdir, 'gitdir'), 'utf8').trim();
   const points = path.resolve(gitdir, recorded);
-  if (!inHome(points)) throw new Error(`not removing ${gitdir}: it names ${recorded}, outside the archived home`);
+  // A record made before the data folder moved names ~/.agentscode/..., now a link to ~/.podcode;
+  // the home has just moved out, so resolve it through its nearest existing parent (ALL-D6).
+  if (!inHome(points) && !inHome(realPathThroughParents(points))) throw new Error(`not removing ${gitdir}: it names ${recorded}, outside the archived home`);
   if (fs.existsSync(path.join(gitdir, 'locked'))) throw new Error(`not removing ${gitdir}: the worktree is locked`);
   fs.rmSync(gitdir, { recursive: true, force: true });
 }

@@ -110,6 +110,25 @@ test('worktrees: one with uncommitted changes stays a working checkout in the ar
   assert.deepEqual(meta.worktrees.map(w => [w.dirty, w.action]).sort(), [[false, 'unregistered'], [true, 'repaired']]);
 });
 
+test('after the data folder moved, a clean worktree git records under the old name is still unregistered (ALL-D6)', () => {
+  const root = fs.realpathSync(tempDir('archive-moved'));
+  const home = path.join(root, '.podcode', 'agents', 'fable');
+  const workspace = path.join(home, 'workspace');
+  fs.mkdirSync(workspace, { recursive: true });
+  fs.symlinkSync(path.join(root, '.podcode'), path.join(root, '.agentscode'), 'dir');
+  const { repo, clean } = repoWithWorktrees(workspace);
+  // The record was made when ~/.agentscode was the real folder, so it names that path.
+  const record = path.join(repo, '.git', 'worktrees', 'wt-clean', 'gitdir');
+  fs.writeFileSync(record, `${path.join(root, '.agentscode', 'agents', 'fable', 'workspace', 'nested', 'wt-clean', '.git')}\n`);
+  assert.ok(fs.existsSync(clean));
+
+  const archived = archiveAgentHome({ home, archiveRoot: path.join(root, '.podcode', 'archive', 'agents'), agent: { id: 'fable', name: 'Fable', role: 'dev', engine: 'claude', projectId: null } })!;
+  const cleanResult = archived.worktrees.find(w => w.path === path.join('workspace', 'nested', 'wt-clean'))!;
+  assert.equal(cleanResult.action, 'unregistered', cleanResult.error ?? '');
+  assert.ok(!git(repo, 'worktree', 'list', '--porcelain').includes('feat/clean'));
+  git(repo, 'branch', '-D', 'feat/clean');
+});
+
 test('a repository kept inside the workspace moves with its worktrees, which keep working in the archive', () => {
   const home = path.join(tempDir('archive-own'), 'agents', 'kai');
   const workspace = path.join(home, 'workspace');

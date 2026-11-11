@@ -24,6 +24,18 @@ function lstat(p: string): fs.Stats | null {
 }
 
 /**
+ * A path's real path; for one that is gone, its nearest existing parent's real path plus the rest.
+ * Git records made before the move name ~/.agentscode/... (now a link to ~/.podcode), and once that
+ * folder is gone realpath fails, so this is how such a record still matches the data folder.
+ */
+export function realPathThroughParents(p: string): string {
+  const abs = path.resolve(p);
+  try { return fs.realpathSync(abs); } catch { /* resolve the parent */ }
+  const parent = path.dirname(abs);
+  return parent === abs ? abs : path.join(realPathThroughParents(parent), path.basename(abs));
+}
+
+/**
  * The data folder to use, without changing anything: PODCODE_HOME (or AGENTSCODE_HOME) when set;
  * else ~/.podcode once it exists; else ~/.agentscode while only that exists (before the first
  * PodCode start migrated it, so tests and scripts never create a second, empty ~/.podcode); else
