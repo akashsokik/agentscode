@@ -69,12 +69,13 @@ test('an agent can have no project: it works from the workspace in its home acro
   assert.deepEqual(ada.ctx.directories!(), []);
   assert.ok(fs.existsSync(path.join(h.ada.home, 'soul.md')), 'project agents get a home too');
 
-  // Removing a project ignores agents with no project; removing the agent deletes its home.
+  // Removing a project ignores agents with no project; removing the agent archives its home.
   h.manager.removeProject(h.api.id);
   assert.deepEqual(runner.ctx.directories!(), [fs.realpathSync(h.web.path)]);
   h.runner(h.nova.id).complete();
   await h.manager.remove(h.nova.id);
   assert.ok(!fs.existsSync(h.nova.home));
+  assert.deepEqual(h.manager.archivedAgents().map(a => a.name), ['Nova']);
 });
 
 test('an agent with no project cannot have a worktree, and a missing project is still an error', async () => {
@@ -385,12 +386,13 @@ test('agent homes refuse ids that are not a single folder name inside the agents
   const homes = new AgentHomes(root);
   for (const id of ['', '.', '..', 'a/b', '../keep', 'keep/..', 'x\\y', 'a\0b']) {
     assert.throws(() => homes.path(id), /agent id|directly inside/, JSON.stringify(id));
-    assert.throws(() => homes.remove(id), /agent id|directly inside/, JSON.stringify(id));
+    assert.throws(() => homes.archive({ id, name: 'x', role: 'dev', engine: 'claude', projectId: null }), /agent id|directly inside/, JSON.stringify(id));
   }
-  assert.ok(fs.existsSync(path.join(sibling, 'soul.md')), 'nothing was removed');
+  assert.ok(fs.existsSync(path.join(sibling, 'soul.md')), 'nothing was moved');
   assert.equal(homes.path('keep'), sibling);
-  homes.remove('keep');
+  const archived = homes.archive({ id: 'keep', name: 'Keep', role: 'dev', engine: 'claude', projectId: null });
   assert.ok(!fs.existsSync(sibling));
+  assert.equal(fs.readFileSync(path.join(archived!.dir, 'soul.md'), 'utf8'), 'keep me\n', 'archived, not deleted');
   assert.ok(fs.existsSync(root), 'the agents folder itself stays');
 });
 

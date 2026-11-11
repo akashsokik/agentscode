@@ -2,12 +2,16 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { PRESSABLE_KEYS } from '../../shared/browser.ts';
 import { MEMORY_TEXT_LIMIT, MEMORY_WHY_LIMIT } from '../agentHome.ts';
+import { REF_BODY_LIMIT, REF_BY_LIMIT, REF_LINK_LIMIT, REF_LINKS_MAX, REF_TITLE_LIMIT, REF_WHY_LIMIT } from '../projectRefs.ts';
 import { COMMS_MCP_ENTRY, COMMS_SERVER, NODE_RUNTIME, PORT } from '../config.ts';
 
 export type CommsTool =
   | 'list_agents' | 'send_message' | 'reply' | 'read_messages' | 'set_task_summary' | 'remember' | 'forget' | 'delegate_task' | 'list_delegations'
   | 'report_result' | 'list_channels' | 'read_channel' | 'post_to_channel' | 'create_walkthrough' | 'openui_guide'
-  | BrowserTool;
+  | RefTool | BrowserTool;
+/** Project notes and decisions: every agent may add and read them. */
+export type RefTool = 'note_add' | 'decision_add' | 'ref_get' | 'ref_search';
+export const REF_TOOLS: RefTool[] = ['note_add', 'decision_add', 'ref_get', 'ref_search'];
 export type BrowserTool =
   | 'browser_open' | 'browser_list' | 'browser_close' | 'browser_snapshot' | 'browser_screenshot' | 'browser_console'
   | 'browser_click' | 'browser_type' | 'browser_press' | 'browser_eval';
@@ -18,7 +22,7 @@ export const BROWSER_TOOLS: BrowserTool[] = [
 export const COMMS_TOOLS: CommsTool[] = [
   'list_agents', 'send_message', 'reply', 'read_messages', 'set_task_summary', 'remember', 'forget', 'delegate_task', 'list_delegations',
   'report_result', 'list_channels', 'read_channel', 'post_to_channel', 'create_walkthrough', 'openui_guide',
-  ...BROWSER_TOOLS,
+  ...REF_TOOLS, ...BROWSER_TOOLS,
 ];
 /** The SuperAgent's own commands: its MCP server registers them, and the IDE refuses them from anyone else. */
 export type SuperTool = 'create_agent' | 'update_agent' | 'new_session' | 'stop_agent' | 'create_channel' | 'update_channel' | 'ask_user' | 'read_transcript'
@@ -43,7 +47,10 @@ export type CommsHandler = (tool: CommsTool | SuperTool | EyesTool, args: Record
 const text = z.string().trim().min(1).max(10_000);
 
 export const sendInput = z.object({ to_agent_id: z.string().min(1), text, expects_reply: z.boolean().default(true) });
-export const replyInput = z.object({ message_id: z.string().min(1), text, expects_reply: z.boolean().default(false) });
+/** Something reusable learned while doing the work, saved as a project note. */
+export const LESSON_LIMIT = 1000;
+const lesson = z.string().trim().min(1).max(LESSON_LIMIT).optional();
+export const replyInput = z.object({ message_id: z.string().min(1), text, expects_reply: z.boolean().default(false), lesson });
 export const summaryInput = z.object({ summary: z.string().trim().min(1).max(280) });
 /** agent: your own memory.md (the default). user: user.md, what every agent knows about the user. */
 const scope = z.enum(['agent', 'user']).default('agent');
@@ -52,6 +59,26 @@ export const rememberInput = z.object({
   why: z.string().trim().max(MEMORY_WHY_LIMIT).optional(),
   scope,
 });
+const refProject = z.string().trim().min(1).max(200);
+const refLinks = z.array(z.string().trim().min(1).max(REF_LINK_LIMIT)).max(REF_LINKS_MAX).optional();
+const refId = z.string().trim().min(3).max(20);
+export const noteAddInput = z.object({
+  project: refProject,
+  title: z.string().trim().min(1).max(REF_TITLE_LIMIT),
+  body: z.string().trim().min(1).max(REF_BODY_LIMIT),
+  links: refLinks,
+});
+export const decisionAddInput = z.object({
+  project: refProject,
+  title: z.string().trim().min(1).max(REF_TITLE_LIMIT),
+  decision: z.string().trim().min(1).max(REF_BODY_LIMIT),
+  why: z.string().trim().min(1).max(REF_WHY_LIMIT),
+  decided_by: z.string().trim().min(1).max(REF_BY_LIMIT),
+  replaces: refId.optional(),
+  links: refLinks,
+});
+export const refGetInput = z.object({ id: refId });
+export const refSearchInput = z.object({ query: z.string().trim().min(1).max(200), project: refProject.optional() });
 export const forgetInput = z.object({ id: z.string().trim().min(1).max(40), scope });
 export const delegationInput = z.object({
   to_agent_id: z.string().min(1),
@@ -59,6 +86,8 @@ export const delegationInput = z.object({
   task: z.string().trim().min(1).max(1000),
   acceptance_criteria: z.string().trim().min(1).max(3000),
   context: z.string().trim().max(3000).optional(),
+  /** The project the work is about (code, name or ALL); lessons reported back are filed there. */
+  project: z.string().trim().min(1).max(200).optional(),
 });
 const channelRef = z.string().trim().min(1).max(80);
 const why = z.string().trim().min(1).max(500);
@@ -170,6 +199,7 @@ export const reportInput = z.object({
   outcome: z.enum(['passed', 'failed', 'blocked', 'done']),
   summary: z.string().trim().min(1).max(2000),
   evidence: z.string().trim().min(1).max(5000),
+  lesson,
 });
 export const WALKTHROUGH_MAX_STEPS = 30;
 export const walkthroughStepInput = z.object({
@@ -243,7 +273,7 @@ export function createCommsMcpServer(call: CommsHandler, options: { executive?: 
     inputSchema: sendInput.shape,
   }, args => invoke('send_message', args));
   server.registerTool('reply', {
-    description: 'Reply to a teammate message using its message ID. Include findings, changes and checks. Returns immediately. By default no further reply is requested.',
+    description: 'Reply to a teammate message using its message ID. Include findings, changes and checks. Returns immediately. By default no further reply is requested. Optional lesson (up to 1000 characters): something reusable another agent would need later, such as a how-to, a pitfall or where things live; never a status summary of this task. It is saved as a note in the task\'s project (else yours, else ALL) and its id goes with your message.',
     inputSchema: replyInput.shape,
   }, args => invoke('reply', args));
   server.registerTool('read_messages', {
@@ -262,8 +292,24 @@ export function createCommsMcpServer(call: CommsHandler, options: { executive?: 
     description: 'Remove one entry by its id (shown in your instructions as [id]), when it is wrong or outdated, or to make room after consolidating. scope "agent" (default) is your memory; scope "user" is the user profile, where you may remove only entries you saved.',
     inputSchema: forgetInput.shape,
   }, args => invoke('forget', args));
+  server.registerTool('note_add', {
+    description: 'Add a note to a project\'s shared notes (notes.md), which every agent sees in its index: a finding, a how-to, a known problem. project is a code (ACH), a project name, or ALL for something that holds across projects. AgentsCode assigns the id (ACH-N4); notes are never edited or deleted by tools. No secrets.',
+    inputSchema: noteAddInput.shape,
+  }, args => invoke('note_add', args));
+  server.registerTool('decision_add', {
+    description: 'Record a decision the user (or the team, with the user\'s agreement) made, in the project\'s decisions.md: title, the decision, why, and who decided ("You" for the user). project is a code (ACH), a project name, or ALL. To change a decision, add a new one with replaces set to the old id (ACH-D7): the old one is marked "replaced by". AgentsCode assigns the id; tools never edit or delete entries.',
+    inputSchema: decisionAddInput.shape,
+  }, args => invoke('decision_add', args));
+  server.registerTool('ref_get', {
+    description: 'Read one note or decision in full by its id, such as ACH-D7 or ALL-N2.',
+    inputSchema: refGetInput.shape, annotations: { readOnlyHint: true },
+  }, args => invoke('ref_get', args));
+  server.registerTool('ref_search', {
+    description: 'Search project notes and decisions for entries containing every word of the query; optionally limit to one project (code, name or ALL). Returns up to 20, newest first, with ids, titles and status; use ref_get for the full text.',
+    inputSchema: refSearchInput.shape, annotations: { readOnlyHint: true },
+  }, args => invoke('ref_search', args));
   server.registerTool('delegate_task', {
-    description: 'Lead only: assign implementation, testing, validation or review to a teammate with acceptance criteria and file or commit context. Returns immediately; the result report arrives later. Prefer a Tester for validation.',
+    description: 'Lead only: assign implementation, testing, validation or review to a teammate with acceptance criteria and file or commit context. Name the project (code, name or ALL) so lessons reported back are filed there. Returns immediately; the result report arrives later. Prefer a Tester for validation.',
     inputSchema: delegationInput.shape,
   }, args => invoke('delegate_task', args));
   server.registerTool('list_delegations', {
@@ -271,7 +317,7 @@ export function createCommsMcpServer(call: CommsHandler, options: { executive?: 
     inputSchema: {}, annotations: { readOnlyHint: true },
   }, args => invoke('list_delegations', args));
   server.registerTool('report_result', {
-    description: 'Return the result of a delegated task using its request message ID. Testing and validation need passed, failed or blocked. Include the commands you ran, their results, files or reproduction steps; never claim unrun checks passed.',
+    description: 'Return the result of a delegated task using its request message ID. Testing and validation need passed, failed or blocked. Include the commands you ran, their results, files or reproduction steps; never claim unrun checks passed. Optional lesson (up to 1000 characters): something reusable another agent would need later, such as a how-to, a pitfall or where things live; never a status summary of this task. It is saved as a note in the task\'s project (else yours, else ALL) and its id goes with your message.',
     inputSchema: reportInput.shape,
   }, args => invoke('report_result', args));
   server.registerTool('list_channels', {
@@ -358,7 +404,7 @@ function registerSuperTools(server: McpServer, invoke: Invoke): void {
     inputSchema: updateChannelInput.shape,
   }, args => invoke('update_channel', args));
   server.registerTool('ask_user', {
-    description: 'Ask the user to decide something, with 1 to 4 short options they click (they may also type an answer). Use it before merging, pushing, deploying, deleting, removing agents, adding projects or costly work. Returns at once; the answer arrives as a later turn. Ask one thing at a time and do not ask again while it is open.',
+    description: 'Ask the user to decide something, with 1 to 4 short options they click (they may also type an answer). Use it before merging, pushing, deploying, deleting, removing agents, adding projects or costly work. Returns at once; the answer arrives as a later turn. Ask one thing at a time and do not ask again while it is open. When the answer is an approval or a rule worth keeping, record it with decision_add (decided_by "You", links ["ask:<question id>"]); not every answer is a decision.',
     inputSchema: askUserInput.shape,
   }, args => invoke('ask_user', args));
   server.registerTool('list_goals', {
@@ -416,7 +462,7 @@ export function codexCommsConfig(token: string, executive = false, eyes = false)
 }
 
 export const COMMS_INSTRUCTIONS = [
-  `AgentsCode gives you ${COMMS_SERVER} MCP tools to work with teammate agents: list_agents, send_message, reply, read_messages, set_task_summary, delegate_task, list_delegations, report_result, list_channels, read_channel and post_to_channel. remember and forget keep your own memory, and with scope "user" the user profile every agent shares. create_walkthrough publishes a guided tour of your work, only when the user asks for one.`,
+  `AgentsCode gives you ${COMMS_SERVER} MCP tools to work with teammate agents: list_agents, send_message, reply, read_messages, set_task_summary, delegate_task, list_delegations, report_result, list_channels, read_channel and post_to_channel. remember and forget keep your own memory, and with scope "user" the user profile every agent shares. create_walkthrough publishes a guided tour of your work, only when the user asks for one. Project notes and decisions (ids like ACH-D7, ALL-N2) are shared by every agent: check the active decisions before changing what they cover, read entries with ref_get and ref_search, and record what the user decides with decision_add (replaces marks an old one replaced) and useful findings with note_add.`,
   'Replies can also include interactive UI (metrics, tables, charts, status, buttons the user clicks to answer you) in ```openui-lang blocks. Use it when the user would rather see or click than read; call openui_guide once for the syntax first.',
   'In the desktop app you have your own browser: browser_open a page (e.g. your dev server), browser_snapshot to read it, then browser_click, browser_type and browser_press to use it, browser_screenshot to see it and browser_console for errors. Use it to check web work the way the user would.',
   'AgentsCode draws ```mermaid code blocks as diagrams in your replies, channel posts and walkthroughs (flowchart, sequenceDiagram, architecture-beta, classDiagram, erDiagram, stateDiagram). Use one when a flow, a sequence of calls or an architecture is clearer as a picture than as prose. In architecture-beta, services are placed by edge sides: connect each neighbour of a service on a different side (L, R, T, B), or two land on the same spot.',

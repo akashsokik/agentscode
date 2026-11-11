@@ -112,6 +112,14 @@ export function toolSummary(name: string, input: Input, cwd?: string): string {
       return clip(`Remembered: ${str(input.text)}`, 160);
     case `mcp__${COMMS_SERVER}__forget`:
       return clip(`Forgot: ${str(input.text) || str(input.id)}`, 160);
+    case `mcp__${COMMS_SERVER}__note_add`:
+      return clip(`Note for ${str(input.project)}: ${str(input.title)}`, 160);
+    case `mcp__${COMMS_SERVER}__decision_add`:
+      return clip(`Decision for ${str(input.project)}: ${str(input.title)}${input.replaces ? ` (replaces ${str(input.replaces)})` : ''}`, 160);
+    case `mcp__${COMMS_SERVER}__ref_get`:
+      return str(input.id);
+    case `mcp__${COMMS_SERVER}__ref_search`:
+      return clip(`${str(input.query)}${input.project ? ` in ${str(input.project)}` : ''}`, 160);
     default:
       return clip(JSON.stringify(input), 160);
   }

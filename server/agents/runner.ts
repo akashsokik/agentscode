@@ -123,6 +123,8 @@ export interface PromptContext {
   profile?: ProfileEntry[];
   /** Entries left out because user.md is over its limit. */
   profileOmitted?: number;
+  /** The index of project notes and decisions this agent is given, already capped; '' when there are none. */
+  refs?: string;
 }
 
 const MEMORY_GUIDANCE = [
@@ -133,8 +135,8 @@ const MEMORY_GUIDANCE = [
 ].join(' ');
 
 /** The parts of an agent's instructions that can change during a session. */
-export type ContextSection = 'projects' | 'soul' | 'memory' | 'user';
-export const CONTEXT_SECTIONS: ContextSection[] = ['projects', 'soul', 'memory', 'user'];
+export type ContextSection = 'projects' | 'soul' | 'memory' | 'user' | 'refs';
+export const CONTEXT_SECTIONS: ContextSection[] = ['projects', 'soul', 'memory', 'user', 'refs'];
 
 /** The memory section: the entries with their ids, or a note that there are none. */
 export function memorySection(memory: MemoryEntry[], omitted = 0): string {
@@ -165,6 +167,7 @@ export function contextSections(agent: Agent, project: Project | null, context: 
     soul: soul ? `Your standing instructions: ${soul}` : '',
     memory: memorySection(context.memory ?? [], context.memoryOmitted),
     user: profileSection(context.profile ?? [], context.profileOmitted),
+    refs: context.refs ?? '',
   };
 }
 
@@ -200,6 +203,7 @@ const EMPTY_SECTION: Record<ContextSection, string> = {
   soul: 'You no longer have standing instructions.',
   memory: 'Your memory (memory.md) is empty.',
   user: 'The user profile (user.md) is now empty.',
+  refs: 'There are no project notes or decisions now.',
 };
 
 /** Put ahead of a turn whose session saw an older version of some sections; `changed` holds only those. */

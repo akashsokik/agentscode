@@ -178,22 +178,36 @@ export class Mailbox {
     if (from.autonomy === 'readonly' && from.role !== 'super') throw new HttpError(403, 'Plan-only agents need the user\'s approval before delegating work.');
     const text = [
       `${delegation.kind.toUpperCase()}: ${delegation.task}`,
+      delegation.project ? `Project: ${delegation.project}` : '',
       `Acceptance criteria:\n${delegation.acceptanceCriteria}`,
       delegation.context ? `Context and references:\n${delegation.context}` : '',
     ].filter(Boolean).join('\n\n');
     return this.enqueue(fromId, toId, text, true, undefined, { delegation });
   }
 
-  report(fromId: string, messageId: string, report: Report): PeerMessage {
+  /**
+   * The delegated request a report answers, checked: only its assignee reports, and testing and
+   * validation need a verdict. Also the identical report already sent, if there is one.
+   */
+  checkReport(fromId: string, messageId: string, report: Pick<Report, 'outcome' | 'summary' | 'evidence'> & { lesson?: string }): { request: PeerMessage & { delegation: Delegation }; previous?: PeerMessage } {
     const request = this.store.messages.find(m => m.id === messageId);
     if (!request?.delegation || request.toAgentId !== fromId) throw new HttpError(403, 'Only the assigned agent can report on this delegated task.');
     if ((request.delegation.kind === 'testing' || request.delegation.kind === 'validation') && report.outcome === 'done') {
       throw new HttpError(400, 'Testing and validation need passed, failed or blocked, with evidence.');
     }
+    // A lesson counts by its text: the same report and lesson again is the same report.
+    const previous = this.store.messages.findLast(m => m.replyTo === messageId && m.report
+      && m.report.outcome === report.outcome && m.report.summary === report.summary && m.report.evidence === report.evidence
+      && m.report.lesson?.text === report.lesson);
+    return { request: request as PeerMessage & { delegation: Delegation }, previous };
+  }
+
+  report(fromId: string, messageId: string, report: Report): PeerMessage {
+    const { request, previous } = this.checkReport(fromId, messageId, { ...report, lesson: report.lesson?.text });
     // A repeated identical report reuses its receipt instead of sending a second message.
-    const previous = this.store.messages.findLast(m => m.replyTo === messageId && m.report);
-    if (previous && JSON.stringify(previous.report) === JSON.stringify(report)) return previous;
-    const text = `${request.delegation.kind.toUpperCase()} RESULT: ${report.outcome.toUpperCase()}\n\n${report.summary}\n\nEvidence:\n${report.evidence}`;
+    if (previous) return previous;
+    const lesson = report.lesson ? `\n\nLesson saved as ${report.lesson.id} (read it with ref_get).` : '';
+    const text = `${request.delegation.kind.toUpperCase()} RESULT: ${report.outcome.toUpperCase()}\n\n${report.summary}\n\nEvidence:\n${report.evidence}${lesson}`;
     return this.enqueue(fromId, request.fromAgentId, text, false, messageId, { report });
   }
 

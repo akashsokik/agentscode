@@ -484,6 +484,8 @@ export interface Project {
   createdAt: number;
   exists: boolean;
   isGit: boolean;
+  /** Short permanent code for its notes and decisions (ACH in ACH-D7); assigned once, kept on rename. */
+  code?: string;
 }
 
 // ---- agent-to-agent communication -------------------------------------------
@@ -495,12 +497,16 @@ export interface Delegation {
   task: string;
   acceptanceCriteria: string;
   context?: string;
+  /** The project code the work is about (ACH), when the lead named one; lessons from it are filed there. */
+  project?: string;
 }
 
 export interface Report {
   outcome: 'passed' | 'failed' | 'blocked' | 'done';
   summary: string;
   evidence: string;
+  /** A reusable lesson the agent saved with the report, as a project note. */
+  lesson?: { id: string; text: string };
 }
 
 export type PeerMessageStatus = 'queued' | 'delivering' | 'delivered' | 'failed' | 'cancelled';

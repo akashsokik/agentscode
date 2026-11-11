@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Agent, MemoryEntry } from '../shared/types.ts';
 import { HttpError } from './errors.ts';
+import { archiveAgentHome, type ArchivedAgent } from './agentArchive.ts';
 
 // Each agent has a private home, <dataDir>/agents/<id>/, never the user's own home folder:
 // - soul.md is its standing instructions. The user writes it (in the app or by hand); Agent.instructions
@@ -365,8 +366,17 @@ export class AgentHomes {
     return { entry, entries: next };
   }
 
-  remove(agentId: string): void {
-    fs.rmSync(this.path(agentId), { recursive: true, force: true });
+  /**
+   * An agent is removed: its home moves to <dataDir>/archive/agents/ (agentArchive.ts), never deleted.
+   * Null when it had no home.
+   */
+  archive(agent: { id: string; name: string; role: string; engine: string; projectId: string | null }, transcript?: string, extras: { from: string; name: string }[] = []): ArchivedAgent | null {
+    return archiveAgentHome({ home: this.path(agent.id), archiveRoot: this.archiveRoot(), agent, transcript, extras });
+  }
+
+  /** Where removed agents' homes go: <dataDir>/archive/agents, beside the agents folder. */
+  archiveRoot(): string {
+    return path.join(path.dirname(path.resolve(this.root)), 'archive', 'agents');
   }
 
   /**

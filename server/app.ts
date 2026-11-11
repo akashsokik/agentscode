@@ -108,6 +108,10 @@ export function createApp(
     await manager.remove(param(req, 'id'), cleanup as WorktreeCleanup);
     res.status(204).end();
   });
+  // Removed agents' archived homes (read only).
+  app.get('/api/archive/agents', (_req, res) => {
+    res.json(manager.archivedAgents());
+  });
   app.get('/api/agents/:id/entries', (req, res) => {
     res.json(manager.entries(param(req, 'id')));
   });

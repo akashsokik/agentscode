@@ -102,6 +102,11 @@ export class Attachments {
     return { attachment: image.attachment, path: target };
   }
 
+  /** An agent's folder of attachments (it may not exist). */
+  folder(agentId: string): string {
+    return this.dir(agentId);
+  }
+
   remove(agentId: string): void {
     fs.rmSync(this.dir(agentId), { recursive: true, force: true });
   }

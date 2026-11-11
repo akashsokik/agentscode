@@ -181,7 +181,9 @@ test('ask_user: the user clicks an answer, which reaches the SuperAgent as their
   // It was busy, so the answer runs as its next turn.
   t.runner.complete();
   await settle();
-  assert.ok(t.runner.sent.some(s => s.text === 'Answer to your question "Merge feat/user-profile?": Merge it'));
+  const answered = t.runner.sent.find(s => s.text.startsWith(`Answer to your question "Merge feat/user-profile?" (question ${asked.id}): Merge it\n\n`));
+  assert.ok(answered, 'the answer names the question');
+  assert.match(answered.text, new RegExp(`record it with decision_add \\(decided_by "You", links \\["ask:${asked.id}"\\]\\); otherwise do not\\.`));
   assert.throws(() => t.manager.answerSuper(asked.id, { answer: 'again' }), e => status(e) === 409);
 
   for (let i = 0; i < MAX_OPEN_ASKS; i++) await t.call('ask_user', { question: `Question ${i}?`, options: ['Yes'] });
