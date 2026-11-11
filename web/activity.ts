@@ -1,3 +1,4 @@
+import { commsToolPattern } from '../shared/commsTools.ts';
 import type { Entry, ToolCall } from '../shared/types.ts';
 
 /**
@@ -7,12 +8,12 @@ import type { Entry, ToolCall } from '../shared/types.ts';
  */
 
 /** Comms tools that send mail: the peer row already shows what they sent. */
-export const SENDING_TOOLS = /(?:^mcp__agentscode__|^agentscode\.)(send_message|reply|delegate_task|report_result)$/;
+export const SENDING_TOOLS = commsToolPattern('send_message|reply|delegate_task|report_result');
 /** Memory tools: what the agent learned or dropped reads as one line of its own, not as work. */
-export const MEMORY_TOOLS = /(?:^mcp__agentscode__|^agentscode\.)(remember|forget)$/;
+export const MEMORY_TOOLS = commsToolPattern('remember|forget');
 
 /** The walkthrough tool: what it made shows as a card of its own, not as work. */
-export const WALKTHROUGH_TOOL = /(?:^mcp__agentscode__|^agentscode\.)create_walkthrough$/;
+export const WALKTHROUGH_TOOL = commsToolPattern('create_walkthrough');
 
 export type WorkKind = 'edit' | 'run' | 'agent' | 'research' | 'plan' | 'other';
 /** A group's icon: the work it did most of, or a note when it holds only messages and status. */

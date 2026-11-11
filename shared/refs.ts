@@ -79,7 +79,7 @@ export interface RefSummary {
   replaces?: string;
   /** Who decided (a decision) or wrote it (a note). */
   by: string;
-  /** Who added it, recorded by Podcode; absent on older and hand-written entries. */
+  /** Who added it, recorded by PodCode; absent on older and hand-written entries. */
   addedBy?: string;
   /** YYYY-MM-DD as recorded. */
   date: string;

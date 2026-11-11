@@ -2,7 +2,7 @@ import type { GraphEdge } from './graph.ts';
 
 // The Work view (ACH-D17): what every agent is working on, what was merged into each project's
 // main and whether it is on GitHub, a short graph of main, and what can be cleaned up. Built by
-// server/work.ts from git (read only) and AgentsCode's own merge and review records.
+// server/work.ts from git (read only) and PodCode's own merge and review records.
 
 /** How a branch in progress stands, from our records first, then the owner's status. */
 export type WorkState = 'approved' | 'reviewing' | 'working' | 'open';
@@ -120,7 +120,7 @@ export interface WorkProject {
   code?: string;
   /** null when the folder is not a git repository. */
   defaultBranch: string | null;
-  /** origin's main as last fetched by someone else; AgentsCode never fetches. */
+  /** origin's main as last fetched by someone else; PodCode never fetches. */
   remote: string | null;
   /** Changes on local main (first-parent: a merge counts once) that origin's main does not have. */
   notPushed: number;

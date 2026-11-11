@@ -43,7 +43,7 @@ export type WorktreeCleanup = 'keep' | 'remove' | 'discard';
 
 export interface AgentTask {
   summary: string;
-  /** system: Podcode itself, such as the SuperAgent's wake-up updates; never the user's words. */
+  /** system: PodCode itself, such as the SuperAgent's wake-up updates; never the user's words. */
   source: 'user' | 'agent' | 'system';
   fromAgentId?: string;
   /** The peer message this turn handles, when source is 'agent'. */
@@ -155,7 +155,7 @@ export interface MemoryEntry {
 // ---- the user profile -----------------------------------------------------------
 
 /**
- * One thing Podcode learned about the user (their style, taste, how they like to work), kept in
+ * One thing PodCode learned about the user (their style, taste, how they like to work), kept in
  * <dataDir>/user.md and given to every agent. An agent adds one with remember scope "user", a dream
  * adds one the user stated outright, and the user adds, edits or deletes them in the app.
  */
@@ -535,7 +535,7 @@ export interface PeerMessage {
   /** Set when an agent mentioned the recipient in a channel post (postId), or answered one. */
   channelId?: string;
   postId?: string;
-  /** It was being handled when Podcode restarted, so it is delivered once more; the recipient may have started on it. */
+  /** It was being handled when PodCode restarted, so it is delivered once more; the recipient may have started on it. */
   redelivered?: boolean;
 }
 
@@ -830,7 +830,7 @@ export interface Snapshot {
   models: Record<EngineKind, EngineModels>;
   home: string;
   platform: string;
-  /** What Podcode knows about the user (user.md), and what waits for approval. */
+  /** What PodCode knows about the user (user.md), and what waits for approval. */
   profile: UserProfile;
   /** The SuperAgent: which agent it is, what it asks the user, and what it did. */
   super: SuperState;
@@ -838,7 +838,7 @@ export interface Snapshot {
 
 /**
  * A shell in the bottom terminal panel. It runs on the server in its project's folder and lives
- * until it exits, is closed, its project is removed or Podcode stops; reloading the page
+ * until it exits, is closed, its project is removed or PodCode stops; reloading the page
  * reattaches to it. Its bytes travel on its own socket, /ws/terminal/<id>, never on the event feed.
  */
 export interface TerminalInfo {

@@ -205,7 +205,7 @@ export class AgentManager {
   private memoryVersions = new Map<string, string>();
   /** Dreaming: the gate, triggers, records, undo, soul proposals and the numbers. */
   private dreamer: Dreamer;
-  /** What Podcode knows about the user (user.md), shared by every agent, and its proposals. */
+  /** What PodCode knows about the user (user.md), shared by every agent, and its proposals. */
   private profile: ProfileStore;
   /** The profile the app was last sent, to notice user.md changing on disk. */
   private profileVersion: string | undefined;
@@ -351,7 +351,7 @@ export class AgentManager {
         console.error(`[agents] could not prepare ${agent.home}:`, (err as Error).message);
       }
       if (agent.status === 'working' || agent.status === 'waiting') {
-        this.addEntry(agent.id, { id: randomUUID(), kind: 'system', text: 'Podcode restarted while this turn was running. Send a message to pick it back up.' });
+        this.addEntry(agent.id, { id: randomUUID(), kind: 'system', text: 'PodCode restarted while this turn was running. Send a message to pick it back up.' });
         agent.status = 'idle';
       }
       agent.activity = '';
@@ -592,7 +592,7 @@ export class AgentManager {
     this.tokens.clear();
     for (const timer of this.idleTimers.values()) clearTimeout(timer);
     this.idleTimers.clear();
-    for (const pending of [...this.approvals.values()]) pending.finish({ allow: false, message: 'Podcode is closing.' });
+    for (const pending of [...this.approvals.values()]) pending.finish({ allow: false, message: 'PodCode is closing.' });
     const closing = [...this.runners.values()].map(runner => runner.dispose());
     this.runners.clear();
     for (const agent of this.store.agents.values()) {
@@ -1047,7 +1047,7 @@ export class AgentManager {
    * recorded started in the home) cannot resume: it is ended here, with a note. Whether a workspace
    * folder already existed does not matter. Codex threads resume from any folder; an OrcaCode session
    * resumes in the folder it recorded, so it is ended like Claude's. Files the agent saved
-   * before stay in its home, where it can still edit them (only Podcode's own files are guarded).
+   * before stay in its home, where it can still edit them (only PodCode's own files are guarded).
    */
   private moveToWorkspace(agent: Agent): void {
     const workspace = fs.realpathSync(this.homes.workspace(agent));
@@ -1179,7 +1179,7 @@ export class AgentManager {
           this.sawOwnProfile(agent, before, entries);
         }
         return added
-          ? { remembered: entry, scope: 'user', note: 'Saved to user.md; every agent gets it on its next turn, and the user can edit or delete it in Podcode.' }
+          ? { remembered: entry, scope: 'user', note: 'Saved to user.md; every agent gets it on its next turn, and the user can edit or delete it in PodCode.' }
           : { remembered: entry, scope: 'user', duplicate: 'The user profile already says that; nothing was added.' };
       }
       const before = this.homes.memory(agent);
@@ -1198,7 +1198,7 @@ export class AgentManager {
         const target = before.find(e => e.id === parsed.data.id);
         if (!target) throw new HttpError(404, 'No profile entry with that id.');
         // The profile is everyone's: an agent removes only what it saved itself; the rest is the user's call.
-        if (target.agentId !== agent.id) throw new HttpError(403, 'You can only forget profile entries you saved. Ask the user to change this one in Podcode (About you, in the sidebar).');
+        if (target.agentId !== agent.id) throw new HttpError(403, 'You can only forget profile entries you saved. Ask the user to change this one in PodCode (About you, in the sidebar).');
         const { entry, entries } = this.profile.forget(target.id);
         this.publishProfile();
         this.sawOwnProfile(agent, before, entries);
@@ -1240,7 +1240,7 @@ export class AgentManager {
         rootOf: (target) => this.stepRoot(agent, target),
         fallback: { projectId: agent.workingIn?.projectId ?? startProjectId(agent), root: agent.workingIn?.root ?? null, branch: agent.workingIn?.branch ?? null },
       }, parsed.data);
-      return { created: summaryOf(walkthrough), folder: path.join(this.walkthroughDir(agent.id), walkthrough.id), note: 'The user can open it from your transcript in Podcode.' };
+      return { created: summaryOf(walkthrough), folder: path.join(this.walkthroughDir(agent.id), walkthrough.id), note: 'The user can open it from your transcript in PodCode.' };
     }
     if (BROWSER_TOOLS.includes(tool as BrowserTool)) return this.browserTool(agent, tool as BrowserTool, args);
     if (isSuper && SUPER_TOOLS.includes(tool as SuperTool)) return this.superCommand(agent, tool as SuperTool, args);
@@ -1703,7 +1703,7 @@ export class AgentManager {
       if (!parsed.success) return fail('Ask one question of up to 300 characters, with 1 to 4 options of up to 80 characters each.');
       const ask = this.superStore.ask(parsed.data);
       this.publishSuper();
-      return { asked: ask, note: 'The user sees it in Podcode; their answer arrives as a later turn. Do not wait or ask again.' };
+      return { asked: ask, note: 'The user sees it in PodCode; their answer arrives as a later turn. Do not wait or ask again.' };
     }
     if (tool === 'list_goals') return { goals: this.superStore.goals() };
     if (tool === 'list_routines') return { routines: this.superStore.routines() };
@@ -1835,7 +1835,7 @@ export class AgentManager {
   }
 
   /**
-   * Start an update turn: Podcode's own words, never a user message. The transcript gets a short
+   * Start an update turn: PodCode's own words, never a user message. The transcript gets a short
    * system line; the SuperAgent reads the whole update.
    */
   private wakeSuper(prompt: string, line: string): void {
@@ -1846,7 +1846,7 @@ export class AgentManager {
     this.addEntry(id, { id: randomUUID(), kind: 'system', text: clip(line, 300) });
     const runner = this.runnerFor(agent);
     agent.lastActiveAt = Date.now();
-    runner.send(prompt, { summary: 'Update from Podcode', source: 'system' });
+    runner.send(prompt, { summary: 'Update from PodCode', source: 'system' });
     this.emitAgent(agent);
   }
 
@@ -2437,7 +2437,7 @@ export class AgentManager {
   private async appScreenshot(agent: Agent, args: Record<string, unknown>): Promise<unknown> {
     const parsed = appScreenshotInput.safeParse(args);
     if (!parsed.success) throw new HttpError(400, 'Choose window main or quick, and optionally an agent or channel to open first.');
-    if (!this.browser.available) throw new HttpError(409, 'app_screenshot works only in the Podcode desktop app; this Podcode runs in a browser.');
+    if (!this.browser.available) throw new HttpError(409, 'app_screenshot works only in the PodCode desktop app; this PodCode runs in a browser.');
     const input = parsed.data;
     const isSuper = agent.role === 'super';
     let openAgent: string | undefined;

@@ -1,6 +1,6 @@
 /**
  * The SuperAgent's pieces shared by the server, the page and the desktop app: quiet hours, and the
- * desktop bridge (`window.agentscodeDesktop.super`) for the menu bar, the system-wide shortcut and
+ * desktop bridge (`window.podcodeDesktop.super`) for the menu bar, the system-wide shortcut and
  * bringing the window forward.
  */
 import type { Settings } from './types.ts';
@@ -52,7 +52,7 @@ export interface DesktopSuper {
 export const QUICK_WIDTH = 720;
 export const QUICK_MARGIN = 40;
 
-/** The floating quick composer's bridge (`window.agentscodeDesktop.quick`), only in its own window. */
+/** The floating quick composer's bridge (`window.podcodeDesktop.quick`), only in its own window. */
 export interface DesktopQuick {
   /** Size the window to the card, in CSS pixels; the top edge stays put. */
   fit(height: number): void;

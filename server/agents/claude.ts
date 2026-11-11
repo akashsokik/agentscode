@@ -84,7 +84,7 @@ const inside = (dir: string, file: string) => {
 const PROFILE_FILE = /^user\.(?:md(?:\.tmp)?|proposals\.json(?:\.tmp)?)$/i;
 
 /**
- * Why an edit tool may not write this file, or null. An agent's home holds files only Podcode and
+ * Why an edit tool may not write this file, or null. An agent's home holds files only PodCode and
  * the user write (reservedHomeFile): soul.md (the user's instructions), memory.md (written only
  * through remember and forget, with the secret filter), a soul proposal, the dream records and
  * history/. Anything else there, such as notes saved before the agent had a workspace, and the
@@ -100,10 +100,10 @@ export function ownFileProblem(home: string | undefined, cwd: string, toolName: 
   const homes = [...new Set([path.resolve(home), realpath(path.resolve(home))])];
   const own = homes.some(h => inside(h, file) && reservedHomeFile(path.relative(h, file)));
   if (!own && homes.some(h => PROFILE_FILE.test(path.relative(path.dirname(path.dirname(h)), file)))) {
-    return 'That is the user profile, which every agent shares: change it with remember and forget (scope "user"), or ask the user to edit it in Podcode.';
+    return 'That is the user profile, which every agent shares: change it with remember and forget (scope "user"), or ask the user to edit it in PodCode.';
   }
   return own
-    ? 'That file is in your Podcode home, which only Podcode and the user edit: soul.md is the user\'s standing instructions, and memory changes go through the remember and forget tools. Ask the user if soul.md should change.'
+    ? 'That file is in your PodCode home, which only PodCode and the user edit: soul.md is the user\'s standing instructions, and memory changes go through the remember and forget tools. Ask the user if soul.md should change.'
     : null;
 }
 

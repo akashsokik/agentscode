@@ -41,7 +41,7 @@ export function isLocalUrl(url: string): boolean {
 
 /**
  * Why the browser will not open a URL, or null when it may. Only http and https, and never
- * Podcode itself: a page there could act as the user (`appPort` is the server's port).
+ * PodCode itself: a page there could act as the user (`appPort` is the server's port).
  */
 export function blockedReason(url: string, appPort: number): string | null {
   let parsed: URL;
@@ -52,7 +52,7 @@ export function blockedReason(url: string, appPort: number): string | null {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'The browser only opens http and https addresses.';
   const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
-  if (isLocalUrl(url) && port === appPort) return 'The browser does not open Podcode itself.';
+  if (isLocalUrl(url) && port === appPort) return 'The browser does not open PodCode itself.';
   return null;
 }
 
@@ -276,7 +276,7 @@ export type BrowserEvent =
   /** Cmd+L inside a browser view: put the caret in that tab's address bar. */
   | { type: 'focus-address'; id: string };
 
-/** What the preload script puts on `window.agentscodeDesktop.browser` (electron/preload.cts). */
+/** What the preload script puts on `window.podcodeDesktop.browser` (electron/preload.cts). */
 export interface DesktopBrowser {
   call(op: string, args?: unknown): Promise<unknown>;
   onEvent(callback: (event: BrowserEvent) => void): () => void;

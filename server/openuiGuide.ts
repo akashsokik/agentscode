@@ -2,12 +2,12 @@ import { createLibrary, defineComponent } from '@openuidev/lang-core';
 import { OPENUI_COMPONENTS, OPENUI_ROOT } from '../shared/openui.ts';
 
 // What an agent reads before it puts interactive UI in a reply: OpenUI's own prompt for the
-// Podcode library, in inline mode (prose with ```openui-lang blocks), built once on demand.
+// PodCode library, in inline mode (prose with ```openui-lang blocks), built once on demand.
 
 const PREAMBLE = [
-  'In Podcode your replies are Markdown, and you may add interactive UI to them in ```openui-lang code blocks.',
+  'In PodCode your replies are Markdown, and you may add interactive UI to them in ```openui-lang code blocks.',
   'Use it when it helps the user see or decide something: a status summary, metrics, a table of results, a chart, choices to click.',
-  'Keep explanations in prose; put only the UI in the block. Podcode draws it in its own theme, so never set colours.',
+  'Keep explanations in prose; put only the UI in the block. PodCode draws it in its own theme, so never set colours.',
 ].join(' ');
 
 const RULES = [

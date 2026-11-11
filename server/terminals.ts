@@ -32,7 +32,7 @@ const SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'mksh', 'tcs
 const OSC7 = /\x1b\]7;file:\/\/[^/\x07\x1b]*(\/[^\x07\x1b]*)(?:\x07|\x1b\\)/g;
 
 /**
- * Variables that describe the terminal or tool Podcode itself was started from. A shell that
+ * Variables that describe the terminal or tool PodCode itself was started from. A shell that
  * inherited them would believe it runs inside iTerm, tmux, VS Code or Ghostty.app, or under npm.
  */
 const INHERITED = /^(?:ELECTRON_|npm_|GHOSTTY_|ITERM_|KITTY_|WEZTERM_|VSCODE_|ALACRITTY_|TERM_PROGRAM|LC_TERMINAL)|^(?:TERM|TERMINFO|COLORTERM|TERM_SESSION_ID|TMUX|TMUX_PANE|STY|INIT_CWD|PWD|OLDPWD|SHLVL)$/;
@@ -95,7 +95,7 @@ export function shellEnv(cwd: string): Record<string, string> {
   }
   env.TERM = 'xterm-256color';
   env.COLORTERM = 'truecolor';
-  env.TERM_PROGRAM = 'Podcode';
+  env.TERM_PROGRAM = 'PodCode';
   env.PWD = cwd;
   // An app opened from the Finder has no locale; without one, shells mangle UTF-8 and prompts.
   if (!env.LANG && !env.LC_ALL && !env.LC_CTYPE) env.LANG = 'en_US.UTF-8';
@@ -341,7 +341,7 @@ export class Terminals {
     if (doomed.length) this.changed();
   }
 
-  /** End every terminal, when Podcode stops. */
+  /** End every terminal, when PodCode stops. */
   closeAll(): void {
     const all = [...this.sessions.values()];
     for (const session of all) this.end(session);

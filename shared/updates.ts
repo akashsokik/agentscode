@@ -22,7 +22,7 @@ export type UpdateSnapshot = {
   canInstall: boolean;
 };
 
-/** What the preload script puts on `window.agentscodeDesktop.updates`. */
+/** What the preload script puts on `window.podcodeDesktop.updates`. */
 export type DesktopUpdates = {
   get(): Promise<UpdateSnapshot>;
   /** Installs the available update: downloads it, then restarts into it. */
@@ -31,7 +31,7 @@ export type DesktopUpdates = {
   onChange(callback: (snapshot: UpdateSnapshot) => void): () => void;
   /** Check for Updates: looks now and reports the outcome in a dialog, as the app menu's item does. */
   check(): Promise<void>;
-  /** The app menu's About Podcode: calls back to open Settings at About. */
+  /** The app menu's About PodCode: calls back to open Settings at About. */
   onShowAbout(callback: () => void): () => void;
 };
 

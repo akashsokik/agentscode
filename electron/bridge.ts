@@ -9,6 +9,7 @@
  * - a server main did not start (`npm run dev`): a WebSocket to /browser-bridge, authenticated by
  *   the token the server writes to DATA_DIR/browser-bridge.token.
  */
+import { resolveDataDir } from '../server/dataDir.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +31,8 @@ export type Outbound =
   | { type: 'browser:response'; id: string; ok: false; error: string };
 
 function tokenFile(): string {
-  return path.join(process.env.AGENTSCODE_HOME ?? path.join(os.homedir(), '.agentscode'), 'browser-bridge.token');
+  // The same folder the server uses (server/dataDir.ts): ~/.podcode, or PODCODE_HOME.
+  return path.join(resolveDataDir(), 'browser-bridge.token');
 }
 
 export class BrowserBridge {
@@ -67,9 +69,9 @@ export class BrowserBridge {
     if (message.type !== 'browser:request' || typeof message.id !== 'string' || typeof message.agentId !== 'string' || typeof message.op !== 'string') return;
     const { id, agentId, op } = message;
     const args = message.args && typeof message.args === 'object' ? message.args : {};
-    // A capture of Podcode's own window rides the same bridge (electron/appShot.ts).
+    // A capture of PodCode's own window rides the same bridge (electron/appShot.ts).
     const work = op === 'app_screenshot'
-      ? (this.appShot ? this.appShot(args) : Promise.reject(new BrowserError('Screenshots of the app need the Podcode desktop app.')))
+      ? (this.appShot ? this.appShot(args) : Promise.reject(new BrowserError('Screenshots of the app need the PodCode desktop app.')))
       : this.host.agent(agentId, op, args);
     work.then(
       result => reply({ type: 'browser:response', id, ok: true, result }),
@@ -113,7 +115,7 @@ export class BrowserBridge {
       this.retry = setTimeout(() => this.connect(), RECONNECT_MS);
       return;
     }
-    const socket = new WebSocket(`ws://127.0.0.1:${this.port}/browser-bridge`, { headers: { 'x-agentscode-bridge': token } });
+    const socket = new WebSocket(`ws://127.0.0.1:${this.port}/browser-bridge`, { headers: { 'x-podcode-bridge': token } });
     this.socket = socket;
     const reply = (message: Outbound) => {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));

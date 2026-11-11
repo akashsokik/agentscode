@@ -13,7 +13,7 @@ import { HttpError } from './errors.ts';
 // request (cleanup) that rechecks everything at that moment.
 //
 // Merges come from git's own record of main (its reflog), copied into <dataDir>/work/merges.json the
-// first time they are seen, with the reviewer and the task from AgentsCode's messages. The copy
+// first time they are seen, with the reviewer and the task from PodCode's messages. The copy
 // matters: after main's history is rewritten (as for 0.2.6, ACH-D16) the original merge commits are
 // no longer on main, git forgets them in time, and git itself no longer sees those branches as merged.
 // A branch counts as merged by record when its tip is the tip that was merged (or older).
@@ -224,7 +224,7 @@ export interface WorkContext {
   messages: () => PeerMessage[];
   /** <dataDir>/agents, whose subfolders are agents' own homes. */
   agentsDir: string;
-  /** <dataDir>: cleanup only ever lists folders under it (agent homes, AgentsCode's worktrees) or an agent's recorded worktree. */
+  /** <dataDir>: cleanup only ever lists folders under it (agent homes, PodCode's worktrees) or an agent's recorded worktree. */
   dataDir: string;
   knownRef: (id: string) => boolean;
 }
@@ -552,7 +552,7 @@ export class WorkService {
       const gitMerged = head ? await this.ancestor(head, defaultBranch, root) && !(wt.branch && await isNew(wt.branch)) : false;
       const folderReal = realOrSelf(wt.path);
       const isLive = busyPlaces.some(p => inside(p, folderReal)) || otherWorktrees.some(p => p !== folderReal && inside(p, folderReal));
-      // Only folders AgentsCode made: under its data folder, or an agent's recorded worktree; never
+      // Only folders PodCode made: under its data folder, or an agent's recorded worktree; never
       // a worktree another tool or the user made elsewhere.
       const ours = inside(realOrSelf(wt.path), dataDir) || agents.some(a => a.worktree && realOrSelf(a.worktree.path) === realOrSelf(wt.path));
       // A detached folder is listed only when it is clean and its commit is on main: removing one

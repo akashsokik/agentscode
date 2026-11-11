@@ -70,7 +70,7 @@ export function abortedMessage(signal: AbortSignal): string {
 
 // ---- the digest --------------------------------------------------------------------------
 
-/** system: noted by Podcode itself (the user stopped a turn), which is neither evidence nor untrusted. */
+/** system: noted by PodCode itself (the user stopped a turn), which is neither evidence nor untrusted. */
 export type DigestSource = 'user' | 'agent' | 'tool' | 'peer' | 'system';
 /**
  * correction: a reply that redirects the agent ("No, ...", "use X instead"); instruction: any other
@@ -172,7 +172,7 @@ export function buildDigest(all: Entry[], cursor: DigestCursor = {}, limit = DIG
     if (e.kind === 'agent' || (e.kind === 'done' && !lastReply)) lastReply = e;
     if (e.kind === 'error' || isStop(e)) {
       failedTurns++;
-      // A stop is Podcode's note of what the user did, not the user's words: it is no evidence.
+      // A stop is PodCode's note of what the user did, not the user's words: it is no evidence.
       found.push(isStop(e)
         ? { kind: 'failure', source: 'system', text: 'The user stopped this turn.', ...(lastReply ? { context: clip(lastReply.text, 300), contextSource: 'agent' as const } : {}), entryId: e.id, ts: e.ts }
         : { kind: 'failure', source: 'tool', text: `The turn failed: ${clip(e.text, 600)}`, entryId: e.id, ts: e.ts });
@@ -1136,7 +1136,7 @@ export class Dreamer {
     return false;
   }
 
-  /** Stop dreams in flight (Podcode is closing, the agent is removed or dreaming is turned off). They record nothing. */
+  /** Stop dreams in flight (PodCode is closing, the agent is removed or dreaming is turned off). They record nothing. */
   abort(agentId?: string): void {
     for (const [id, controller] of this.running) if (!agentId || id === agentId) controller.abort();
   }
@@ -1156,7 +1156,7 @@ export class Dreamer {
         signal: controller.signal, stillThere: () => this.host.agent(agent.id) === agent && agent.dreaming, now: () => this.now(),
         ...(this.host.profile ? { profile: this.host.profile } : {}),
       });
-      // The agent was removed, dreaming was turned off, or Podcode is closing while the model
+      // The agent was removed, dreaming was turned off, or PodCode is closing while the model
       // thought: write nothing, so the next dream reads the same session instead of logging a failure.
       if (!outcome || this.host.agent(agent.id) !== agent || !agent.dreaming) return null;
       if (controller.signal.aborted && controller.signal.reason !== DREAM_TIMED_OUT) return null;

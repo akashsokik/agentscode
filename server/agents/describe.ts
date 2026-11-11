@@ -1,3 +1,4 @@
+import { commsTool, currentCommsName, isCommsServer } from '../../shared/commsTools.ts';
 import path from 'node:path';
 import { COMMS_SERVER } from '../config.ts';
 
@@ -61,7 +62,6 @@ export function toolActivity(name: string, input: Input): string {
   }
 }
 
-const BROWSER_TOOL = /(?:^mcp__agentscode__|^agentscode\.)browser_(\w+)$/;
 
 /** A browser tool call in a few words: the page it opened, the ref it clicked, the key it pressed. */
 export function browserSummary(op: string, input: Input): string {
@@ -76,8 +76,10 @@ export function browserSummary(op: string, input: Input): string {
 }
 
 /** One line for the chat transcript. */
-export function toolSummary(name: string, input: Input, cwd?: string): string {
-  const browser = BROWSER_TOOL.exec(name)?.[1];
+export function toolSummary(raw: string, input: Input, cwd?: string): string {
+  // A team tool under its old name (agentscode, in transcripts from before the rename) reads as the current one.
+  const name = currentCommsName(raw);
+  const browser = /^browser_(\w+)$/.exec(commsTool(name) ?? '')?.[1];
   if (browser) return browserSummary(browser, input);
   switch (name) {
     case 'Bash':
@@ -195,7 +197,7 @@ export function approvalTitle(name: string, input: Input, cwd?: string): string 
  * what was forgotten when the result says.
  */
 export function resultSummary(name: string, output: string): string | undefined {
-  if (name !== `mcp__${COMMS_SERVER}__forget`) return undefined;
+  if (currentCommsName(name) !== `mcp__${COMMS_SERVER}__forget`) return undefined;
   try {
     const text = (JSON.parse(output) as { forgot?: { text?: unknown } })?.forgot?.text;
     return typeof text === 'string' ? clip(`Forgot: ${text}`, 160) : undefined;
@@ -206,9 +208,9 @@ export function resultSummary(name: string, output: string): string | undefined 
 
 /** The summary for a teammate-comms call made by Codex, whose items carry the server, tool and arguments. */
 export function mcpSummary(server: string, tool: string, args: Input, output: string): string {
-  const name = `mcp__${server}__${tool}`;
-  if (server === COMMS_SERVER && tool.startsWith('browser_')) return browserSummary(tool.slice('browser_'.length), args);
-  if (server !== COMMS_SERVER || (tool !== 'remember' && tool !== 'forget')) return `${server}.${tool}`;
+  const name = currentCommsName(`mcp__${server}__${tool}`);
+  if (isCommsServer(server) && tool.startsWith('browser_')) return browserSummary(tool.slice('browser_'.length), args);
+  if (!isCommsServer(server) || (tool !== 'remember' && tool !== 'forget')) return `${server}.${tool}`;
   const summary = resultSummary(name, output) ?? toolSummary(name, args);
   // Without the text (an item shaped differently than expected), the tool name says more.
   return /^(Remembered|Forgot):\s*$/.test(summary) ? `${server}.${tool}` : summary;

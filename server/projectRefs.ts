@@ -177,7 +177,7 @@ export function renderRef(entry: RefEntry): string {
 function header(code: string, kind: RefKind): string {
   const what = kind === 'D' ? 'Decisions' : 'Notes';
   const tool = kind === 'D' ? 'decision_add' : 'note_add';
-  return `# ${what} (${code})\n\nPodcode keeps this file. Agents add entries with ${tool}; ids are assigned by Podcode and never reused. You can edit it by hand: keep each entry's "## ${code}-${kind}<n>  Title" heading.\n`;
+  return `# ${what} (${code})\n\nPodCode keeps this file. Agents add entries with ${tool}; ids are assigned by PodCode and never reused. You can edit it by hand: keep each entry's "## ${code}-${kind}<n>  Title" heading.\n`;
 }
 
 /** addedBy is the caller's identity, set by the server, never taken from tool input. */
@@ -209,7 +209,7 @@ function checkDate(date: string | undefined): string {
 /** Who decided or wrote something: a name, never text posing as the server's "added by". */
 function checkBy(value: unknown, what: string): string {
   const by = checkText(value, REF_BY_LIMIT, what, true);
-  if (/added\s*by/i.test(by)) throw new HttpError(400, `Give just a name for ${what}; "added by" is recorded by Podcode.`);
+  if (/added\s*by/i.test(by)) throw new HttpError(400, `Give just a name for ${what}; "added by" is recorded by PodCode.`);
   return by;
 }
 

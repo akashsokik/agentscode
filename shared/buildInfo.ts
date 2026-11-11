@@ -1,6 +1,6 @@
 /**
  * What this build is, for Settings > About. vite.config.ts bakes it into the page at build time
- * (`__AGENTSCODE_BUILD__`), so the packaged app never runs git. Pure, so it is tested directly.
+ * (`__PODCODE_BUILD__`), so the packaged app never runs git. Pure, so it is tested directly.
  */
 import type { UpdateSnapshot } from './updates.ts';
 
