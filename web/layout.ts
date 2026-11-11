@@ -9,8 +9,6 @@ export type TabContent =
   | { kind: 'file'; root: Root; path: string }
   | { kind: 'diff'; root: Root; path: string }
   | { kind: 'comms'; conversationId?: string }
-  /** The Work view as a pane (web/work/WorkView.tsx). */
-  | { kind: 'work' }
   | { kind: 'channel'; channelId: string }
   /** `title` names the tab before the walkthrough has loaded. */
   | { kind: 'walkthrough'; agentId: string; id: string; title: string }
@@ -52,7 +50,7 @@ export interface Layout {
   /** Column widths the user dragged to, in px; a column without one uses its default. */
   widths?: Partial<Record<ColumnKey, number>>;
   rightPanel: boolean;
-  rightView: 'overview' | 'comms' | 'changes' | 'notes' | 'work';
+  rightView: 'overview' | 'comms' | 'changes' | 'notes';
   /** The right panel's tab while the SuperAgent has focus, the last one picked; Decisions until then. */
   superView?: SuperView;
   /** The right panel was shown for the SuperAgent once; after that, opening it leaves the panel as you left it. */
@@ -75,7 +73,7 @@ export interface Layout {
 export type ColumnKey = 'nav' | 'workspace' | 'panel';
 
 /** The right panel's tabs for the SuperAgent: its Overview, its own Decisions, Goals and Routines, Comms, and project Notes. */
-export const SUPER_VIEWS = ['overview', 'decisions', 'goals', 'routines', 'comms', 'notes', 'work'] as const;
+export const SUPER_VIEWS = ['overview', 'decisions', 'goals', 'routines', 'comms', 'notes'] as const;
 export type SuperView = (typeof SUPER_VIEWS)[number];
 
 const STORAGE_KEY = 'podcode:layout';
@@ -91,11 +89,31 @@ export function tabKey(content: TabContent): string {
     case 'file': return `file:${rootKey(content.root)}:${content.path}`;
     case 'diff': return `diff:${rootKey(content.root)}:${content.path}`;
     case 'comms': return 'comms';
-    case 'work': return 'work';
     case 'channel': return `channel:${content.channelId}`;
     case 'walkthrough': return `walkthrough:${content.agentId}:${content.id}`;
     case 'browser': return `browser:${content.id}`;
   }
+}
+
+/** Tab kinds and panel views that were removed: the Work view (ACH-D20; revivable from feat/work-view). */
+const RETIRED_TABS = new Set(['work']);
+const RETIRED_VIEWS = new Set(['work']);
+
+/**
+ * A saved layout without what was removed since it was saved: those tabs are dropped (a pane that
+ * showed one is left empty), and a panel view that is gone falls back to Overview for agents and to
+ * the SuperAgent's default (Decisions).
+ */
+export function withoutRetired(saved: Layout): Layout {
+  const gone = new Set(saved.tabs.filter(t => RETIRED_TABS.has((t.content as { kind: string }).kind)).map(t => t.id));
+  const { superView, ...rest } = saved;
+  return {
+    ...rest,
+    tabs: saved.tabs.filter(t => !gone.has(t.id)),
+    panes: saved.panes.map(p => (p.tabId && gone.has(p.tabId) ? { ...p, tabId: null } : p)),
+    rightView: RETIRED_VIEWS.has(saved.rightView) ? 'overview' : saved.rightView,
+    ...(superView && !RETIRED_VIEWS.has(superView) ? { superView } : {}),
+  };
 }
 
 function initial(): Layout {
@@ -108,7 +126,7 @@ function initial(): Layout {
     const { superLog: _width, ...widths } = (kept.widths ?? {}) as Record<string, number>;
     const restored: Layout = { ...fallback, ...kept, ...(kept.widths ? { widths } : {}) };
     const ids = restored.panes.map(p => p.id);
-    return { ...restored, paneWeights: prunedWeights(restored.paneWeights, ids), maximized: restored.maximized && ids.includes(restored.maximized) && ids.length > 1 ? restored.maximized : null };
+    return { ...withoutRetired(restored), paneWeights: prunedWeights(restored.paneWeights, ids), maximized: restored.maximized && ids.includes(restored.maximized) && ids.length > 1 ? restored.maximized : null };
   } catch {
     return fallback;
   }
@@ -315,10 +333,7 @@ export function setRightPanel(rightPanel: boolean): void { set({ ...layout, righ
 export function setSuperView(superView: SuperView): void { set({ ...layout, rightPanel: true, superView, superPanelShown: true }); }
 /** The first time the SuperAgent opens, show the right panel (where its Decisions, Goals and Routines are); never again after. */
 export function showPanelForSuperOnce(): void { if (!layout.superPanelShown) set({ ...layout, rightPanel: true, superPanelShown: true }); }
-export function setRightView(rightView: Layout['rightView']): void {
-  // Work is a tab for the SuperAgent too, so asking for it shows it there as well.
-  set({ ...layout, rightPanel: true, rightView, ...(rightView === 'work' ? { superView: 'work' as const, superPanelShown: true } : {}) });
-}
+export function setRightView(rightView: Layout['rightView']): void { set({ ...layout, rightPanel: true, rightView }); }
 /** Show the Notes tab, for the SuperAgent and for every other agent. */
 export function showNotesPanel(): void { set({ ...layout, rightPanel: true, rightView: 'notes', superView: 'notes', superPanelShown: true }); }
 export function setTerminal(terminal: boolean): void { if (Boolean(layout.terminal) !== terminal) set({ ...layout, terminal }); }
