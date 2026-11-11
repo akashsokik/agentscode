@@ -1,5 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import type { CleanupFolder, WorkBranch, WorkCommit, WorkMerge, WorkProject } from '../../shared/work.ts';
+import type { CleanupFolder, WorkBranch, WorkCommit, WorkMerge, WorkProject, WorkRef } from '../../shared/work.ts';
+import { edgePath } from '../../shared/graph.ts';
+import { agentLook, AVATAR_FILL } from '../../shared/avatar.ts';
 import { api } from '../api.ts';
 import { shortPath } from '../format.ts';
 import { open, openToSide, setRightView, useLayout } from '../layout.ts';
@@ -16,9 +18,9 @@ import { day, graphProject, loadWork, scoped, setWorkScope, toggleWorkRow, useWo
 
 /*
  * The Work view (ACH-D17), as in the approved demo: what each agent is working on, what was merged
- * into main and whether it is on GitHub, a short graph of main, and cleanup. One-line rows (ACH-D8)
+ * into main and whether it is on GitHub, a graph of main and its open branches (ACH-D18), and cleanup. One-line rows (ACH-D8)
  * that open to their details; ID chips (ACH-D13); theme tokens only (ACH-D14); no shadows (ACH-D7);
- * agent colour only on avatars. A right-panel tab and a full pane share these pieces.
+ * branch lanes in their owner's avatar colour (ACH-D18). A right-panel tab and a full pane share these pieces.
  */
 
 const STATE: Record<WorkBranch['state'], { dot: string; text: string }> = {
@@ -168,39 +170,99 @@ function MergeRow({ m, project, wide }: { m: WorkMerge; project: WorkProject; wi
   );
 }
 
-/** One lane of main in a neutral tone; a merge is a hollow dot with its branch joining from below. */
-function Lane({ merge }: { merge: boolean }) {
-  const x0 = 8;
-  const x1 = 22;
+// ---- the graph (ACH-D18) ------------------------------------------------------------------------
+
+const ROW_H = 24;
+const LANE_W = 13;
+const LANE_PAD = 8;
+
+/** A lane's colour: main's neutral tone, else its owner's avatar colour (the app's palette, ACH-D14). */
+function useLaneColour(project: WorkProject): (key: string | null) => string {
+  const agents = useApp(s => s.snapshot?.agents);
+  return useMemo(() => {
+    const cache = new Map<string, string>();
+    return (key: string | null) => {
+      if (!key || key === 'main') return 'color-mix(in srgb, var(--color-content) 45%, transparent)';
+      if (!cache.has(key)) {
+        const id = project.laneOwners[key];
+        const agent = agents?.find(a => a.id === id);
+        // An owner who is not an agent now still gets a steady colour from its name.
+        cache.set(key, AVATAR_FILL[agentLook(agent ?? { id: `lane:${key}` }).color]);
+      }
+      return cache.get(key)!;
+    };
+  }, [agents, project.laneOwners]);
+}
+
+function Lanes({ project }: { project: WorkProject }) {
+  const colour = useLaneColour(project);
+  const rows = project.graph.length;
+  const width = LANE_PAD * 2 + Math.max(0, project.graphLanes - 1) * LANE_W;
   return (
-    <svg aria-hidden viewBox="0 0 30 24" className="h-6 w-[30px] shrink-0 overflow-visible">
-      <path d={`M${x0} 0V24`} className="stroke-content/35" strokeWidth={1.4} />
-      {merge ? (
-        <>
-          <path d={`M${x1} 24V18C${x1} 13 ${x0 + 7} 12 ${x0 + 3.6} 12`} fill="none" className="stroke-content/35" strokeWidth={1.4} />
-          <circle cx={x1} cy={21.5} r={2} className="fill-content/40" />
-          <circle cx={x0} cy={12} r={3.6} className="fill-background-base stroke-content/60" strokeWidth={1.6} />
-        </>
-      ) : <circle cx={x0} cy={12} r={3.4} className="fill-content/60" />}
+    <svg aria-hidden width={width} height={rows * ROW_H} viewBox={`0 0 ${width} ${rows * ROW_H}`} className="pointer-events-none absolute left-0 top-0 overflow-visible">
+      {project.graphEdges.map((e, i) => (
+        <path key={i} d={edgePath(e, rows, LANE_W, ROW_H, LANE_PAD)} fill="none" stroke={colour(e.key)} strokeWidth={1.6} strokeLinecap="round" />
+      ))}
+      {project.graph.map((c, i) => (
+        <circle key={c.hash} cx={LANE_PAD + c.lane * LANE_W} cy={i * ROW_H + ROW_H / 2} r={c.lane ? 3.6 : 3.8} fill={c.key === 'main' || !c.key ? 'color-mix(in srgb, var(--color-content) 60%, transparent)' : colour(c.key)} className="stroke-background-base" strokeWidth={1.5} />
+      ))}
     </svg>
   );
 }
 
-function GraphLine({ c, wide }: { c: WorkCommit; wide: boolean }) {
-  const subject = c.merge ? c.subject.replace(/^Merge (branch )?'?([^'\s(:]+)'?.*$/, '$2') : c.subject;
-  return (
-    <div className="flex h-6 min-w-0 items-center gap-1.5 whitespace-nowrap font-sans text-[12px]" title={`${c.hash.slice(0, 7)} ${c.subject}${c.reviewer ? `, reviewed by ${c.reviewer}` : ''}`}>
-      <Lane merge={c.merge} />
-      {c.names.length ? <Who id={c.agentIds[0]} name={c.names[0]} /> : <span className="w-4 shrink-0" />}
-      <span className={`min-w-0 truncate ${c.merge ? 'font-mono text-[11.5px]' : ''} text-content/85`}>
-        {c.labels.map(l => (
-          <span key={l} className={`mr-1.5 rounded px-1.5 py-0.5 font-mono text-[10.5px] ${l === 'GitHub' ? 'bg-success/12 text-success' : 'bg-content/7 text-content/70'}`}>{l}</span>
-        ))}
-        {subject}
-        {wide && c.names.length ? <span className="font-sans text-content/40"> · {c.names.join(', ')}{c.reviewer ? `, reviewed by ${c.reviewer}` : ''}</span> : null}
+function PillIcon({ kind }: { kind: 'branch' | 'globe' | 'tag' }) {
+  const paths = {
+    branch: <><circle cx="4.5" cy="3.5" r="1.6" /><circle cx="4.5" cy="12.5" r="1.6" /><circle cx="11.5" cy="5" r="1.6" /><path d="M4.5 5.1v5.8M11.5 6.6c0 3-3 3-7 4.3" /></>,
+    globe: <><circle cx="8" cy="8" r="6" /><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12" /></>,
+    tag: <><path d="M2.5 2.5h5.5l6 6-5.5 5.5-6-6Z" /><circle cx="5.5" cy="5.5" r="1" /></>,
+  };
+  return <svg aria-hidden viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} className="size-2.5 shrink-0">{paths[kind]}</svg>;
+}
+
+/** Ref pills (ACH-D18): local solid with a branch icon (and a globe when its GitHub copy is here too), GitHub dashed with a globe, tags filled. */
+function Pill({ r }: { r: WorkRef }) {
+  const base = 'mr-1.5 inline-flex h-[17px] items-center gap-[3px] rounded-[5px] px-[5px] align-[1px] font-mono text-[10.5px] font-medium';
+  if (r.kind === 'local') {
+    return (
+      <span className={`${base} border border-content/20 text-content/85`} title={r.remote ? `${r.name}, also on GitHub as ${r.remote}` : r.name}>
+        <PillIcon kind="branch" />{r.name}
+        {r.remote ? <span className="ml-1 inline-flex text-content/55"><PillIcon kind="globe" /></span> : null}
       </span>
-      {wide ? <span className="ml-auto shrink-0 font-mono text-[11px] text-content/40">{c.hash.slice(0, 7)}</span> : null}
-      <span className={`${wide ? '' : 'ml-auto '}shrink-0 text-[11px] tabular-nums text-content/35`}>{day(c.at)}</span>
+    );
+  }
+  if (r.kind === 'remote') return <span className={`${base} border border-dashed border-content/30 text-content/70`} title={`${r.name}, on GitHub`}><PillIcon kind="globe" />{r.name}</span>;
+  return <span className={`${base} bg-content/7 text-content/70`}><PillIcon kind="tag" />{r.name}</span>;
+}
+
+/** In the panel, at most two pills and "+N"; the pane shows them all. */
+function Pills({ refs, wide }: { refs: WorkRef[]; wide: boolean }) {
+  const shown = wide || refs.length <= 2 ? refs : refs.slice(0, 2);
+  const more = refs.length - shown.length;
+  return (
+    <>
+      {shown.map(r => <Pill key={`${r.kind}:${r.name}`} r={r} />)}
+      {more ? <span className="mr-1.5 align-[1px] font-mono text-[10.5px] text-content/45" title={refs.slice(2).map(r => r.remote ?? r.name).join(', ')}>+{more}</span> : null}
+    </>
+  );
+}
+
+function GraphLine({ c, wide, gutter }: { c: WorkCommit; wide: boolean; gutter: number }) {
+  return (
+    <div
+      className="grid h-6 min-w-0 items-center gap-x-1.5 whitespace-nowrap font-sans text-[12px]"
+      style={{ gridTemplateColumns: `${gutter}px 16px minmax(0,1fr) auto${wide ? ' auto' : ''}` }}
+      title={`${c.hash.slice(0, 7)} ${c.subject}${c.reviewer ? `, reviewed by ${c.reviewer}` : ''}`}
+    >
+      <span />
+      {c.names.length ? <Who id={c.agentIds[0]} name={c.names[0]} /> : <span />}
+      <span className={`min-w-0 truncate ${c.head ? 'text-content' : 'text-content/85'}`}>
+        {c.head ? <span title="Checked out (HEAD)" className="mr-1 inline-flex align-[-2px] text-content"><svg aria-hidden viewBox="0 0 16 16" className="size-[11px]" fill="none" stroke="currentColor" strokeWidth={2.4}><path d="m3 8.5 3 3 7-7" /></svg></span> : null}
+        <Pills refs={c.refs} wide={wide} />
+        {c.subject}
+        {wide && c.names.length && c.lane === 0 ? <span className="text-content/40"> · {c.names.join(', ')}{c.reviewer ? `, reviewed by ${c.reviewer}` : ''}</span> : null}
+      </span>
+      {wide ? <span className="shrink-0 font-mono text-[11px] text-content/40">{c.hash.slice(0, 7)}</span> : null}
+      <span className="shrink-0 text-[11px] tabular-nums text-content/35">{day(c.at)}</span>
     </div>
   );
 }
@@ -236,11 +298,15 @@ function Lists({ projects, wide }: { projects: WorkProject[]; wide: boolean }) {
 }
 
 function Graph({ project, wide }: { project: WorkProject | undefined; wide: boolean }) {
-  if (!project) return null;
+  if (!project || !project.graph.length) return null;
+  const gutter = LANE_PAD * 2 + Math.max(0, project.graphLanes - 1) * LANE_W - 6;
   return (
     <>
-      <Label count={`last ${project.graph.length}${wide && project.notPushed ? ` · ${project.notPushed} not on GitHub` : ''}`}>{project.defaultBranch}, {project.name}</Label>
-      {project.graph.map(c => <GraphLine key={c.hash} c={c} wide={wide} />)}
+      <Label>Graph, {project.name}</Label>
+      <div className="relative">
+        <Lanes project={project} />
+        {project.graph.map(c => <GraphLine key={c.hash} c={c} wide={wide} gutter={gutter} />)}
+      </div>
     </>
   );
 }
