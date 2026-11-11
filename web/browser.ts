@@ -16,7 +16,7 @@ const native = (window as unknown as { agentscodeDesktop?: { browser?: DesktopBr
 export const HAS_NATIVE_BROWSER = Boolean(native);
 
 export async function browserCall<T = unknown>(op: string, args?: Record<string, unknown>): Promise<T> {
-  if (!native) throw new Error('The browser needs the AgentsCode desktop app.');
+  if (!native) throw new Error('The browser needs the Podcode desktop app.');
   const result = await native.call(op, args);
   if (result && typeof result === 'object' && 'error' in result && typeof (result as { error: unknown }).error === 'string') {
     throw new Error((result as { error: string }).error);

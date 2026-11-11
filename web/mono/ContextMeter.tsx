@@ -1,6 +1,6 @@
 /**
  * Vendored from MonoCode's src/features/sessions/ui/ContextMeter.tsx (MIT, see NOTICE). Changes:
- * the ring uses AgentsCode's warning and danger tokens, and the Compact now action is left out.
+ * the ring uses Podcode's warning and danger tokens, and the Compact now action is left out.
  */
 import { useRef, useState } from 'react';
 import type { ContextUsage } from '../../shared/types.ts';

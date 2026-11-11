@@ -1,16 +1,16 @@
 name: release
 
-# Release pipeline for the AgentsCode desktop app. Pushing a tag v<version> (scripts/release.mjs
+# Release pipeline for the Podcode desktop app. Pushing a tag v<version> (scripts/release.mjs
 # tag does this) checks the source, builds the app on each platform's own runner, and publishes
 # one GitHub Release. Re-run for an existing tag with workflow_dispatch and the tag name: the
 # publish step replaces the release's assets.
 #
 # Asset names carry no version, so https://github.com/akashsokik/agentscode/releases/latest/download/<name>
 # always points at the newest release. The site's download buttons depend on these names:
-#   AgentsCode-mac-arm64.dmg / .zip        macos-15        (arm64)
-#   AgentsCode-mac-x64.dmg / .zip          macos-15-intel  (x64)
-#   AgentsCode-win-x64.exe                 windows-latest  (NSIS installer)
-#   AgentsCode-linux-x86_64.AppImage       ubuntu-latest
+#   Podcode-mac-arm64.dmg / .zip        macos-15        (arm64)
+#   Podcode-mac-x64.dmg / .zip          macos-15-intel  (x64)
+#   Podcode-win-x64.exe                 windows-latest  (NSIS installer)
+#   Podcode-linux-x86_64.AppImage       ubuntu-latest
 # plus the update feeds the installed apps read (latest-mac.yml, latest.yml, latest-linux.yml),
 # the .blockmap files for differential updates, and SHA256SUMS.
 #
@@ -102,7 +102,7 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "releasing AgentsCode $version from tag $tag"
+          echo "releasing Podcode $version from tag $tag"
 
   check:
     name: typecheck and test
@@ -215,7 +215,7 @@ jobs:
                 # Reuse a saved submission only when it is this tag, arch and commit.
                 if node scripts/release/notarize.mjs reusable notary "$TAG" "$ARCH" "$commit"; then
                   mkdir -p "release/mac-$ARCH"
-                  ditto -x -k notary/AgentsCode.zip "release/mac-$ARCH"
+                  ditto -x -k notary/Podcode.zip "release/mac-$ARCH"
                 else
                   rm -rf notary
                   echo "signing with the Developer ID certificate; notarizing without holding the runner"
@@ -223,8 +223,8 @@ jobs:
                   # into the app before it is signed. This zip is of the un-notarized app, so it goes;
                   # the dmg and zip are built again from the stapled app after notarization.
                   npx electron-builder --mac zip "--$ARCH" --publish never -c.mac.notarize=false
-                  rm -f release/AgentsCode-mac-*.zip release/AgentsCode-mac-*.zip.blockmap release/latest-mac.yml
-                  app="$(ls -d release/mac*/AgentsCode.app | head -n 1)"
+                  rm -f release/Podcode-mac-*.zip release/Podcode-mac-*.zip.blockmap release/latest-mac.yml
+                  app="$(ls -d release/mac*/Podcode.app | head -n 1)"
                   node scripts/release/notarize.mjs submit "$app" notary "$TAG" "$ARCH" "$commit"
                 fi
                 ls -la release
@@ -263,7 +263,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          app="$(ls -d release/mac*/AgentsCode.app | head -n 1)"
+          app="$(ls -d release/mac*/Podcode.app | head -n 1)"
           node scripts/release/notarize.mjs wait "$app" notary 40
 
       - name: package dmg and zip (notarized app)
@@ -272,15 +272,15 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          app="$(ls -d release/mac*/AgentsCode.app | head -n 1)"
+          app="$(ls -d release/mac*/Podcode.app | head -n 1)"
           # --prepackaged leaves the stapled app as it is (no re-signing, no notarization).
           npx electron-builder --mac dmg zip "--$ARCH" --publish never --prepackaged "$app" -c.mac.notarize=false
           ls -la release
           # The zip is what auto-update downloads: its app has to carry the stapled ticket.
-          zip="$(ls release/AgentsCode-mac-*.zip | head -n 1)"
+          zip="$(ls release/Podcode-mac-*.zip | head -n 1)"
           check="$(mktemp -d)"
           ditto -x -k "$zip" "$check"
-          xcrun stapler validate "$check/AgentsCode.app"
+          xcrun stapler validate "$check/Podcode.app"
           rm -rf "$check"
 
       - name: verify package
@@ -291,7 +291,7 @@ jobs:
         with:
           name: ${{ matrix.name }}
           path: |
-            release/AgentsCode-*
+            release/Podcode-*
             release/latest*.yml
           if-no-files-found: error
           retention-days: 7
@@ -322,11 +322,11 @@ jobs:
           node scripts/release/merge-mac-yml.mjs artifacts/mac-arm64/latest-mac.yml artifacts/mac-x64/latest-mac.yml > upload/latest-mac.yml
           cp artifacts/win-x64/latest.yml upload/latest.yml
           cp artifacts/linux-x64/latest-linux.yml upload/latest-linux.yml
-          cp artifacts/*/AgentsCode-* upload/
+          cp artifacts/*/Podcode-* upload/
           cd upload
-          LC_ALL=C sha256sum AgentsCode-* | LC_ALL=C sort -k 2 > SHA256SUMS
-          for f in AgentsCode-mac-arm64.dmg AgentsCode-mac-arm64.zip AgentsCode-mac-x64.dmg AgentsCode-mac-x64.zip \
-                   AgentsCode-win-x64.exe AgentsCode-linux-x86_64.AppImage; do
+          LC_ALL=C sha256sum Podcode-* | LC_ALL=C sort -k 2 > SHA256SUMS
+          for f in Podcode-mac-arm64.dmg Podcode-mac-arm64.zip Podcode-mac-x64.dmg Podcode-mac-x64.zip \
+                   Podcode-win-x64.exe Podcode-linux-x86_64.AppImage; do
             [[ -f "$f" ]] || { echo "missing $f" >&2; exit 1; }
           done
           cat latest-mac.yml
@@ -340,7 +340,7 @@ jobs:
         run: |
           set -euo pipefail
           notes="docs/releases/${VERSION}.md"
-          args=(--title "AgentsCode v${VERSION}")
+          args=(--title "Podcode v${VERSION}")
           if [[ -f "$notes" ]]; then
             args+=(--notes-file "$notes")
           else

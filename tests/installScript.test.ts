@@ -11,39 +11,42 @@ const MAC_ONLY = { skip: process.platform !== 'darwin' ? 'install.sh is macOS-on
 
 /**
  * install.sh up to its download, with lsappinfo, pgrep and curl faked on PATH. `runningFrom` is
- * where LaunchServices says AgentsCode runs from (nothing when it is not running). pgrep always
+ * where LaunchServices says Podcode runs from (nothing when it is not running). pgrep always
  * matches, as it does when an agent CLI or comms MCP server outlives the app. curl records that it
  * was called and fails, so a run that gets past the running-app check ends at "could not download".
  */
-function run(runningFrom: (dir: string) => string | null, installDir = (dir: string) => dir) {
+function run(runningFrom: (dir: string) => string | null, installDir = (dir: string) => dir, sums?: string) {
   const dir = tempDir('install');
   const bin = path.join(dir, 'bin');
   const target = path.join(dir, 'Applications');
   fs.mkdirSync(bin);
   const downloads = path.join(dir, 'downloads');
   const bundle = runningFrom(target);
+  // With `sums`, curl serves it as SHA256SUMS (to the path after -o) and fails everything else.
+  const serveSums = sums === undefined ? '' : `case "$*" in *SHA256SUMS*) while [ "$1" != "-o" ]; do shift; done; printf '%s\\n' '${sums}' > "$2"; exit 0;; esac; `;
   const fakes: Record<string, string> = {
     // Like the real one: exit 0 either way, and print nothing when the app is not running.
     lsappinfo: bundle ? `echo '"LSBundlePath"="${bundle}"'` : 'exit 0',
     pgrep: 'echo 95008; exit 0',
-    curl: `echo "$*" >> "${downloads}"; exit 22`,
+    curl: `echo "$*" >> "${downloads}"; ${serveSums}exit 22`,
   };
   for (const [name, body] of Object.entries(fakes)) fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, AGENTSCODE_INSTALL_DIR: installDir(target), AGENTSCODE_NO_OPEN: '1', TMPDIR: dir };
-  return new Promise<{ code: number; out: string; downloaded: boolean; app: string }>(resolve => {
+  return new Promise<{ code: number; out: string; downloaded: boolean; requests: string; app: string }>(resolve => {
     execFile('/bin/bash', [SCRIPT], { env, timeout: 30_000 }, (err, stdout, stderr) => resolve({
       code: err ? Number((err as { code?: number }).code ?? 1) : 0,
       out: `${stdout}${stderr}`,
       downloaded: fs.existsSync(downloads),
-      app: path.join(target, 'AgentsCode.app'),
+      requests: fs.existsSync(downloads) ? fs.readFileSync(downloads, 'utf8') : '',
+      app: path.join(target, 'Podcode.app'),
     }));
   });
 }
 
 test('the app running from the install folder stops the install before any download', MAC_ONLY, async () => {
-  const r = await run(dir => path.join(dir, 'AgentsCode.app'));
+  const r = await run(dir => path.join(dir, 'Podcode.app'));
   assert.equal(r.code, 1);
-  assert.match(r.out, new RegExp(`AgentsCode is running from ${r.app.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\. Quit it`));
+  assert.match(r.out, new RegExp(`Podcode is running from ${r.app.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\. Quit it`));
   assert.equal(r.downloaded, false);
 });
 
@@ -55,15 +58,35 @@ test('an agent process that outlived the app does not count as the app running',
 });
 
 test('a copy running from another folder does not stop the install', MAC_ONLY, async () => {
-  const r = await run(() => '/tmp/AgentsCode.app.prev');
+  const r = await run(() => '/tmp/Podcode.app.prev');
   assert.doesNotMatch(r.out, /is running from/);
   assert.equal(r.downloaded, true, r.out);
 });
 
 test('an install folder given with a trailing slash still finds the running app', MAC_ONLY, async () => {
-  const r = await run(dir => path.join(dir, 'AgentsCode.app'), dir => `${dir}/`);
+  const r = await run(dir => path.join(dir, 'Podcode.app'), dir => `${dir}/`);
   assert.equal(r.code, 1);
-  assert.match(r.out, /is running from .*\/Applications\/AgentsCode\.app\. Quit it/);
-  assert.doesNotMatch(r.out, /\/\/AgentsCode/);
+  assert.match(r.out, /is running from .*\/Applications\/Podcode\.app\. Quit it/);
+  assert.doesNotMatch(r.out, /\/\/Podcode/);
   assert.equal(r.downloaded, false);
+});
+
+test('the app running under its old name, AgentsCode.app, also stops the install', MAC_ONLY, async () => {
+  const r = await run(dir => path.join(dir, 'AgentsCode.app'));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Podcode is running from .*\/Applications\/AgentsCode\.app\. Quit it/);
+  assert.equal(r.downloaded, false);
+});
+
+test('a release with Podcode assets is downloaded under the new name', MAC_ONLY, async () => {
+  const r = await run(() => null, undefined, 'aaaa  Podcode-mac-arm64.zip\nbbbb  Podcode-mac-x64.zip');
+  assert.match(r.requests, /\/Podcode-mac-(arm64|x64)\.zip/, r.out);
+  assert.doesNotMatch(r.requests, /AgentsCode-mac-/);
+});
+
+test('a release from before the rename falls back to the AgentsCode asset', MAC_ONLY, async () => {
+  const r = await run(() => null, undefined, 'aaaa  AgentsCode-mac-arm64.zip\nbbbb  AgentsCode-mac-x64.zip');
+  assert.match(r.requests, /\/AgentsCode-mac-(arm64|x64)\.zip/, r.out);
+  assert.doesNotMatch(r.requests, /Podcode-mac-/);
+  assert.match(r.out, /Downloading AgentsCode-mac-/);
 });

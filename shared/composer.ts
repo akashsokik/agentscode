@@ -8,7 +8,7 @@ export interface ComposerCommand {
   /** What follows the slash: "clear", "review", "vercel:deploy". */
   name: string;
   description: string;
-  /** Who defines it: AgentsCode itself, the project, the user, or an installed plugin. */
+  /** Who defines it: Podcode itself, the project, the user, or an installed plugin. */
   scope: 'agentscode' | 'project' | 'user' | 'plugin';
   /** Where it came from: "agentscode", "claude", "codex", "agents", or the plugin's name. */
   source: string;

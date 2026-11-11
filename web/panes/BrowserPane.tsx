@@ -167,8 +167,8 @@ function FallbackBody({ url, reloadKey }: { url: string; reloadKey: number }) {
   if (!url) return <Empty icon={Globe} title="New browser tab">Type a localhost address above to preview it here.</Empty>;
   if (!isLocalUrl(url)) {
     return (
-      <Empty icon={Globe} title="Opens outside AgentsCode" action={<TextButton onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>Open in your browser</TextButton>}>
-        Only localhost pages show here when AgentsCode runs in a browser. The desktop app opens any page.
+      <Empty icon={Globe} title="Opens outside Podcode" action={<TextButton onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>Open in your browser</TextButton>}>
+        Only localhost pages show here when Podcode runs in a browser. The desktop app opens any page.
       </Empty>
     );
   }

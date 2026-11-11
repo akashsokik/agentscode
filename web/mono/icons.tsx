@@ -260,7 +260,7 @@ export const SplitColumns = wrap(Layout2ColumnIcon, "SplitColumns");
 export const SplitRows = wrap(Layout2RowIcon, "SplitRows");
 export const Route = wrap(Route01Icon, "Route");
 export const Workflow = wrap(Flowchart01Icon, "Workflow");
-// Terminal panel (AgentsCode): paste, clear, unzoom.
+// Terminal panel (Podcode): paste, clear, unzoom.
 export const ClipboardPaste = wrap(ClipboardPasteIcon, "ClipboardPaste");
 export const Eraser = wrap(EraserIcon, "Eraser");
 export const Minimize2 = wrap(ArrowShrink02Icon, "Minimize2");

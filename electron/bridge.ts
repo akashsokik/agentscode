@@ -67,9 +67,9 @@ export class BrowserBridge {
     if (message.type !== 'browser:request' || typeof message.id !== 'string' || typeof message.agentId !== 'string' || typeof message.op !== 'string') return;
     const { id, agentId, op } = message;
     const args = message.args && typeof message.args === 'object' ? message.args : {};
-    // A capture of AgentsCode's own window rides the same bridge (electron/appShot.ts).
+    // A capture of Podcode's own window rides the same bridge (electron/appShot.ts).
     const work = op === 'app_screenshot'
-      ? (this.appShot ? this.appShot(args) : Promise.reject(new BrowserError('Screenshots of the app need the AgentsCode desktop app.')))
+      ? (this.appShot ? this.appShot(args) : Promise.reject(new BrowserError('Screenshots of the app need the Podcode desktop app.')))
       : this.host.agent(agentId, op, args);
     work.then(
       result => reply({ type: 'browser:response', id, ok: true, result }),

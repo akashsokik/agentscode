@@ -1,10 +1,13 @@
 <div align="center">
 
-<img src="build/icon.png" width="104" alt="AgentsCode icon" />
+<img src="build/icon.png" width="104" alt="Podcode icon" />
 
-# AgentsCode
+# Podcode
 
-**An IDE where Claude Code, Codex and OrcaCode agents work side by side and talk to each other.**
+**The desktop app where your coding agents message each other.**<br />
+Claude Code, Codex and OrcaCode agents side by side, asking each other for reviews, delegating and reporting back.
+
+By [Orca](https://orcapods.ai) · [podcode.orcapods.ai](https://podcode.orcapods.ai)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3b82f6)](LICENSE)
 [![Desktop app](https://img.shields.io/badge/desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-111111)](#download)
@@ -23,17 +26,21 @@
 
 <br />
 
-<img src="docs/screenshots/hero.webp" alt="AgentsCode: the SuperAgent's conversation with its goals in the right panel, and the floating quick window in front with its @ picker open" width="100%" />
+<img src="docs/screenshots/hero.webp" alt="Podcode: the SuperAgent's conversation with its goals in the right panel, and the floating quick window in front with its @ picker open" width="100%" />
 
 </div>
 
 <br />
 
-Each agent in AgentsCode is a real **Claude Code**, **Codex** or **OrcaCode** session, working in one of your local
-projects. You give agents work in their own tabs. Agents hand each other requests, reviews and
-validations through built-in messaging tools, and every exchange is visible in **Comms**.
-**Channels** put you in a room with agents from several projects at once, and the **SuperAgent**
-runs the team across every project for you.
+A pod is a group of orcas that hunt together and talk the whole time. Podcode does that for coding
+agents. Each agent is a real **Claude Code**, **Codex** or **OrcaCode** session, working in one of
+your local projects. Agents hand each other requests, reviews and validations through built-in
+messaging tools: one asks another to review its change, delegates a task with acceptance criteria,
+and gets a report back with evidence. Every exchange is visible in **Comms**. **Channels** put you
+in a room with agents from several projects at once, and the **SuperAgent** runs the team across
+every project for you.
+
+Podcode was called AgentsCode until 0.3.0. Your agents, projects and settings carry over.
 
 ## Highlights
 
@@ -102,17 +109,17 @@ curl -fsSL https://raw.githubusercontent.com/akashsokik/agentscode/main/install.
 ```
 
 It picks the Apple silicon or Intel build, checks it against the release's `SHA256SUMS`, puts it in
-`/Applications` and opens it. Run it again to update (quit AgentsCode first).
+`/Applications` and opens it. Run it again to update (quit Podcode first).
 
-Or get the app for your platform from [orcapods.ai/agentscode](https://orcapods.ai/agentscode) or
+Or get the app for your platform from [podcode.orcapods.ai](https://podcode.orcapods.ai) or
 the [latest release](https://github.com/akashsokik/agentscode/releases/latest):
 
 | Platform | File |
 | :-- | :-- |
-| macOS, Apple silicon | [AgentsCode-mac-arm64.dmg](https://github.com/akashsokik/agentscode/releases/latest/download/AgentsCode-mac-arm64.dmg) |
-| macOS, Intel | [AgentsCode-mac-x64.dmg](https://github.com/akashsokik/agentscode/releases/latest/download/AgentsCode-mac-x64.dmg) |
-| Windows x64 | [AgentsCode-win-x64.exe](https://github.com/akashsokik/agentscode/releases/latest/download/AgentsCode-win-x64.exe) |
-| Linux x64 | [AgentsCode-linux-x86_64.AppImage](https://github.com/akashsokik/agentscode/releases/latest/download/AgentsCode-linux-x86_64.AppImage) |
+| macOS, Apple silicon | [Podcode-mac-arm64.dmg](https://github.com/akashsokik/agentscode/releases/latest/download/Podcode-mac-arm64.dmg) |
+| macOS, Intel | [Podcode-mac-x64.dmg](https://github.com/akashsokik/agentscode/releases/latest/download/Podcode-mac-x64.dmg) |
+| Windows x64 | [Podcode-win-x64.exe](https://github.com/akashsokik/agentscode/releases/latest/download/Podcode-win-x64.exe) |
+| Linux x64 | [Podcode-linux-x86_64.AppImage](https://github.com/akashsokik/agentscode/releases/latest/download/Podcode-linux-x86_64.AppImage) |
 
 #### Updating
 
@@ -121,14 +128,14 @@ the new version in the sidebar (or **Check for Updates** in the app menu on macO
 on Windows and Linux) downloads it, stops the agents and restarts into the new version. A Mac build
 that is not signed with a Developer ID (versions up to 0.2.2, or a build from a fork) cannot replace
 itself: it tells you about the new version and gives you the install command to run in Terminal
-(quit AgentsCode first). **Settings > About** (or **About AgentsCode**, in the app menu on macOS and
+(quit Podcode first). **Settings > About** (or **About Podcode**, in the app menu on macOS and
 the Help menu on Windows and Linux) shows the version, its build, the update status with
 **Check for updates**, the install command on an unsigned Mac build, and a link to the release
 notes.
 
 - The app bundles Electron, so it needs no Node install. It still needs the `claude`, `codex` and
   `orcacode` CLIs you use, which it finds through your login shell's PATH.
-- It starts the server in the background and opens a window on it. If an AgentsCode server already
+- It starts the server in the background and opens a window on it. If a Podcode server already
   answers on port 4320 (for example `npm run dev`), the window opens on that one instead, so two
   servers never share `~/.agentscode`.
 - Quitting the app stops its agents. Closing the window keeps them working.
@@ -138,9 +145,11 @@ notes.
   verify AgentsCode"; System Settings > Privacy & Security > Open Anyway), and they can't install a
   signed update themselves, so update one of those once by downloading the DMG again or running the
   install command above.
+  When an AgentsCode install updates itself to Podcode, the app in Applications is renamed to
+  `Podcode.app`, but it doesn't reopen on its own that one time: open Podcode from Applications.
 - **Windows:** the installer is not code-signed yet, so SmartScreen may ask you to confirm
   (**More info > Run anyway**).
-- **Linux:** make the AppImage executable (`chmod +x AgentsCode-linux-x86_64.AppImage`) and run it.
+- **Linux:** make the AppImage executable (`chmod +x Podcode-linux-x86_64.AppImage`) and run it.
 
 ### Run from source
 
@@ -155,14 +164,14 @@ For development with hot reload:
 npm run dev        # API on :4320, Vite on http://localhost:5174
 ```
 
-AgentsCode uses port 4320 and keeps its data in `~/.agentscode`, so it can run next to Agent Office.
+Podcode uses port 4320 and keeps its data in `~/.agentscode`, so it can run next to Agent Office.
 Override with `PORT=...` and `AGENTSCODE_HOME=...`.
 
 To build the desktop app locally:
 
 ```bash
 npm run desktop    # build and open it straight from the source tree
-npm run dist:mac   # release/AgentsCode-mac-<arch>.dmg and .zip (also dist:win, dist:linux on those platforms)
+npm run dist:mac   # release/Podcode-mac-<arch>.dmg and .zip (also dist:win, dist:linux on those platforms)
 ```
 
 ## Using it
@@ -267,7 +276,7 @@ WebAssembly. It is not the Ghostty app, so `~/.config/ghostty` does not apply.
 - **Shells outlive the page.** They run in the server. Reloading the page, or opening a second
   window, reattaches to them with their recent output (about 1 MB each). They end when you close
   their tab, type `exit` (the panel hides with the project's last one), remove the project or quit
-  AgentsCode.
+  Podcode.
 
 <details>
 <summary><b>Splits and keys, as in Ghostty</b></summary>
@@ -319,13 +328,13 @@ agent it delegates to. Open it from **SuperAgent** in the sidebar.
 - **Eyes.** The SuperAgent, reviewers and testers get read-only tools: GitHub and CI through the
   `gh` CLI (open PRs, a PR's checks and reviews, CI runs and a run's failed log, open issues),
   `run_check` for read-only git commands in a project (and its test, typecheck and lint scripts, only
-  for reviewers and testers at Full access), and `app_screenshot`, a capture of the AgentsCode window. What GitHub
+  for reviewers and testers at Full access), and `app_screenshot`, a capture of the Podcode window. What GitHub
   returns is treated as data, never instructions.
 - **Quick window.** **Shift+Cmd+Space** (Ctrl+Shift+Space on Windows and Linux) opens a floating
   composer over any app: talk to the SuperAgent or any agent, or start a new agent, with your team at
   a glance and the SuperAgent's questions answerable inline. Enter sends; Cmd+Enter sends and opens
   the conversation. The desktop app registers the shortcut system-wide (if another app already holds
-  it, it works inside AgentsCode only) and, while there is a SuperAgent, adds a menu bar item
+  it, it works inside Podcode only) and, while there is a SuperAgent, adds a menu bar item
   (a notification-area icon on Windows and Linux).
 
 ## Settings
@@ -370,8 +379,8 @@ focused terminal go to the shell, except Ctrl+Tab and Ctrl+\`.
 
 ```mermaid
 flowchart LR
-    you(["You"]) -->|"tasks, approvals, @mentions"| ui["AgentsCode UI<br/>Electron window or browser"]
-    ui <-->|"REST + WebSocket<br/>127.0.0.1:4320"| server["AgentsCode server"]
+    you(["You"]) -->|"tasks, approvals, @mentions"| ui["Podcode UI<br/>Electron window or browser"]
+    ui <-->|"REST + WebSocket<br/>127.0.0.1:4320"| server["Podcode server"]
     server -->|"one session per agent"| claude["Claude Code agents<br/>Claude Agent SDK"]
     server -->|"one process per turn"| codex["Codex agents<br/>codex exec --json"]
     claude <-->|"agentscode MCP tools"| mail[("Mailbox<br/>and channels")]
@@ -449,7 +458,7 @@ shared, whether each task starts with a team snapshot, and the message budget.
 Claude agents raise permission requests and plans inline in their transcript, with Allow and Deny
 (Deny takes an optional note). Questions open above the composer. Codex runs non-interactively
 (`codex exec --json`, resumed per thread), so its sandbox is the safety net.
-OrcaCode has no OS sandbox: its modes are tool gates. Its approvals come to AgentsCode over stdin
+OrcaCode has no OS sandbox: its modes are tool gates. Its approvals come to Podcode over stdin
 (`--approvals stdio`) and show inline like Claude's.
 
 ### Engines
@@ -462,7 +471,7 @@ OrcaCode has no OS sandbox: its modes are tool gates. Its approvals come to Agen
 - **Codex** agents run one `codex exec` process per turn and resume the same thread for follow-ups.
 - **OrcaCode** agents run one headless `orcacode --json` process per turn and pass `--resume` with
   the session id from the turn's metadata. An OrcaCode agent with no project (All projects) passes
-  `--add-dir` for every project you added, which needs `orcacode` 0.12.0 or newer; AgentsCode checks
+  `--add-dir` for every project you added, which needs `orcacode` 0.12.0 or newer; Podcode checks
   the installed `orcacode` for it. The prompt and the per-agent `agentscode` MCP server go in
   a private temporary folder (`--prompt-file`, `--mcp-config`), so your OrcaCode config is never edited.
 - Model lists come from the CLIs themselves, so no tokens are spent. Change model, effort or autonomy
@@ -489,11 +498,11 @@ npm run build      # the web app
 npm run build:desktop
 ```
 
-To restart the installed Mac app onto a fresh local build (`release/mac-arm64/AgentsCode.app`, from
+To restart the installed Mac app onto a fresh local build (`release/mac-arm64/Podcode.app`, from
 `npm run build:desktop` and `electron-builder --mac dir`):
 
 ```bash
-scripts/restart-desktop.sh              # quit, keep the old app in /tmp/AgentsCode.app.prev, install, reopen
+scripts/restart-desktop.sh              # quit, keep the old app in /tmp/Podcode.app.prev, install, reopen
 scripts/restart-desktop.sh --when-idle  # wait until no agent is mid-turn and no build is running
 ```
 
@@ -564,7 +573,7 @@ signed.
 ## Acknowledgements
 
 - **[MonoCode](https://github.com/hardbeat920/monocode)** by Nick (MIT) is where the interface comes
-  from. MonoCode is a Tauri app whose frontend calls a Rust backend directly, so AgentsCode vendors
+  from. MonoCode is a Tauri app whose frontend calls a Rust backend directly, so Podcode vendors
   its portable UI primitives into `web/mono/` and rebuilds the rest from MonoCode's own markup: the
   theme tokens, transcript, composer, inset layout and title-bar tabs, and the Inbox list and
   activity timeline that the Comms page follows. Thank you for a beautifully considered design.
@@ -579,7 +588,7 @@ The file-by-file list of what was vendored or adapted, with each upstream licens
 [NOTICE](NOTICE).
 
 Claude and Codex names and logos are trademarks of their respective owners and are used only to
-identify those products. AgentsCode is not affiliated with, endorsed by, or sponsored by Anthropic,
+identify those products. Podcode is not affiliated with, endorsed by, or sponsored by Anthropic,
 OpenAI, the Ghostty project or the MonoCode authors.
 
 ## License

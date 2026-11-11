@@ -43,7 +43,7 @@ function useCached<T>(cache: Map<string, Cached<T>>, key: string, enabled: boole
 const loadCommands = new Map<string, () => Promise<ComposerCommand[]>>();
 const loadFiles = new Map<string, () => Promise<ProjectFileList>>();
 
-/** The agent's skills and commands (not AgentsCode's own), while `enabled`. */
+/** The agent's skills and commands (not Podcode's own), while `enabled`. */
 export function useAgentCommands(agentId: string, enabled: boolean) {
   let load = loadCommands.get(agentId);
   if (!load) loadCommands.set(agentId, (load = () => api.commands(agentId).catch(() => [])));

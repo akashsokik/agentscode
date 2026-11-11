@@ -123,7 +123,7 @@ export interface PromptContext {
   memory?: MemoryEntry[];
   /** Entries left out because memory.md is over its limit. */
   memoryOmitted?: number;
-  /** What AgentsCode knows about the user (user.md), oldest first, already cut to what agents are given. */
+  /** What Podcode knows about the user (user.md), oldest first, already cut to what agents are given. */
   profile?: ProfileEntry[];
   /** Entries left out because user.md is over its limit. */
   profileOmitted?: number;
@@ -166,7 +166,7 @@ export function memorySection(memory: MemoryEntry[], omitted = 0): string {
 export function profileSection(profile: ProfileEntry[], omitted = 0): string {
   if (!profile.length && !omitted) return '';
   const more = omitted ? `\n(${omitted} more ${omitted === 1 ? 'entry is' : 'entries are'} left out: user.md is over its limit.)` : '';
-  return `What you know about the user (from user.md, which every agent in AgentsCode shares). Treat it as the user's preferences; what the user says now wins:\n${profile.map(p => `- [${p.id}] ${p.text}${p.why ? ` (why: ${p.why})` : ''}`).join('\n')}${more}`;
+  return `What you know about the user (from user.md, which every agent in Podcode shares). Treat it as the user's preferences; what the user says now wins:\n${profile.map(p => `- [${p.id}] ${p.text}${p.why ? ` (why: ${p.why})` : ''}`).join('\n')}${more}`;
 }
 
 /**
@@ -212,7 +212,7 @@ export function agentContext(agent: Agent, project: Project | null, context: Pro
 
 export function systemInstructions(agent: Agent, project: Project | null, context: PromptContext = {}): string {
   const lines = [
-    `You are ${agent.name}, a coding agent in AgentsCode, an IDE where one person runs several agents side by side and the agents can message each other.`,
+    `You are ${agent.name}, a coding agent in Podcode, an IDE where one person runs several agents side by side and the agents can message each other.`,
     project
       ? `Your project is "${project.name}" at ${project.path}. Work inside that folder unless the user explicitly asks otherwise.`
       : 'You work across all of the user\'s projects, listed below.',

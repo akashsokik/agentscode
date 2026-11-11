@@ -388,7 +388,7 @@ export function App() {
   // The browser tab shows how many agents are waiting on the user.
   const waiting = snapshot?.agents.filter(a => a.status === 'waiting').length ?? 0;
   useEffect(() => {
-    document.title = waiting ? `(${waiting}) AgentsCode` : 'AgentsCode';
+    document.title = waiting ? `(${waiting}) Podcode` : 'Podcode';
   }, [waiting]);
 
   // An agent's settings link to Settings at a group (the SuperAgent's limits); see openSettingsAt.
@@ -398,7 +398,7 @@ export function App() {
     return () => window.removeEventListener('agentscode:open-settings', onOpen);
   }, []);
 
-  // The app menu's About AgentsCode (electron/main.ts) opens Settings at About.
+  // The app menu's About Podcode (electron/main.ts) opens Settings at About.
   useEffect(() => window.agentscodeDesktop?.updates?.onShowAbout?.(() => setDialog({ kind: 'settings', group: 'about' })), []);
 
   const actions: SidebarActions = {
@@ -421,7 +421,7 @@ export function App() {
   if (!snapshot) {
     return (
       <div className="body-glass grid h-full place-items-center font-sans text-sm text-content/50">
-        <Shimmer duration={1.6}>{connection === 'closed' ? 'Waiting for the AgentsCode server on this machine…' : 'Connecting…'}</Shimmer>
+        <Shimmer duration={1.6}>{connection === 'closed' ? 'Waiting for the Podcode server on this machine…' : 'Connecting…'}</Shimmer>
       </div>
     );
   }

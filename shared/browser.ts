@@ -41,7 +41,7 @@ export function isLocalUrl(url: string): boolean {
 
 /**
  * Why the browser will not open a URL, or null when it may. Only http and https, and never
- * AgentsCode itself: a page there could act as the user (`appPort` is the server's port).
+ * Podcode itself: a page there could act as the user (`appPort` is the server's port).
  */
 export function blockedReason(url: string, appPort: number): string | null {
   let parsed: URL;
@@ -52,7 +52,7 @@ export function blockedReason(url: string, appPort: number): string | null {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'The browser only opens http and https addresses.';
   const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
-  if (isLocalUrl(url) && port === appPort) return 'The browser does not open AgentsCode itself.';
+  if (isLocalUrl(url) && port === appPort) return 'The browser does not open Podcode itself.';
   return null;
 }
 

@@ -27,13 +27,13 @@ export function isLocalHost(host: string | undefined): boolean {
   return name === 'localhost' || name === '127.0.0.1' || name === '::1';
 }
 
-/** Ports whose pages are AgentsCode's own: this server, and the Vite dev page outside the desktop app. */
+/** Ports whose pages are Podcode's own: this server, and the Vite dev page outside the desktop app. */
 const APP_PORTS: readonly number[] = IN_DESKTOP_APP ? [PORT] : [PORT, DEV_WEB_PORT];
 
 /**
- * Whether a request's Origin may write or open a socket: AgentsCode's own page (this server's port on
+ * Whether a request's Origin may write or open a socket: Podcode's own page (this server's port on
  * a loopback name) or, outside the desktop app, the Vite dev page. Any other local page, such as a
- * dev server open in the user's browser or in AgentsCode's own browser tab, cannot drive the API.
+ * dev server open in the user's browser or in Podcode's own browser tab, cannot drive the API.
  */
 export function isLocalOrigin(origin: string | undefined, ports: readonly number[] = APP_PORTS): boolean {
   if (!origin) return true; // same-origin navigations and non-browser clients
@@ -48,7 +48,7 @@ export function isLocalOrigin(origin: string | undefined, ports: readonly number
 
 function localOnly(req: Request, res: Response, next: NextFunction): void {
   if (!isLocalHost(req.headers.host)) {
-    res.status(403).json({ error: 'AgentsCode only answers on localhost.' });
+    res.status(403).json({ error: 'Podcode only answers on localhost.' });
     return;
   }
   if (req.method !== 'GET' && req.method !== 'HEAD' && !isLocalOrigin(req.headers.origin)) {
@@ -432,7 +432,7 @@ export function createServer(manager: AgentManager, hub: Hub, options: { distDir
     });
   } else {
     app.get('/', (_req, res) => {
-      res.type('text').send('AgentsCode API is running. Run `npm run dev` for the Vite dev server, or `npm start` to build and serve the app here.');
+      res.type('text').send('Podcode API is running. Run `npm run dev` for the Vite dev server, or `npm start` to build and serve the app here.');
     });
   }
 

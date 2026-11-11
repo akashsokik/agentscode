@@ -591,12 +591,12 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
   const channelsWaiting = (agents ?? []).some(a => a.currentTask?.channelId && a.status === 'waiting');
   const channelsWorking = (agents ?? []).some(a => a.currentTask?.channelId && a.status === 'working');
   return (
-    <nav aria-label="AgentsCode" style={{ width: column.width }} className="sidebar-glass relative flex shrink-0 flex-col border-r border-stroke font-sans">
+    <nav aria-label="Podcode" style={{ width: column.width }} className="sidebar-glass relative flex shrink-0 flex-col border-r border-stroke font-sans">
       {/* In the desktop app the traffic lights take the brand's place, as in MonoCode. */}
       <div data-window-drag className="flex h-10 shrink-0 items-center gap-2 pl-3.5 pr-1.5 desktop:pl-[76px]">
         <span className="flex min-w-0 flex-1 items-center gap-2 desktop:invisible">
           <BrandMark />
-          <span className="min-w-0 truncate text-[13px] font-semibold text-content/85">AgentsCode</span>
+          <span className="min-w-0 truncate text-[13px] font-semibold text-content/85">Podcode</span>
         </span>
       </div>
       {/* New agent is the one raised control; Search sits beside it as an icon. */}
@@ -934,7 +934,7 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
     )),
   ].filter(group => group.length);
   return (
-    <nav aria-label="AgentsCode" className="sidebar-glass relative flex w-12 shrink-0 flex-col items-center font-sans">
+    <nav aria-label="Podcode" className="sidebar-glass relative flex w-12 shrink-0 flex-col items-center font-sans">
       {titleBarAbove ? null : <div data-window-drag className="h-10 w-full shrink-0 border-b border-stroke" />}
       {/* The edge starts under the header, so the header row reads as one band with the workspace's. */}
       <span aria-hidden className={cx('pointer-events-none absolute bottom-0 right-0 w-px bg-stroke', titleBarAbove ? 'top-0' : 'top-10')} />

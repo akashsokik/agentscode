@@ -1,7 +1,7 @@
 import { action } from '@openuidev/lang-core';
 import { z } from 'zod';
 
-// AgentsCode's OpenUI component library, as schemas: the props each component takes and what it is
+// Podcode's OpenUI component library, as schemas: the props each component takes and what it is
 // for. The server builds the agents' guide from these (server/openuiGuide.ts); the web app draws
 // them in the app's own theme (web/openui/library.tsx). Same names and props on both sides.
 

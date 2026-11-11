@@ -5,7 +5,7 @@ This script replays fixed scenarios against the real engine. Each scenario runs 
 plain code scores session 2 (no LLM judge). It is the controlled half of "is dreaming helping"; the
 in-app dream stats are the live half.
 
-It runs on demand. It is not part of `npm test` and does not start the AgentsCode server.
+It runs on demand. It is not part of `npm test` and does not start the Podcode server.
 
 ```
 node scripts/dream-eval/run.ts --dry                                  # free: fake engine, checks plumbing and arms
@@ -171,8 +171,8 @@ To test the cap for free, set `DREAM_EVAL_DRY_DREAM_USD=1` so each dry dream rep
   - `AGENTSCODE_HOME` points into the run folder; `~/.agentscode` is never touched.
 - **Comms:**
   - The agents' comms tools call back on `PORT`.
-  - This script answers only `POST /api/comms`, on a random port on 127.0.0.1, so it never reaches an AgentsCode app you have open.
-  - It is not the AgentsCode server: there is no UI, no REST API and no websocket.
+  - This script answers only `POST /api/comms`, on a random port on 127.0.0.1, so it never reaches a Podcode app you have open.
+  - It is not the Podcode server: there is no UI, no REST API and no websocket.
 - **Claude Code's own auto memory:**
   - It is off by default (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`). Otherwise it would carry lessons in every arm and write entries into `~/.claude/projects`.
   - Use `--claude-auto-memory` to include it. Codex has no equivalent.

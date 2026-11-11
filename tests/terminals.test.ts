@@ -267,7 +267,7 @@ test('the busy check names the program running in a terminal, and leaves idle sh
   }
 });
 
-test('a new shell does not inherit the terminal AgentsCode was started from', () => {
+test('a new shell does not inherit the terminal Podcode was started from', () => {
   const saved = { ...process.env };
   try {
     Object.assign(process.env, {
@@ -280,7 +280,7 @@ test('a new shell does not inherit the terminal AgentsCode was started from', ()
     const env = shellEnv('/work/here');
     assert.equal(env.TERM, 'xterm-256color');
     assert.equal(env.COLORTERM, 'truecolor');
-    assert.equal(env.TERM_PROGRAM, 'AgentsCode');
+    assert.equal(env.TERM_PROGRAM, 'Podcode');
     assert.equal(env.PWD, '/work/here');
     assert.equal(env.LANG, 'en_US.UTF-8');
     assert.equal(env.HOME_KEEP, 'kept');
