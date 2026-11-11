@@ -1,3 +1,5 @@
+import type { GraphEdge } from './graph.ts';
+
 // The Work view (ACH-D17): what every agent is working on, what was merged into each project's
 // main and whether it is on GitHub, a short graph of main, and what can be cleaned up. Built by
 // server/work.ts from git (read only) and AgentsCode's own merge and review records.
@@ -47,8 +49,17 @@ export interface WorkMerge {
   refs: string[];
 }
 
+/** A ref at a commit, as a pill (ACH-D18): a local branch (with its GitHub copy when that is at the same commit), a remote branch on its own, or a tag. */
+export interface WorkRef {
+  kind: 'local' | 'remote' | 'tag';
+  name: string;
+  /** For a local branch: its remote copy at the same commit (origin/main), drawn in the same pill. */
+  remote?: string;
+}
+
 export interface WorkCommit {
   hash: string;
+  parents: string[];
   subject: string;
   at: number;
   merge: boolean;
@@ -56,8 +67,12 @@ export interface WorkCommit {
   agentIds: string[];
   names: string[];
   reviewer?: string;
-  /** main, GitHub (origin's main) and tags at this commit. */
-  labels: string[];
+  refs: WorkRef[];
+  /** The project's checked-out commit. */
+  head: boolean;
+  /** Its lane and whose lane that is ('main', an owner's name, or null), from shared/graph.ts. */
+  lane: number;
+  key: string | null;
 }
 
 /** Why a folder counts as having uncommitted changes. */
@@ -101,7 +116,12 @@ export interface WorkProject {
   notPushed: number;
   inProgress: WorkBranch[];
   merged: WorkMerge[];
+  /** About 20 commits of main and its open branches, newest first, laid out in lanes (ACH-D18). */
   graph: WorkCommit[];
+  graphEdges: GraphEdge[];
+  graphLanes: number;
+  /** A lane key that is an agent's name, to its id, for the lane's colour (the agent's avatar colour). */
+  laneOwners: Record<string, string>;
   cleanup: { folders: CleanupFolder[]; branches: CleanupBranch[] };
   error?: string;
 }
@@ -122,6 +142,33 @@ export interface CleanupRequest {
 export interface CleanupResult {
   removed: { folders: string[]; branches: string[] };
   skipped: { item: string; why: string }[];
+}
+
+/**
+ * Pills from `git log --decorate=full --format=%D`: local branches, remote branches, tags, and
+ * whether HEAD is here. A local branch whose remote copy (origin/<same name>) is at the same commit
+ * takes it into its pill, as VS Code's Git Graph does by default; remote HEAD pointers are left out.
+ */
+export function parseDecorations(text: string): { refs: WorkRef[]; head: boolean } {
+  let head = false;
+  const locals: WorkRef[] = [];
+  const remotes: string[] = [];
+  const tags: WorkRef[] = [];
+  for (const raw of text.split(',').map(s => s.trim()).filter(Boolean)) {
+    let ref = raw;
+    if (ref === 'HEAD') { head = true; continue; }
+    if (ref.startsWith('HEAD -> ')) { head = true; ref = ref.slice(8); }
+    if (ref.startsWith('tag: ')) { tags.push({ kind: 'tag', name: ref.slice(5).replace(/^refs\/tags\//, '') }); continue; }
+    if (ref.startsWith('refs/heads/')) { locals.push({ kind: 'local', name: ref.slice(11) }); continue; }
+    if (ref.startsWith('refs/remotes/') && !ref.endsWith('/HEAD')) remotes.push(ref.slice(13));
+  }
+  const loose: WorkRef[] = [];
+  for (const remote of remotes) {
+    const branch = remote.slice(remote.indexOf('/') + 1);
+    const local = locals.find(l => l.name === branch && !l.remote);
+    if (local) local.remote = remote; else loose.push({ kind: 'remote', name: remote });
+  }
+  return { refs: [...locals, ...loose, ...tags], head };
 }
 
 /** A branch name as a whole word in text: feat/notes-tab, not feat/notes-tab-2. */

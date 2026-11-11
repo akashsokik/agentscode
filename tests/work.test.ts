@@ -6,7 +6,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { createApp } from '../server/app.ts';
 import { countChanges, isReadOnlyGit, MergeRecords, parseWorktrees, readGit, taskRefs, WorkService, type GitRunner } from '../server/work.ts';
-import { mentionsBranch, namesInMergeSubject } from '../shared/work.ts';
+import { mentionsBranch, namesInMergeSubject, parseDecorations } from '../shared/work.ts';
+import { edgePath, layoutGraph } from '../shared/graph.ts';
 import type { Agent, PeerMessage, Project } from '../shared/types.ts';
 import { harness, tempDir } from './helpers.ts';
 
@@ -106,12 +107,117 @@ test('merges come from main\'s record, with who, reviewer and task; pushed is or
   assert.deepEqual(byBranch.get('feat/a')!.refs, ['ACH-D7'], 'the task\'s own decision, not the appended list');
   assert.deepEqual(byBranch.get('feat/c')!.names, ['Fen', 'Ada']);
   assert.equal(byBranch.get('feat/a')!.rewritten, false);
-  // The graph: main, newest first, merges marked, origin's main labelled GitHub.
-  assert.equal(view.graph[0].merge, true);
-  assert.deepEqual(view.graph[0].labels, ['main']);
-  assert.ok(view.graph[1].labels.includes('GitHub'));
-  assert.deepEqual(view.graph[1].names, ['Cy']);
-  assert.ok(view.graph.length <= 15);
+  // The graph: main and its merged branches in lanes, newest first; HEAD, the local main, and GitHub's main where it is.
+  const top = view.graph[0];
+  assert.equal(top.merge, true);
+  assert.equal(top.head, true, 'the checked-out commit');
+  assert.deepEqual(top.refs.find(r => r.name === 'main'), { kind: 'local', name: 'main' }, 'GitHub\'s main is not here yet');
+  assert.ok(top.refs.some(r => r.name === 'backup/pre-x'), 'other branches here are pills too');
+  assert.equal(top.key, 'main');
+  assert.equal(top.lane, 0);
+  const pushedTip = view.graph.find(c => c.refs.some(r => r.kind === 'remote' && r.name === 'origin/main'))!;
+  assert.deepEqual(pushedTip.names, ['Cy'], 'the feat/b merge, where origin/main is, named from the record');
+  const sideCommit = view.graph.find(c => c.subject === 'work on c')!;
+  assert.equal(sideCommit.lane, 1, 'a merged branch\'s own commit sits in its lane');
+  assert.equal(sideCommit.key, 'Fen', 'that lane is the merge\'s author\'s');
+  assert.equal(view.laneOwners.Fen, 'fen');
+  assert.equal(view.graphLanes, 2);
+  assert.ok(view.graph.length <= 20);
+  assert.ok(view.graphEdges.some(e => e.lane === 1 && e.key === 'Fen'));
+});
+
+test('an open branch is drawn on top of main in its owner\'s lane; a local branch and its GitHub copy share a pill', async () => {
+  const { dir, repo, project } = setup();
+  git(repo, 'push', '-q', 'origin', 'main');
+  const home = path.join(dir, 'data', 'agents', 'fen', 'workspace');
+  fs.mkdirSync(home, { recursive: true });
+  const wt = path.join(home, 'wt-open');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/open', wt, 'main');
+  commit(wt, 'o1.txt', '1', 'open one');
+  commit(wt, 'o2.txt', '2', 'open two');
+  git(repo, 'tag', 'v1.0', 'main');
+  const agents = [{ id: 'fen', name: 'Fen', role: 'dev', status: 'idle', worktree: null }] as unknown as Agent[];
+  const view = await service(dir, agents).project(project, true);
+  assert.deepEqual(view.graph.slice(0, 2).map(c => [c.subject, c.lane, c.key]), [['open two', 1, 'Fen'], ['open one', 1, 'Fen']], 'to the right of main');
+  assert.equal(view.graph[2].lane, 0, 'main keeps lane 0');
+  assert.deepEqual(view.graph[0].refs, [{ kind: 'local', name: 'feat/open' }]);
+  const main = view.graph[2];
+  assert.equal(main.head, true);
+  assert.deepEqual(main.refs.find(r => r.name === 'main'), { kind: 'local', name: 'main', remote: 'origin/main' }, 'one pill for main and its GitHub copy');
+  assert.deepEqual(main.refs.at(-1), { kind: 'tag', name: 'v1.0' }, 'tags last');
+  assert.ok(!main.refs.some(r => r.kind === 'remote'), 'no separate GitHub pill');
+});
+
+// ---- the graph's lanes (shared/graph.ts) ------------------------------------------------------------
+
+const c = (hash: string, parents: string[], key?: string, mergeKey?: string) => ({ hash, parents, ...(key ? { key } : {}), ...(mergeKey ? { mergeKey } : {}) });
+
+test('lanes: a straight line stays in lane 0, an open branch forks off and joins with a rounded turn', () => {
+  // f2 -> f1 -> m2 (main) -> m1
+  const layout = layoutGraph([c('f2', ['f1'], 'Fen'), c('f1', ['m2']), c('m2', ['m1'], 'main'), c('m1', [], 'main')]);
+  assert.deepEqual(layout.rows.map(r => [r.hash, r.lane, r.key]), [['f2', 0, 'Fen'], ['f1', 0, 'Fen'], ['m2', 0, 'main'], ['m1', 0, 'main']]);
+  assert.equal(layout.lanes, 1);
+  // A branch tip with main's tip still above it in another lane: main keeps lane 0, the branch gets lane 1.
+  const two = layoutGraph([c('m3', ['m2'], 'main'), c('f1', ['m2'], 'Ada'), c('m2', ['m1'], 'main'), c('m1', [], 'main')]);
+  assert.deepEqual(two.rows.map(r => r.lane), [0, 1, 0, 0]);
+  const join = two.edges.find(e => e.from === 1)!;
+  assert.deepEqual([join.fromLane, join.lane, join.to, join.toLane, join.key], [1, 1, 2, 0, 'Ada'], 'Ada\'s line runs in lane 1 and turns into main at m2');
+});
+
+test('lanes: a merge sends its other parent to a free lane in the merged branch\'s owner\'s colour', () => {
+  // M merges b1 (Fable's) into main; b1 forked from m1.
+  const layout = layoutGraph([c('M', ['m1', 'b1'], 'main', 'Fable'), c('b1', ['m1']), c('m1', [], 'main')]);
+  assert.deepEqual(layout.rows.map(r => [r.hash, r.lane, r.key]), [['M', 0, 'main'], ['b1', 1, 'Fable'], ['m1', 0, 'main']]);
+  const toBranch = layout.edges.find(e => e.from === 0 && e.to === 1)!;
+  assert.deepEqual([toBranch.fromLane, toBranch.lane, toBranch.toLane, toBranch.key], [0, 1, 1, 'Fable']);
+  const back = layout.edges.find(e => e.from === 1)!;
+  assert.deepEqual([back.lane, back.to, back.toLane], [1, 2, 0], 'and joins main again where it forked');
+});
+
+test('lanes: with main reserved, main stays in lane 0 and a newer branch tip opens to its right', () => {
+  const layout = layoutGraph([c('f2', ['f1'], 'Fen'), c('f1', ['m2']), c('m2', ['m1'], 'main'), c('m1', [], 'main')], { mainKey: 'main' });
+  assert.deepEqual(layout.rows.map(r => [r.hash, r.lane]), [['f2', 1], ['f1', 1], ['m2', 0], ['m1', 0]]);
+  const join = layout.edges.find(e => e.from === 1)!;
+  assert.deepEqual([join.lane, join.toLane, join.key], [1, 0, 'Fen'], 'Fen\'s line turns into main where it forked');
+});
+
+test('lanes: a freed lane is reused, so lanes stay few; a line crosses rows in its own lane', () => {
+  // Two merges one after another: both branches use lane 1, one after the other.
+  const reuse = layoutGraph([
+    c('M2', ['M1', 'b2'], 'main', 'Fen'), c('b2', ['M1']),
+    c('M1', ['m0', 'b1'], 'main', 'Cy'), c('b1', ['m0']),
+    c('m0', [], 'main'),
+  ]);
+  assert.deepEqual(reuse.rows.map(r => r.lane), [0, 1, 0, 1, 0]);
+  assert.equal(reuse.lanes, 2);
+  // A branch that forked before a main commit runs past it in lane 1 (as feat/no-shadows past v0.2.4).
+  const cross = layoutGraph([c('M', ['r', 'b'], 'main', 'Fen'), c('b', ['p']), c('r', ['p'], 'main'), c('p', [], 'main')]);
+  assert.deepEqual(cross.rows.map(r => r.lane), [0, 1, 0, 0]);
+  const long = cross.edges.find(e => e.from === 1)!;
+  assert.deepEqual([long.lane, long.to, long.toLane], [1, 3, 0], 'down lane 1 past r, then into p');
+  // Two branches open at once take lanes 1 and 2, and a parent below the window runs off the bottom.
+  const wide = layoutGraph([c('M', ['m', 'x'], 'main', 'Fen'), c('x', ['y']), c('y', ['q'], 'Ada'), c('m', ['q'], 'main')]);
+  assert.ok(wide.edges.some(e => e.to === 4), 'q is below the window');
+});
+
+test('lane paths are straight with rounded turns', () => {
+  const straight = edgePath({ from: 0, fromLane: 0, lane: 0, to: 3, toLane: 0, key: null }, 4, 13, 24, 8);
+  assert.equal(straight, 'M8 12V84');
+  const merge = edgePath({ from: 0, fromLane: 0, lane: 1, to: 1, toLane: 1, key: null }, 4, 13, 24, 8);
+  assert.match(merge, /^M8 12C8 24 21 24 21 36$/);
+  const join = edgePath({ from: 1, fromLane: 1, lane: 1, to: 3, toLane: 0, key: null }, 4, 13, 24, 8);
+  assert.match(join, /^M21 36V60C21 72 8 72 8 84$/);
+  const off = edgePath({ from: 2, fromLane: 1, lane: 1, to: 4, toLane: 1, key: null }, 4, 13, 24, 8);
+  assert.equal(off, 'M21 60V98');
+});
+
+test('decorations become pills: local, GitHub combined with its local, remote alone, tags; HEAD noted', () => {
+  assert.deepEqual(parseDecorations('HEAD -> refs/heads/main, tag: refs/tags/v0.2.6, refs/remotes/origin/main, refs/remotes/origin/HEAD'), {
+    head: true, refs: [{ kind: 'local', name: 'main', remote: 'origin/main' }, { kind: 'tag', name: 'v0.2.6' }],
+  });
+  assert.deepEqual(parseDecorations('refs/remotes/origin/main'), { head: false, refs: [{ kind: 'remote', name: 'origin/main' }] });
+  assert.deepEqual(parseDecorations('refs/heads/feat/work-view'), { head: false, refs: [{ kind: 'local', name: 'feat/work-view' }] });
+  assert.deepEqual(parseDecorations(''), { head: false, refs: [] });
 });
 
 test('after main is rewritten, merges still count by record: same files map to the new commit, a folded one has none', async () => {

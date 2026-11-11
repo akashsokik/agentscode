@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Agent, PeerMessage, Project } from '../shared/types.ts';
 import { findRefIds } from '../shared/refs.ts';
-import { mentionsBranch, namesInMergeSubject, type CleanupBranch, type CleanupFolder, type CleanupRequest, type CleanupResult, type FolderChanges, type WorkBranch, type WorkCommit, type WorkMerge, type WorkProject, type WorkState, type WorkView } from '../shared/work.ts';
+import { layoutGraph } from '../shared/graph.ts';
+import { mentionsBranch, namesInMergeSubject, parseDecorations, type CleanupBranch, type CleanupFolder, type CleanupRequest, type CleanupResult, type FolderChanges, type WorkBranch, type WorkCommit, type WorkMerge, type WorkProject, type WorkState, type WorkView } from '../shared/work.ts';
 import { HttpError } from './errors.ts';
 
 // The Work view's data (ACH-D17). Read only: every git command it runs for the view goes through
@@ -19,6 +20,9 @@ import { HttpError } from './errors.ts';
 
 export interface GitResult { ok: boolean; out: string }
 export type GitRunner = (args: string[], cwd: string) => Promise<GitResult>;
+
+/** About how many commits the graph shows (ACH-D18). */
+export const GRAPH_ROWS = 20;
 
 /** Git with nothing that runs another program or takes optional locks. */
 const GIT_FLAGS = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.untrackedCache=false'];
@@ -270,7 +274,7 @@ export class WorkService {
   }
 
   private empty(project: Project, defaultBranch: string | null): WorkProject {
-    return { projectId: project.id, name: project.name, ...(project.code ? { code: project.code } : {}), defaultBranch, remote: null, notPushed: 0, inProgress: [], merged: [], graph: [], cleanup: { folders: [], branches: [] } };
+    return { projectId: project.id, name: project.name, ...(project.code ? { code: project.code } : {}), defaultBranch, remote: null, notPushed: 0, inProgress: [], merged: [], graph: [], graphEdges: [], graphLanes: 0, laneOwners: {}, cleanup: { folders: [], branches: [] } };
   }
 
   private async facts(project: Project): Promise<RepoFacts | null> {
@@ -413,20 +417,6 @@ export class WorkService {
       };
     });
 
-    // The graph: the last 15 on main, each labelled from our records (the same commit or the same files).
-    const labels = new Map<string, string[]>();
-    const refsOut = await this.git(['for-each-ref', '--format=%(objectname)%1f%(refname:short)', 'refs/tags', `refs/heads/${defaultBranch}`, ...(remote ? [`refs/remotes/${remote}`] : [])], root);
-    for (const line of refsOut.out.split('\n').filter(Boolean)) {
-      const [hash, name] = line.split('\x1f');
-      const label = name === remote ? 'GitHub' : name;
-      labels.set(hash, [...(labels.get(hash) ?? []), label]);
-    }
-    const graph: WorkCommit[] = history.slice(0, 15).map(c => {
-      const r = records.find(x => x.hash === c.hash) ?? records.find(x => x.tree === c.tree);
-      const names = r?.names.length ? r.names : namesInMergeSubject(c.subject);
-      return { hash: c.hash, subject: c.subject, at: c.at, merge: c.merge, names, agentIds: ids(names), ...(r?.reviewer ? { reviewer: r.reviewer } : {}), labels: labels.get(c.hash) ?? [] };
-    });
-
     // Branches checked out somewhere: in progress, or merged and left behind.
     const realRoot = realOrSelf(root);
     const liveWorktrees = new Set(agents.flatMap(a => (a.worktree ? [realOrSelf(a.worktree.path)] : [])));
@@ -494,9 +484,40 @@ export class WorkService {
       branches.push({ name, by: record ? 'record' : 'git', ...(at ? { inFolder: at } : {}), ...(names[0] ? { agentName: names[0] } : {}) });
     }
 
+    // The graph (ACH-D18): about 20 commits of main and the open branches, in topological order, with
+    // parents and refs; main's own line is 'main', an open branch's lane its owner, a merged branch's
+    // lane the merge's author (lazygit colours a lane by what opened it).
+    const tips = inProgress.map(b => b.branch);
+    const glog = await this.git(['log', '--topo-order', `-${GRAPH_ROWS}`, '--decorate=full', '--format=%H%x1f%P%x1f%T%x1f%s%x1f%ct%x1f%D', defaultBranch, ...tips.map(b => `refs/heads/${b}`)], root);
+    const mainLine = new Set(history.map(c => c.hash));
+    const tipOwner = new Map<string, string>();
+    for (const b of inProgress) {
+      const tip = await this.git(['rev-parse', '--verify', '--quiet', `refs/heads/${b.branch}`], root);
+      if (tip.ok) tipOwner.set(tip.out.trim(), b.agentName ?? b.branch);
+    }
+    const commits = glog.out.split('\n').filter(Boolean).map(line => {
+      const [hash, parents, tree, subject, at, deco] = line.split('\x1f');
+      const r = records.find(x => x.hash === hash) ?? records.find(x => x.tree === tree);
+      const names = r?.names.length ? r.names : namesInMergeSubject(subject ?? '');
+      const parentList = (parents ?? '').split(' ').filter(Boolean);
+      const { refs, head } = parseDecorations(deco ?? '');
+      return {
+        hash, parents: parentList, subject: subject ?? '', at: Number(at) * 1000, merge: parentList.length > 1,
+        names, agentIds: ids(names), ...(r?.reviewer ? { reviewer: r.reviewer } : {}), refs, head,
+        key: mainLine.has(hash) ? 'main' : tipOwner.get(hash) ?? null, mergeKey: names[0] ?? null,
+      };
+    });
+    const layout = layoutGraph(commits, { mainKey: 'main' });
+    const graph: WorkCommit[] = commits.map(({ mergeKey: _m, ...c }, i) => ({ ...c, lane: layout.rows[i].lane, key: layout.rows[i].key }));
+    const laneOwners: Record<string, string> = {};
+    for (const key of new Set([...graph.map(c => c.key), ...layout.edges.map(e => e.key)])) {
+      const agent = key ? byName(key) : undefined;
+      if (key && agent) laneOwners[key] = agent.id;
+    }
+
     return {
       projectId: project.id, name: project.name, ...(project.code ? { code: project.code } : {}),
-      defaultBranch, remote, notPushed, inProgress, merged, graph,
+      defaultBranch, remote, notPushed, inProgress, merged, graph, graphEdges: layout.edges, graphLanes: layout.lanes, laneOwners,
       cleanup: { folders, branches: branches.sort((a, b) => a.name.localeCompare(b.name)) },
     };
   }
