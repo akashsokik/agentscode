@@ -84,8 +84,13 @@ export function migrateDataDir(options: { home?: string; env?: NodeJS.ProcessEnv
   }
 
   fs.renameSync(old, fresh);
-  fs.symlinkSync(fresh, old, 'dir');
-  say(`Moved ${old} to ${fresh}, and linked ${old} to it so paths naming the old folder keep working.`);
+  // From here the data is in ~/.podcode, so the steps below run even if the link can't be made.
+  try {
+    fs.symlinkSync(fresh, old, 'dir');
+    say(`Moved ${old} to ${fresh}, and linked ${old} to it so paths naming the old folder keep working.`);
+  } catch (err) {
+    say(`Moved ${old} to ${fresh}, but could not link ${old} to it (${err instanceof Error ? err.message : String(err)}); paths naming the old folder will not resolve until that link exists.`);
+  }
   const rewritten = rewriteStatePaths(path.join(fresh, 'state.json'), old, fresh);
   if (rewritten) say(`Rewrote ${rewritten} saved ${rewritten === 1 ? 'path' : 'paths'} in state.json to ${fresh}.`);
   const linked = linkClaudeSessions(home);

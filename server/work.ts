@@ -216,7 +216,16 @@ export function hasLosses(c: FolderChanges): boolean {
   return c.changed > 0 || c.untracked > c.links || c.ignored.length > 0;
 }
 
-const realOrSelf = (p: string) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+/**
+ * A folder's real path; for one that is gone, its nearest existing parent's real path plus the rest,
+ * so a missing worktree git records under ~/.agentscode (now a link to ~/.podcode) still matches.
+ */
+const realOrSelf = (p: string): string => {
+  const abs = path.resolve(p);
+  try { return fs.realpathSync(abs); } catch { /* resolve the parent */ }
+  const parent = path.dirname(abs);
+  return parent === abs ? abs : path.join(realOrSelf(parent), path.basename(abs));
+};
 const inside = (child: string, parent: string) => child === parent || child.startsWith(parent + path.sep);
 
 export interface WorkContext {
@@ -540,7 +549,7 @@ export class WorkService {
       const agent = this.owner(wt.path, agents);
       if (wt.prunable || !fs.existsSync(wt.path)) {
         // git gives real paths (/private/var on macOS), so compare with the data folder's real path.
-        if (!main && !wt.locked && inside(path.resolve(wt.path), dataDir)) folders.push({ path: wt.path, branch: wt.branch, ...(agent ? { agentId: agent.id, agentName: agent.name } : {}), reason: 'missing', changes: { changed: 0, untracked: 0, links: 0, built: 0, ignored: [] }, dirty: false });
+        if (!main && !wt.locked && inside(realOrSelf(wt.path), dataDir)) folders.push({ path: wt.path, branch: wt.branch, ...(agent ? { agentId: agent.id, agentName: agent.name } : {}), reason: 'missing', changes: { changed: 0, untracked: 0, links: 0, built: 0, ignored: [] }, dirty: false });
         continue;
       }
       const status = await this.git(['status', '--porcelain', '--untracked-files=normal', '--ignored'], wt.path);

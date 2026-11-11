@@ -543,6 +543,22 @@ test('a worktree whose folder is gone: only its own record is removed, and only 
   assert.ok(left.includes('wt-kept') && left.includes('outside-gone'), 'other records are intact');
 });
 
+test('a gone worktree git records under the old data folder name (a link to the new one) is still ours (ALL-D6)', async () => {
+  const { dir, repo, project } = setup();
+  fs.mkdirSync(path.join(dir, 'data', 'agents', 'fen', 'workspace'), { recursive: true });
+  fs.symlinkSync(path.join(dir, 'data'), path.join(dir, 'old-data'), 'dir');
+  const real = path.join(fs.realpathSync(dir), 'data', 'agents', 'fen', 'workspace', 'wt-gone');
+  git(repo, 'worktree', 'add', '-q', real, 'feat/a');
+  // A record made before the move names ~/.agentscode/... (git keeps the path it was given when the
+  // folder was real); that name is now a link to ~/.podcode. Write the record that way.
+  const record = path.join(repo, '.git', 'worktrees', 'wt-gone', 'gitdir');
+  fs.writeFileSync(record, `${path.join(fs.realpathSync(dir), 'old-data', 'agents', 'fen', 'workspace', 'wt-gone', '.git')}\n`);
+  fs.rmSync(real, { recursive: true, force: true });
+  assert.match(git(repo, 'worktree', 'list', '--porcelain'), /old-data/);
+  const view = await service(dir).project(project, true);
+  assert.deepEqual(view.cleanup.folders.filter(f => f.reason === 'missing').map(f => path.basename(f.path)), ['wt-gone']);
+});
+
 test('a merge undone after a backup was taken is not merged: a backup counts only when main itself was rewritten (A2)', async () => {
   const { dir, repo, project } = setup();
   const home = path.join(dir, 'data', 'agents', 'fen', 'workspace');
