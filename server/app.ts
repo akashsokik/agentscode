@@ -9,6 +9,7 @@ import { DEV_WEB_PORT, IN_DESKTOP_APP, PORT } from './config.ts';
 import { HttpError } from './errors.ts';
 import { BRIDGE_HEADER, bridgeTokenMatches } from './browserBridge.ts';
 import type { AgentManager } from './manager.ts';
+import type { CleanupRequest } from '../shared/work.ts';
 import { listProjectFiles } from './fileList.ts';
 import { listDirs, normalizeDir } from './projects.ts';
 import { Terminals } from './terminals.ts';
@@ -235,6 +236,18 @@ export function createApp(
   });
   app.post('/api/super/log/:actionId/undo', async (req, res) => {
     res.json(await manager.undoSuper(param(req, 'actionId')));
+  });
+  // The Work view (server/work.ts): read only, except cleanup, which removes exactly what the user ticked.
+  app.get('/api/work', async (req, res) => {
+    const id = query(req, 'project');
+    const projects = id ? [manager.project(id)] : manager.snapshot().projects;
+    res.json(await manager.work.view(projects, query(req, 'fresh') === '1'));
+  });
+  app.post('/api/work/cleanup', async (req, res) => {
+    const body = (req.body ?? {}) as Partial<CleanupRequest>;
+    const project = manager.project(String(body.projectId ?? ''));
+    const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, 500) : []);
+    res.json(await manager.work.cleanup(project, { projectId: project.id, folders: list(body.folders), branches: list(body.branches), forceFolders: list(body.forceFolders) }));
   });
   // Project notes and decisions, read only: the Notes tab and the id chips.
   app.get('/api/refs', (_req, res) => {
