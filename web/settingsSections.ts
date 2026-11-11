@@ -48,7 +48,7 @@ export function sectionForKey(
   return null;
 }
 
-const STORAGE_KEY = 'agentscode:agent-settings-section';
+const STORAGE_KEY = 'podcode:agent-settings-section';
 
 function readAll(storage: Pick<Storage, 'getItem'> | undefined): Record<string, unknown> {
   try {

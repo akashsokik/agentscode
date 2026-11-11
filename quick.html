@@ -8,7 +8,7 @@
       // The saved theme before the first paint, as index.html does.
       (function () {
         var pref = 'dark';
-        try { pref = localStorage.getItem('agentscode:theme') || pref; } catch (e) {}
+        try { pref = (localStorage.getItem('podcode:theme') || localStorage.getItem('agentscode:theme')) || pref; } catch (e) {}
         var light = pref === 'light' || (pref === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
         if (light) document.documentElement.classList.add('theme-light');
         if (/Mac/.test(navigator.platform)) document.documentElement.classList.add('is-mac');

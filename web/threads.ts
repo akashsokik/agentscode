@@ -110,7 +110,7 @@ export type ParticipantMark = { key: string; name: string } & (
   | { kind: 'removed' }
 );
 
-/** Every participant gets a mark; agents no longer in Podcode keep the name they posted under. */
+/** Every participant gets a mark; agents no longer in PodCode keep the name they posted under. */
 export function participantMarks(participants: readonly ThreadParticipant[], agents: readonly Pick<Agent, 'id' | 'name' | 'engine'>[]): ParticipantMark[] {
   return participants.map(p => {
     if (p.from !== 'agent') return { key: p.key, name: p.name, kind: 'user' };

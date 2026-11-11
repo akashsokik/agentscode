@@ -1,5 +1,5 @@
 /**
- * Small pieces of MonoCode markup used across Podcode, lifted as-is from the
+ * Small pieces of MonoCode markup used across PodCode, lifted as-is from the
  * components named beside each one so every surface shares MonoCode's look.
  */
 import type { ComponentPropsWithoutRef, ReactNode } from 'react';

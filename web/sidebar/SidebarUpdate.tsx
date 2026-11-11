@@ -3,7 +3,7 @@
  * UpdateRailCard.tsx in hardbeat920/monocode): an "Update to X" row while an update waits or
  * downloads, and an "Updated to X / What's new" card after one. Only the desktop app has updates;
  * in a browser the bridge is missing and nothing renders. The state comes from
- * electron/updater.ts through window.agentscodeDesktop (electron/preload.cts).
+ * electron/updater.ts through window.podcodeDesktop (electron/preload.cts).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BrandMark } from '../ui/BrandMark.tsx';
@@ -19,14 +19,14 @@ import {
 
 declare global {
   interface Window {
-    agentscodeDesktop?: { updates?: DesktopUpdates };
+    podcodeDesktop?: { updates?: DesktopUpdates };
   }
 }
 
-const LAST_SEEN_KEY = 'agentscode:lastSeenVersion';
+const LAST_SEEN_KEY = 'podcode:lastSeenVersion';
 
 function desktopUpdates(): DesktopUpdates | null {
-  return window.agentscodeDesktop?.updates ?? null;
+  return window.podcodeDesktop?.updates ?? null;
 }
 
 function readLastSeen(): string | null {

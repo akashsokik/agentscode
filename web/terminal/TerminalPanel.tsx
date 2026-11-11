@@ -237,7 +237,7 @@ function CloseDialog({ request }: { request: CloseRequest }) {
     >
       <p className="px-4 pb-4 pt-2 font-sans text-[12px] leading-relaxed text-content/60">
         {unknown
-          ? `Podcode could not check whether a program is still running in ${many ? 'them' : 'it'}. Closing stops anything that is.`
+          ? `PodCode could not check whether a program is still running in ${many ? 'them' : 'it'}. Closing stops anything that is.`
           : `${programs} ${one ? 'is' : 'are'} still running. Closing stops ${one ? 'it' : 'them'}.`}
       </p>
     </Modal>

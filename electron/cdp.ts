@@ -121,19 +121,19 @@ export class Cdp {
       let doc = this.ownerDocument || this;
       if (focused) { try { while (doc.activeElement && doc.activeElement.contentDocument) doc = doc.activeElement.contentDocument; } catch (e) {} }
       const w = doc.defaultView;
-      const old = w.__agentscodeWatch;
+      const old = w.__podcodeWatch;
       if (old) for (const t of old.types) w.removeEventListener(t, old.fn, true);
-      w.__agentscodeSeen = null;
+      w.__podcodeSeen = null;
       const fn = (e) => {
-        if (w.__agentscodeSeen !== null) return;
-        if (!target || e.target === target || (e.target instanceof Node && target.contains(e.target))) { w.__agentscodeSeen = ''; return; }
+        if (w.__podcodeSeen !== null) return;
+        if (!target || e.target === target || (e.target instanceof Node && target.contains(e.target))) { w.__podcodeSeen = ''; return; }
         const hit = e.target instanceof Element ? e.target : null;
         const name = hit ? (hit.getAttribute('aria-label') || hit.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 60) : '';
-        w.__agentscodeSeen = hit ? hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') + (name ? ' "' + name + '"' : '') : 'another element';
+        w.__podcodeSeen = hit ? hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') + (name ? ' "' + name + '"' : '') : 'another element';
       };
-      w.__agentscodeWatch = { types, fn };
+      w.__podcodeWatch = { types, fn };
       for (const t of types) w.addEventListener(t, fn, true);
-      globalThis.__agentscodeWin = w;
+      globalThis.__podcodeWin = w;
     }`, [types, focused]);
   }
 
@@ -143,11 +143,11 @@ export class Cdp {
    */
   private async seen(objectId: string): Promise<string | null> {
     return this.call<string | null>(objectId, `function () {
-      const w = globalThis.__agentscodeWin || window;
-      const seen = w.__agentscodeSeen === undefined ? null : w.__agentscodeSeen;
-      const old = w.__agentscodeWatch;
+      const w = globalThis.__podcodeWin || window;
+      const seen = w.__podcodeSeen === undefined ? null : w.__podcodeSeen;
+      const old = w.__podcodeWatch;
       if (old) for (const t of old.types) w.removeEventListener(t, old.fn, true);
-      w.__agentscodeWatch = undefined;
+      w.__podcodeWatch = undefined;
       return seen;
     }`).catch(() => ''); // the page navigated away: the input arrived
   }

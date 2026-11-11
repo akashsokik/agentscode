@@ -18,7 +18,7 @@ export function AboutGroup() {
   const version = snapshot?.currentVersion || BUILD.version;
   return (
     <Group id="settings-about" title="About">
-      <Row label={`Podcode ${version || ''}`.trim()} description={buildLabel(BUILD)}>
+      <Row label={`PodCode ${version || ''}`.trim()} description={buildLabel(BUILD)}>
         <span className="text-[12px] text-content/45">{channelLabel(version)}</span>
       </Row>
       {snapshot ? <UpdatesRow snapshot={snapshot} /> : <Row label="Updates" description="Updates are managed by the desktop app." />}
@@ -35,7 +35,7 @@ export function AboutGroup() {
 }
 
 function UpdatesRow({ snapshot }: { snapshot: UpdateSnapshot }) {
-  const updates = window.agentscodeDesktop?.updates;
+  const updates = window.podcodeDesktop?.updates;
   const busy = snapshot.phase === 'checking' || snapshot.phase === 'downloading' || snapshot.phase === 'ready';
   const available = snapshot.phase === 'available' && snapshot.availableVersion;
   return (
@@ -66,7 +66,7 @@ function InstallCommandRow() {
     <div className="settings-row border-b border-content/5 px-4 py-3.5 last:border-b-0">
       <div className="text-[13px] font-medium text-content">Install or update from Terminal</div>
       <p className="mt-1 text-[12px] leading-relaxed text-content/45">
-        This build is not signed with an Apple Developer ID yet, so it cannot replace itself. Quit Podcode and run this to install the latest version.
+        This build is not signed with an Apple Developer ID yet, so it cannot replace itself. Quit PodCode and run this to install the latest version.
       </p>
       <div className="mt-2.5 flex items-center gap-2 rounded-md bg-content/5 py-1 pl-3 pr-1">
         <code className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-content/75" title={MAC_INSTALL_COMMAND}>{MAC_INSTALL_COMMAND}</code>

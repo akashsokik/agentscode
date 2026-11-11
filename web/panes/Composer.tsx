@@ -213,8 +213,8 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
   const pickCommand = (command: ComposerCommand) => {
     if (!slash) return;
     closePickers();
-    // Podcode's own commands run as the whole message, the moment you pick one.
-    if (command.scope === 'agentscode' && text.trim() === text.slice(slash.start, slash.end) && !images.images.length) {
+    // PodCode's own commands run as the whole message, the moment you pick one.
+    if (command.scope === 'podcode' && text.trim() === text.slice(slash.start, slash.end) && !images.images.length) {
       void runBuiltin(command);
       return;
     }

@@ -8,13 +8,13 @@
       // Apply the saved theme before the first paint; web/theme.ts owns it afterwards.
       (function () {
         var pref = 'dark';
-        try { pref = localStorage.getItem('agentscode:theme') || pref; } catch (e) {}
+        try { pref = (localStorage.getItem('podcode:theme') || localStorage.getItem('agentscode:theme')) || pref; } catch (e) {}
         var light = pref === 'light' || (pref === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
         if (light) document.documentElement.classList.add('theme-light');
         if (/Mac/.test(navigator.platform)) document.documentElement.classList.add('is-mac');
       })();
     </script>
-    <title>Podcode</title>
+    <title>PodCode</title>
     <link rel="icon" href="/favicon.png" sizes="64x64" type="image/png" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

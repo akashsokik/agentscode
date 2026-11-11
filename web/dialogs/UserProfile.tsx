@@ -10,7 +10,7 @@ import { Modal } from '../mono/Modal.tsx';
 import { Group } from '../mono/settings.tsx';
 import { submitKey } from './submitKey.ts';
 
-/** About you, from the sidebar: everything Podcode saved about the user, and where the file is. */
+/** About you, from the sidebar: everything PodCode saved about the user, and where the file is. */
 export function ProfileDialog({ onClose }: { onClose: () => void }) {
   const file = useApp(s => s.snapshot?.profile.file);
   return (
@@ -28,7 +28,7 @@ export function ProfileDialog({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * What Podcode knows about the user (user.md), shared by every agent: what waits for approval
+ * What PodCode knows about the user (user.md), shared by every agent: what waits for approval
  * first, then every entry, each editable and deletable, and a way to add one by hand.
  */
 export function AboutYouGroup() {

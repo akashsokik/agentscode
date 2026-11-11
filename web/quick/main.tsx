@@ -1,8 +1,10 @@
 /**
  * The desktop app's floating quick composer window (quick.html, electron/quickWindow.ts). It has
  * its own connection to the server, like the main window, and talks to the main process through
- * window.agentscodeDesktop.quick: its height, hiding, and opening an agent in the main window.
+ * window.podcodeDesktop.quick: its height, hiding, and opening an agent in the main window.
  */
+// First: carry localStorage over from the old AgentsCode keys (web/storageMigration.ts).
+import '../storageMigration.ts';
 import { StrictMode, useCallback, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { DesktopQuick } from '../../shared/superAgent.ts';
@@ -14,7 +16,7 @@ import { chipsWithoutNotes } from '../notes/RefChip.tsx';
 import '../theme.ts';
 import '../styles.css';
 
-const desktop = (window as unknown as { agentscodeDesktop?: { quick?: DesktopQuick } }).agentscodeDesktop?.quick ?? null;
+const desktop = (window as unknown as { podcodeDesktop?: { quick?: DesktopQuick } }).podcodeDesktop?.quick ?? null;
 
 // The drag strip uses the same rule as the main window's headers.
 if (IS_DESKTOP_APP) document.documentElement.classList.add('desktop-app');

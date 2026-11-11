@@ -5,7 +5,7 @@
 import { useSyncExternalStore } from 'react';
 import { markSeen, parseSeen, type CommsThread, type SeenStore } from './comms.ts';
 
-const KEY = 'agentscode.commsSeen';
+const KEY = 'podcode.commsSeen';
 
 function load(): SeenStore {
   let raw: string | null = null;

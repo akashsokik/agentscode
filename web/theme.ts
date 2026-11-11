@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { isLight, parsePreference, type ThemePreference } from './themePreference.ts';
 
 export type { ThemePreference };
-const KEY = 'agentscode:theme';
+const KEY = 'podcode:theme';
 
 function read(): ThemePreference {
   try {

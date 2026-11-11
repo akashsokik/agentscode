@@ -65,7 +65,7 @@ function usePickerPointer(items: unknown, active: number, onActive: (index: numb
 }
 
 function scopeLabel(command: ComposerCommand): string {
-  if (command.scope === 'agentscode') return 'agentscode';
+  if (command.scope === 'podcode') return 'podcode';
   if (command.scope === 'plugin') return command.source;
   if (command.scope === 'user') return 'personal';
   return 'project';

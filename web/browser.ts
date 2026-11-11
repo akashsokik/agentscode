@@ -1,7 +1,7 @@
 /**
  * The page's side of the integrated browser. In the desktop app, main draws each browser tab as
  * a native view over its pane (electron/browser.ts); this module talks to it through the preload
- * (`window.agentscodeDesktop.browser`), keeps each tab's live state for BrowserPane, and keeps main's
+ * (`window.podcodeDesktop.browser`), keeps each tab's live state for BrowserPane, and keeps main's
  * tabs and the layout's tabs in step. In a plain browser there is no native view: BrowserPane
  * falls back to an iframe for localhost pages.
  */
@@ -10,13 +10,13 @@ import { normalizeAddress, type BrowserEvent, type BrowserTabState, type Desktop
 import { addTab, closeTab, focusPane, getLayout, open, openToSide, subscribeLayout, updateBrowserTab } from './layout.ts';
 import { runShortcut } from './shortcuts.ts';
 
-const native = (window as unknown as { agentscodeDesktop?: { browser?: DesktopBrowser } }).agentscodeDesktop?.browser;
+const native = (window as unknown as { podcodeDesktop?: { browser?: DesktopBrowser } }).podcodeDesktop?.browser;
 
 /** True in the desktop app, where browser tabs are real browser views. */
 export const HAS_NATIVE_BROWSER = Boolean(native);
 
 export async function browserCall<T = unknown>(op: string, args?: Record<string, unknown>): Promise<T> {
-  if (!native) throw new Error('The browser needs the Podcode desktop app.');
+  if (!native) throw new Error('The browser needs the PodCode desktop app.');
   const result = await native.call(op, args);
   if (result && typeof result === 'object' && 'error' in result && typeof (result as { error: unknown }).error === 'string') {
     throw new Error((result as { error: string }).error);

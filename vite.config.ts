@@ -21,7 +21,7 @@ const api = `http://127.0.0.1:${process.env.PORT ?? 4320}`;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  define: { __AGENTSCODE_BUILD__: JSON.stringify(buildInfo()) },
+  define: { __PODCODE_BUILD__: JSON.stringify(buildInfo()) },
   server: {
     host: '127.0.0.1',
     port: 5174,

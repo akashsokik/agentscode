@@ -458,7 +458,7 @@ function CleanupDialog({ projects, onClose }: { projects: WorkProject[]; onClose
           <p className="mt-3 flex gap-2 rounded-lg bg-content/5 px-2.5 py-2 text-[12px] leading-normal text-content/60">
             <AlertCircle aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
             <span>
-              {byRecord ? 'After a history rewrite, git no longer sees some of these branches as merged; AgentsCode knows from its merge and review records, so they wait for your OK here. ' : ''}
+              {byRecord ? 'After a history rewrite, git no longer sees some of these branches as merged; PodCode knows from its merge and review records, so they wait for your OK here. ' : ''}
               Only merges with proof their work is on main are listed. Removing a folder deletes its files, ignored ones too (a linked node_modules is only unlinked), so it always waits for you; folders with uncommitted or ignored files ask twice. Nothing here is pushed, and main is never touched.
             </span>
           </p>

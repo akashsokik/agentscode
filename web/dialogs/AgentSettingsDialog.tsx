@@ -28,7 +28,7 @@ export type { AgentSettingsSection };
 
 /** Ask the app to open Settings at a group (the SuperAgent's limits live there, once, for every agent). */
 export function openSettingsAt(group: 'super'): void {
-  window.dispatchEvent(new CustomEvent('agentscode:open-settings', { detail: { group } }));
+  window.dispatchEvent(new CustomEvent('podcode:open-settings', { detail: { group } }));
 }
 
 /**
@@ -189,7 +189,7 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
                   </Row>
                 ) : (
                   <>
-                    <Row label="Avatar" description="How it looks across Podcode. Shuffle for one no other agent has." />
+                    <Row label="Avatar" description="How it looks across PodCode. Shuffle for one no other agent has." />
                     <AvatarPicker look={look} others={others} onChange={setLook} />
                   </>
                 )}

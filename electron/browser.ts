@@ -5,7 +5,7 @@
  * agent tools (electron/cdp.ts) still read, click and capture it.
  *
  * Browser tabs share one session of their own, apart from the app's, with no preload, no Node, and
- * every permission prompt refused. They never load Podcode itself.
+ * every permission prompt refused. They never load PodCode itself.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,6 +17,7 @@ import { Cdp } from './cdp.ts';
 
 export { BrowserError };
 
+/** Its saved cookies and logins. The name stays from before the rename, so the logins in it stay too. */
 export const BROWSER_PARTITION = 'persist:agentscode-browser';
 /** The viewport an agent's tab has while no pane shows it. */
 const DEFAULT_SIZE = { width: 1280, height: 800 };
@@ -49,7 +50,7 @@ interface Tab {
 }
 
 interface Options {
-  /** The Podcode server's port, which browser tabs may never load. */
+  /** The PodCode server's port, which browser tabs may never load. */
   appPort: number;
   window: () => BrowserWindow | null;
 }
@@ -174,7 +175,7 @@ export class BrowserHost {
   }
 
   private make(id: string, agentId: string | null): Tab {
-    if (this.quitting) throw new BrowserError('Podcode is quitting.');
+    if (this.quitting) throw new BrowserError('PodCode is quitting.');
     const view = new WebContentsView({
       webPreferences: { session: this.session, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
     });

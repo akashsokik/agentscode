@@ -113,7 +113,7 @@ function TabEmpty({ icon: Icon, title, children }: { icon: typeof ListBullet; ti
   );
 }
 
-const SEEN_KEY = 'agentscode:super-tabs-seen';
+const SEEN_KEY = 'podcode:super-tabs-seen';
 function readSeen(): Partial<Record<SuperTab, number>> {
   try {
     const saved = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}') as Record<string, unknown>;

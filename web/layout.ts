@@ -78,7 +78,7 @@ export type ColumnKey = 'nav' | 'workspace' | 'panel';
 export const SUPER_VIEWS = ['overview', 'decisions', 'goals', 'routines', 'comms', 'notes', 'work'] as const;
 export type SuperView = (typeof SUPER_VIEWS)[number];
 
-const STORAGE_KEY = 'agentscode:layout';
+const STORAGE_KEY = 'podcode:layout';
 const MAX_PANES = 3;
 
 export function rootKey(root: Root): string {

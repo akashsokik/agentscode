@@ -1,9 +1,9 @@
 /**
- * The desktop app's bridge to the page, as `window.agentscodeDesktop`:
+ * The desktop app's bridge to the page, as `window.podcodeDesktop`:
  * - `updates`, which the sidebar's update row reads (web/sidebar/SidebarUpdate.tsx);
  * - `browser`, the integrated browser's controls and events (web/browser.ts);
  * - `super`, the SuperAgent's menu bar item and system-wide shortcut (web/super.ts, electron/superTray.ts).
- * The page is the Podcode server's own UI on 127.0.0.1; main.ts answers only that origin, and
+ * The page is the PodCode server's own UI on 127.0.0.1; main.ts answers only that origin, and
  * browser tabs run without any preload. CommonJS because sandboxed preload scripts cannot be ES
  * modules; tsc compiles this .cts to preload.cjs.
  */
@@ -70,4 +70,4 @@ const quick: DesktopQuick = {
   },
 };
 
-contextBridge.exposeInMainWorld('agentscodeDesktop', { updates, browser, super: superAgent, quick });
+contextBridge.exposeInMainWorld('podcodeDesktop', { updates, browser, super: superAgent, quick });

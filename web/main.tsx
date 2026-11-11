@@ -1,3 +1,5 @@
+// First: carry localStorage over from the old AgentsCode keys (web/storageMigration.ts).
+import './storageMigration.ts';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';

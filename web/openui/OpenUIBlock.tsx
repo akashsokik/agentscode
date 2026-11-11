@@ -8,7 +8,7 @@ import { OpenUIActionContext } from './context.ts';
 import { podcodeLibrary } from './library.tsx';
 
 /**
- * An ```openui-lang block from an agent, drawn with Podcode's components. Buttons send their
+ * An ```openui-lang block from an agent, drawn with PodCode's components. Buttons send their
  * message to the agent whose transcript holds the block; elsewhere they say where to answer.
  */
 export default function OpenUIBlock({ source }: { source: string }) {

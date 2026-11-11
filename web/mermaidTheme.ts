@@ -32,7 +32,7 @@ export interface MermaidTheme {
   sankey: { linkColor: string };
 }
 
-/** Mermaid's `base` theme set up to look like the rest of Podcode. */
+/** Mermaid's `base` theme set up to look like the rest of PodCode. */
 export function mermaidTheme({ ink, background, font, light }: AppColours): MermaidTheme {
   const fg = hex(ink);
   const bg = hex(background);

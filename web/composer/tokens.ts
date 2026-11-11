@@ -7,15 +7,15 @@ import { mentionStart } from '../../shared/mentions.ts';
  * directly.
  */
 
-// ---- Podcode's own commands ------------------------------------------------
+// ---- PodCode's own commands ------------------------------------------------
 
-/** Commands Podcode runs itself. They run only when they are the whole message. */
+/** Commands PodCode runs itself. They run only when they are the whole message. */
 export const BUILTIN_COMMANDS: ComposerCommand[] = [
   {
     name: 'clear',
     description: 'Clear the conversation and start a fresh session',
-    scope: 'agentscode',
-    source: 'agentscode',
+    scope: 'podcode',
+    source: 'podcode',
     // The server refuses these as messages (shared/commands.ts), so they run here too.
     aliases: ['new', 'reset'],
   },
@@ -183,13 +183,13 @@ const MAX_COMMANDS = 50;
 const MAX_FILES = 30;
 
 function scopeRank(command: ComposerCommand): number {
-  if (command.scope === 'agentscode') return 0;
+  if (command.scope === 'podcode') return 0;
   if (command.scope === 'project') return 1;
   if (command.scope === 'user') return 2;
   return 3;
 }
 
-/** Commands for the `/` picker: Podcode's first, then project, personal and plugin ones; fuzzy once typed. */
+/** Commands for the `/` picker: PodCode's first, then project, personal and plugin ones; fuzzy once typed. */
 export function rankCommands(commands: ComposerCommand[], query: string, limit = MAX_COMMANDS): ComposerCommand[] {
   const needle = query.trim().toLowerCase();
   if (!needle) {

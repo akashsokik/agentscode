@@ -17,7 +17,7 @@ const SUPER_ICON = `data:image/svg+xml,${encodeURIComponent(avatarSvg(SUPER_LOOK
 export { openAsks, superLabel };
 
 /** The desktop app's bridge; absent in a browser tab. */
-const desktop = typeof window === 'undefined' ? null : (window as unknown as { agentscodeDesktop?: { super?: DesktopSuper } }).agentscodeDesktop?.super ?? null;
+const desktop = typeof window === 'undefined' ? null : (window as unknown as { podcodeDesktop?: { super?: DesktopSuper } }).podcodeDesktop?.super ?? null;
 
 export function useSuperAgent(): Agent | undefined {
   return useApp(s => s.snapshot?.agents.find(a => a.role === 'super'));

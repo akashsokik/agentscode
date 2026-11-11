@@ -1,8 +1,8 @@
 /**
  * The SuperAgent outside the window: a menu bar item with what it is doing and the questions it
  * waits on you for, and a system-wide shortcut for its floating quick composer (quickWindow.ts),
- * which opens over the app in front without raising Podcode. The page keeps the menu bar
- * current (window.agentscodeDesktop.super.status) and gets the commands back (web/super.ts).
+ * which opens over the app in front without raising PodCode. The page keeps the menu bar
+ * current (window.podcodeDesktop.super.status) and gets the commands back (web/super.ts).
  */
 import { globalShortcut, ipcMain, Menu, nativeImage, Tray, type BrowserWindow, type IpcMainEvent, type MenuItemConstructorOptions } from 'electron';
 import { SUPER_GLOBAL_ACCELERATOR, type SuperCommand, type SuperTrayState } from '../shared/superAgent.ts';
@@ -12,14 +12,14 @@ interface Options {
   window: () => BrowserWindow | null;
   /** Show the window, making it if it was closed. */
   show: () => void;
-  /** Only the Podcode page may drive the menu bar. */
+  /** Only the PodCode page may drive the menu bar. */
   fromApp: (event: IpcMainEvent) => boolean;
   /** The floating quick composer. */
   quick: QuickWindow;
 }
 
 /**
- * The menu bar icon, drawn here so nothing has to ship beside the app: Podcode's 2x2 grid, the
+ * The menu bar icon, drawn here so nothing has to ship beside the app: PodCode's 2x2 grid, the
  * top-left and bottom-right cells solid and the others faint, as a template image macOS tints.
  */
 function trayIcon(): Electron.NativeImage {
@@ -74,7 +74,7 @@ export function startSuperBridge(options: Options): void {
       ...(state.asks.length ? [{ type: 'separator' } as MenuItemConstructorOptions] : []),
       { label: 'Ask the SuperAgent…', accelerator: SUPER_GLOBAL_ACCELERATOR, click: () => options.quick.show() },
       { label: 'Open the SuperAgent', click: () => send({ type: 'open' }) },
-      { label: 'Show Podcode', click: () => options.show() },
+      { label: 'Show PodCode', click: () => options.show() },
     ];
     tray.setContextMenu(Menu.buildFromTemplate(items));
   };
@@ -102,7 +102,7 @@ export function startSuperBridge(options: Options): void {
 
   // Another app may hold the keys already; the quick bar still works inside the window.
   if (!globalShortcut.register(SUPER_GLOBAL_ACCELERATOR, () => options.quick.toggle())) {
-    console.warn(`[super] ${SUPER_GLOBAL_ACCELERATOR} is taken by another app; the SuperAgent's quick bar works inside Podcode only.`);
+    console.warn(`[super] ${SUPER_GLOBAL_ACCELERATOR} is taken by another app; the SuperAgent's quick bar works inside PodCode only.`);
   }
 }
 

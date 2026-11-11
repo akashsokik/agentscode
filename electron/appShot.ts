@@ -1,5 +1,5 @@
 /**
- * app_screenshot: a PNG of Podcode's own window as the user sees it, for agents that check UI
+ * app_screenshot: a PNG of PodCode's own window as the user sees it, for agents that check UI
  * work (the SuperAgent, reviewers, testers). It never focuses or raises a window. Asked to open an
  * agent's tab or a channel first, it changes what the main window shows, which its tool says.
  */
@@ -27,7 +27,7 @@ export async function captureApp(deps: AppShotDeps, args: Record<string, unknown
   const which = args.window === 'quick' ? 'quick' : 'main';
   const win = which === 'quick' ? deps.quick() : deps.main();
   if (!win || win.isDestroyed()) {
-    throw new BrowserError(which === 'quick' ? 'The quick window is not open, so there is nothing to capture.' : 'The Podcode window is closed. Ask the user to open it, then try again.');
+    throw new BrowserError(which === 'quick' ? 'The quick window is not open, so there is nothing to capture.' : 'The PodCode window is closed. Ask the user to open it, then try again.');
   }
   if (which === 'main') {
     const command: SuperCommand | null = typeof args.openAgent === 'string' ? { type: 'openAgent', agentId: args.openAgent }

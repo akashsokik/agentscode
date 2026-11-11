@@ -28,8 +28,8 @@ import { SUPER_LOOK } from '../../shared/avatar.ts';
 
 type Picker = 'target' | 'project' | 'model' | null;
 
-const DRAFT_KEY = 'agentscode:quick-draft';
-const TARGET_KEY = 'agentscode:quick-target';
+const DRAFT_KEY = 'podcode:quick-draft';
+const TARGET_KEY = 'podcode:quick-target';
 const FIELD_MAX = 220;
 const MOD = IS_MAC ? '⌘' : 'Ctrl+';
 /** Card motion, as MonoCode's picker motion: a quick ease-out on height, a fade on the panel. */
@@ -268,7 +268,7 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
       </header>
 
       {!snapshot ? (
-        <p className="px-5 pb-1 pt-4 text-[13px] text-content/45">{connection === 'closed' ? 'Waiting for Podcode on this machine…' : 'Connecting to Podcode…'}</p>
+        <p className="px-5 pb-1 pt-4 text-[13px] text-content/45">{connection === 'closed' ? 'Waiting for PodCode on this machine…' : 'Connecting to PodCode…'}</p>
       ) : (
         <>
           <TeamStrip agents={agents} onOpen={onOpenAgent} />
