@@ -115,6 +115,10 @@ export interface RunnerCommand {
 export interface PromptContext {
   /** Every registered project, for an agent with no project. */
   projects?: Pick<Project, 'name' | 'path'>[];
+  /** For an agent on several projects: the ones besides its start folder, used in place. */
+  alsoProjects?: Pick<Project, 'name' | 'path'>[];
+  /** It can read those but not write there (Codex's sandbox writes only in the start folder). */
+  readOnlyOthers?: boolean;
   /** What the agent remembered, oldest first, already cut to what it is given. */
   memory?: MemoryEntry[];
   /** Entries left out because memory.md is over its limit. */
@@ -173,8 +177,12 @@ export function profileSection(profile: ProfileEntry[], omitted = 0): string {
 export function contextSections(agent: Agent, project: Project | null, context: PromptContext = {}): Record<ContextSection, string> {
   const projects = context.projects ?? [];
   const soul = agent.instructions.trim();
+  const also = context.alsoProjects ?? [];
   return {
-    projects: project ? '' : projects.length
+    projects: project ? (also.length ? alsoProjectsText(project, also, Boolean(context.readOnlyOthers)) : '')
+      // No projects at all: its stored choice could not be read, so it was given none rather than every project.
+      : agent.projectIds?.length === 0 ? `You have no projects right now: your project choice could not be read, so you were given none. Work only in your own folder, ${noProjectFolder(agent.home)}, and ask the user to pick your projects in your settings before working in any project.`
+      : projects.length
       ? `You are not tied to one project. The user's projects are:\n${projects.map(p => `- ${p.name}: ${p.path}`).join('\n')}\nWork in the project the task is about, and ask if it is not clear which. Your own folder is ${noProjectFolder(agent.home)}; keep notes there, not in the projects.`
       : `You are not tied to one project, and the user has not added any projects yet. Your own folder is ${noProjectFolder(agent.home)}.`,
     soul: soul ? `Your standing instructions: ${soul}` : '',
@@ -182,6 +190,18 @@ export function contextSections(agent: Agent, project: Project | null, context: 
     user: profileSection(context.profile ?? [], context.profileOmitted),
     refs: context.refs ?? '',
   };
+}
+
+/**
+ * For an agent on several projects: the others besides its start folder, which it uses in place (a
+ * worktree is only ever made for the start folder), and whether it may write there.
+ */
+function alsoProjectsText(start: Project, also: Pick<Project, 'name' | 'path'>[], readOnly: boolean): string {
+  const list = also.map(p => `- ${p.name}: ${p.path}`).join('\n');
+  const access = readOnly
+    ? `You can read them, but your sandbox lets you write only in ${start.name}, your start folder: for a change in one of them, ask the user or a teammate who works there.`
+    : 'You may read and write in them too. Edit them in place: they are the user\'s own checkouts, so keep changes small and say what you changed.';
+  return `Besides ${start.name} (your start folder, where your sessions run), you also work on these projects, used in place:\n${list}\n${access} Notes and decisions you record go to ${start.name} unless you name another project.`;
 }
 
 /** The changeable part of an agent's instructions, whole: its sections and the memory guidance. */

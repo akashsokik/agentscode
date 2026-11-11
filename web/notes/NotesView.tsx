@@ -6,7 +6,7 @@ import { open, useLayout } from '../layout.ts';
 import { ChevronLeft, ChevronsUpDown, Search, X } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { useApp } from '../store.ts';
-import { Loading, MenuRow } from '../ui/common.tsx';
+import { Loading, MenuLabel, MenuRow } from '../ui/common.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
 import { citeTime, Highlight, kindWord, NoteGlyph, shortDate, StaticChip, StatusPill, WhoAvatar } from './parts.tsx';
 import { RefChip } from './RefChip.tsx';
@@ -21,32 +21,41 @@ import { loadRefs, openNote, setNotesCode, setNotesEverywhere, setNotesFilter, s
 
 const SearchGlyph = () => <Search aria-hidden className="size-[13px] shrink-0" strokeWidth={1.75} />;
 
-/** The project the list shows, and whether it can be switched. */
-function useNotesProject(agent: Agent | undefined, projects: RefProject[]): { project: RefProject | undefined; switchable: boolean } {
+/** The project the list shows, whether it can be switched, and to which (null: any). */
+function useNotesProject(agent: Agent | undefined, projects: RefProject[]): { project: RefProject | undefined; switchable: boolean; options: RefProject[]; label?: string } {
   const live = useApp(s => s.snapshot?.projects);
   const layout = useLayout();
   const picked = useNotes(s => s.code);
-  const own = agent && agent.role !== 'super' && agent.projectId !== null ? live?.find(p => p.id === agent.projectId)?.code : undefined;
-  if (own) return { project: projects.find(p => p.code === own) ?? { code: own, name: live?.find(p => p.code === own)?.name ?? own, decisions: 0, notes: 0, replaced: 0 }, switchable: false };
+  const asRef = (code: string): RefProject => projects.find(p => p.code === code) ?? { code, name: code === 'ALL' ? 'All projects' : live?.find(p => p.code === code)?.name ?? code, decisions: 0, notes: 0, replaced: 0 };
+  // An agent on chosen projects: its own projects' notes (the start folder's first), and with
+  // several, a switcher between them and All (ACH-D15).
+  const codes = agent && agent.role !== 'super' && agent.projectIds !== null
+    ? agent.projectIds.flatMap(id => { const code = live?.find(p => p.id === id)?.code; return code ? [code] : []; })
+    : [];
+  if (codes.length === 1) return { project: asRef(codes[0]), switchable: false, options: [] };
+  if (codes.length > 1) {
+    const options = [...codes, 'ALL'].map(asRef);
+    return { project: options.find(p => p.code === picked) ?? options[0], switchable: true, options, label: `${agent!.name} works in` };
+  }
   const current = layout.projectId ? live?.find(p => p.id === layout.projectId)?.code : undefined;
   const code = picked ?? current;
   const project = projects.find(p => p.code === code)
     ?? projects.find(p => p.decisions + p.notes + p.replaced > 0)
     ?? projects[0];
-  return { project, switchable: true };
+  return { project, switchable: true, options: projects };
 }
 
 export function NotesView({ agent }: { agent: Agent | undefined }) {
   const index = useNotes(s => s.index);
   const error = useNotes(s => s.error);
   const openId = useNotes(s => s.openId);
-  const { project, switchable } = useNotesProject(agent, index?.projects ?? []);
+  const { project, switchable, options, label } = useNotesProject(agent, index?.projects ?? []);
   // The files can be edited by hand, which sends no event: read them again whenever the tab opens.
   useEffect(() => { void loadRefs(); }, []);
   if (openId) return <NoteDetail id={openId} />;
   if (!index) return error ? <p className="p-4 font-sans text-[12px] text-danger">{error}</p> : <Loading className="px-4 py-4" />;
   if (!project) return <EmptyState icon={<NoteGlyph className="size-[18px]" />}>No projects yet.</EmptyState>;
-  return <NotesList project={project} switchable={switchable} projects={index.projects} entries={index.entries} />;
+  return <NotesList project={project} switchable={switchable} projects={options} switcherLabel={label} entries={index.entries} />;
 }
 
 function Header({ children, trailing }: { children: ReactNode; trailing?: ReactNode }) {
@@ -54,7 +63,7 @@ function Header({ children, trailing }: { children: ReactNode; trailing?: ReactN
   return <div className="flex h-10 shrink-0 items-center gap-1.5 pl-2 pr-3 font-sans">{children}{trailing}</div>;
 }
 
-function ProjectSwitcher({ project, projects }: { project: RefProject; projects: RefProject[] }) {
+function ProjectSwitcher({ project, projects, label }: { project: RefProject; projects: RefProject[]; label?: string }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   return (
     <>
@@ -71,7 +80,8 @@ function ProjectSwitcher({ project, projects }: { project: RefProject; projects:
       </button>
       {anchor ? (
         <Popover anchor={anchor} side="bottom" align="start" width={260} onDismiss={() => setAnchor(null)} className="p-1.5">
-          <div role="listbox" aria-label="Projects">
+          <div role="listbox" aria-label={label ?? 'Projects'}>
+            {label ? <MenuLabel>{label}</MenuLabel> : null}
             {projects.map(p => (
               <MenuRow
                 key={p.code}
@@ -184,7 +194,7 @@ function EmptyState({ icon, children, action }: { icon: ReactNode; children: Rea
   );
 }
 
-function NotesList({ project, switchable, projects, entries }: { project: RefProject; switchable: boolean; projects: RefProject[]; entries: RefSummary[] }) {
+function NotesList({ project, switchable, projects, switcherLabel, entries }: { project: RefProject; switchable: boolean; projects: RefProject[]; switcherLabel?: string; entries: RefSummary[] }) {
   const filter = useNotes(s => s.filter);
   const query = useNotes(s => s.query);
   const everywhere = useNotes(s => s.everywhere);
@@ -196,7 +206,7 @@ function NotesList({ project, switchable, projects, entries }: { project: RefPro
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Header trailing={<span className="ml-auto shrink-0 font-mono text-[12px] text-content/40">{project.code}</span>}>
-        {switchable ? <ProjectSwitcher project={project} projects={projects} /> : <h3 className="min-w-0 truncate pl-1.5 text-[13px] font-medium text-content">{project.name}</h3>}
+        {switchable ? <ProjectSwitcher project={project} projects={projects} label={switcherLabel} /> : <h3 className="min-w-0 truncate pl-1.5 text-[13px] font-medium text-content">{project.name}</h3>}
       </Header>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pb-3 pt-1">
         {mine.length || query ? <Tools query={query} /> : null}

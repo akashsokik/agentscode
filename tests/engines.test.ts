@@ -8,7 +8,7 @@ import { COMMS_SERVER } from '../server/config.ts';
 import { COMMS_TOOLS, codexCommsConfig, commsMcpConfig, createCommsMcpServer } from '../server/comms/tools.ts';
 
 const base: Agent = {
-  id: 'a1', name: 'Ada', engine: 'codex', projectId: 'p1', worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: '', effort: '',
+  id: 'a1', name: 'Ada', engine: 'codex', projectIds: ['p1'], worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: '', effort: '',
   autonomy: 'edits', useMcp: false, role: 'dev', instructions: '', status: 'idle', activity: '',
   currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
   costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null,

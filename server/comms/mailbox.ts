@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { noProjectFolder, type Agent, type AgentTask, type Conversation, type Delegation, type PeerMessage, type Report } from '../../shared/types.ts';
 import { HttpError } from '../errors.ts';
+import { isAllProjects, sharesProject, startProjectId } from '../../shared/agentProjects.ts';
 import type { Store } from '../store.ts';
 
 export interface Delivery {
@@ -73,10 +74,11 @@ export class Mailbox {
 
   private visible(source: Agent, other: Agent): boolean {
     // An agent with no project works with everyone, whatever the awareness setting; the SuperAgent runs them all.
-    if (source.projectId === null || other.projectId === null || source.role === 'super') return true;
+    if (isAllProjects(source) || isAllProjects(other) || source.role === 'super') return true;
     const { awareness } = this.store.settings;
     if (awareness === 'off') return false;
-    return awareness === 'all' || other.projectId === source.projectId;
+    // Same project: they share at least one of their projects.
+    return awareness === 'all' || sharesProject(source, other);
   }
 
   /** Can `from` start (or continue, with replyTo) a conversation with `to`? */
@@ -94,13 +96,20 @@ export class Mailbox {
     const source = this.agent(id);
     const share = this.store.settings.shareActivity;
     return [...this.store.agents.values()].filter(a => a.id !== id && this.visible(source, a)).map(a => {
-      const project = a.projectId === null ? undefined : this.store.projects.get(a.projectId);
+      const start = startProjectId(a);
+      const project = start === null ? undefined : this.store.projects.get(start);
+      const others = (a.projectIds ?? []).slice(1).flatMap(pid => {
+        const p = this.store.projects.get(pid);
+        return p ? [{ name: p.name, path: p.path }] : [];
+      });
       return {
         id: a.id, name: a.name, engine: a.engine, role: a.role, status: a.status,
+        // Its start folder; the rest of its projects follow in alsoProjects.
         project: project ? { name: project.name, path: project.path } : null,
+        ...(others.length ? { alsoProjects: others } : {}),
         // No project: works across all of them, from the workspace in its home.
-        allProjects: a.projectId === null || undefined,
-        workspace: a.worktree?.cwd ?? project?.path ?? (a.projectId === null ? noProjectFolder(a.home) : null),
+        allProjects: isAllProjects(a) || undefined,
+        workspace: a.worktree?.cwd ?? project?.path ?? (isAllProjects(a) ? noProjectFolder(a.home) : null),
         branch: a.worktree?.branch ?? null,
         // The SuperAgent is read-only so it never edits, but messaging agents is its job. An agent the
         // user stopped is off limits to it too: it asks the user instead.

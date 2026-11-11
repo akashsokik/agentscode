@@ -4,22 +4,22 @@ import type { Agent } from '../shared/types.ts';
 import { ALL_PROJECTS, railAgents, railAgentStatus, showsWorkspace } from '../web/sidebar/agentRail.ts';
 
 let made = 0;
-const agent = (fields: Partial<Agent> & Pick<Agent, 'id' | 'name'>): Agent => ({ projectId: null, status: 'idle', unread: false, createdAt: ++made, ...fields }) as Agent;
+const agent = (fields: Partial<Agent> & Pick<Agent, 'id' | 'name'>): Agent => ({ projectIds: null, status: 'idle', unread: false, createdAt: ++made, ...fields }) as Agent;
 
 test('only agents with no project are listed; project agents stay in their workspace column', () => {
   const listed = railAgents([
-    agent({ id: 'ada', name: 'Ada', projectId: 'p1' }),
+    agent({ id: 'ada', name: 'Ada', projectIds: ['p1'] }),
     agent({ id: 'nova', name: 'Nova' }),
-    agent({ id: 'cy', name: 'Cy', projectId: 'p2' }),
+    agent({ id: 'cy', name: 'Cy', projectIds: ['p2'] }),
     // An agent whose project was deleted still has a project id: it is not one that works across all of them.
-    agent({ id: 'gone', name: 'Dee', projectId: 'deleted' }),
+    agent({ id: 'gone', name: 'Dee', projectIds: ['deleted'] }),
     agent({ id: 'atlas', name: 'atlas' }),
   ]);
   assert.deepEqual(listed.map(a => a.id), ['atlas', 'nova']);
 });
 
 test('nothing is listed when every agent belongs to a project', () => {
-  assert.deepEqual(railAgents([agent({ id: 'ada', name: 'Ada', projectId: 'p1' })]), []);
+  assert.deepEqual(railAgents([agent({ id: 'ada', name: 'Ada', projectIds: ['p1'] })]), []);
 });
 
 test('by name, case-insensitive and numeric; the same name keeps creation order', () => {
@@ -49,7 +49,7 @@ test('row status follows the agent card: needs you, then working, failed, unread
 
 test('the workspace column shows only for a project with agents of its own', () => {
   const agents = [
-    agent({ id: 'ada', name: 'Ada', projectId: 'p1' }),
+    agent({ id: 'ada', name: 'Ada', projectIds: ['p1'] }),
     agent({ id: 'nova', name: 'Nova' }),
   ];
   assert.equal(showsWorkspace(agents, 'p1'), true);

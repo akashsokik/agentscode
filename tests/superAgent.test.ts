@@ -73,7 +73,7 @@ test('there is one SuperAgent: read-only, across all projects, never a role to p
   const t = await team();
   assert.equal(t.sup.role, 'super');
   assert.equal(t.sup.autonomy, 'readonly');
-  assert.equal(t.sup.projectId, null);
+  assert.equal(t.sup.projectIds, null);
   assert.equal(t.view().agentId, t.sup.id);
   await assert.rejects(t.manager.createSuper(), e => status(e) === 409);
   assert.ok(!ROLES.some(r => r.id === 'super'), 'not in the pickers');
@@ -99,9 +99,9 @@ test('create_agent: the role\'s own permissions, a project by name, a daily cap,
   const t = await team();
   const MAX_CREATES_PER_DAY = 3;
   t.manager.updateSettings({ superMaxCreatesPerDay: MAX_CREATES_PER_DAY });
-  const result = await t.call('create_agent', { name: 'Tess', role: 'tester', project: 'WEB', task: 'Run the tests.', why: 'The user wants tests before merging.' }) as { created: { id: string; autonomy: string; projectId: string } };
+  const result = await t.call('create_agent', { name: 'Tess', role: 'tester', project: 'WEB', task: 'Run the tests.', why: 'The user wants tests before merging.' }) as { created: { id: string; autonomy: string; projectIds: string[] | null } };
   assert.equal(result.created.autonomy, 'edits', 'a tester\'s default, never Full access');
-  assert.equal(result.created.projectId, t.web.id);
+  assert.deepEqual(result.created.projectIds, [t.web.id]);
   const tess = t.store.agents.get(result.created.id)!;
   assert.equal(tess.instructions, ROLES.find(r => r.id === 'tester')!.instructions, 'no instructions of its own');
   assert.equal(t.runner.ctx.agent().role, 'super');
@@ -336,8 +336,8 @@ test('the page: the SuperAgent has its own row, not one among the agents; its li
   const { railAgents } = await import('../web/sidebar/agentRail.ts');
   const { openAsks, superLabel } = await import('../web/superText.ts');
   const listed = railAgents([
-    { name: 'SuperAgent', projectId: null, createdAt: 1, role: 'super' as const },
-    { name: 'Ada', projectId: null, createdAt: 2, role: 'dev' as const },
+    { name: 'SuperAgent', projectIds: null, createdAt: 1, role: 'super' as const },
+    { name: 'Ada', projectIds: null, createdAt: 2, role: 'dev' as const },
   ]);
   assert.deepEqual(listed.map(a => a.name), ['Ada']);
   assert.equal(superLabel(undefined, 0), 'Set up the SuperAgent');

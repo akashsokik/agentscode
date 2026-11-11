@@ -10,7 +10,7 @@ import { settle, tempDir } from './helpers.ts';
 
 function agent(id: string, overrides: Partial<Agent> = {}): Agent {
   return {
-    id, name: id.toUpperCase(), engine: 'claude', projectId: 'p1', worktree: null, home: `/tmp/agentscode-test/agents/${id}`, dreaming: true, model: '', effort: '',
+    id, name: id.toUpperCase(), engine: 'claude', projectIds: ['p1'], worktree: null, home: `/tmp/agentscode-test/agents/${id}`, dreaming: true, model: '', effort: '',
     autonomy: 'edits', useMcp: false, role: 'dev', instructions: '', status: 'idle', activity: '',
     currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
     costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null, ...overrides,
@@ -96,7 +96,7 @@ test('only the recipient can reply, and only to the sender', async () => {
 });
 
 test('awareness settings limit who can be messaged', () => {
-  const same = setup([agent('a'), agent('b', { projectId: 'p2' })], { awareness: 'project' });
+  const same = setup([agent('a'), agent('b', { projectIds: ['p2'] })], { awareness: 'project' });
   assert.deepEqual(same.mailbox.teammates('a'), []);
   assert.throws(() => same.mailbox.send('a', 'b', 'hi'), e => status(e) === 403);
 
@@ -104,7 +104,7 @@ test('awareness settings limit who can be messaged', () => {
   assert.deepEqual(off.mailbox.teammates('a'), []);
   assert.throws(() => off.mailbox.send('a', 'b', 'hi'), e => status(e) === 403);
 
-  const all = setup([agent('a'), agent('b', { projectId: 'p2' })], { awareness: 'all' });
+  const all = setup([agent('a'), agent('b', { projectIds: ['p2'] })], { awareness: 'all' });
   assert.equal(all.mailbox.teammates('a').length, 1);
   assert.equal(all.mailbox.send('a', 'b', 'hi').status, 'queued');
 });

@@ -7,12 +7,14 @@ export { ALL_PROJECTS };
 
 /**
  * The agents with no project, by name; agents with the same name keep the order they were made in.
- * A project's agents live in that project's workspace column instead.
+ * A project's agents live in that project's workspace column instead (an agent on several projects,
+ * in each of theirs).
  */
-export function railAgents<A extends Pick<Agent, 'name' | 'projectId' | 'createdAt'> & { role?: Agent['role'] }>(agents: readonly A[]): A[] {
+export function railAgents<A extends Pick<Agent, 'name' | 'projectIds' | 'createdAt'> & { role?: Agent['role'] }>(agents: readonly A[]): A[] {
   return agents
     // The SuperAgent has its own row at the top of the navigation column.
-    .filter(agent => !agent.projectId && agent.role !== 'super')
+    // Agents with no projects to show under (their choice could not be read) are listed here too.
+    .filter(agent => !agent.projectIds?.length && agent.role !== 'super')
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }) || a.createdAt - b.createdAt);
 }
 
@@ -21,8 +23,8 @@ export function railAgents<A extends Pick<Agent, 'name' | 'projectId' | 'created
  * the project has agents of its own, since agents with no project are listed in the navigation
  * column. With no project at all it shows the Add project prompt, until any agent exists.
  */
-export function showsWorkspace(agents: readonly Pick<Agent, 'projectId'>[], projectId: string | undefined): boolean {
-  return projectId ? agents.some(agent => agent.projectId === projectId) : !agents.length;
+export function showsWorkspace(agents: readonly Pick<Agent, 'projectIds'>[], projectId: string | undefined): boolean {
+  return projectId ? agents.some(agent => Boolean(agent.projectIds?.includes(projectId))) : !agents.length;
 }
 
 /** What a rail row shows at its end, in the order AgentCard's StatusMark checks them. */

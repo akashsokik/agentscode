@@ -41,7 +41,7 @@ async function turn(h: Awaited<ReturnType<typeof team>>, agentId: string, text =
 
 test('an agent can have no project: it works from the workspace in its home across every project', async () => {
   const h = await team();
-  assert.equal(h.nova.projectId, null);
+  assert.equal(h.nova.projectIds, null);
   assert.equal(h.nova.home, path.join(h.store.dataDir, 'agents', h.nova.id));
   assert.ok(fs.statSync(h.nova.home).isDirectory());
   assert.equal(fs.readFileSync(path.join(h.nova.home, 'soul.md'), 'utf8'), 'Answer in plain words.\n');

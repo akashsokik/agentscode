@@ -61,8 +61,13 @@ export interface Agent {
   engine: EngineKind;
   /** How it looks in the app (shared/avatar.ts); absent, it comes from the id. */
   avatar?: AvatarLook;
-  /** The project it works on; null for an agent with no project, which works across every registered project. */
-  projectId: string | null;
+  /**
+   * The projects it works on (shared/agentProjects.ts): null for every registered project, else the
+   * chosen ones in order, the first being its start folder, where its sessions run and its worktree
+   * (if any) is made. The others are used in place. Stored agents with the old projectId are
+   * migrated on load: an id becomes [id], null stays null.
+   */
+  projectIds: string[] | null;
   worktree: Worktree | null;
   /**
    * The agent's private folder, <dataDir>/agents/<id>/: soul.md (standing instructions) and
@@ -889,8 +894,13 @@ export type ServerEvent =
 export interface CreateAgentRequest {
   name: string;
   engine: EngineKind;
-  /** null creates an agent with no project, working across every project; it cannot have a worktree. */
-  projectId: string | null;
+  /**
+   * null creates an agent with no project, working across every project; it cannot have a worktree.
+   * A list chooses projects, the first being its start folder (the worktree's, with worktree).
+   */
+  projectIds?: string[] | null;
+  /** The older single-project form: an id is [id]. Used when projectIds is absent. */
+  projectId?: string | null;
   model?: string;
   effort?: string;
   autonomy?: Autonomy;
@@ -919,6 +929,8 @@ export interface AgentPatch {
   dreaming?: boolean;
   /** Its avatar's shape, colour and eyes (shared/avatar.ts). */
   avatar?: AvatarLook;
+  /** Its projects: null for all, else the chosen ones with the start folder first (shared/agentProjects.ts). */
+  projectIds?: string[] | null;
 }
 
 /** A change to one memory entry from the app. */

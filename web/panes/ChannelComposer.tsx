@@ -63,7 +63,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
   const query = mentionTokenAt(text, caret, mentionNames(agents, projects));
   const open = Boolean(query) && query?.start !== dismissedAt;
   const memberProjects = useMemo(() => {
-    const ids = new Set(members.map(m => m.projectId).filter((id): id is string => Boolean(id)));
+    const ids = new Set(members.flatMap(m => m.projectIds ?? []));
     return (projects ?? []).filter(p => ids.has(p.id));
   }, [members, projects]);
   const projectFiles = useProjectsFiles(memberProjects, open);

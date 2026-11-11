@@ -18,6 +18,9 @@ import { submitKey } from './submitKey.ts';
 import { AvatarPicker } from './AvatarPicker.tsx';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 import { agentLook, type AvatarLook } from '../../shared/avatar.ts';
+import { startProjectId } from '../../shared/agentProjects.ts';
+import { choiceFrom, choiceValue, sameChoice, type ProjectsChoice } from '../projectPicker.ts';
+import { ProjectsPicker } from './ProjectsPicker.tsx';
 import { IS_MAC } from '../platform.ts';
 import { openingSection, rememberedSection, rememberSection, SECTIONS, sectionForKey, type AgentSettingsSection } from '../settingsSections.ts';
 
@@ -63,7 +66,11 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
   }, [agent.id]);
   const home = useApp(s => s.snapshot?.home);
   const projects = useApp(s => s.snapshot?.projects);
-  const project = projects?.find(p => p.id === agent.projectId);
+  const project = projects?.find(p => p.id === startProjectId(agent));
+  // Its projects (ACH-D15); a worktree keeps its start folder where it is.
+  const [choice, setChoice] = useState<ProjectsChoice>(() => choiceFrom(agent.projectIds, agent.worktree ? startProjectId(agent) ?? undefined : undefined));
+  const chosen = choiceValue(choice);
+  const projectsChanged = agent.role !== 'super' && chosen !== undefined && !sameChoice(chosen, agent.projectIds);
   const [name, setName] = useState(agent.name);
   const [role, setRole] = useState<AgentRole>(agent.role);
   const [look, setLook] = useState<AvatarLook>(() => agentLook(agent));
@@ -84,7 +91,7 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
 
   const save = async () => {
     setBusy(true);
-    const ok = await attempt(() => api.updateAgent(agent.id, { name: name.trim(), role, instructions, ...(lookChanged ? { avatar: look } : {}) }));
+    const ok = await attempt(() => api.updateAgent(agent.id, { name: name.trim(), role, instructions, ...(lookChanged ? { avatar: look } : {}), ...(projectsChanged ? { projectIds: chosen } : {}) }));
     setBusy(false);
     if (ok) onClose();
   };
@@ -92,13 +99,14 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
   // The confirmation replaces this dialog rather than stacking on it; Cancel comes back here.
   if (removing) return <RemoveAgentDialog agent={agent} onClose={onClose} onCancel={() => setRemoving(false)} />;
 
-  const onSubmitKey = submitKey(!busy && Boolean(name.trim()), () => void save());
+  const onSubmitKey = submitKey(!busy && Boolean(name.trim()) && chosen !== undefined, () => void save());
   const usage = [`${agent.turns} ${agent.turns === 1 ? 'turn' : 'turns'}`, agent.costUsd ? `$${agent.costUsd.toFixed(2)}` : '', agent.tokens ? `${agent.tokens.toLocaleString()} tokens` : ''].filter(Boolean).join(', ');
-  const noProject = agent.projectId === null;
+  const noProject = agent.projectIds === null;
+  const alsoNames = (agent.projectIds ?? []).slice(1).flatMap(id => (projects ?? []).filter(p => p.id === id).map(p => p.name));
   return (
     <Modal
       title={agent.name}
-      description={projectLabel(agent.projectId, projects) || undefined}
+      description={projectLabel(agent.projectIds, projects) || undefined}
       size="lg"
       fitViewport
       className="h-[min(680px,calc(100dvh-32px))]"
@@ -106,7 +114,7 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
       footer={
         <>
           <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
-          <button type="button" className={PRIMARY} disabled={busy || !name.trim()} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
+          <button type="button" className={PRIMARY} disabled={busy || !name.trim() || chosen === undefined} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
         </>
       }
     >
@@ -152,9 +160,22 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
           {section === 'general' ? (
             <>
               <Group title="Workspace">
-                <Row label="Folder" description={shortPath(agent.worktree?.cwd ?? project?.path ?? (noProject ? noProjectFolder(agent.home) : ''), home)} />
-                {noProject ? <Row label="Projects" description={`${ALL_PROJECTS}: it can work in any project you have added.`} /> : null}
-                {agent.worktree ? <Row label="Branch" description={`${agent.worktree.branch}, from ${agent.worktree.base}`} /> : null}
+                {agent.role === 'super' ? (
+                  <Row label="Projects" description={`${ALL_PROJECTS}: it can work in any project you have added.`} />
+                ) : (
+                  <div className="border-b border-content/5 px-4 py-3.5">
+                    <ProjectsPicker
+                      choice={choice}
+                      onChange={setChoice}
+                      projects={projects ?? []}
+                      agents={(allAgents ?? []).filter(a => a.id !== agent.id)}
+                      engine={agent.engine}
+                      note={`${agent.projectIds?.length === 0 ? 'Its project choice could not be read, so it has none for now: pick its projects and save. ' : ''}Changes apply from its next turn, removing a project too: until then the turn it is in keeps the projects it started with${agent.worktree ? '' : '; a new start folder begins a fresh session there'}. Notes and decisions it records go to the start folder's project unless it names another.`}
+                    />
+                  </div>
+                )}
+                <Row label="Folder" description={`${shortPath(agent.worktree?.cwd ?? project?.path ?? (noProject ? noProjectFolder(agent.home) : ''), home)}${alsoNames.length ? `, also ${alsoNames.join(' and ')}` : ''}`} />
+                {agent.worktree ? <Row label="Worktree" description={`${agent.worktree.branch}, from ${agent.worktree.base}, for ${project?.name ?? 'its start folder'} only.${alsoNames.length ? ` ${alsoNames.join(' and ')} ${alsoNames.length === 1 ? 'is' : 'are'} used in place.` : ''}`} /> : null}
                 <Row label="Usage" description={`${usage}${agent.sessionId ? `. Session ${agent.sessionId.slice(0, 8)}.` : '.'}`} />
               </Group>
 

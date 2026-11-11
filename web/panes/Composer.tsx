@@ -300,7 +300,9 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
   };
 
   const contextShare = contextPercent(agent.context);
-  const where = agent.worktree?.cwd ?? project?.path ?? (agent.projectId === null ? noProjectFolder(agent.home) : '');
+  const where = agent.worktree?.cwd ?? project?.path ?? (agent.projectIds === null ? noProjectFolder(agent.home) : '');
+  // An agent on several projects starts here and also works on these, in place.
+  const also = (agent.projectIds ?? []).slice(1).flatMap(id => (allProjects ?? []).filter(p => p.id === id).map(p => p.name));
   return (
     <div data-composer className="@container/composer relative mx-auto w-full max-w-3xl shrink-0 p-1.5 pt-0">
       {question ? <div className="px-1.5 pb-1.5"><QuestionPrompt approval={question} /></div> : null}
@@ -439,7 +441,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
       <div data-composer-workspace-bar className="flex min-w-0 items-center gap-2.5 overflow-hidden pl-[15px] pr-[15px] pt-2 font-sans text-[11.5px] text-content/40">
         <span className="flex min-w-0 items-center gap-1.5" title={where}>
           <Folder className="size-3.5 shrink-0" strokeWidth={1.75} />
-          <span className="min-w-0 truncate">{shortPath(where, home)}</span>
+          <span className="min-w-0 truncate">{shortPath(where, home)}{also.length ? <span className="text-content/35"> · also {also.join(', ')}</span> : null}</span>
         </span>
         {agent.worktree ? (
           <span className="flex min-w-0 items-center gap-1.5" title={`From ${agent.worktree.base}`}>

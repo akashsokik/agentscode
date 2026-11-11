@@ -43,7 +43,7 @@ import {
   type WorktreeCleanup,
 } from '../shared/types.ts';
 import { ROLES, rolePreset, SUPER_PRESET } from '../shared/roles.ts';
-import { engineProblem, serviceTiers } from '../shared/engines.ts';
+import { engineProblem, ORCACODE_NO_ADD_DIR, serviceTiers } from '../shared/engines.ts';
 import { isIdeCommand } from '../shared/commands.ts';
 import { injectSkillPrompt, skillNamesInText, type ComposerCommand } from '../shared/composer.ts';
 import { commandBody, commandsFor, type DiscoveredCommand } from './skills.ts';
@@ -85,7 +85,8 @@ import { RefMentions } from './refMentions.ts';
 import { BrowserBridge, BROWSER_WRITE_OPS, compactConsole, type BrowserOp } from './browserBridge.ts';
 import { blockedReason, normalizeAddress } from '../shared/browser.ts';
 import { createWalkthrough, deleteWalkthrough, listWalkthroughs, readWalkthrough, summaryOf, walkthroughImage, walkthroughMarkdown, type StepRoot } from './walkthroughs.ts';
-import type { Store } from './store.ts';
+import { migrateAgentProjects, type Store } from './store.ts';
+import { isAllProjects, normalizeProjectIds, startProjectId, worksOn } from '../shared/agentProjects.ts';
 import { createWorktree, removeWorktree } from './worktrees.ts';
 import { listArchive, type ArchivedAgent } from './agentArchive.ts';
 
@@ -159,6 +160,13 @@ export interface ManagerOptions {
 
 /** Longest model id kept; OrcaCode's `provider::vendor/model:variant` ids run long. */
 const MODEL_MAX = 200;
+/** The most projects one agent may be given (beyond that, All projects says it better). */
+const MAX_AGENT_PROJECTS = 12;
+
+/** A Codex agent on several projects writes only in its start folder (its sandbox), unless at Full access, which has none. */
+function codexWritesOnlyStart(agent: Agent): boolean {
+  return agent.engine === 'codex' && agent.autonomy !== 'full' && (agent.projectIds?.length ?? 0) > 1;
+}
 
 /** The runner for an agent's engine. */
 function createEngineRunner(ctx: RunnerContext): Runner {
@@ -316,7 +324,7 @@ export class AgentManager {
     this.channels.recover();
     for (const agent of this.store.agents.values()) {
       // Agents from before homes existed get one, with soul.md seeded from their instructions.
-      if (agent.projectId === undefined) agent.projectId = null;
+      migrateAgentProjects(agent);
       // Kept in the home now (.prompt.json), not on the agent the app sees.
       delete (agent as Agent & { promptKey?: string }).promptKey;
       // Dreaming is on unless you turned it off.
@@ -327,7 +335,8 @@ export class AgentManager {
       try {
         this.homes.ensure(agent);
         agent.instructions = this.homes.readSoul(agent);
-        if (agent.projectId === null) this.moveToWorkspace(agent);
+        // Every project, or none (a choice that could not be read): it works from its own folder.
+        if (startProjectId(agent) === null) this.moveToWorkspace(agent);
       } catch (err) {
         console.error(`[agents] could not prepare ${agent.home}:`, (err as Error).message);
       }
@@ -441,11 +450,11 @@ export class AgentManager {
         return index ? `${label(code)}:\n${index}` : '';
       };
       const blocks: string[] = [];
-      if (agent.role === 'super') {
-        const codes = [ALL_CODE, ...projects.map(p => p.code!), ...this.refs.codes()].filter((c, i, all) => all.indexOf(c) === i);
+      /** Each code's index in turn while the whole stays under the cap, then a count of the rest. */
+      const capped = (codes: string[]) => {
         let used = 0;
         let left = 0;
-        for (const code of codes) {
+        for (const code of codes.filter((c, i, all) => all.indexOf(c) === i)) {
           const text = block(code);
           if (!text) continue;
           if (used + text.length > ALL_INDEXES_LIMIT) { left++; continue; }
@@ -453,9 +462,12 @@ export class AgentManager {
           used += text.length;
         }
         if (left) blocks.push(`(${left} more ${left === 1 ? 'project is' : 'projects are'} left out; use ref_search)`);
-      } else if (agent.projectId !== null) {
-        const own = this.store.projects.get(agent.projectId)?.code;
-        for (const code of [own, ALL_CODE]) if (code) blocks.push(block(code));
+      };
+      if (agent.role === 'super') {
+        capped([ALL_CODE, ...projects.map(p => p.code!), ...this.refs.codes()]);
+      } else if (agent.projectIds !== null) {
+        // Its own projects, the start folder first, then ALL.
+        capped([...this.agentCodes(agent), ALL_CODE]);
       } else {
         blocks.push(block(ALL_CODE));
         const counts = projects.flatMap(p => {
@@ -482,14 +494,32 @@ export class AgentManager {
   private decisionHintFor(toId: string, text: string, taskProject?: string): string {
     try {
       const to = this.store.agents.get(toId);
-      const own = to?.projectId ? this.store.projects.get(to.projectId)?.code : undefined;
-      const first = taskProject ?? own;
-      const codes = first ? [first, ALL_CODE] : this.refs.codes();
+      const own = to ? this.agentCodes(to) : [];
+      const codes = taskProject ? [taskProject, ALL_CODE] : own.length ? [...own, ALL_CODE] : this.refs.codes();
       return decisionHint(matchDecisions([...new Set(codes)].flatMap(code => this.refs.entries(code, 'D')), text));
     } catch (err) {
       console.error('[refs] no decision hint:', (err as Error).message);
       return '';
     }
+  }
+
+  /** Where a note or decision goes: the project named, else the agent's start folder's; one on every project must name it. */
+  private recordCode(agent: Agent, project: string | undefined): string {
+    if (project) return this.refCode(project);
+    const own = this.agentCodes(agent)[0];
+    if (!own) {
+      const why = agent.projectIds === null ? 'You work across every project' : 'You have no projects right now';
+      throw new HttpError(400, `Name the project: a code such as ACH, a project name, or ALL. ${why}, so there is no default.`);
+    }
+    return own;
+  }
+
+  /** The codes of the projects an agent chose, the start folder's first; [] for an agent on every project. */
+  private agentCodes(agent: Agent): string[] {
+    return (agent.projectIds ?? []).flatMap(id => {
+      const code = this.store.projects.get(id)?.code;
+      return code ? [code] : [];
+    });
   }
 
   /** The agent added an entry itself; if its session was up to date, it need not be told again. */
@@ -576,6 +606,25 @@ export class AgentManager {
     this.hub.broadcast({ type: 'agent', agent });
   }
 
+  /**
+   * A requested project choice, checked: null for every project, else existing projects whose
+   * folders exist, without repeats, the start folder first. The older single projectId is read when
+   * projectIds is absent.
+   */
+  private checkProjectIds(raw: unknown, legacy?: unknown): string[] | null {
+    if (raw === undefined && legacy === undefined) throw new HttpError(400, 'Pick a project for this agent, or All projects.');
+    const ids = normalizeProjectIds(raw, legacy);
+    if (ids === undefined) throw new HttpError(400, 'Pick at least one project, or All projects.');
+    if (ids === null) return null;
+    if (ids.length > MAX_AGENT_PROJECTS) throw new HttpError(400, `Pick at most ${MAX_AGENT_PROJECTS} projects.`);
+    for (const id of ids) {
+      const found = this.store.projects.get(id);
+      if (!found) throw new HttpError(400, 'Pick a project for this agent.');
+      if (!isDirectory(found.path)) throw new HttpError(400, `The project folder ${found.path} does not exist.`);
+    }
+    return ids;
+  }
+
   private agentName(raw: unknown, except?: string): string {
     const name = clip(String(raw ?? '').trim(), 24);
     if (!name) throw new HttpError(400, 'Give the agent a name.');
@@ -588,18 +637,13 @@ export class AgentManager {
   async create(req: CreateAgentRequest, options: { super?: boolean } = {}): Promise<Agent> {
     const engine = req.engine;
     if (!ENGINES.includes(engine)) throw new HttpError(400, 'Pick Claude Code, Codex or OrcaCode.');
-    const problem = engineProblem(engine, this.engines[engine], req.projectId === null);
+    // null is an agent with no project: it works across every project, from its own home. A list is
+    // its chosen projects, the first being its start folder (shared/agentProjects.ts).
+    const projectIds = this.checkProjectIds(req.projectIds, req.projectId);
+    const problem = engineProblem(engine, this.engines[engine], projectIds === null || projectIds.length > 1);
     if (problem) throw new HttpError(400, problem);
-    // null is an agent with no project: it works across every project, from its own home.
-    let project: Project | null = null;
-    if (req.projectId === null) {
-      if (req.worktree) throw new HttpError(400, 'An agent with no project cannot have its own worktree. Pick a project, or turn the worktree off.');
-    } else {
-      const found = this.store.projects.get(String(req.projectId ?? ''));
-      if (!found) throw new HttpError(400, 'Pick a project for this agent.');
-      if (!isDirectory(found.path)) throw new HttpError(400, `The project folder ${found.path} does not exist.`);
-      project = found;
-    }
+    const project: Project | null = projectIds === null ? null : this.project(projectIds[0]);
+    if (projectIds === null && req.worktree) throw new HttpError(400, 'An agent with no project cannot have its own worktree. Pick a project, or turn the worktree off.');
     const name = this.agentName(req.name);
     const role = options.super ? 'super' : req.role ?? 'dev';
     // The SuperAgent is set up on its own (createSuper), never picked as a role.
@@ -627,7 +671,7 @@ export class AgentManager {
       engine,
       // A look no other agent has yet; the SuperAgent always looks like itself (shared/avatar.ts).
       ...(options.super ? {} : { avatar: ((look => (look && !isSuperPair(look) ? look : null))(cleanLook(req.avatar))) ?? freshLook([...this.store.agents.values()].map(a => agentLook(a))) }),
-      projectId: project?.id ?? null,
+      projectIds,
       worktree,
       home: this.homes.path(id),
       dreaming: true,
@@ -705,6 +749,8 @@ export class AgentManager {
     const nextTier = tier ?? agent.serviceTier ?? '';
     const keptTier = !nextTier || !offered || offered.some(t => t.id === nextTier) ? nextTier : '';
     const runner = this.runners.get(id);
+    // Its projects: checked fully before anything else changes.
+    const projectIds = patch.projectIds === undefined ? undefined : this.checkProjectChange(agent, patch.projectIds);
     if (name !== undefined) agent.name = name;
     // soul.md is the source of truth; the agent sees the change at its next turn.
     if (patch.instructions !== undefined) {
@@ -740,8 +786,53 @@ export class AgentManager {
       else delete agent.serviceTier;
       await runner?.setServiceTier?.(keptTier).catch(() => {});
     }
+    if (projectIds !== undefined) await this.setProjects(agent, projectIds);
     this.emitAgent(agent);
     return agent;
+  }
+
+  /**
+   * A new project choice for an agent, checked: the SuperAgent keeps every project; an OrcaCode
+   * without --add-dir keeps one; a worktree stays with its start folder; and a start folder change,
+   * which moves its sessions to another folder, waits until it is not mid-turn.
+   */
+  private checkProjectChange(agent: Agent, raw: unknown): string[] | null {
+    if (agent.role === 'super') throw new HttpError(400, 'The SuperAgent works across every project.');
+    const next = this.checkProjectIds(raw);
+    // Only reaching beyond one folder can newly fail (an OrcaCode without --add-dir).
+    if (agent.engine === 'orcacode' && (next === null || next.length > 1) && !this.engines.orcacode?.addDir) throw new HttpError(400, ORCACODE_NO_ADD_DIR);
+    const from = startProjectId(agent);
+    const to = next === null ? null : next[0];
+    if (to !== from && agent.worktree) {
+      const name = from ? this.store.projects.get(from)?.name ?? 'its project' : 'its project';
+      throw new HttpError(409, `${agent.name}'s worktree is a branch of ${name}, so ${name} stays its start folder. Keep it first, or remove the agent's worktree first.`);
+    }
+    if (to !== from && (this.runners.get(agent.id)?.busy || agent.status === 'working' || agent.status === 'waiting')) {
+      throw new HttpError(409, `${agent.name} is in the middle of a turn. Changing where it starts begins a fresh session there, so wait until it finishes, or stop it.`);
+    }
+    return next;
+  }
+
+  /**
+   * Give an agent its new projects. The same start folder: nothing restarts; the other folders and
+   * the prompt's project list follow from its next turn. A new start folder: its session cannot go
+   * on in another folder, so the runner closes and the next turn starts a fresh session there.
+   */
+  private async setProjects(agent: Agent, next: string[] | null): Promise<void> {
+    const from = startProjectId(agent);
+    agent.projectIds = next;
+    const to = startProjectId(agent);
+    if (to === from) return;
+    this.tokens.delete(agent.id);
+    await this.runners.get(agent.id)?.dispose();
+    this.runners.delete(agent.id);
+    agent.sessionId = null;
+    delete agent.sessionCwd;
+    delete agent.context;
+    delete agent.threadUsage;
+    const where = to === null ? 'its own folder, across all projects' : this.store.projects.get(to)?.name ?? 'its new start folder';
+    this.addEntry(agent.id, { id: randomUUID(), kind: 'system', text: `Its projects changed, so it now starts in ${where}. The next message begins a fresh session there; earlier context is cleared.`, sessionStart: true });
+    if (to !== null) this.seedWhereabouts(agent);
   }
 
   async remove(id: string, cleanup: WorktreeCleanup = 'keep'): Promise<void> {
@@ -758,7 +849,7 @@ export class AgentManager {
     // Its home (soul, memory, workspace and its worktrees) and transcript go to the archive, never
     // deleted. If the move fails, the agent stays.
     const archived = this.homes.archive(
-      { id: agent.id, name: agent.name, role: agent.role, engine: agent.engine, projectId: agent.projectId },
+      { id: agent.id, name: agent.name, role: agent.role, engine: agent.engine, projectId: startProjectId(agent) },
       path.join(this.store.dataDir, 'transcripts', `${agent.id}.jsonl`),
       [{ from: this.attachments.folder(agent.id), name: 'attachments' }],
     );
@@ -818,7 +909,7 @@ export class AgentManager {
   /** Everyone and every project a mention can name, for shared/mentions.ts. */
   mentionLookup(): { agents: MentionAgent[]; projects: MentionProject[] } {
     return {
-      agents: [...this.store.agents.values()].map(a => ({ id: a.id, name: a.name, role: a.role, projectId: a.projectId })),
+      agents: [...this.store.agents.values()].map(a => ({ id: a.id, name: a.name, role: a.role, projectIds: a.projectIds })),
       projects: [...this.store.projects.values()].map(p => ({ id: p.id, name: p.name, path: p.path })),
     };
   }
@@ -966,7 +1057,8 @@ export class AgentManager {
   /** The folder an agent works in: its worktree, its project, or (with no project) the workspace in its home. */
   workspaceOf(id: string): { root: string; baseCommit?: string } {
     const agent = this.agent(id);
-    const root = agent.worktree?.cwd ?? (agent.projectId === null ? this.homes.workspace(agent) : this.project(agent.projectId).path);
+    const start = startProjectId(agent);
+    const root = agent.worktree?.cwd ?? (start === null ? this.homes.workspace(agent) : this.project(start).path);
     if (!isDirectory(root)) throw new HttpError(409, `The workspace folder is missing: ${root}.`);
     return { root, baseCommit: agent.worktree?.baseCommit };
   }
@@ -1115,12 +1207,12 @@ export class AgentManager {
       if (tool === 'note_add') {
         const parsed = noteAddInput.safeParse(args);
         if (!parsed.success) throw new HttpError(400, `Give a project (code, name or ALL), a title and a body within the limits. ${parsed.error.issues.slice(0, 3).map(i => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
-        entry = this.refs.addNote(this.refCode(parsed.data.project), { title: parsed.data.title, body: parsed.data.body, author: agent.name, addedBy: agent.name, replaces: parsed.data.replaces, links: parsed.data.links });
+        entry = this.refs.addNote(this.recordCode(agent, parsed.data.project), { title: parsed.data.title, body: parsed.data.body, author: agent.name, addedBy: agent.name, replaces: parsed.data.replaces, links: parsed.data.links });
       } else {
         const parsed = decisionAddInput.safeParse(args);
         if (!parsed.success) throw new HttpError(400, `Give a project (code, name or ALL), a title, the decision, why and who decided, within the limits. ${parsed.error.issues.slice(0, 3).map(i => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
         const input = parsed.data;
-        entry = this.refs.addDecision(this.refCode(input.project), { title: input.title, decision: input.decision, why: input.why, decidedBy: input.decided_by, addedBy: agent.name, replaces: input.replaces, links: input.links });
+        entry = this.refs.addDecision(this.recordCode(agent, input.project), { title: input.title, decision: input.decision, why: input.why, decidedBy: input.decided_by, addedBy: agent.name, replaces: input.replaces, links: input.links });
       }
       this.sawOwnRefs(agent, before);
       return { added: refView(entry), ...('replaces' in args && args.replaces ? { [entry.kind === 'D' ? 'replaced' : 'outdated']: String(args.replaces).toUpperCase() } : {}) };
@@ -1136,7 +1228,7 @@ export class AgentManager {
         cwd: this.cwdOf(agent),
         home: os.homedir(),
         rootOf: (target) => this.stepRoot(agent, target),
-        fallback: { projectId: agent.workingIn?.projectId ?? agent.projectId, root: agent.workingIn?.root ?? null, branch: agent.workingIn?.branch ?? null },
+        fallback: { projectId: agent.workingIn?.projectId ?? startProjectId(agent), root: agent.workingIn?.root ?? null, branch: agent.workingIn?.branch ?? null },
       }, parsed.data);
       return { created: summaryOf(walkthrough), folder: path.join(this.walkthroughDir(agent.id), walkthrough.id), note: 'The user can open it from your transcript in AgentsCode.' };
     }
@@ -1220,7 +1312,8 @@ export class AgentManager {
    * is already out.
    */
   private prepareLesson(agent: Agent, text: string, taskProject: string | undefined, links: string[]): { id: string; commit: () => string | undefined } {
-    const own = agent.projectId ? this.store.projects.get(agent.projectId)?.code : undefined;
+    // The task's project, else the agent's start folder's, else ALL.
+    const own = this.agentCodes(agent)[0];
     const code = taskProject ?? own ?? ALL_CODE;
     const first = text.replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s/)[0];
     const title = first.length > 100 ? `${first.slice(0, 97).trimEnd()}...` : first;
@@ -1280,13 +1373,16 @@ export class AgentManager {
 
   /** The folder an agent's sessions run in, by its real path: its worktree, its project, or (no project) the workspace in its home, never the home itself. */
   private cwdOf(agent: Agent): string {
-    const project = agent.projectId === null ? null : this.project(agent.projectId);
+    const start = startProjectId(agent);
+    const project = start === null ? null : this.project(start);
     return canonicalDirectory(agent.worktree?.cwd ?? project?.path ?? this.homes.workspace(agent));
   }
 
   private execution(agentId: string): ExecutionContext {
     const agent = this.agent(agentId);
-    const project = agent.projectId === null ? null : this.project(agent.projectId);
+    // Its start folder; its other projects reach it through directories() and the prompt.
+    const start = startProjectId(agent);
+    const project = start === null ? null : this.project(start);
     const cwd = this.cwdOf(agent);
     const projectPath = project ? canonicalDirectory(project.path) : null;
     // The project as the prompt names it, read live so a rename shows.
@@ -1324,11 +1420,31 @@ export class AgentManager {
             this.homes.setSeen(live, sectionKeys(contextSections(live, view(), context)));
             return systemInstructions(live, view(), context);
           },
-          directories: () => (this.agent(agentId).projectId === null ? this.projectFolders().map(p => p.path) : []),
+          directories: () => this.extraDirectories(this.agent(agentId)),
           hooks,
         };
       },
     };
+  }
+
+  /**
+   * The folders an agent may reach beyond the one it runs in: every project for an agent with no
+   * project; its other chosen projects for one on several. Codex gets none of its other projects:
+   * its sandbox writes only in the folder it runs in (it still reads the others).
+   */
+  private extraDirectories(agent: Agent): string[] {
+    if (isAllProjects(agent)) return this.projectFolders().map(p => p.path);
+    if (agent.engine === 'codex') return [];
+    return this.otherFolders(agent).map(p => p.path);
+  }
+
+  /** An agent's chosen projects besides its start folder whose folders exist, by real path, in order. */
+  private otherFolders(agent: Agent): { name: string; path: string }[] {
+    return (agent.projectIds ?? []).slice(1).flatMap(id => {
+      const project = this.store.projects.get(id);
+      if (!project || !isDirectory(project.path)) return [];
+      return [{ name: project.name, path: canonicalDirectory(project.path) }];
+    });
   }
 
   /** Every project whose folder exists, by its real path: where an agent with no project may work. */
@@ -1366,7 +1482,9 @@ export class AgentManager {
       memoryOmitted: omitted,
       profile: profile.entries,
       profileOmitted: profile.omitted,
-      projects: agent.projectId === null ? this.projectFolders() : undefined,
+      projects: isAllProjects(agent) ? this.projectFolders() : undefined,
+      alsoProjects: this.otherFolders(agent),
+      readOnlyOthers: codexWritesOnlyStart(agent),
     };
   }
 
@@ -1632,13 +1750,16 @@ export class AgentManager {
       if (!forUser && this.superStore.createdSince(Date.now() - 86_400_000) >= cap) {
         throw new HttpError(429, `You created ${cap} agents in the last day, the most the user allows (Settings, SuperAgent). Ask the user before creating more.`);
       }
-      const projectId = input.project ? this.projectRef(input.project).id : null;
-      const agent = await this.create({ name: input.name, engine: input.engine, projectId, role: input.role, model: input.model, worktree: input.worktree, task: input.task });
+      if (input.project && input.projects) return fail('Give project or projects, not both.');
+      const refs = input.projects ?? (input.project ? [input.project] : null);
+      const projectIds = refs === null ? null : [...new Set(refs.map(ref => this.projectRef(ref).id))];
+      const agent = await this.create({ name: input.name, engine: input.engine, projectIds, role: input.role, model: input.model, worktree: input.worktree, task: input.task });
+      const names = (projectIds ?? []).map(pid => this.store.projects.get(pid)?.name).filter(Boolean);
       this.recordSuper({
         tool, why: input.why, undo: { kind: 'removeAgent', agentId: agent.id }, ...(forUser ? { forUser: true } : {}),
-        summary: `Created ${agent.name} (${rolePreset(agent.role).name}, ${ENGINE_LABELS[agent.engine]}) ${projectId ? `on ${this.store.projects.get(projectId)?.name}` : 'across all projects'}${input.task ? `, first task: ${clip(input.task.replace(/\s+/g, ' '), 120)}` : ''}`,
+        summary: `Created ${agent.name} (${rolePreset(agent.role).name}, ${ENGINE_LABELS[agent.engine]}) ${names.length ? `on ${names.join(' and ')}` : 'across all projects'}${input.task ? `, first task: ${clip(input.task.replace(/\s+/g, ' '), 120)}` : ''}`,
       });
-      return { created: { id: agent.id, name: agent.name, role: agent.role, autonomy: agent.autonomy, projectId: agent.projectId } };
+      return { created: { id: agent.id, name: agent.name, role: agent.role, autonomy: agent.autonomy, projectIds: agent.projectIds } };
     }
     if (tool === 'update_agent') {
       const parsed = updateAgentInput.safeParse(args);
@@ -2185,19 +2306,26 @@ export class AgentManager {
 
   /**
    * What an agent may look at with the eyes tools. The SuperAgent, and an agent with no project
-   * (which already works with everyone), see every project; any other agent only its own project.
+   * (which already works with everyone), see every project; any other agent only its own projects.
    */
   private eyesProjects(agent: Agent): Project[] | 'all' {
-    if (agent.role === 'super' || agent.projectId === null) return 'all';
-    const own = this.store.projects.get(agent.projectId);
-    return own ? [own] : [];
+    if (agent.role === 'super' || isAllProjects(agent)) return 'all';
+    return (agent.projectIds ?? []).flatMap(id => {
+      const project = this.store.projects.get(id);
+      return project ? [project] : [];
+    });
   }
 
   /** A project the agent may look at, by id or name; 403 for one outside its scope. */
   private eyesProject(agent: Agent, ref: string): Project {
     const project = this.projectRef(ref);
     const scope = this.eyesProjects(agent);
-    if (scope !== 'all' && !scope.some(p => p.id === project.id)) throw new HttpError(403, `You work on ${scope[0]?.name ?? 'one project'}, so you can look only at its GitHub repo.`);
+    if (scope !== 'all' && !scope.some(p => p.id === project.id)) {
+      const names = scope.map(p => p.name);
+      throw new HttpError(403, names.length > 1
+        ? `You work on ${names.join(' and ')}, so you can look only at their GitHub repos.`
+        : `You work on ${names[0] ?? 'one project'}, so you can look only at its GitHub repo.`);
+    }
     return project;
   }
 
@@ -2210,7 +2338,8 @@ export class AgentManager {
       const { project: ref, command, ...options } = parsed.data;
       const project = this.eyesProject(agent, ref); // the same scope as the GitHub tools
       // In the caller's own worktree for that project when it has one, so it checks its own code.
-      const cwd = agent.worktree && agent.projectId === project.id ? agent.worktree.cwd : project.path;
+      // The worktree is the start folder's only; another of its projects is checked in place.
+      const cwd = agent.worktree && startProjectId(agent) === project.id ? agent.worktree.cwd : project.path;
       // One check per folder at a time: a slow test run is never stacked by a retry.
       if (this.checksRunning.has(cwd)) throw new HttpError(409, `A check is already running in ${project.name}. Wait for it to finish.`);
       this.checksRunning.add(cwd);
@@ -2351,7 +2480,7 @@ export class AgentManager {
     }
     if (place) return { root: place.root, open: { project: place.projectId }, projectId: place.projectId };
     const own = real(this.workspaceOf(agent.id).root);
-    if (own && inside(own)) return { root: own, open: { agent: agent.id }, projectId: agent.projectId };
+    if (own && inside(own)) return { root: own, open: { agent: agent.id }, projectId: startProjectId(agent) };
     const home = real(this.homes.path(agent.id));
     if (home && inside(home)) return { root: home, open: null, projectId: null };
     return null;
@@ -2394,8 +2523,10 @@ export class AgentManager {
       if (root) places.push({ root, projectId: project.id });
     }
     for (const agent of this.store.agents.values()) {
-      const root = agent.worktree && agent.projectId ? real(agent.worktree.path) : null;
-      if (root && agent.projectId) places.push({ root, projectId: agent.projectId, branch: agent.worktree!.branch, agentId: agent.id });
+      // A worktree belongs to the start folder's project.
+      const start = startProjectId(agent);
+      const root = agent.worktree && start ? real(agent.worktree.path) : null;
+      if (root && start) places.push({ root, projectId: start, branch: agent.worktree!.branch, agentId: agent.id });
     }
     return places;
   }
@@ -2457,16 +2588,17 @@ export class AgentManager {
     }
   }
 
-  /** A project agent starts each turn in its own folder; an agent with no project keeps its last place. */
+  /** A project agent starts each turn in its start folder; an agent with no project keeps its last place. */
   private seedWhereabouts(agent: Agent): void {
-    if (agent.projectId === null) return;
+    const start = startProjectId(agent);
+    if (start === null) return;
     let root: string;
     try {
-      root = fs.realpathSync(agent.worktree?.path ?? this.project(agent.projectId).path);
+      root = fs.realpathSync(agent.worktree?.path ?? this.project(start).path);
     } catch {
       return;
     }
-    this.moveTo(agent, { root, projectId: agent.projectId, branch: agent.worktree?.branch });
+    this.moveTo(agent, { root, projectId: start, branch: agent.worktree?.branch });
   }
 
   private onTurnEnd(agentId: string, result: TurnResult): void {
@@ -2631,8 +2763,15 @@ export class AgentManager {
 
   removeProject(id: string): void {
     const project = this.project(id);
-    const staff = [...this.store.agents.values()].filter((a) => a.projectId === id);
-    if (staff.length) throw new HttpError(409, `${staff.map((a) => a.name).join(', ')} still work on ${project.name}. Remove them first.`);
+    // An agent that starts in it would have no folder: those are removed (or moved) first. An agent
+    // that only also works on it just loses it from its list.
+    const staff = [...this.store.agents.values()].filter((a) => startProjectId(a) === id);
+    if (staff.length) throw new HttpError(409, `${staff.map((a) => a.name).join(', ')} still ${staff.length === 1 ? 'starts' : 'start'} in ${project.name}. Remove them, or give them another start folder, first.`);
+    for (const agent of this.store.agents.values()) {
+      if (!agent.projectIds?.includes(id)) continue;
+      agent.projectIds = agent.projectIds.filter(p => p !== id);
+      this.emitAgent(agent);
+    }
     this.store.projects.delete(id);
     this.store.save();
     this.hub.broadcast({ type: 'projectRemoved', id });

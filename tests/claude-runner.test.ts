@@ -9,7 +9,7 @@ import { COMMS_TOOLS } from '../server/comms/tools.ts';
 import { settle } from './helpers.ts';
 
 const agent: Agent = {
-  id: 'a1', name: 'Ada', engine: 'claude', projectId: 'p1', worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: 'sonnet', effort: '',
+  id: 'a1', name: 'Ada', engine: 'claude', projectIds: ['p1'], worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: 'sonnet', effort: '',
   autonomy: 'ask', useMcp: false, role: 'dev', instructions: 'Prefer small diffs.', status: 'idle', activity: '',
   currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
   costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null,
@@ -297,7 +297,7 @@ test('a SuperAgent session gets only read tools, its commands, none of the user\
     session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, turnEnd: () => {}, closed: () => {},
     approval: async request => { approvals.push(request); return { allow: true }; },
   };
-  const boss: Agent = { ...agent, id: 's1', name: 'SuperAgent', role: 'super', autonomy: 'readonly', projectId: null, useMcp: true };
+  const boss: Agent = { ...agent, id: 's1', name: 'SuperAgent', role: 'super', autonomy: 'readonly', projectIds: null, useMcp: true };
   const runner = new ClaudeRunner({ agent: () => boss, project: null, cwd: '/tmp/home', binPath: null, hooks, commsToken: 'tok-s' }, fakeQuery(captured));
   runner.send('Run the team.');
   await settle(10);

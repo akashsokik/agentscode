@@ -87,7 +87,7 @@ function Crew({ agents }: { agents: Agent[] }) {
 /** The codebase and branch an agent is in, or its project until it has touched one. */
 function placeLabel(agent: Agent, projects: Parameters<typeof whereabouts>[1]): string {
   const where = whereabouts(agent, projects);
-  if (!where) return projectLabel(agent.projectId, projects);
+  if (!where) return projectLabel(agent.projectIds, projects);
   return where.branch ? `${where.project} / ${where.branch}` : where.project;
 }
 

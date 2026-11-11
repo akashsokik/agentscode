@@ -17,7 +17,7 @@ import { helpListsAddDir, orcacodeAddDir } from '../server/config.ts';
 import { engineProblem, ORCACODE_MIN_VERSION, ORCACODE_NO_ADD_DIR, orcacodeModelValue, splitOrcacodeModel, versionBelow } from '../shared/engines.ts';
 
 const base: Agent = {
-  id: 'a1', name: 'Ada', engine: 'orcacode', projectId: 'p1', worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: '', effort: '',
+  id: 'a1', name: 'Ada', engine: 'orcacode', projectIds: ['p1'], worktree: null, home: '/tmp/agentscode-test/agents/a1', dreaming: true, model: '', effort: '',
   autonomy: 'ask', useMcp: false, role: 'dev', instructions: '', status: 'idle', activity: '',
   currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
   costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null,
@@ -239,7 +239,7 @@ test('the manager creates OrcaCode agents and names the engine in errors', async
   assert.equal(orc.engine, 'orcacode');
   assert.equal(orc.useMcp, false);
   // Its file tools stay inside the folder it runs in, so without --add-dir it needs a project.
-  await assert.rejects(ok.manager.create({ name: 'Roam', engine: 'orcacode', projectId: null }), /cannot work across all projects.*orcacode update/);
+  await assert.rejects(ok.manager.create({ name: 'Roam', engine: 'orcacode', projectId: null }), /cannot work in more than one project.*orcacode update/);
 });
 
 test('engine versions compare numerically and only OrcaCode has a minimum', () => {
@@ -421,7 +421,7 @@ test('an All-projects OrcaCode agent is blocked without --add-dir and allowed wi
   const h = harness({ orcacode: { available: true, path: '/bin/orcacode', version: '0.12.0', addDir: true } });
   const web = h.manager.addProject({ path: projectDir(h.dir, 'web') });
   const roam = await h.manager.create({ name: 'Roam', engine: 'orcacode', projectId: null });
-  assert.equal(roam.projectId, null);
+  assert.equal(roam.projectIds, null);
   // Every project the user has added, read when asked, so a project added later is in the next turn.
   h.manager.send(roam.id, 'Look around.');
   await settle();
@@ -434,8 +434,8 @@ test('an All-projects OrcaCode agent is blocked without --add-dir and allowed wi
 
 test('orcacode args carry one --add-dir per folder, on a resumed turn too', () => {
   const dirs = ['/work/web', '/work/orca site'];
-  const fresh = orcacodeArgs({ ...base, projectId: null }, files, [], dirs);
-  const resumed = orcacodeArgs({ ...base, projectId: null, sessionId: 'sess-9' }, files, [], dirs);
+  const fresh = orcacodeArgs({ ...base, projectIds: null }, files, [], dirs);
+  const resumed = orcacodeArgs({ ...base, projectIds: null, sessionId: 'sess-9' }, files, [], dirs);
   for (const args of [fresh, resumed]) {
     const added = args.flatMap((a, i) => (a === '--add-dir' ? [args[i + 1]] : []));
     assert.deepEqual(added, dirs);

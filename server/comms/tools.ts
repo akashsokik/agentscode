@@ -63,7 +63,8 @@ const refProject = z.string().trim().min(1).max(200);
 const refLinks = z.array(z.string().trim().min(1).max(REF_LINK_LIMIT)).max(REF_LINKS_MAX).optional();
 const refId = z.string().trim().min(3).max(20);
 export const noteAddInput = z.object({
-  project: refProject,
+  /** Left out: the agent's start folder's project (an agent on every project has to name one). */
+  project: refProject.optional(),
   title: z.string().trim().min(1).max(REF_TITLE_LIMIT),
   body: z.string().trim().min(1).max(REF_BODY_LIMIT),
   /** A note in the same project this one corrects; it is marked "outdated by" the new one. */
@@ -71,7 +72,7 @@ export const noteAddInput = z.object({
   links: refLinks,
 });
 export const decisionAddInput = z.object({
-  project: refProject,
+  project: refProject.optional(),
   title: z.string().trim().min(1).max(REF_TITLE_LIMIT),
   decision: z.string().trim().min(1).max(REF_BODY_LIMIT),
   why: z.string().trim().min(1).max(REF_WHY_LIMIT),
@@ -101,6 +102,8 @@ export const createAgentInput = z.object({
   engine: z.enum(['claude', 'codex', 'orcacode']).default('claude'),
   /** A project id or name; leave it out for an agent that works across all projects. */
   project: z.string().trim().min(1).max(200).optional(),
+  /** Several projects (ids or names), the start folder first; instead of project. */
+  projects: z.array(z.string().trim().min(1).max(200)).min(1).max(12).optional(),
   role: teamRole.default('dev'),
   model: z.string().trim().max(200).optional(),
   worktree: z.boolean().default(false),
@@ -295,11 +298,11 @@ export function createCommsMcpServer(call: CommsHandler, options: { executive?: 
     inputSchema: forgetInput.shape,
   }, args => invoke('forget', args));
   server.registerTool('note_add', {
-    description: 'Add a note to a project\'s shared notes (notes.md), which every agent sees in its index: a finding, a how-to, a known problem. project is a code (ACH), a project name, or ALL for something that holds across projects. AgentsCode assigns the id (ACH-N4); notes are never edited or deleted by tools. To correct a wrong or outdated note, add the new one with replaces set to the old id (ACH-N3): the old one is marked "outdated by". No secrets.',
+    description: 'Add a note to a project\'s shared notes (notes.md), which every agent sees in its index: a finding, a how-to, a known problem. project is a code (ACH), a project name, or ALL for something that holds across projects; left out, it is your start folder\'s project. AgentsCode assigns the id (ACH-N4); notes are never edited or deleted by tools. To correct a wrong or outdated note, add the new one with replaces set to the old id (ACH-N3): the old one is marked "outdated by". No secrets.',
     inputSchema: noteAddInput.shape,
   }, args => invoke('note_add', args));
   server.registerTool('decision_add', {
-    description: 'Record a decision the user (or the team, with the user\'s agreement) made, in the project\'s decisions.md: title, the decision, why, and who decided ("You" for the user). project is a code (ACH), a project name, or ALL. To change a decision, add a new one with replaces set to the old id (ACH-D7): the old one is marked "replaced by". AgentsCode assigns the id; tools never edit or delete entries.',
+    description: 'Record a decision the user (or the team, with the user\'s agreement) made, in the project\'s decisions.md: title, the decision, why, and who decided ("You" for the user). project is a code (ACH), a project name, or ALL; left out, it is your start folder\'s project. To change a decision, add a new one with replaces set to the old id (ACH-D7): the old one is marked "replaced by". AgentsCode assigns the id; tools never edit or delete entries.',
     inputSchema: decisionAddInput.shape,
   }, args => invoke('decision_add', args));
   server.registerTool('ref_get', {
@@ -382,7 +385,7 @@ function registerEyesTools(server: McpServer, invoke: Invoke): void {
 function registerSuperTools(server: McpServer, invoke: Invoke): void {
   const note = 'SuperAgent only. Give a short why: the user sees it in your decision log and can undo it.';
   server.registerTool('create_agent', {
-    description: `Create an agent: name, engine (claude, codex or orcacode), project (id or name; leave out for all projects), role, optional model, worktree (its own git branch) and a first task. It gets its role's default permissions. ${note}`,
+    description: `Create an agent: name, engine (claude, codex or orcacode), project (id or name; leave out for all projects) or projects (several, the first being its start folder, where it runs and its worktree goes; the others are used in place), role, optional model, worktree (its own git branch) and a first task. It gets its role's default permissions. ${note}`,
     inputSchema: createAgentInput.shape,
   }, args => invoke('create_agent', args));
   server.registerTool('update_agent', {

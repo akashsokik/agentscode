@@ -39,5 +39,5 @@ test('the label names the project and branch, falling back to the folder for a r
   assert.equal(whereabouts(base, projects), null);
   assert.deepEqual(whereabouts({ ...base, workingIn: { projectId: 'p', root: '/w/orcabox', branch: 'main', at: 0 } }, projects), { project: 'orcabox', branch: 'main', own: false });
   assert.deepEqual(whereabouts({ ...base, workingIn: { projectId: 'gone', root: '/w/old-site', branch: null, at: 0 } }, projects), { project: 'old-site', branch: null, own: false });
-  assert.deepEqual(whereabouts({ ...base, projectId: 'p', workingIn: { projectId: 'p', root: '/w/orcabox', branch: 'dev', at: 0 } }, projects)?.own, true);
+  assert.deepEqual(whereabouts({ ...base, projectIds: ['p'], workingIn: { projectId: 'p', root: '/w/orcabox', branch: 'dev', at: 0 } }, projects)?.own, true);
 });

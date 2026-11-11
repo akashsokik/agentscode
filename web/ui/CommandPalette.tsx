@@ -13,7 +13,7 @@ import { closeTab, currentProjectId, focusedAgentId, focusedChannelId, open, ope
 import { rankCommands } from '../paletteMatch.ts';
 import { IS_MAC } from '../platform.ts';
 import { MOD, SHORTCUTS } from '../shortcuts.ts';
-import { projectLabel } from '../projects.ts';
+import { projectLabel, projectNames } from '../projects.ts';
 import { showsWorkspace } from '../sidebar/agentRail.ts';
 import { attempt, useApp } from '../store.ts';
 import { hideTerminal, newTerminal, showTerminal, splitFront } from '../terminal/actions.ts';
@@ -81,7 +81,7 @@ function useCommands(actions: PaletteActions): Command[] {
   return useMemo(() => {
     if (!snapshot) return [];
     const commands: Command[] = [];
-    const projectName = (id: string | null) => projectLabel(id, snapshot.projects);
+    const projectName = (ids: string[] | null) => projectLabel(ids, snapshot.projects);
     const pending = (id: string) => snapshot.approvals.some(a => a.agentId === id);
 
     // Agents waiting on you first, then the most recently active.
@@ -92,8 +92,8 @@ function useCommands(actions: PaletteActions): Command[] {
         id: `agent:${agent.id}`,
         group: 'Agents',
         title: agent.name,
-        keywords: [projectName(agent.projectId), rolePreset(agent.role).name, agent.currentTask?.summary ?? ''].join(' '),
-        hint: [projectName(agent.projectId), rolePreset(agent.role).name, status.label].filter(Boolean).join(' · '),
+        keywords: [...projectNames(agent.projectIds, snapshot.projects), rolePreset(agent.role).name, agent.currentTask?.summary ?? ''].join(' '),
+        hint: [projectName(agent.projectIds), rolePreset(agent.role).name, status.label].filter(Boolean).join(' · '),
         icon: <AgentAvatar agent={agent} className="size-4" />,
         status: status.mark,
         priority: 2,

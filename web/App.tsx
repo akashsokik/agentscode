@@ -1,3 +1,4 @@
+import { startProjectId } from '../shared/agentProjects.ts';
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Agent, Snapshot } from '../shared/types.ts';
 import { AddProjectDialog } from './dialogs/AddProjectDialog.tsx';
@@ -62,7 +63,7 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
     return {
       icon: <AgentAvatar agent={agent} className="size-3.5" />,
       headline: agent.name,
-      meta: agent.currentTask?.summary || agent.lastSummary || projectLabel(agent.projectId, snapshot?.projects),
+      meta: agent.currentTask?.summary || agent.lastSummary || projectLabel(agent.projectIds, snapshot?.projects),
       busy: agent.status === 'working',
       attention: agent.status === 'waiting' || pending,
     };
@@ -373,7 +374,8 @@ export function App() {
 
   // Opening an agent from anywhere (a tab, a channel) brings its project into the sidebar and
   // the terminal panel, with the sidebar shown or not.
-  const focusedProject = snapshot?.agents.find(a => a.id === focusedAgentId(layout))?.projectId;
+  const focused = snapshot?.agents.find(a => a.id === focusedAgentId(layout));
+  const focusedProject = focused ? startProjectId(focused) : undefined;
   useEffect(() => {
     if (focusedProject) setProject(focusedProject);
   }, [focusedProject]);

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { startProjectId } from '../../shared/agentProjects.ts';
+import { AgentProjects } from './AgentProjects.tsx';
 import { api } from '../api.ts';
 import { ALL_PROJECTS } from '../projects.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
@@ -17,7 +19,7 @@ import { AgentAvatar } from '../ui/Avatar.tsx';
 /** One agent's session: transcript, inline approvals and the composer. */
 export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneChrome }) {
   const agent = useApp(s => s.snapshot?.agents.find(a => a.id === agentId));
-  const project = useApp(s => s.snapshot?.projects.find(p => p.id === agent?.projectId));
+  const project = useApp(s => s.snapshot?.projects.find(p => p.id === (agent ? startProjectId(agent) : undefined)));
   const entries = useApp(s => s.entries[agentId]);
   const allApprovals = useApp(s => s.snapshot?.approvals);
   const approvals = useMemo(() => (allApprovals ?? []).filter(a => a.agentId === agentId), [allApprovals, agentId]);
@@ -47,8 +49,12 @@ export function AgentPane({ agentId, chrome }: { agentId: string; chrome: PaneCh
         <span className="flex min-w-0 items-center gap-2">
           <AgentAvatar agent={agent} className="size-3.5" />
           <span className="shrink-0 text-[13px] text-content">{agent.name}</span>
-          {/* An agent with no project works across all of them; a project agent's project is in the Overview. */}
-          {agent.projectId === null ? <span className="shrink-0 text-[12px] font-normal text-content/45">{ALL_PROJECTS}</span> : null}
+          {/* An agent with no project works across all of them; one on several shows "first + N", hover for
+              the list; a one-project agent's project is in the Overview. */}
+          {agent.projectIds === null ? <span className="shrink-0 text-[12px] font-normal text-content/45">{ALL_PROJECTS}</span>
+            : agent.projectIds.length === 0 ? (
+              <button type="button" onClick={() => setSettings({ section: 'general' })} title="Its project choice could not be read, so it has none. Pick its projects in its settings." className="shrink-0 rounded-[5px] bg-content/7 px-1.5 text-[12px] font-normal text-content/70 hover:bg-content/12">No projects: pick some</button>
+            ) : <AgentProjects agent={agent} />}
           <AgentStatus agent={agent} pending={approvals.length > 0} className="min-w-0 font-normal" />
         </span>
       }

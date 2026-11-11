@@ -290,7 +290,7 @@ function FileTree({ projectId }: { projectId?: string }) {
   const focused = focusedAgentId(layout);
   const [choice, setChoice] = useState<string | null>(null);
   const options = useMemo(() => [
-    ...(agents ?? []).filter(a => !projectId || a.projectId === projectId).map(a => ({ value: `a:${a.id}`, root: { agent: a.id } as Root, label: `${a.name}'s workspace`, detail: a.worktree?.branch ?? '' })),
+    ...(agents ?? []).filter(a => !projectId || a.projectIds?.[0] === projectId).map(a => ({ value: `a:${a.id}`, root: { agent: a.id } as Root, label: `${a.name}'s workspace`, detail: a.worktree?.branch ?? '' })),
     ...(projects ?? []).filter(p => !projectId || p.id === projectId).map(p => ({ value: `p:${p.id}`, root: { project: p.id } as Root, label: p.name, detail: shortPath(p.path, home) })),
   ], [agents, projects, home, projectId]);
   // Follow the focused agent unless the user picked a root.
@@ -587,7 +587,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
   const pendingIds = useMemo(() => new Set((approvals ?? []).map(a => a.agentId)), [approvals]);
   // What each section says about itself while it is folded.
   const listedSummary = agentsSummary(listed, pendingIds);
-  const projectSummary = agentsSummary((agents ?? []).filter(a => a.projectId), pendingIds);
+  const projectSummary = agentsSummary((agents ?? []).filter(a => a.projectIds !== null), pendingIds);
   const channelsWaiting = (agents ?? []).some(a => a.currentTask?.channelId && a.status === 'waiting');
   const channelsWorking = (agents ?? []).some(a => a.currentTask?.channelId && a.status === 'working');
   return (
@@ -645,7 +645,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
         </RailSection>
         <RailSection id="projects" title="Projects" count={projects?.length ?? 0} mark={<SummaryMark needs={projectSummary.needsYou} working={projectSummary.working} />} addLabel="Add project" onAdd={actions.addProject}>
           {(projects ?? []).map(project => (
-            <ProjectRailRow key={project.id} project={project} agents={(agents ?? []).filter(a => a.projectId === project.id)} pendingIds={pendingIds} selected={project.id === projectId} actions={actions} />
+            <ProjectRailRow key={project.id} project={project} agents={(agents ?? []).filter(a => Boolean(a.projectIds?.includes(project.id)))} pendingIds={pendingIds} selected={project.id === projectId} actions={actions} />
           ))}
         </RailSection>
       </div>
@@ -720,7 +720,7 @@ function WorkspaceColumn({ actions, project, titleBarAbove }: { actions: Sidebar
   const selected = focusedAgentId(layout);
   const approvals = useApp(s => s.snapshot?.approvals);
   const pendingIds = useMemo(() => new Set((approvals ?? []).map(a => a.agentId)), [approvals]);
-  const mine = useMemo(() => (agents ?? []).filter(a => a.projectId === project?.id).sort((a, b) => a.createdAt - b.createdAt), [agents, project?.id]);
+  const mine = useMemo(() => (agents ?? []).filter(a => Boolean(project && a.projectIds?.includes(project.id))).sort((a, b) => a.createdAt - b.createdAt), [agents, project?.id]);
   const column = useColumnWidth('workspace', window.innerWidth < 1200 ? 240 : 260, 220, 0.4);
 
   if (!project) {
@@ -930,7 +930,7 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
     sorted.map(channel => <ChannelRailIcon key={channel.id} channel={channel} selected={channel.id === channelId} actions={actions} />),
     listed.map(agent => <AgentRailIcon key={agent.id} agent={agent} selected={agent.id === agentId} actions={actions} />),
     (projects ?? []).map(project => (
-      <ProjectRailIcon key={project.id} project={project} agents={(agents ?? []).filter(a => a.projectId === project.id)} selected={project.id === projectId} actions={actions} />
+      <ProjectRailIcon key={project.id} project={project} agents={(agents ?? []).filter(a => Boolean(a.projectIds?.includes(project.id)))} selected={project.id === projectId} actions={actions} />
     )),
   ].filter(group => group.length);
   return (

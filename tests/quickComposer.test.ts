@@ -5,7 +5,7 @@ import { answerQuick, newAgentName, sendQuick, STUCK_MS, targetAgentId, teamStat
 import { harness, projectDir, settle } from './helpers.ts';
 
 const agent = (over: Partial<Agent>): Agent => ({
-  id: 'a1', name: 'Ada', engine: 'claude', projectId: null, worktree: null, home: '/h', dreaming: true, model: '', effort: '', autonomy: 'edits', useMcp: false,
+  id: 'a1', name: 'Ada', engine: 'claude', projectIds: null, worktree: null, home: '/h', dreaming: true, model: '', effort: '', autonomy: 'edits', useMcp: false,
   role: 'dev', instructions: '', status: 'idle', activity: '', currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null,
   unread: false, costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null, ...over,
 });
@@ -100,7 +100,7 @@ test('end to end against the server: each target, and answering a question from 
   const fresh = await sendQuick({ kind: 'new', projectId: web.id, engine: 'claude', model: '' }, 'Write the release notes', team(), api);
   const made = h.store.agents.get(fresh.agentId)!;
   assert.equal(made.name, 'Bo');
-  assert.equal(made.projectId, web.id);
+  assert.deepEqual(made.projectIds, [web.id]);
   await settle();
   assert.ok(h.store.readEntries(made.id).some(e => e.kind === 'user' && e.text === 'Write the release notes'));
 

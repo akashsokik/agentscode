@@ -134,7 +134,7 @@ function groupHeader(picks: MentionPick[], index: number): string | null {
 function agentHint(agent: Agent | undefined, projects: Project[] | undefined): string {
   if (!agent) return '';
   const status = agent.status === 'waiting' ? 'Needs you' : agent.status === 'working' ? (agent.activity || 'Working') : '';
-  return [rolePreset(agent.role).name, projectLabel(agent.projectId, projects), status].filter(Boolean).join(', ');
+  return [rolePreset(agent.role).name, projectLabel(agent.projectIds, projects), status].filter(Boolean).join(', ');
 }
 
 /**

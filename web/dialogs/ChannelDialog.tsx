@@ -1,3 +1,4 @@
+import { sharesProject } from '../../shared/agentProjects.ts';
 import { useEffect, useState } from 'react';
 import type { Channel } from '../../shared/types.ts';
 import { api } from '../api.ts';
@@ -32,7 +33,9 @@ export function ChannelDialog({ channel, onClose, onNewAgent }: { channel?: Chan
   }, [confirmDelete]);
 
   const finalName = slug(name);
-  const crossProject = new Set(agents.filter(a => members.includes(a.id)).map(a => a.projectId)).size > 1;
+  // Members that share no project with one another (shared/agentProjects.ts).
+  const chosen = agents.filter(a => members.includes(a.id));
+  const crossProject = chosen.some((a, i) => chosen.slice(i + 1).some(b => !sharesProject(a, b)));
 
   const save = async () => {
     setBusy(true);

@@ -15,6 +15,7 @@ import { MentionPicker } from '../composer/Pickers.tsx';
 import { mentionTokenAt, pickValue, rankMentions, replaceToken, withFolders, type MentionPick } from '../composer/tokens.ts';
 import { IS_MAC } from '../platform.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
+import { projectLabel } from '../projects.ts';
 import { heldText, openAsks } from '../superText.ts';
 import { cx } from '../ui/common.tsx';
 import { EngineIcon, ENGINE_NAMES } from '../ui/EngineIcon.tsx';
@@ -353,7 +354,7 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
               items={[
                 { key: 'super', label: 'SuperAgent', hint: superId ? 'Runs the team' : 'Set up when you send', icon: <AvatarGlyph look={SUPER_LOOK} seed="super" className="size-3.5" />, checked: live.kind === 'super', onPick: () => pick({ kind: 'super' }) },
                 ...[...agents].filter(a => a.role !== 'super').sort((a, b) => a.name.localeCompare(b.name)).map(a => ({
-                  key: a.id, label: a.name, hint: `${snapshot?.projects.find(p => p.id === a.projectId)?.name ?? 'All projects'} · ${stateWord(a)}`,
+                  key: a.id, label: a.name, hint: `${projectLabel(a.projectIds, snapshot?.projects, 'All projects')} · ${stateWord(a)}`,
                   icon: <AgentAvatar agent={a} className="size-3.5" />, checked: live.kind === 'agent' && live.agentId === a.id, onPick: () => pick({ kind: 'agent', agentId: a.id }),
                 })),
                 { key: 'new', label: 'New agent…', hint: `${MOD}P picks its project`, icon: <Plus className="size-3.5" strokeWidth={1.75} />, checked: live.kind === 'new', onPick: () => pick(asNew({})) },

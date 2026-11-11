@@ -35,9 +35,9 @@ function Members({ channel, members, onEdit }: { channel: Channel; members: Agen
   const [filter, setFilter] = useState('');
   const root = useRef<HTMLDivElement>(null);
   const projects = useApp(s => s.snapshot?.projects);
-  const projectName = (id: string | null) => projectLabel(id, projects);
+  const projectName = (ids: string[] | null) => projectLabel(ids, projects);
   const q = filter.trim().toLowerCase();
-  const listed = q ? members.filter(m => [m.name, projectName(m.projectId), rolePreset(m.role).name].some(f => f.toLowerCase().includes(q))) : members;
+  const listed = q ? members.filter(m => [m.name, projectName(m.projectIds), rolePreset(m.role).name].some(f => f.toLowerCase().includes(q))) : members;
   return (
     <div ref={root} className="relative">
       <button
@@ -66,7 +66,7 @@ function Members({ channel, members, onEdit }: { channel: Channel; members: Agen
             <MenuRow
               key={agent.id}
               title={<span className="flex items-center gap-1.5"><AgentAvatar agent={agent} className="size-3.5" />{agent.name}</span>}
-              hint={[projectName(agent.projectId), rolePreset(agent.role).name, agent.status === 'working' ? agent.activity || 'Working' : agent.status === 'waiting' ? 'Needs you' : ''].filter(Boolean).join(', ')}
+              hint={[projectName(agent.projectIds), rolePreset(agent.role).name, agent.status === 'working' ? agent.activity || 'Working' : agent.status === 'waiting' ? 'Needs you' : ''].filter(Boolean).join(', ')}
               onSelect={() => { setShown(false); open({ kind: 'agent', agentId: agent.id }); }}
             />
           ))}

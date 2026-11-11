@@ -16,11 +16,10 @@ import { Group, Row, Select, Toggle } from '../mono/settings.tsx';
 import { submitKey } from './submitKey.ts';
 import { AvatarGlyph } from '../ui/Avatar.tsx';
 import { agentLook, freshLook, type AvatarLook } from '../../shared/avatar.ts';
+import { beyondOneFolder, choiceValue, initialChoice, type ProjectsChoice } from '../projectPicker.ts';
+import { ProjectsPicker } from './ProjectsPicker.tsx';
 
 const NAMES = AGENT_NAMES;
-const ADD_PROJECT = '__add';
-/** The project choice for an agent with no project: it works from its own folder, across every project. */
-const NO_PROJECT = '__none';
 
 /** `projectId` null opens with No project chosen; undefined starts from the first project. */
 export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId?: string | null; onClose: () => void; onAddProject: () => void }) {
@@ -34,7 +33,8 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   const allAgents = useApp(s => s.snapshot?.agents);
   const takenLooks = useMemo(() => (allAgents ?? []).map(a => agentLook(a)), [allAgents]);
   const [look, setLook] = useState<AvatarLook>(() => freshLook(takenLooks));
-  const [project, setProject] = useState(projectId === null ? NO_PROJECT : projectId ?? projects[0]?.id ?? NO_PROJECT);
+  // All projects, or the chosen ones with the start folder first (ACH-D15).
+  const [choice, setChoice] = useState<ProjectsChoice>(() => initialChoice(projectId, projects[0]?.id));
   const [role, setRole] = useState<AgentRole>('dev');
   const [instructions, setInstructions] = useState(rolePreset('dev').instructions);
   const [autonomy, setAutonomy] = useState<Autonomy>(rolePreset('dev').autonomy);
@@ -47,10 +47,13 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   const [busy, setBusy] = useState(false);
 
   const models = snapshot?.models[engine];
-  const selectedProject = projects.find(p => p.id === project);
-  const noProject = project === NO_PROJECT;
+  const projectIds = choiceValue(choice);
+  const noProject = projectIds === null;
+  // The start folder: the worktree, if any, is a branch of it; the others are used in place.
+  const selectedProject = projects.find(p => p.id === projectIds?.[0]);
+  const others = (projectIds ?? []).slice(1).flatMap(id => projects.filter(p => p.id === id));
   const efforts = (model ? models?.models.find(m => m.value === model)?.efforts : undefined) ?? models?.efforts ?? [];
-  const problem = engineProblem(engine, engines?.[engine], noProject);
+  const problem = engineProblem(engine, engines?.[engine], beyondOneFolder(choice));
   const engineReady = !problem;
 
   useEffect(() => { setModel(''); setEffort(''); }, [engine]);
@@ -66,7 +69,8 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
   const create = async () => {
     setBusy(true);
     const agent = await attempt(() => api.createAgent({
-      name: name.trim(), engine, projectId: noProject ? null : project, role, instructions, autonomy, model, effort, avatar: look,
+      // null is All projects; Create is disabled while Choose has nothing picked (undefined).
+      name: name.trim(), engine, projectIds: projectIds === undefined ? [] : projectIds, role, instructions, autonomy, model, effort, avatar: look,
       worktree: !noProject && worktree, branch: (!noProject && worktree && branch.trim()) || undefined, useMcp: engine === 'claude' && useMcp, task: task.trim() || undefined,
     }));
     setBusy(false);
@@ -76,7 +80,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
     }
   };
 
-  const onSubmitKey = submitKey(!busy && Boolean(name.trim()) && Boolean(project) && engineReady, () => void create());
+  const onSubmitKey = submitKey(!busy && Boolean(name.trim()) && projectIds !== undefined && engineReady, () => void create());
 
   return (
     <Modal
@@ -89,7 +93,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
         <>
           {problem ? <span className="mr-auto font-sans text-[12px] text-warning">{problem}</span> : null}
           <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
-          <button type="button" className={PRIMARY} disabled={busy || !name.trim() || !project || !engineReady} onClick={() => void create()}>
+          <button type="button" className={PRIMARY} disabled={busy || !name.trim() || projectIds === undefined || !engineReady} onClick={() => void create()}>
             {busy ? 'Creating…' : 'Create agent'}
           </button>
         </>
@@ -106,18 +110,16 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
           <Row label="Avatar" description="A look no other agent has. Change it any time in its settings.">
             <SecondaryButton onClick={() => setLook(freshLook(takenLooks))}>Shuffle</SecondaryButton>
           </Row>
-          <Row label="Project" description={noProject ? 'Works from its own folder and can reach every project you have added.' : undefined}>
-            <Select
-              label="Project"
-              value={project}
-              options={[
-                ...projects.map(p => ({ value: p.id, label: p.name })),
-                { value: NO_PROJECT, label: 'No project (works across all projects)' },
-                { value: ADD_PROJECT, label: 'Add project…' },
-              ]}
-              onChange={value => (value === ADD_PROJECT ? (onClose(), onAddProject()) : setProject(value))}
+          <div className="border-b border-content/5 px-4 py-3.5">
+            <ProjectsPicker
+              choice={choice}
+              onChange={setChoice}
+              projects={projects}
+              agents={allAgents ?? []}
+              engine={engine}
+              onAddProject={() => { onClose(); onAddProject(); }}
             />
-          </Row>
+          </div>
           <Row label="Engine" description={engines?.[engine].available ? `${engines[engine].path} (v${engines[engine].version})` : 'Not installed on this machine.'}>
             <Select label="Engine" value={engine} onChange={value => setEngine(value as EngineKind)} options={ENGINES.map(kind => ({ value: kind, icon: <EngineIcon engine={kind} className="size-4" />, label: engines?.[kind].available ? ENGINE_LABEL[kind] : `${ENGINE_LABEL[kind]} (not installed)` }))} />
           </Row>
@@ -152,7 +154,9 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
         </Group>
 
         {noProject && engine !== 'claude' ? null : <Group title="Workspace">
-          {noProject ? null : <Row label="Own git worktree" description={selectedProject?.isGit ? 'A new branch in its own folder, so it never collides with you or other agents.' : 'Available for projects inside a git repository.'}>
+          {noProject ? null : <Row label="Own git worktree" description={!selectedProject?.isGit ? 'Available when the start folder is inside a git repository.' : others.length
+            ? `A new branch in its own folder for ${selectedProject.name}, the start folder. ${others.map(p => p.name).join(' and ')} ${others.length === 1 ? 'is' : 'are'} used as ${others.length === 1 ? 'it is' : 'they are'}, in place: changes there land in your own ${others.length === 1 ? 'copy' : 'copies'}.`
+            : 'A new branch in its own folder, so it never collides with you or other agents.'}>
             <Toggle label="Own git worktree" on={worktree} disabled={!selectedProject?.isGit} onChange={setWorktree} />
           </Row>}
           {worktree && !noProject ? (

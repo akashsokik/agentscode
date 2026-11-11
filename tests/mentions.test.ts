@@ -6,9 +6,9 @@ import { hintFor } from '../web/composer/mentionHints.ts';
 import { harness, projectDir } from './helpers.ts';
 
 const agents = [
-  { id: 'a1', name: 'Ada', role: 'dev', projectId: 'p1' },
-  { id: 'a2', name: 'Ada Lovelace', role: 'reviewer', projectId: null },
-  { id: 'a3', name: 'Rhea', role: 'reviewer', projectId: 'p1' },
+  { id: 'a1', name: 'Ada', role: 'dev', projectIds: ['p1'] },
+  { id: 'a2', name: 'Ada Lovelace', role: 'reviewer', projectIds: null },
+  { id: 'a3', name: 'Rhea', role: 'reviewer', projectIds: ['p1'] },
 ];
 const projects = [
   { id: 'p1', name: 'web', path: '/work/web' },
@@ -109,7 +109,7 @@ test('names with spaces: the picker stays open while one is typed, and closes on
 });
 
 test('an agent and a project with the same name: each pick keeps its kind, in the chips, the note and channel delivery', () => {
-  const both = { agents: [...agents, { id: 'a9', name: 'orca', role: 'dev', projectId: null }], projects: [...projects, { id: 'p9', name: 'orca', path: '/work/orca' }] };
+  const both = { agents: [...agents, { id: 'a9', name: 'orca', role: 'dev', projectIds: null }], projects: [...projects, { id: 'p9', name: 'orca', path: '/work/orca' }] };
   const text = 'ask @orca about @orca';
   // Picked: the agent first, then the project.
   const picked = [hintFor({ kind: 'agent', agent: { id: 'a9', name: 'orca' }, positions: [] }, 4)!, hintFor({ kind: 'project', project: { id: 'p9', name: 'orca', path: '/work/orca' }, positions: [] }, 16)!];

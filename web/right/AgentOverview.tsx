@@ -87,7 +87,7 @@ export function AgentOverview({ agent, git }: { agent: Agent; git: GitStatus | n
               <span className="truncate text-[15px] font-semibold leading-5 text-content">{agent.name}</span>
               <span className="shrink-0 text-[12.5px] text-content/45">{rolePreset(agent.role).name}</span>
             </p>
-            <WorkingIn agent={agent} where={where} home={projectLabel(agent.projectId, projects, 'Removed')} now={now} />
+            <WorkingIn agent={agent} where={where} home={projectLabel(agent.projectIds, projects, 'Removed')} now={now} />
           </div>
         </div>
 

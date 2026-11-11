@@ -14,7 +14,8 @@ export interface MentionAgent {
   id: string;
   name: string;
   role?: string;
-  projectId?: string | null;
+  /** Its projects, the start folder first; null for all projects (shared/agentProjects.ts). */
+  projectIds?: string[] | null;
 }
 
 export interface MentionProject {
@@ -165,9 +166,12 @@ export function mentionContext(
     if (ref.kind === 'agent') {
       const agent = lookup.agents.find(a => a.id === ref.id);
       if (!agent) continue;
-      const project = agent.projectId ? lookup.projects.find(p => p.id === agent.projectId) : undefined;
+      const projects = (agent.projectIds ?? []).flatMap(id => lookup.projects.filter(p => p.id === id));
       const role = agent.role ? (lookup.roleName?.(agent.role) ?? agent.role) : '';
-      lines.push(`- @${ref.name}: the agent ${agent.name} (agent id ${agent.id}${role ? `, ${role}` : ''}${project ? `, project ${project.name} at ${project.path}` : agent.projectId === null ? ', all projects' : ''}).`);
+      const where = projects.length === 1 ? `, project ${projects[0].name} at ${projects[0].path}`
+        : projects.length ? `, projects ${projects.map(p => `${p.name} at ${p.path}`).join(' and ')} (starts in ${projects[0].name})`
+        : agent.projectIds === null ? ', all projects' : '';
+      lines.push(`- @${ref.name}: the agent ${agent.name} (agent id ${agent.id}${role ? `, ${role}` : ''}${where}).`);
     } else if (ref.kind === 'project') {
       const project = lookup.projects.find(p => p.id === ref.id);
       if (project) lines.push(`- @${ref.name}: the project ${project.name} at ${project.path}.`);

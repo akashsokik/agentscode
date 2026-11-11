@@ -1,3 +1,4 @@
+import { isAllProjects, startProjectId } from '../../shared/agentProjects.ts';
 import { randomUUID } from 'node:crypto';
 import { alignHints, findMentions, mentionContext, type MentionAgent, type MentionHint, type MentionProject, type MentionRef } from '../../shared/mentions.ts';
 import { rolePreset } from '../../shared/roles.ts';
@@ -422,11 +423,14 @@ export class Channels {
   // ---- prompts -----------------------------------------------------------------
 
   private member(a: Agent, selfId: string) {
-    const project = a.projectId === null ? undefined : this.store.projects.get(a.projectId);
+    const start = startProjectId(a);
+    const project = start === null ? undefined : this.store.projects.get(start);
+    const names = (a.projectIds ?? []).map(pid => this.store.projects.get(pid)?.name).filter((n): n is string => Boolean(n));
     return {
       id: a.id, name: a.name, you: a.id === selfId || undefined, engine: ENGINE_LABELS[a.engine], role: a.role, status: a.status,
-      project: a.projectId === null ? ALL_PROJECTS : project?.name ?? null,
-      workspace: a.worktree?.cwd ?? project?.path ?? (a.projectId === null ? noProjectFolder(a.home) : null),
+      // Every project it works on, the start folder first.
+      project: isAllProjects(a) ? ALL_PROJECTS : names.length ? names.join(', ') : null,
+      workspace: a.worktree?.cwd ?? project?.path ?? (isAllProjects(a) ? noProjectFolder(a.home) : null),
       branch: a.worktree?.branch ?? null,
     };
   }
@@ -434,7 +438,8 @@ export class Channels {
   private roster(channel: Channel, selfId: string): string[] {
     return channel.memberIds.map(id => this.store.agents.get(id)).filter((a): a is Agent => Boolean(a)).map(a => {
       const m = this.member(a, selfId);
-      const where = a.projectId === null ? 'no project (works across all projects)' : `project ${m.project ?? 'unknown'} at ${m.workspace ?? 'unknown'}`;
+      const several = (a.projectIds?.length ?? 0) > 1;
+      const where = isAllProjects(a) ? 'no project (works across all projects)' : `${several ? 'projects' : 'project'} ${m.project ?? 'unknown'} at ${m.workspace ?? 'unknown'}`;
       return `- ${m.name}${m.you ? ' (you)' : ''}, id ${m.id}: ${m.engine}, ${m.role}, ${where}${m.branch ? ` on branch ${m.branch}` : ''}, ${m.status}.`;
     });
   }

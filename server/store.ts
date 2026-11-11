@@ -3,10 +3,12 @@ import path from 'node:path';
 import { DEFAULT_SETTINGS, type Agent, type Channel, type ChannelPost, type Conversation, type Entry, type PeerMessage, type Project, type Settings } from '../shared/types.ts';
 import { DATA_DIR } from './config.ts';
 import { threadRoot, withThreadRoots } from './comms/threads.ts';
+import { normalizeProjectIds } from '../shared/agentProjects.ts';
 
 interface PersistedState {
   version: 1;
-  agents: Agent[];
+  /** Each with the old projectId beside projectIds (legacyProjectId), for an older build. */
+  agents: (Agent & { projectId?: string | null })[];
   projects: Project[];
   settings: Settings;
   messages: PeerMessage[];
@@ -54,7 +56,8 @@ export class Store {
     try {
       const raw = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as Partial<PersistedState>;
       for (const p of raw.projects ?? []) this.projects.set(p.id, p);
-      for (const a of raw.agents ?? []) this.agents.set(a.id, a);
+      // Projects are read first, so a damaged project choice can fall back to a project that exists.
+      for (const a of raw.agents ?? []) this.agents.set(a.id, migrateAgentProjects(a, id => this.projects.has(id)));
       this.settings = { ...DEFAULT_SETTINGS, ...raw.settings };
       this.messages = raw.messages ?? [];
       this.conversations = raw.conversations ?? [];
@@ -89,7 +92,8 @@ export class Store {
     }
     const state: PersistedState = {
       version: 1,
-      agents: [...this.agents.values()],
+      // projectId too, for an older build: the start folder, or null only for an agent on every project.
+      agents: [...this.agents.values()].map(a => ({ ...a, projectId: legacyProjectId(a) })),
       projects: [...this.projects.values()],
       settings: this.settings,
       messages: this.messages,
@@ -181,4 +185,51 @@ export class Store {
     this.posts.delete(channelId);
     fs.rmSync(this.postsPath(channelId), { force: true });
   }
+}
+
+/**
+ * What an agent with no usable project choice is saved with in the old projectId field: an id no
+ * project has, so a build from before projectIds fails closed on it (no folder) instead of reading
+ * a missing value as every project.
+ */
+export const NO_PROJECT_LEGACY = 'no-project';
+
+/**
+ * The old single-project field written beside projectIds on save, so a build from before agents
+ * could have several projects reads each agent at its narrowest: its start folder, or every project
+ * only when it really has every project.
+ */
+export function legacyProjectId(agent: Pick<Agent, 'projectIds'>): string | null {
+  if (agent.projectIds === null) return null;
+  return agent.projectIds[0] ?? NO_PROJECT_LEGACY;
+}
+
+/**
+ * Read an agent's project choice as stored, always at the narrowest safe scope:
+ * - projectIds that read (null, or a list of ids) win: the newer field is the authority;
+ * - stored before projectIds existed: the old projectId, an id becoming [id] and null staying null
+ *   (it really was an agent on every project);
+ * - anything unreadable (a damaged projectIds, or no usable field at all): the old projectId when it
+ *   names a project that exists, else [] (no projects: the agent keeps only its own folder, and the
+ *   app asks you to pick its projects). Never every project.
+ * The old key is dropped in memory; save writes it back from projectIds (legacyProjectId).
+ */
+export function migrateAgentProjects(agent: Agent, projectExists: (id: string) => boolean = () => true): Agent {
+  const raw = agent as Agent & { projectId?: unknown };
+  const stored: unknown = raw.projectIds;
+  const legacy = raw.projectId;
+  const readable = stored === null || (Array.isArray(stored) && stored.every(id => typeof id === 'string' && id !== ''));
+  if (readable) {
+    raw.projectIds = stored === null ? null : [...new Set(stored as string[])];
+  } else if (stored === undefined && legacy === null) {
+    raw.projectIds = null;
+  } else if (stored === undefined && typeof legacy === 'string' && legacy && legacy !== NO_PROJECT_LEGACY) {
+    raw.projectIds = [legacy];
+  } else {
+    const ids = normalizeProjectIds(undefined, legacy);
+    raw.projectIds = ids && ids.length === 1 && ids[0] !== NO_PROJECT_LEGACY && projectExists(ids[0]) ? ids : [];
+    console.error(`[store] ${raw.name ?? raw.id}'s projects could not be read; it now has ${raw.projectIds.length ? 'its old project only' : 'no projects until you pick some in its settings'}.`);
+  }
+  delete raw.projectId;
+  return raw;
 }

@@ -25,12 +25,12 @@ export function AgentPicker({ value, onChange }: { value: string[]; onChange: (i
   const list = useRef<HTMLDivElement>(null);
   const selected = new Set(value);
 
-  const projectName = (id: string | null) => projectLabel(id, projects, 'Unknown project');
-  const describe = (a: Agent) => [projectName(a.projectId), rolePreset(a.role).name, a.worktree ? `branch ${a.worktree.branch}` : ''].filter(Boolean).join(', ');
+  const projectName = (ids: string[] | null) => projectLabel(ids, projects, 'Unknown project');
+  const describe = (a: Agent) => [projectName(a.projectIds), rolePreset(a.role).name, a.worktree ? `branch ${a.worktree.branch}` : ''].filter(Boolean).join(', ');
 
   const { groups, rows, total } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const matches = (a: Agent) => !q || [a.name, projectName(a.projectId), rolePreset(a.role).name, ENGINE_NAMES[a.engine], a.worktree?.branch ?? '']
+    const matches = (a: Agent) => !q || [a.name, projectName(a.projectIds), rolePreset(a.role).name, ENGINE_NAMES[a.engine], a.worktree?.branch ?? '']
       .some(field => field.toLowerCase().includes(q));
     // Agents with no project come first, under All projects.
     const all = groupByProject((agents ?? []).filter(matches), projects ?? []).map(({ id, name, agents: inGroup }) => ({
@@ -89,7 +89,7 @@ export function AgentPicker({ value, onChange }: { value: string[]; onChange: (i
             <span key={agent.id} title={describe(agent)} className="inline-flex h-6.5 max-w-full items-center gap-1 rounded-md bg-selection pl-1.5 pr-0.5 text-[12px] text-content">
               <AgentAvatar agent={agent} className="size-3.5" />
               <span className="min-w-0 truncate">{agent.name}</span>
-              <span className="min-w-0 truncate text-content/40">{projectName(agent.projectId)}</span>
+              <span className="min-w-0 truncate text-content/40">{projectName(agent.projectIds)}</span>
               <button type="button" aria-label={`Remove ${agent.name}`} onClick={() => toggle(agent.id)} className="grid size-5 shrink-0 place-items-center rounded text-content/45 hover:bg-content/10 hover:text-content">
                 <X className="size-3" strokeWidth={1.8} />
               </button>

@@ -51,13 +51,13 @@ function ChangeRow({ file, root }: { file: ChangedFile; root: Root }) {
 
 /** The git root for an agent's changes; an agent with no project has no one folder to diff. */
 function changesRoot(agent: Agent | undefined): Root | null {
-  return agent && agent.projectId !== null ? { agent: agent.id } : null;
+  return agent && agent.projectIds !== null ? { agent: agent.id } : null;
 }
 
 export function ChangesView({ agent }: { agent: Agent | undefined }) {
-  const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectId]);
+  const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectIds?.[0]]);
   const { status, error } = useGitStatus(root, agent ? `${agent.status}:${agent.turns}` : undefined);
-  if (agent?.projectId === null) {
+  if (agent?.projectIds === null) {
     return (
       <Empty icon={Folder} title={ALL_PROJECTS}>
         {agent.name} has no project of its own, so there is no single working tree to show changes for. Open a project agent, or a project's Changes, to see what changed there.
@@ -280,7 +280,7 @@ export function RightPanel() {
   const agentId = focusedAgentId(layout);
   const agent = useApp(s => s.snapshot?.agents.find(a => a.id === agentId));
   const inFlight = useApp(s => s.snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0);
-  const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectId]);
+  const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectIds?.[0]]);
   const { status: git } = useGitStatus(root, agent ? `${agent.status}:${agent.turns}` : undefined);
   const isSuper = agent?.role === 'super';
   const tabs: { view: PanelView; label: string; icon: IconComponent }[] = isSuper ? SUPER_PANEL_TABS : PANEL_TABS;
