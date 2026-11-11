@@ -34,7 +34,8 @@ const READ_COMMANDS: Record<string, (args: string[]) => boolean> = {
   'rev-parse': () => true,
   'merge-base': a => a[1] === '--is-ancestor',
   'for-each-ref': () => true,
-  'symbolic-ref': a => a.includes('--short') && !a.some(x => x.startsWith('refs/heads/') && a.indexOf(x) > 2),
+  // Reading: exactly one ref named, so it can never be the two-argument form that sets one.
+  'symbolic-ref': a => a.includes('--short') && a.slice(1).filter(x => !x.startsWith('-')).length === 1,
 };
 
 /** Whether a command may run for the view. */
@@ -190,6 +191,8 @@ export interface WorkContext {
   messages: () => PeerMessage[];
   /** <dataDir>/agents, whose subfolders are agents' own homes. */
   agentsDir: string;
+  /** <dataDir>: cleanup only ever lists folders under it (agent homes, AgentsCode's worktrees) or an agent's recorded worktree. */
+  dataDir: string;
   knownRef: (id: string) => boolean;
 }
 
@@ -326,14 +329,19 @@ export class WorkService {
     return this.records.list(root);
   }
 
-  /** Whether a branch's tip is merged by one of our records: the tip that was merged, or an older one. */
-  private async mergedByRecord(branch: string, tip: string, records: MergeRecord[], cwd: string): Promise<MergeRecord | null> {
-    const mine = records.filter(r => r.branch === branch).reverse();
-    for (const r of mine) {
-      if (r.tip === tip) return r;
-      if (await this.ancestor(tip, r.tip, cwd)) return r;
+  /**
+   * The branches whose tips are in some recorded merge: the branch merged itself, or a branch that
+   * went in through it (feat/x merged into feat/y, feat/y merged into main). By branch name, the
+   * latest such record.
+   */
+  private async mergedBranches(records: MergeRecord[], cwd: string): Promise<Map<string, MergeRecord>> {
+    const out = new Map<string, MergeRecord>();
+    for (const r of [...records].sort((a, b) => a.at - b.at)) {
+      const merged = await this.git(['for-each-ref', '--merged', r.tip, '--format=%(refname:short)', 'refs/heads'], cwd);
+      if (!merged.ok) continue; // the tip is gone from the repository
+      for (const name of merged.out.split('\n').filter(Boolean)) out.set(name, r);
     }
-    return null;
+    return out;
   }
 
   private owner(folder: string, agents: Agent[]): Agent | undefined {
@@ -354,6 +362,9 @@ export class WorkService {
     const messages = this.ctx.messages();
     const byName = (name: string) => agents.find(a => a.name.toLowerCase() === name.toLowerCase());
     const records = await this.captureMerges(facts);
+    const byRecord = await this.mergedBranches(records, root);
+    const dataDir = realOrSelf(this.ctx.dataDir);
+    const usable = async (branch: string) => branch !== defaultBranch && !branch.startsWith('backup/') && !(await neverUsed(this.git, branch, root));
 
     // main's recent history, with the trees to match rewritten merges by their files.
     const log = await this.git(['log', '--first-parent', '-200', '--format=%H%x1f%T%x1f%P%x1f%s%x1f%ct', defaultBranch], root);
@@ -426,21 +437,24 @@ export class WorkService {
       if (main && (!wt.branch || wt.branch === defaultBranch)) continue;
       const agent = this.owner(wt.path, agents);
       if (wt.prunable || !fs.existsSync(wt.path)) {
-        if (!main && !wt.locked) folders.push({ path: wt.path, branch: wt.branch, ...(agent ? { agentId: agent.id, agentName: agent.name } : {}), reason: 'missing', changes: { changed: 0, untracked: 0, links: 0 }, dirty: false });
+        if (!main && !wt.locked && inside(path.resolve(wt.path), path.resolve(this.ctx.dataDir))) folders.push({ path: wt.path, branch: wt.branch, ...(agent ? { agentId: agent.id, agentName: agent.name } : {}), reason: 'missing', changes: { changed: 0, untracked: 0, links: 0 }, dirty: false });
         continue;
       }
       const status = await this.git(['status', '--porcelain', '--untracked-files=normal'], wt.path);
       const changes = countChanges(status.out, wt.path);
       const dirty = changes.changed > 0 || changes.untracked > changes.links;
       const head = wt.head ?? '';
-      const record = wt.branch ? await this.mergedByRecord(wt.branch, head, records, root) : null;
+      const record = wt.branch && await usable(wt.branch) ? byRecord.get(wt.branch) ?? null : null;
       // On main by git, unless it is a branch that never had work of its own (just made from main).
       const gitMerged = head ? await this.ancestor(head, defaultBranch, root) && !(wt.branch && await neverUsed(this.git, wt.branch, root)) : false;
       const isLive = liveWorktrees.has(realOrSelf(wt.path));
+      // Only folders AgentsCode made: under its data folder, or an agent's recorded worktree; never
+      // a worktree another tool or the user made elsewhere.
+      const ours = inside(realOrSelf(wt.path), dataDir) || agents.some(a => a.worktree && realOrSelf(a.worktree.path) === realOrSelf(wt.path));
       // A detached folder is listed only when it is clean and its commit is on main: removing one
       // with commits of its own would leave them on no branch.
       const leftover = wt.branch ? Boolean(record || gitMerged) : gitMerged && !dirty;
-      if (!main && !wt.locked && !isLive && leftover) {
+      if (!main && !wt.locked && !isLive && ours && leftover) {
         folders.push({ path: wt.path, branch: wt.branch, ...(agent ? { agentId: agent.id, agentName: agent.name } : {}), reason: wt.branch ? 'merged' : 'detached', changes, dirty });
         continue;
       }
@@ -472,8 +486,9 @@ export class WorkService {
       if (!name || !tip || name === defaultBranch || name.startsWith('backup/')) continue;
       const at = checkedOut.get(name);
       if (at && !folders.some(f => f.path === at)) continue; // still in use somewhere
-      const record = await this.mergedByRecord(name, tip, records, root);
-      const gitMerged = !record && await this.ancestor(tip, defaultBranch, root) && !(await neverUsed(this.git, name, root));
+      const fresh = await neverUsed(this.git, name, root);
+      const record = fresh ? null : byRecord.get(name) ?? null;
+      const gitMerged = !record && !fresh && await this.ancestor(tip, defaultBranch, root);
       if (!record && !gitMerged) continue;
       const names = record?.names ?? [];
       branches.push({ name, by: record ? 'record' : 'git', ...(at ? { inFolder: at } : {}), ...(names[0] ? { agentName: names[0] } : {}) });

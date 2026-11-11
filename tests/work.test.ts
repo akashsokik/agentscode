@@ -47,7 +47,7 @@ function setup() {
 }
 
 function service(dir: string, agents: Agent[] = [], messages: PeerMessage[] = [], runner: GitRunner = readGit) {
-  return new WorkService(new MergeRecords(path.join(dir, 'data', 'work')), { agents: () => agents, messages: () => messages, agentsDir: path.join(dir, 'data', 'agents'), knownRef: () => true }, runner);
+  return new WorkService(new MergeRecords(path.join(dir, 'data', 'work')), { agents: () => agents, messages: () => messages, agentsDir: path.join(dir, 'data', 'agents'), dataDir: path.join(dir, 'data'), knownRef: () => true }, runner);
 }
 
 // ---- small pieces -------------------------------------------------------------------------------
@@ -61,7 +61,7 @@ test('only read-only git commands are allowed for the view', () => {
   for (const args of [
     ['fetch'], ['pull'], ['push'], ['worktree', 'remove', 'x'], ['worktree', 'prune'], ['worktree', 'list'], ['branch', '-D', 'x'], ['status'],
     ['merge-base', 'a', 'b'], ['reset', '--hard'], ['checkout', 'x'], ['gc'], ['reflog', 'expire'], ['log', '--output=/tmp/x'], ['update-ref', 'x', 'y'],
-    ['symbolic-ref', 'HEAD', 'refs/heads/x'], ['config', 'x', 'y'],
+    ['symbolic-ref', 'HEAD', 'refs/heads/x'], ['symbolic-ref', '--short', 'HEAD', 'refs/remotes/x'], ['config', 'x', 'y'],
   ]) assert.equal(isReadOnlyGit(args), false, args.join(' '));
 });
 
@@ -143,6 +143,28 @@ test('after main is rewritten, merges still count by record: same files map to t
   assert.deepEqual(names, ['feat/a:record', 'feat/b:record', 'feat/c:record']);
 });
 
+test('a branch merged through another branch counts as merged by record, also after a rewrite', async () => {
+  const { dir, repo, base, project } = setup();
+  git(repo, 'checkout', '-q', '-b', 'feat/x', base);
+  commit(repo, 'x.txt', 'x', 'work on x');
+  git(repo, 'checkout', '-q', '-b', 'feat/y', 'feat/x');
+  commit(repo, 'y.txt', 'y', 'work on y');
+  git(repo, 'checkout', '-q', 'main');
+  merge(repo, 'feat/y', 'Merge feat/y (Cy): x and y');
+  const svc = service(dir);
+  await svc.project(project);
+  // Rewrite main to a single commit with the same files, and let git forget the old ones.
+  const tree = git(repo, 'rev-parse', 'main^{tree}');
+  git(repo, 'update-ref', 'refs/heads/main', git(repo, 'commit-tree', tree, '-p', base, '-m', 'everything'));
+  git(repo, 'reset', '-q', '--hard', 'main');
+  git(repo, 'reflog', 'expire', '--expire=now', '--all');
+  const view = await service(dir).project(project, true);
+  const branches = new Map(view.cleanup.branches.map(b => [b.name, b.by]));
+  assert.equal(branches.get('feat/x'), 'record', 'feat/x went in through feat/y');
+  assert.equal(branches.get('feat/y'), 'record');
+  assert.ok(!view.inProgress.some(b => b.branch === 'feat/x' || b.branch === 'feat/y'));
+});
+
 test('pushed: nothing local only means everything merged is on GitHub, rewritten or not', async () => {
   const { dir, repo, project } = setup();
   git(repo, 'push', '-q', 'origin', 'main');
@@ -178,18 +200,23 @@ test('in progress: ahead and behind main, changes, last commit; symlinks are not
 
 test('cleanup lists merged work only: never main or backup/*, never a live agent\'s worktree, a locked one or a new branch; dirty folders flagged', async () => {
   const { dir, repo, project } = setup();
-  const add = (name: string, branch: string, start = 'feat/a') => { const p = path.join(dir, name); git(repo, 'worktree', 'add', '-q', p, branch === '--detach' ? start : branch, ...(branch === '--detach' ? ['--detach'] : [])); return fs.realpathSync(p); };
+  const home = path.join(dir, 'data', 'agents', 'fen', 'workspace');
+  fs.mkdirSync(home, { recursive: true });
+  const add = (name: string, branch: string) => { const p = path.join(home, name); git(repo, 'worktree', 'add', '-q', p, branch); return fs.realpathSync(p); };
   const clean = add('wt-a', 'feat/a');
   const dirty = add('wt-b', 'feat/b');
   fs.writeFileSync(path.join(dirty, 'feat/b.txt'), 'edited');
   const linked = add('wt-c', 'feat/c');
   fs.symlinkSync(dir, path.join(linked, 'node_modules'));
-  const live = path.join(dir, 'wt-live');
+  const live = path.join(home, 'wt-live');
   git(repo, 'worktree', 'add', '-q', '-b', 'feat/live', live, 'feat/a');
-  const locked = path.join(dir, 'wt-locked');
+  const locked = path.join(home, 'wt-locked');
   git(repo, 'worktree', 'add', '-q', '-b', 'feat/locked', locked, 'feat/a');
   git(repo, 'worktree', 'lock', locked);
-  const fresh = path.join(dir, 'wt-fresh');
+  const fresh = path.join(home, 'wt-fresh');
+  // A worktree another tool made, outside AgentsCode's data folder: never AgentsCode's to remove.
+  const foreign = path.join(dir, 'other-tool', 'wt');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/foreign', foreign, 'feat/a');
   git(repo, 'worktree', 'add', '-q', fresh, 'feat/fresh');
   const agents = [{ id: 'x', name: 'X', role: 'dev', status: 'idle', worktree: { path: live, cwd: live, branch: 'feat/live' } }] as unknown as Agent[];
   const view = await service(dir, agents).project(project, true);
@@ -202,6 +229,7 @@ test('cleanup lists merged work only: never main or backup/*, never a live agent
   assert.ok(!folders.has(fs.realpathSync(locked)), 'a locked worktree');
   assert.ok(!folders.has(fs.realpathSync(fresh)), 'a branch made from main and never used is new, not merged');
   assert.ok(!folders.has(repo), 'never the project\'s own folder');
+  assert.ok(!folders.has(fs.realpathSync(foreign)), 'never a worktree made outside AgentsCode');
   const branches = view.cleanup.branches.map(b => b.name);
   assert.ok(!branches.includes('main') && !branches.includes('backup/pre-x') && !branches.includes('feat/fresh'));
   assert.ok(!branches.includes('feat/live') && !branches.includes('feat/locked'), 'still checked out in a folder that stays');
@@ -211,20 +239,25 @@ test('cleanup lists merged work only: never main or backup/*, never a live agent
 
 test('cleanup removes exactly what was ticked, rechecked now; a dirty folder needs a second yes; links stay intact', async () => {
   const { dir, repo, project } = setup();
-  const add = (name: string, branch: string) => { const p = path.join(dir, name); git(repo, 'worktree', 'add', '-q', p, branch); return fs.realpathSync(p); };
+  const home = path.join(dir, 'data', 'agents', 'fen', 'workspace');
+  fs.mkdirSync(home, { recursive: true });
+  const add = (name: string, branch: string) => { const p = path.join(home, name); git(repo, 'worktree', 'add', '-q', p, branch); return fs.realpathSync(p); };
   const clean = add('wt-a', 'feat/a');
   const dirty = add('wt-b', 'feat/b');
   fs.writeFileSync(path.join(dirty, 'feat/b.txt'), 'edited');
   const linked = add('wt-c', 'feat/c');
+  const foreign = path.join(dir, 'other-tool', 'wt');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/foreign', foreign, 'feat/a');
   const target = path.join(dir, 'kept');
   fs.mkdirSync(target);
   fs.writeFileSync(path.join(target, 'file'), 'keep');
   fs.symlinkSync(target, path.join(linked, 'node_modules'));
   const svc = service(dir);
-  const first = await svc.cleanup(project, { projectId: 'p1', folders: [clean, dirty, linked, '/etc'], branches: ['feat/a', 'main', 'backup/pre-x', 'feat/fresh', 'feat/b'] });
+  const first = await svc.cleanup(project, { projectId: 'p1', folders: [clean, dirty, linked, '/etc', foreign], forceFolders: [foreign], branches: ['feat/a', 'main', 'backup/pre-x', 'feat/fresh', 'feat/b'] });
   assert.deepEqual(first.removed.folders.sort(), [clean, linked].sort());
   assert.ok(first.skipped.some(s => s.item === dirty && /uncommitted/.test(s.why)));
   assert.ok(first.skipped.some(s => s.item === '/etc'));
+  assert.ok(first.skipped.some(s => s.item === foreign) && fs.existsSync(foreign), 'a worktree another tool made stays, even when asked');
   assert.deepEqual(first.removed.branches, ['feat/a']);
   for (const name of ['main', 'backup/pre-x', 'feat/fresh']) assert.ok(first.skipped.some(s => s.item === name), name);
   assert.ok(first.skipped.some(s => s.item === 'feat/b' && /checked out/.test(s.why)), 'its folder stayed');

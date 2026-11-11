@@ -246,6 +246,7 @@ export class AgentManager {
       agents: () => [...this.store.agents.values()],
       messages: () => this.store.messages,
       agentsDir: path.join(store.dataDir, 'agents'),
+      dataDir: store.dataDir,
       knownRef: id => this.refs.get(id) !== null,
     });
     this.profile = new ProfileStore(store.dataDir);

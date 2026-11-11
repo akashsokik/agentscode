@@ -146,7 +146,8 @@ function MergeRow({ m, project, wide }: { m: WorkMerge; project: WorkProject; wi
       <Row rowKey={key} title={`${m.branch}, merged ${new Date(m.at).toLocaleString()}${m.reviewer ? `, reviewed by ${m.reviewer}` : ''}`}>
         <Who id={m.agentIds[0]} name={m.names[0]} />
         <span className="min-w-0 truncate text-content/90">{m.branch}</span>
-        {wide && m.refs[0] ? <RefChip id={m.refs[0]} /> : null}
+        {/* Inside the row's button: an inert chip (its card on hover), not a second button. */}
+        {wide && m.refs[0] ? <RefChip id={m.refs[0]} inert /> : null}
         <span className="ml-auto shrink-0 font-mono text-[11.5px] text-content/45">{m.hash ? m.hash.slice(0, 7) : 'rewritten'}</span>
         <span className="shrink-0 text-[11.5px] tabular-nums text-content/35">{day(m.at)}</span>
         {wide ? <span className="w-[150px] shrink-0 truncate text-right text-[11.5px] text-content/40">{m.reviewer ? `reviewed by ${m.reviewer}` : ''}</span> : null}
