@@ -362,10 +362,11 @@ export class WorkService {
       return { hash, tree, merge: (parents ?? '').split(' ').length > 1, subject: subject ?? '', at: Number(at) * 1000 };
     });
     const onMain = new Set(history.map(c => c.hash));
-    // Commits on local main that origin's main (as last fetched) does not have.
+    // Changes on local main that origin's main (as last fetched) does not have.
     const local = new Set<string>();
     if (remote) {
-      const ahead = await this.git(['rev-list', `${remote}..${defaultBranch}`], root);
+      // First-parent: main's own changes (a merge counts once, not with every commit it brought in).
+      const ahead = await this.git(['rev-list', '--first-parent', `${remote}..${defaultBranch}`], root);
       for (const hash of ahead.out.split('\n').filter(Boolean)) local.add(hash);
     }
     const notPushed = local.size;

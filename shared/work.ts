@@ -97,7 +97,7 @@ export interface WorkProject {
   defaultBranch: string | null;
   /** origin's main as last fetched by someone else; AgentsCode never fetches. */
   remote: string | null;
-  /** Commits on local main that origin's main does not have. */
+  /** Changes on local main (first-parent: a merge counts once) that origin's main does not have. */
   notPushed: number;
   inProgress: WorkBranch[];
   merged: WorkMerge[];
