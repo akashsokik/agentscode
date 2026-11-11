@@ -53,11 +53,20 @@ main() {
     dir="$HOME/Applications"
   fi
   mkdir -p "$dir"
+  # An absolute path with no trailing slash, as LaunchServices reports a running app's.
+  dir="$(CDPATH='' cd -- "$dir" && pwd)"
   local app="$dir/AgentsCode.app"
 
   # Replacing the app under a running copy would break it. Quitting it stops its agents, so that
-  # is left to the user.
-  if pgrep -f "$app/Contents/" >/dev/null 2>&1; then
+  # is left to the user. LaunchServices knows the app by its bundle id and where it runs from. A
+  # process pattern (pgrep -f "$app/Contents/") also matches agent CLIs, whose arguments name the
+  # app, and comms MCP servers, which run on its binary. Those can outlive the app, and then a quit
+  # app read as running and the install refused (2026-11-11). lsappinfo prints nothing, and still
+  # exits 0, when the app is not running.
+  local running
+  running="$(lsappinfo info -only bundlepath -app com.agentscode.app 2>/dev/null |
+    sed -n 's/^"LSBundlePath"="\(.*\)"$/\1/p' || true)"
+  if [[ "$running" == "$app" ]]; then
     fail "AgentsCode is running from $app. Quit it (Cmd+Q) and run this again."
   fi
 
