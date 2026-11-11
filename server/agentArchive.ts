@@ -52,6 +52,10 @@ export interface ArchivedAgent {
   extras?: ArchivedExtra[];
   /** Set when the transcript could not be copied in; the live transcript is then kept. */
   transcriptError?: string;
+  /** The agent had no home folder: the archive holds only its transcript and extras. */
+  noHome?: boolean;
+  /** Set when .archived.json could not be written (the folder is then not listed); the live transcript is kept. Never saved in the file. */
+  metaError?: string;
 }
 
 export const ARCHIVE_META = '.archived.json';
@@ -195,9 +199,10 @@ function unregister(gitdir: string, inHome: (p: string) => boolean): void {
 }
 
 /**
- * Archive an agent's home into `archiveRoot`. Returns what was archived, or null when the agent
- * had no home. Throws (moving nothing) if the move itself fails; worktree repair or unregister failures
- * are recorded per worktree instead, since by then everything is safely in the archive.
+ * Archive an agent's home into `archiveRoot`. An agent with no home still has its transcript and
+ * extras archived, in a fresh folder; returns null only when there is nothing of its at all.
+ * Throws (moving nothing) if the move itself fails. Once the home has moved nothing throws: worktree,
+ * extra, transcript and .archived.json failures are recorded on the result instead.
  */
 export function archiveAgentHome(input: {
   home: string;
@@ -212,9 +217,15 @@ export function archiveAgentHome(input: {
   ops?: MoveOps;
 }): ArchivedAgent | null {
   const git = input.git ?? runGit;
-  if (!fs.existsSync(input.home)) return null;
   const now = input.now ?? new Date();
-  const found = findWorktrees(input.home).map(wt => {
+  const noHome = !fs.existsSync(input.home);
+  if (noHome) {
+    // Nothing to move, but the transcript and attachments are still the agent's: they go into a
+    // fresh folder of their own. With none of them either, there is nothing to archive.
+    const transcript = Boolean(input.transcript && fs.existsSync(input.transcript));
+    if (!transcript && !(input.extras ?? []).some(e => fs.existsSync(e.from))) return null;
+  }
+  const found = noHome ? [] : findWorktrees(input.home).map(wt => {
     let dirty = true; // when status cannot be read, keep it as if it had changes
     let branch: string | null = null;
     try { dirty = git(['status', '--porcelain'], wt.dir).trim() !== ''; } catch { /* keep dirty */ }
@@ -224,9 +235,10 @@ export function archiveAgentHome(input: {
   });
 
   // git records real paths (/private/var on macOS for /var), so compare against the home's real path.
-  const realHome = fs.realpathSync(input.home);
+  const realHome = noHome ? path.resolve(input.home) : fs.realpathSync(input.home);
   const dir = archiveDir(input.archiveRoot, input.agent.id, input.agent.name, now);
-  move(input.home, dir, input.ops);
+  if (noHome) fs.mkdirSync(dir, { recursive: true });
+  else move(input.home, dir, input.ops);
 
   const done = new Map<FoundWorktree, ArchivedWorktree>();
   const home = path.resolve(input.home);
@@ -273,8 +285,13 @@ export function archiveAgentHome(input: {
       extras.push({ name: extra.name, path: extra.from, action: 'failed', error: String((err as Error).message).slice(0, 300) });
     }
   }
-  const record: ArchivedAgent = { ...input.agent, archivedAt: now.toISOString(), dir, worktrees, extras, ...(transcriptError ? { transcriptError } : {}) };
-  fs.writeFileSync(path.join(dir, ARCHIVE_META), JSON.stringify({ ...record, dir: undefined }, null, 2));
+  const record: ArchivedAgent = { ...input.agent, archivedAt: now.toISOString(), dir, worktrees, extras, ...(transcriptError ? { transcriptError } : {}), ...(noHome ? { noHome } : {}) };
+  try {
+    fs.writeFileSync(path.join(dir, ARCHIVE_META), JSON.stringify({ ...record, dir: undefined }, null, 2));
+  } catch (err) {
+    // The home is already in the archive: report it rather than throw (the agent would stay, homeless).
+    return { ...record, metaError: String((err as Error).message).slice(0, 300) };
+  }
   return record;
 }
 

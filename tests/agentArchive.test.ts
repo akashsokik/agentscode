@@ -369,3 +369,55 @@ test('the worktree search says so when it stops at its folder limit', () => {
   assert.equal(warnings.length, 1, 'once');
   assert.match(warnings[0], /stopped looking for worktrees .* after 50 folders/);
 });
+
+test('an agent with no home still has its transcript and attachments archived, in a fresh folder', async () => {
+  const base = tempDir('archive-nohome');
+  const transcript = path.join(base, 'transcript.jsonl');
+  fs.writeFileSync(transcript, '{"id":"1"}\n');
+  const extra = path.join(base, 'attachments', 'A');
+  fs.mkdirSync(extra, { recursive: true });
+  fs.writeFileSync(path.join(extra, 'img.png'), 'img');
+  const archiveRoot = path.join(base, 'archive');
+  const record = archiveAgentHome({ home: path.join(base, 'agents', 'A'), archiveRoot, agent: probeAgent, transcript, extras: [{ from: extra, name: 'attachments' }] })!;
+  assert.equal(record.noHome, true);
+  assert.equal(fs.readFileSync(path.join(record.dir, ARCHIVE_TRANSCRIPT), 'utf8'), '{"id":"1"}\n');
+  assert.equal(fs.readFileSync(path.join(record.dir, ARCHIVE_EXTRAS, 'attachments', 'img.png'), 'utf8'), 'img');
+  assert.deepEqual(record.worktrees, []);
+  assert.equal(listArchive(archiveRoot)[0].noHome, true, 'listed, with its metadata');
+  // With nothing of the agent's anywhere, there is nothing to archive.
+  assert.equal(archiveAgentHome({ home: path.join(base, 'agents', 'B'), archiveRoot, agent: { ...probeAgent, id: 'B' }, transcript: path.join(base, 'none.jsonl') }), null);
+
+  // Through the manager: an agent whose home folder is gone keeps its transcript and attachments.
+  const h = harness();
+  const nova = await h.manager.create({ name: 'Nova', engine: 'claude', projectId: null });
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const image = h.manager.saveAttachment(nova.id, png, 'screen.png');
+  h.store.appendEntry({ id: 'e1', agentId: nova.id, kind: 'user', text: 'hello', ts: Date.now() } as never);
+  fs.rmSync(nova.home, { recursive: true, force: true });
+  await h.manager.remove(nova.id);
+  const [archived] = h.manager.archivedAgents();
+  assert.equal(archived.noHome, true);
+  assert.match(fs.readFileSync(path.join(archived.dir, ARCHIVE_TRANSCRIPT), 'utf8'), /"hello"/);
+  assert.deepEqual(fs.readFileSync(path.join(archived.dir, ARCHIVE_EXTRAS, 'attachments', image.id)), png);
+});
+
+test('a failed .archived.json write is reported, not thrown after the home moved; the live transcript is kept', async () => {
+  const p = homeWithAttachmentsFolder('meta-fail');
+  // A folder where .archived.json goes makes the write fail, as a full disk would.
+  fs.mkdirSync(path.join(p.home, ARCHIVE_META));
+  const transcript = path.join(p.base, 'transcript.jsonl');
+  fs.writeFileSync(transcript, '{}\n');
+  const record = archiveAgentHome({ home: p.home, archiveRoot: p.archiveRoot, agent: probeAgent, transcript, extras: [{ from: p.extra, name: 'attachments' }] })!;
+  assert.ok(record.metaError, 'reported');
+  assert.ok(!fs.existsSync(p.home), 'the home is in the archive');
+  assert.equal(fs.readFileSync(path.join(record.dir, 'soul.md'), 'utf8'), 'soul');
+
+  // Through the manager: the agent is removed, and its live transcript is not deleted.
+  const h = harness();
+  const nova = await h.manager.create({ name: 'Nova', engine: 'claude', projectId: null });
+  h.store.appendEntry({ id: 'e1', agentId: nova.id, kind: 'user', text: 'hello', ts: Date.now() } as never);
+  fs.mkdirSync(path.join(nova.home, ARCHIVE_META), { recursive: true });
+  await h.manager.remove(nova.id);
+  assert.ok(!h.store.agents.has(nova.id));
+  assert.ok(fs.existsSync(path.join(h.store.dataDir, 'transcripts', `${nova.id}.jsonl`)), 'transcript kept');
+});

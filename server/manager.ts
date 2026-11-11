@@ -744,13 +744,14 @@ export class AgentManager {
     for (const extra of archived?.extras ?? []) {
       if (extra.action === 'failed') console.log(`[archive] ${agent.name}: ${extra.name} could not be moved into ${archived!.dir} and stays at ${extra.path}: ${extra.error}`);
     }
+    if (archived?.metaError) console.log(`[archive] ${agent.name}: archived in ${archived.dir}, but .archived.json could not be written, so it is not listed and the transcript is kept: ${archived.metaError}`);
     if (archived?.transcriptError) console.log(`[archive] ${agent.name}: the transcript could not be copied into ${archived.dir}, so it is kept: ${archived.transcriptError}`);
     this.channels.agentRemoved(id);
     this.browser.agentRemoved(id);
     this.mailbox.forget(id);
     this.store.agents.delete(id);
     // Only once the archive holds a copy.
-    if (!archived?.transcriptError) this.store.deleteTranscript(id);
+    if (!archived?.transcriptError && !archived?.metaError) this.store.deleteTranscript(id);
     this.memoryVersions.delete(id);
     this.store.save();
     this.hub.broadcast({ type: 'agentRemoved', id });
