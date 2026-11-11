@@ -90,14 +90,46 @@ test('both real folders: ~/.podcode is used and ~/.agentscode is left exactly as
   assert.ok(lines.some(l => /left as it is/.test(l)));
 });
 
-test('a link already there with no ~/.podcode: a new folder is made and the link is left alone', () => {
+test('a dangling link (to nothing, or to a missing ~/.podcode) and no ~/.podcode: a new folder is made and the link is left alone', () => {
+  for (const pick of [(h: string) => path.join(h, 'gone'), (h: string) => path.join(h, '.podcode')]) {
+    const h = home();
+    const target = pick(h);
+    fs.symlinkSync(target, path.join(h, '.agentscode'));
+    const r = migrateDataDir({ home: h, env: {}, log: quiet });
+    assert.equal(r.action, 'fresh', target);
+    assert.ok(fs.statSync(path.join(h, '.podcode')).isDirectory());
+    assert.equal(fs.readlinkSync(path.join(h, '.agentscode')), target);
+  }
+});
+
+test('~/.agentscode as the user\'s own link to data elsewhere: the link moves to ~/.podcode and the data is used', () => {
   const h = home();
-  const target = path.join(h, 'elsewhere');
-  fs.mkdirSync(target);
-  fs.symlinkSync(target, path.join(h, '.agentscode'));
+  const synced = path.join(h, 'Dropbox', 'agentscode');
+  fs.mkdirSync(path.join(synced, 'agents', 'a1'), { recursive: true });
+  const old = path.join(h, '.agentscode');
+  const fresh = path.join(h, '.podcode');
+  fs.writeFileSync(path.join(synced, 'state.json'), JSON.stringify({ version: 1, agents: [{ id: 'a1', home: `${old}/agents/a1` }] }));
+  fs.writeFileSync(path.join(synced, 'agents', 'a1', 'memory.md'), 'kept');
+  fs.symlinkSync(synced, old, 'dir');
   const r = migrateDataDir({ home: h, env: {}, log: quiet });
-  assert.equal(r.action, 'fresh');
-  assert.equal(fs.readlinkSync(path.join(h, '.agentscode')), target);
+  assert.equal(r.action, 'moved');
+  assert.equal(fs.realpathSync(fresh), synced, '~/.podcode points at the same data');
+  assert.equal(fs.realpathSync(old), synced, 'and so does the old name');
+  assert.equal(fs.readFileSync(path.join(fresh, 'agents', 'a1', 'memory.md'), 'utf8'), 'kept');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(synced, 'state.json'), 'utf8')).agents[0].home, `${fresh}/agents/a1`);
+  assert.equal(resolveDataDir(h, {}), fresh);
+  assert.equal(migrateDataDir({ home: h, env: {}, log: quiet }).action, 'ready');
+});
+
+test('an empty ~/.podcode beside ~/.agentscode with state: the empty one is set aside and the data moves in', () => {
+  const h = home();
+  oldHome(h);
+  fs.mkdirSync(path.join(h, '.podcode'));
+  const r = migrateDataDir({ home: h, env: {}, log: quiet });
+  assert.equal(r.action, 'moved');
+  assert.equal(fs.readFileSync(path.join(h, '.podcode', 'agents', 'a1', 'memory.md'), 'utf8'), 'kept');
+  assert.ok(fs.statSync(path.join(h, '.podcode-unused-1')).isDirectory(), 'set aside, not deleted');
+  assert.ok(fs.lstatSync(path.join(h, '.agentscode')).isSymbolicLink());
 });
 
 test('PODCODE_HOME (or the old AGENTSCODE_HOME) set: no migration, and that folder is used', () => {

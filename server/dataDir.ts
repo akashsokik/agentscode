@@ -35,6 +35,11 @@ export function realPathThroughParents(p: string): string {
   return parent === abs ? abs : path.join(realPathThroughParents(parent), path.basename(abs));
 }
 
+/** Whether a data folder holds the app's state (state.json), as opposed to being empty or bare. */
+function hasState(dir: string): boolean {
+  return fs.existsSync(path.join(dir, 'state.json'));
+}
+
 /**
  * The data folder to use, without changing anything: PODCODE_HOME (or AGENTSCODE_HOME) when set;
  * else ~/.podcode once it exists; else ~/.agentscode while only that exists (before the first
@@ -63,9 +68,13 @@ export interface MigrationResult {
  * - only the old folder: rename it (one atomic step on the same disk), link ~/.agentscode to it,
  *   rewrite the absolute paths state.json keeps for agents (home, worktree, where they work), and
  *   link Claude Code's session folders for the new paths so agents resume their conversations;
+ * - ~/.agentscode a link to an existing folder (the user's, elsewhere): the link moves the same way,
+ *   so ~/.podcode points at that folder;
  * - ~/.podcode already there (and ~/.agentscode a link, or gone): nothing to do;
- * - both real folders: use ~/.podcode and leave ~/.agentscode exactly as it is (logged);
- * - neither: a fresh install, so ~/.podcode is made.
+ * - ~/.podcode there without a state.json while ~/.agentscode has one: ~/.podcode is set aside as
+ *   ~/.podcode-unused-<n> and the move goes ahead;
+ * - both folders with state: use ~/.podcode and leave ~/.agentscode exactly as it is (logged);
+ * - neither, or ~/.agentscode a link to nothing: a fresh install, so ~/.podcode is made.
  * Running it again changes nothing.
  */
 export function migrateDataDir(options: { home?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void } = {}): MigrationResult {
@@ -82,19 +91,31 @@ export function migrateDataDir(options: { home?: string; env?: NodeJS.ProcessEnv
   const freshStat = lstat(fresh);
   const oldStat = lstat(old);
 
+  // The old name is the user's own link to a folder elsewhere (a synced drive, say): that folder is
+  // their data. The link itself moves to the new name, so ~/.podcode points where it pointed.
+  const oldIsLinkToData = Boolean(oldStat?.isSymbolicLink() && isDir(old));
+
   if (freshStat) {
-    if (oldStat && !oldStat.isSymbolicLink()) {
-      say(`Both ${fresh} and ${old} exist as folders. Using ${fresh}; ${old} is left as it is.`);
-      return { action: 'both', dir: fresh, notes };
+    if (oldStat && (!oldStat.isSymbolicLink() || oldIsLinkToData) && hasState(old) && !hasState(fresh)) {
+      // ~/.podcode was made (by a fresh start, say) but holds no state, while ~/.agentscode does:
+      // starting on the empty one would look like a lost install. Set it aside, then move as usual.
+      const aside = setAside(fresh);
+      say(`${fresh} held no state.json while ${old} does; moved ${fresh} to ${aside} and moving ${old} in its place.`);
+    } else {
+      if (oldStat && !oldStat.isSymbolicLink()) {
+        say(`Both ${fresh} and ${old} exist as folders. Using ${fresh}; ${old} is left as it is.`);
+        return { action: 'both', dir: fresh, notes };
+      }
+      return { action: 'ready', dir: fresh, notes };
     }
-    return { action: 'ready', dir: fresh, notes };
-  }
-  if (!oldStat || oldStat.isSymbolicLink()) {
-    if (oldStat?.isSymbolicLink()) say(`${old} is a link but ${fresh} is missing; starting a new ${fresh} (the link is left alone).`);
+  } else if (!oldStat || (oldStat.isSymbolicLink() && !oldIsLinkToData)) {
+    if (oldStat?.isSymbolicLink()) say(`${old} is a link to nothing that exists and ${fresh} is missing; starting a new ${fresh} (the link is left alone).`);
     fs.mkdirSync(fresh, { recursive: true });
     return { action: 'fresh', dir: fresh, notes };
   }
 
+  // A rename moves a link as a link: the data behind it stays where it is.
+  if (oldIsLinkToData) say(`${old} is a link to ${fs.realpathSync(old)}; moving the link to ${fresh}.`);
   fs.renameSync(old, fresh);
   // From here the data is in ~/.podcode, so the steps below run even if the link can't be made.
   try {
@@ -108,6 +129,20 @@ export function migrateDataDir(options: { home?: string; env?: NodeJS.ProcessEnv
   const linked = linkClaudeSessions(home);
   if (linked) say(`Linked ${linked} Claude Code session ${linked === 1 ? 'folder' : 'folders'} under their new paths, so agents resume where they were.`);
   return { action: 'moved', dir: fresh, notes };
+}
+
+function isDir(p: string): boolean {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+
+/** Rename a folder to a free `<name>-unused-<n>` beside it. Nothing is deleted. */
+function setAside(dir: string): string {
+  for (let n = 1; ; n++) {
+    const target = `${dir}-unused-${n}`;
+    if (lstat(target)) continue;
+    fs.renameSync(dir, target);
+    return target;
+  }
 }
 
 /** The agent fields that hold absolute paths the app works from (not prose such as messages). */
