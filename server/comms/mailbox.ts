@@ -170,6 +170,20 @@ export class Mailbox {
     });
   }
 
+  /**
+   * The message `messageId`, when it is a request addressed to `fromId` that is still waiting for its
+   * answer: a delegation with no report from it yet (kind "report"), or a message that expects a reply
+   * and has no answer from it yet (kind "reply"). An answer to an open request is accepted outside
+   * the agent's turns; everything else an agent sends needs a turn.
+   */
+  openRequest(fromId: string, messageId: string, kind: 'report' | 'reply'): PeerMessage | undefined {
+    const request = this.store.messages.find(m => m.id === messageId);
+    if (!request || request.toAgentId !== fromId) return undefined;
+    const answers = this.store.messages.filter(m => m.replyTo === request.id && m.fromAgentId === fromId);
+    if (kind === 'report') return request.delegation && !answers.some(m => m.report) ? request : undefined;
+    return request.expectsReply && !answers.length ? request : undefined;
+  }
+
   send(fromId: string, toId: string, text: string, expectsReply = true): PeerMessage {
     return this.enqueue(fromId, toId, text, expectsReply);
   }
@@ -241,19 +255,17 @@ export class Mailbox {
 
     let conversation: Conversation | undefined;
     if (replyTo) {
+      // An answer belongs to the request's own conversation, and is counted against its budget,
+      // whichever message the agent is handling now (it may report on A while working on B).
       const original = this.store.messages.find(m => m.id === replyTo);
       if (!original || original.toAgentId !== fromId || original.fromAgentId !== toId) throw new HttpError(403, 'You can only reply to messages addressed to you.');
       conversation = this.store.conversations.find(c => c.id === original.conversationId);
       if (!conversation) throw new HttpError(404, 'That conversation no longer exists.');
-    }
-    // Anything sent while handling peer work shares that work's budget, even to a third agent.
-    const active = this.active.get(fromId);
-    if (active) {
-      const current = this.store.conversations.find(c => c.id === active.conversationId);
-      if (current) {
-        if (conversation && conversation.id !== current.id) throw new HttpError(409, 'Finish the current collaboration before replying in another one.');
-        conversation = current;
-      }
+    } else {
+      // Anything else sent while handling peer work shares that work's budget, even to a third agent.
+      const active = this.active.get(fromId);
+      const current = active && this.store.conversations.find(c => c.id === active.conversationId);
+      if (current) conversation = current;
     }
     conversation ??= this.roots.get(fromId);
     if (!conversation) {
@@ -265,6 +277,7 @@ export class Mailbox {
       this.roots.set(fromId, conversation);
       this.delivery.conversationChanged(conversation);
     }
+    // After recover, a stopped conversation is one the user stopped: nothing goes into it, answers included.
     if (conversation.stopped) throw new HttpError(409, 'This collaboration was stopped. Wait for a new task from the user.');
     const count = this.store.messages.filter(m => m.conversationId === conversation.id).length;
     if (conversation.messageLimit > 0 && count >= conversation.messageLimit) {

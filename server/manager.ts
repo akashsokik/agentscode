@@ -1155,7 +1155,14 @@ export class AgentManager {
       if (!parsed.success) throw new HttpError(400, 'Provide a channel id or name, and a limit from 1 to 100.');
       return this.channels.read(id, parsed.data.channel, parsed.data.limit, parsed.data.thread);
     }
-    if (!this.runners.get(id)?.busy) throw new HttpError(409, 'Messages can only be sent during an active turn.');
+    // Outside a turn an agent may only answer: report on a delegation, or reply to a message that is
+    // still waiting for its answer (a background job finished, or the turn ended first). The answer
+    // goes to the request's conversation; nothing new starts outside a turn.
+    if (!this.runners.get(id)?.busy) {
+      const answer = (tool === 'report_result' || tool === 'reply') && typeof args.message_id === 'string'
+        ? this.mailbox.openRequest(id, args.message_id, tool === 'report_result' ? 'report' : 'reply') : undefined;
+      if (!answer) throw new HttpError(409, 'Messages can only be sent during an active turn. Outside one you can only report_result or reply to an open request addressed to you.');
+    }
     const agent = this.agent(id);
     if (tool === 'set_task_summary') {
       const parsed = summaryInput.safeParse(args);
