@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react';
-import type { WorkProject, WorkView } from '../../shared/work.ts';
+import type { WorkTab, WorkTarget, WorkView } from '../../shared/work.ts';
 import { api } from '../api.ts';
 
 // The Work view's data (GET /api/work): loaded while a Work tab or pane is on screen, again every
@@ -10,13 +10,13 @@ export interface WorkState {
   view: WorkView | null;
   error: string | null;
   loading: boolean;
-  /** The project the view is narrowed to, or null for all projects (ACH-D17's default). */
-  scope: string | null;
-  /** Rows opened to show their details, by key. */
-  open: Set<string>;
+  /** Selection survives opening the full pane, independently for each project. */
+  ui: Record<string, WorkUi>;
 }
 
-let state: WorkState = { view: null, error: null, loading: false, scope: null, open: new Set() };
+export interface WorkUi { tab: WorkTab; selected: WorkTarget | null; otherOpen: boolean; pushedOpen: boolean; unknownOpen: boolean }
+export const DEFAULT_WORK_UI: WorkUi = { tab: 'graph', selected: null, otherOpen: false, pushedOpen: false, unknownOpen: false };
+let state: WorkState = { view: null, error: null, loading: false, ui: {} };
 const listeners = new Set<() => void>();
 function set(next: Partial<WorkState>): void {
   state = { ...state, ...next };
@@ -29,7 +29,7 @@ export function useWork<T>(select: (s: WorkState) => T): T {
 
 let inFlight: Promise<void> | null = null;
 export function loadWork(fresh = false): Promise<void> {
-  if (inFlight && !fresh) return inFlight;
+  if (inFlight) return inFlight;
   set({ loading: true });
   inFlight = api.work(fresh)
     .then(view => set({ view, error: null }))
@@ -62,24 +62,8 @@ export function useWorkData(): void {
   }, []);
 }
 
-export function setWorkScope(scope: string | null): void { set({ scope }); }
-
-export function toggleWorkRow(key: string): void {
-  const open = new Set(state.open);
-  if (open.has(key)) open.delete(key); else open.add(key);
-  set({ open });
-}
-
-/** The projects in scope. */
-export function scoped(view: WorkView | null, scope: string | null): WorkProject[] {
-  if (!view) return [];
-  return scope ? view.projects.filter(p => p.projectId === scope) : view.projects;
-}
-
-/** The project whose main the graph shows: the one in scope, or the one with the latest merge or change. */
-export function graphProject(projects: WorkProject[]): WorkProject | undefined {
-  const latest = (p: WorkProject) => Math.max(p.graph[0]?.at ?? 0, p.merged[0]?.at ?? 0);
-  return [...projects].filter(p => p.graph.length).sort((a, b) => latest(b) - latest(a))[0];
+export function setWorkUi(projectId: string, update: Partial<WorkUi>): void {
+  set({ ui: { ...state.ui, [projectId]: { ...(state.ui[projectId] ?? DEFAULT_WORK_UI), ...update } } });
 }
 
 /** "9 Nov", or the time for today. */

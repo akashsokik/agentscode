@@ -1,7 +1,10 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Agent, PeerMessage, Project } from '../shared/types.ts';
+import type { Agent, ChangedFile, PeerMessage, Project } from '../shared/types.ts';
+import type { WorkChanges, WorkDiff, WorkTarget } from '../shared/work.ts';
+import { parsePorcelainZ } from './projects.ts';
+import { readFile, resolveInside } from './workspace.ts';
 import { findRefIds } from '../shared/refs.ts';
 import { layoutGraph } from '../shared/graph.ts';
 import { mentionsBranch, namesInMergeSubject, parseDecorations, type CleanupBranch, type CleanupFolder, type CleanupRequest, type CleanupResult, type FolderChanges, type WorkBranch, type WorkCommit, type WorkMerge, type WorkProject, type WorkState, type WorkView } from '../shared/work.ts';
@@ -26,7 +29,7 @@ export type GitRunner = (args: string[], cwd: string) => Promise<GitResult>;
 export const GRAPH_ROWS = 20;
 
 /** Git with nothing that runs another program or takes optional locks. */
-const GIT_FLAGS = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.untrackedCache=false'];
+const GIT_FLAGS = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.untrackedCache=false', '-c', 'diff.submodule=short', '-c', 'status.submoduleSummary=false'];
 // GIT_LITERAL_PATHSPECS: a file name is only ever a name (":!x" is not an exclude, "*" not a glob).
 const GIT_ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_LITERAL_PATHSPECS: '1' };
 
@@ -37,10 +40,12 @@ const READ_COMMANDS: Record<string, (args: string[]) => boolean> = {
   'rev-list': () => true,
   log: () => true,
   status: a => a.includes('--porcelain'),
+  'ls-files': a => a.length === 3 && a[1] === '--stage' && a[2] === '-z',
   'rev-parse': () => true,
   'merge-base': a => a[1] === '--is-ancestor' || (a.length === 3 && !a[1].startsWith('-') && !a[2].startsWith('-')),
   // Comparing content only, with no external diff or textconv program, and no output file.
-  diff: a => a.includes('--no-ext-diff') && a.includes('--no-textconv') && (a.includes('--quiet') || a.includes('--name-only')),
+  diff: a => a.includes('--no-ext-diff') && a.includes('--no-textconv') && ['--quiet', '--name-only', '--numstat', '--patch'].some(flag => a.includes(flag)),
+  show: a => a.includes('--no-ext-diff') && a.includes('--no-textconv') && a.includes('--format=') && ['--numstat', '--patch'].some(flag => a.includes(flag)),
   'for-each-ref': () => true,
   // Reading: exactly one ref named, so it can never be the two-argument form that sets one.
   'symbolic-ref': a => a.includes('--short') && a.slice(1).filter(x => !x.startsWith('-')).length === 1,
@@ -63,12 +68,38 @@ async function slot<T>(fn: () => Promise<T>): Promise<T> {
   try { return await fn(); } finally { running--; queue.shift()?.(); }
 }
 
-function runGit(args: string[], cwd: string): Promise<GitResult> {
-  return slot(() => new Promise(resolve => {
-    execFile('git', [...GIT_FLAGS, ...args], { cwd, env: GIT_ENV, timeout: 15_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-      resolve({ ok: !error, out: String(stdout ?? '') });
-    });
+function execGit(args: string[], cwd: string): Promise<GitResult & { code?: string | number }> {
+  return new Promise(resolve => execFile('git', [...GIT_FLAGS, ...args], { cwd, env: GIT_ENV, timeout: 15_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
+    resolve({ ok: !error, out: String(stdout ?? ''), ...(error ? { code: error.code } : {}) });
   }));
+}
+
+function runGit(args: string[], cwd: string): Promise<GitResult> {
+  return slot(async () => {
+    if (args[0] !== 'diff' && args[0] !== 'status') return execGit(args, cwd);
+    // Even status and --no-textconv diff can execute clean/process filters. Read only
+    // their config names, disable each driver, and never fall back to an unsafe read.
+    const filters = await execGit(['config', '--includes', '--null', '--name-only', '--get-regexp', '^filter\\.'], cwd);
+    if (!filters.ok && filters.code !== 1) return { ok: false, out: '' };
+    const drivers = new Set(filters.out.split('\0').filter(Boolean).map(key => key.slice(0, key.lastIndexOf('.'))));
+    const overrides = [...drivers].flatMap(driver => ['-c', `${driver}.clean=`, '-c', `${driver}.process=`, '-c', `${driver}.required=false`]);
+    // Do not recurse into dirty submodule worktrees with their own filter config.
+    return execGit([...overrides, '-c', 'status.submoduleSummary=false', '-c', 'diff.submodule=short', args[0], '--ignore-submodules=dirty', ...args.slice(1)], cwd);
+  });
+}
+
+/** Worktree setup links are not source changes and must not mask committed branch work. */
+function dependencyLink(root: string, file: { path: string; status: string }): boolean {
+  if (file.status !== '??' || !['node_modules', '.venv'].includes(path.basename(file.path))) return false;
+  try { return fs.lstatSync(path.join(resolveInside(root, path.dirname(file.path)), path.basename(file.path))).isSymbolicLink(); } catch { return false; }
+}
+
+/** Git commits a symlink's target string, never the file the link points to. */
+function untrackedContent(root: string, file: string) {
+  const parent = resolveInside(root, path.dirname(file));
+  const full = path.join(parent, path.basename(file));
+  if (fs.lstatSync(full).isSymbolicLink()) return { text: fs.readlinkSync(full), binary: false, truncated: false };
+  return readFile(root, file);
 }
 
 /** The view's git: read-only commands only; anything else is refused before git runs. */
@@ -76,6 +107,19 @@ export const readGit: GitRunner = (args, cwd) => {
   if (!isReadOnlyGit(args)) return Promise.reject(new Error(`Not a read-only git command: git ${args.join(' ')}`));
   return runGit(args, cwd);
 };
+
+/** Status deliberately skips submodule contents; never offer their worktrees for removal. */
+async function canCleanWorktree(root: string, git: GitRunner): Promise<boolean> {
+  if (fs.existsSync(path.join(root, '.gitmodules'))) return false;
+  const index = await git(['ls-files', '--stage', '-z'], root);
+  if (!index.ok || index.out.split('\0').some(entry => entry.startsWith('160000 '))) return false;
+  // Keep registered submodules protected even if their gitlinks/.gitmodules were removed.
+  for (const flag of ['--git-dir', '--git-common-dir']) {
+    const dir = await git(['rev-parse', '--path-format=absolute', flag], root);
+    if (!dir.ok || !dir.out.trim() || fs.existsSync(path.join(dir.out.trim(), 'modules'))) return false;
+  }
+  return true;
+}
 
 /** Cleanup's git: removing one worktree or deleting one branch, nothing else. */
 const writeGit: GitRunner = (args, cwd) => {
@@ -290,6 +334,85 @@ export class WorkService {
   async view(projects: Project[], fresh = false): Promise<WorkView> {
     const out = await Promise.all(projects.map(p => this.project(p, fresh)));
     return { projects: out, at: Date.now() };
+  }
+
+  /** Resolve only rows we actually expose, so requests cannot choose arbitrary paths or refs. */
+  private async inspection(project: Project, target: WorkTarget): Promise<{ root: string; args: string[]; basis: WorkChanges['basis'] }> {
+    if (!target.id || !['branch', 'commit', 'merge'].includes(target.kind)) throw new HttpError(400, 'Choose a branch or commit.');
+    const view = await this.project(project);
+    const facts = await this.facts(project);
+    if (!facts) throw new HttpError(409, 'This project is not a Git repository.');
+    const flags = ['--no-ext-diff', '--no-textconv', '--no-renames', '--no-color'];
+    if (target.kind === 'branch') {
+      const branch = view.inProgress.find(b => b.folder === target.id);
+      const folder = facts.worktrees.find(w => w.path === branch?.folder && w.branch === branch.branch);
+      if (!branch || !folder) throw new HttpError(404, 'That branch is no longer in this project. Refresh Work.');
+      // Recheck the checkout's repository before reading any working-tree files.
+      const common = await this.git(['rev-parse', '--path-format=absolute', '--git-common-dir'], folder.path);
+      const expected = await this.git(['rev-parse', '--path-format=absolute', '--git-common-dir'], facts.root);
+      if (!common.ok || !expected.ok || realOrSelf(common.out.trim()) !== realOrSelf(expected.out.trim())) throw new HttpError(409, 'That worktree has changed. Refresh Work.');
+      const dirty = await this.git(['status', '--porcelain', '-z', '--untracked-files=all'], folder.path);
+      if (!dirty.ok) throw new HttpError(409, 'Could not read that worktree.');
+      if (parsePorcelainZ(dirty.out).some(file => !dependencyLink(folder.path, file))) return { root: folder.path, args: ['diff', ...flags, 'HEAD'], basis: 'uncommitted' };
+      const base = await this.git(['merge-base', `refs/heads/${facts.defaultBranch}`, `refs/heads/${branch.branch}`], facts.root);
+      if (!base.ok) throw new HttpError(409, 'Could not find this branch’s base.');
+      return { root: folder.path, args: ['diff', ...flags, base.out.trim(), `refs/heads/${branch.branch}`], basis: 'branch' };
+    }
+    const hash = target.kind === 'commit' ? view.graph.find(c => c.hash === target.id)?.hash : view.merged.find(m => m.originalHash === target.id)?.hash;
+    if (!hash) throw new HttpError(404, target.kind === 'merge' ? 'This merge no longer has a separate commit after the history rewrite.' : 'That commit is no longer in this view. Refresh Work.');
+    return { root: facts.root, args: ['show', ...flags, '--format=', '--first-parent', '--diff-merges=first-parent', hash], basis: 'commit' };
+  }
+
+  private async changedFiles(inspect: { root: string; args: string[]; basis: WorkChanges['basis'] }, countUntracked = true): Promise<WorkChanges> {
+    const result = await this.git([...inspect.args, '--numstat', '-z', '--'], inspect.root);
+    if (!result.ok) throw new HttpError(409, 'Could not read these changes. Refresh Work and try again.');
+    const files: ChangedFile[] = result.out.split('\0').filter(Boolean).flatMap(entry => {
+      const match = /^(\d+|-)\t(\d+|-)\t([\s\S]+)$/.exec(entry);
+      return match ? [{ path: match[3], added: Number(match[1]) || 0, removed: Number(match[2]) || 0, status: '' }] : [];
+    });
+    let total = files.length;
+    const limited = files.slice(0, 500);
+    if (inspect.basis === 'uncommitted') {
+      const status = await this.git(['status', '--porcelain', '-z', '--untracked-files=all'], inspect.root);
+      if (!status.ok) throw new HttpError(409, 'Could not read that worktree.');
+      const untracked = parsePorcelainZ(status.out).filter(file => file.status === '??' && !dependencyLink(inspect.root, file));
+      total += untracked.length;
+      for (const file of untracked.slice(0, Math.max(0, 500 - limited.length))) {
+        let added = 0;
+        if (countUntracked) {
+          try { const f = untrackedContent(inspect.root, file.path); if (!f.binary && !f.truncated) added = f.text ? f.text.split('\n').length - (f.text.endsWith('\n') ? 1 : 0) : 0; } catch { /* selecting the diff reports unreadable files */ }
+        }
+        limited.push({ path: file.path, status: '??', added, removed: 0 });
+      }
+    }
+    return { files: limited, basis: inspect.basis, truncated: total > 500 };
+  }
+
+  async changes(project: Project, target: WorkTarget): Promise<WorkChanges> {
+    return this.changedFiles(await this.inspection(project, target));
+  }
+
+  async diff(project: Project, target: WorkTarget, file: string): Promise<WorkDiff> {
+    const inspect = await this.inspection(project, target);
+    const changes = await this.changedFiles(inspect, false);
+    const listed = changes.files.find(f => f.path === file);
+    if (!listed) throw new HttpError(404, 'That file is not in these changes.');
+    let diff: string;
+    let truncated = false;
+    if (listed.status === '??') {
+      const content = untrackedContent(inspect.root, file);
+      truncated = content.truncated;
+      const name = JSON.stringify(`b/${file}`);
+      const lines = content.text.split('\n');
+      if (content.text.endsWith('\n')) lines.pop();
+      diff = content.binary ? `Binary files /dev/null and ${name} differ\n` : `--- /dev/null\n+++ ${name}\n@@ -0,0 +1,${content.text ? lines.length : 0} @@\n${content.text ? lines.map(line => `+${line}`).join('\n') : ''}\n`;
+    } else {
+      const result = await this.git([...inspect.args, '--patch', '--', file], inspect.root);
+      if (!result.ok) throw new HttpError(409, 'Could not read that diff. Refresh Work and try again.');
+      diff = result.out;
+    }
+    truncated ||= diff.length > 400_000;
+    return { path: file, status: listed.status, diff: diff.slice(0, 400_000), truncated };
   }
 
   async project(project: Project, fresh = false): Promise<WorkProject> {
@@ -559,7 +682,7 @@ export class WorkService {
       // A detached folder is listed only when it is clean and its commit is on main: removing one
       // with commits of its own would leave them on no branch.
       const leftover = wt.branch ? Boolean(record || gitMerged) : gitMerged && !dirty;
-      if (!main && !wt.locked && !isLive && ours && leftover) {
+      if (!main && !wt.locked && !isLive && ours && leftover && status.ok && await canCleanWorktree(wt.path, this.git)) {
         folders.push({ path: wt.path, branch: wt.branch, ...(agent ? { agentId: agent.id, agentName: agent.name } : {}), reason: wt.branch ? 'merged' : 'detached', changes, dirty });
         continue;
       }
@@ -631,9 +754,12 @@ export class WorkService {
       if (key && agent) laneOwners[key] = agent.id;
     }
 
+    const fetchPath = await this.git(['rev-parse', '--git-path', 'FETCH_HEAD'], root);
+    let fetchedAt: number | null = null;
+    if (fetchPath.ok) { try { fetchedAt = fs.statSync(path.resolve(root, fetchPath.out.trim())).mtimeMs; } catch { /* never fetched */ } }
     return {
       projectId: project.id, name: project.name, ...(project.code ? { code: project.code } : {}),
-      defaultBranch, remote, notPushed, inProgress, merged, graph, graphEdges: layout.edges, graphLanes: layout.lanes, laneOwners,
+      defaultBranch, remote, fetchedAt, notPushed, inProgress, merged, graph, graphEdges: layout.edges, graphLanes: layout.lanes, laneOwners,
       cleanup: { folders, branches: branches.sort((a, b) => a.name.localeCompare(b.name)) },
     };
   }
@@ -659,7 +785,10 @@ export class WorkService {
         continue;
       }
       // Checked again right before removing it: anything that appeared since the list needs the second yes too.
-      const now = countChanges((await readGit(['status', '--porcelain', '--untracked-files=normal', '--ignored'], folder.path)).out, folder.path);
+      if (!await canCleanWorktree(folder.path, readGit)) { result.skipped.push({ item: folder.path, why: 'submodule worktrees require manual cleanup' }); continue; }
+      const status = await readGit(['status', '--porcelain', '--untracked-files=normal', '--ignored'], folder.path);
+      if (!status.ok) { result.skipped.push({ item: folder.path, why: 'could not verify its current changes' }); continue; }
+      const now = countChanges(status.out, folder.path);
       if (hasLosses(now) && !force.has(realOrSelf(folder.path))) { result.skipped.push({ item: folder.path, why: 'it has uncommitted or ignored files now; confirm it again to remove it' }); continue; }
       // --force only for a folder whose only extras are symlinks or build output, or one the user confirmed twice.
       const forced = hasLosses(now) || now.untracked > 0 || now.built > 0;

@@ -597,3 +597,173 @@ test('file names are never pathspec magic: ":!x.txt" cannot exclude itself from 
   assert.ok(!view.merged.some(m => m.branch === 'feat/p'), '":!x.txt" is not on main, so the branch is not proven');
   assert.ok(!view.cleanup.branches.some(b => b.name === 'feat/p'));
 });
+
+// ---- selected work inspection (ACH-D24) ---------------------------------------------------------
+
+test('commit inspection reads the selected revision, including root commits and first-parent merges', async () => {
+  const { dir, project, repo, base } = setup();
+  const svc = service(dir);
+  const view = await svc.project(project);
+  const merged = view.merged.find(m => m.branch === 'feat/c')!;
+  const target = { kind: 'merge' as const, id: merged.originalHash };
+  fs.writeFileSync(path.join(repo, 'c.txt'), 'not the selected commit\n');
+  const changes = await svc.changes(project, target);
+  assert.equal(changes.basis, 'commit');
+  assert.deepEqual(changes.files.map(f => f.path), ['c.txt']);
+  const diff = await svc.diff(project, target, 'c.txt');
+  assert.match(diff.diff, /\+c/);
+  assert.doesNotMatch(diff.diff, /not the selected commit/);
+  const initial = await svc.changes(project, { kind: 'commit', id: base });
+  assert.deepEqual(initial.files.map(f => f.path), ['README.md']);
+  assert.match((await svc.diff(project, { kind: 'commit', id: base }, 'README.md')).diff, /\+app/);
+});
+
+test('branch inspection uses its own worktree, and switches between branch and uncommitted changes', async () => {
+  const { dir, project, repo } = setup();
+  const folder = path.join(dir, 'open');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/inspect', folder, 'main');
+  commit(folder, 'branch.txt', 'first\n', 'branch change');
+  const svc = service(dir);
+  const target = { kind: 'branch' as const, id: fs.realpathSync(folder) };
+  const committed = await svc.changes(project, target);
+  assert.equal(committed.basis, 'branch');
+  assert.deepEqual(committed.files.map(f => f.path), ['branch.txt']);
+  fs.writeFileSync(path.join(folder, 'branch.txt'), 'first\nsecond\n');
+  fs.writeFileSync(path.join(folder, 'new.txt'), 'new\n');
+  fs.writeFileSync(path.join(folder, 'empty.txt'), '');
+  const dirty = await svc.changes(project, target);
+  assert.equal(dirty.basis, 'uncommitted');
+  assert.deepEqual(dirty.files.map(f => f.path).sort(), ['branch.txt', 'empty.txt', 'new.txt']);
+  assert.equal(dirty.files.find(f => f.path === 'empty.txt')!.added, 0);
+  assert.match((await svc.diff(project, target, 'branch.txt')).diff, /\+second/);
+  assert.match((await svc.diff(project, target, 'new.txt')).diff, /\+new/);
+  assert.equal(git(repo, 'status', '--porcelain'), '', 'main checkout untouched');
+});
+
+test('Work inspection rejects unlisted targets and files, and does not follow untracked symlinks outside the worktree', async () => {
+  const { dir, project, repo } = setup();
+  const folder = path.join(dir, 'open');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/inspect', folder, 'main');
+  commit(folder, 'branch.txt', 'first\n', 'branch change');
+  const secret = path.join(dir, 'outside.txt');
+  fs.writeFileSync(secret, 'outside workspace\n');
+  fs.symlinkSync(secret, path.join(folder, 'linked.txt'));
+  const svc = service(dir), target = { kind: 'branch' as const, id: fs.realpathSync(folder) };
+  await assert.rejects(svc.changes(project, { kind: 'branch', id: dir }), /no longer in this project/);
+  await assert.rejects(svc.changes(project, { kind: 'commit', id: '--output=oops' }), /no longer in this view/);
+  await assert.rejects(svc.diff(project, target, '../outside.txt'), /not in these changes/);
+  const changed = await svc.changes(project, target);
+  assert.ok(changed.files.some(f => f.path === 'linked.txt'));
+  const linked = await svc.diff(project, target, 'linked.txt');
+  assert.ok(linked.diff.includes(secret), 'shows link target string');
+  assert.doesNotMatch(linked.diff, /outside workspace/, 'never reads the link target contents');
+});
+
+test('inspection treats unusual Git file names literally and disables external diff programs', async () => {
+  const { dir, project, repo } = setup();
+  const names = [':!literal.txt', '-option.txt', 'tab\tname.txt', 'line\nname.txt'];
+  for (const name of names) fs.writeFileSync(path.join(repo, name), 'literal\n');
+  git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'unusual files');
+  const hash = git(repo, 'rev-parse', 'HEAD');
+  git(repo, 'config', 'diff.external', '/definitely-not-a-diff-program');
+  const svc = service(dir), target = { kind: 'commit' as const, id: hash };
+  const changes = await svc.changes(project, target);
+  assert.deepEqual(changes.files.map(f => f.path).sort(), names.sort());
+  for (const name of names) assert.match((await svc.diff(project, target, name)).diff, /\+literal/);
+});
+
+test('last-fetch metadata is separate from the time Work was refreshed', async () => {
+  const { dir, project, repo } = setup();
+  const fetchHead = path.join(repo, '.git', 'FETCH_HEAD');
+  fs.writeFileSync(fetchHead, '');
+  const when = new Date('2025-01-02T03:04:05Z');
+  fs.utimesSync(fetchHead, when, when);
+  const svc = service(dir);
+  assert.equal((await svc.project(project, true)).fetchedAt, when.getTime());
+  assert.equal((await svc.project(project, true)).fetchedAt, when.getTime(), 'a refresh is not a fetch');
+});
+
+test('Work status and diffs never execute configured clean or process filters', async () => {
+  const { dir, project, repo } = setup();
+  const folder = path.join(dir, 'filtered');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/filtered', folder, 'main');
+  commit(folder, 'filtered.txt', 'before\n', 'filtered file');
+  const marker = path.join(dir, 'filter-ran');
+  const filter = path.join(dir, 'filter.sh');
+  fs.writeFileSync(filter, `#!/bin/sh\ntouch '${marker}'\ncat\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(folder, '.gitattributes'), 'filtered.txt filter=Review.With.Dots\n');
+  git(repo, 'config', 'filter.Review.With.Dots.clean', filter);
+  git(repo, 'config', 'filter.Review.With.Dots.process', filter);
+  git(repo, 'config', 'filter.Review.With.Dots.required', 'true');
+  fs.writeFileSync(path.join(folder, 'filtered.txt'), 'after\n');
+  const svc = service(dir), target = { kind: 'branch' as const, id: fs.realpathSync(folder) };
+  const changes = await svc.changes(project, target);
+  assert.ok(changes.files.some(f => f.path === 'filtered.txt'));
+  assert.match((await svc.diff(project, target, 'filtered.txt')).diff, /\+after/);
+  assert.equal(fs.existsSync(marker), false);
+});
+
+test('untracked summary work is capped, and selecting one diff does not read every untracked file', async () => {
+  const { dir, project, repo } = setup();
+  const folder = path.join(dir, 'many');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/many', folder, 'main');
+  commit(folder, 'branch.txt', 'branch\n', 'branch change');
+  for (let n = 0; n < 510; n++) fs.writeFileSync(path.join(folder, `${String(n).padStart(3, '0')}.txt`), 'new\n');
+  const svc = service(dir), target = { kind: 'branch' as const, id: fs.realpathSync(folder) };
+  await svc.project(project);
+  const original = fs.openSync;
+  let reads = 0;
+  fs.openSync = ((file: fs.PathLike, ...args: unknown[]) => {
+    if (String(file).startsWith(fs.realpathSync(folder)) && /\d{3}\.txt$/.test(String(file))) reads++;
+    return Reflect.apply(original, fs, [file, ...args]);
+  }) as typeof fs.openSync;
+  try {
+    const changes = await svc.changes(project, target);
+    assert.equal(changes.files.length, 500);
+    assert.equal(changes.truncated, true);
+    assert.equal(reads, 500);
+    reads = 0;
+    await svc.diff(project, target, '001.txt');
+    assert.equal(reads, 1, 'only the selected file is read');
+  } finally { fs.openSync = original; }
+});
+
+test('dependency setup symlinks do not hide the branch diff', async () => {
+  const { dir, project, repo } = setup();
+  const folder = path.join(dir, 'linked-deps');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/linked-deps', folder, 'main');
+  commit(folder, 'branch.txt', 'branch work\n', 'branch change');
+  fs.symlinkSync(dir, path.join(folder, 'node_modules'), 'dir');
+  const svc = service(dir), target = { kind: 'branch' as const, id: fs.realpathSync(folder) };
+  const changes = await svc.changes(project, target);
+  assert.equal(changes.basis, 'branch');
+  assert.deepEqual(changes.files.map(f => f.path), ['branch.txt']);
+  fs.writeFileSync(path.join(folder, 'new.txt'), 'new\n');
+  assert.deepEqual((await svc.changes(project, target)).files.map(f => f.path), ['new.txt']);
+});
+
+test('cleanup preserves dirty submodules even with a dependency link that would allow forced removal', async () => {
+  const { dir, project, repo } = setup();
+  const source = path.join(dir, 'submodule-source');
+  fs.mkdirSync(source);
+  git(source, 'init', '-q');
+  commit(source, 'nested.txt', 'committed\n', 'nested base');
+  const folder = path.join(dir, 'data', 'submodule-worktree');
+  git(repo, 'worktree', 'add', '-q', '-b', 'feat/submodule', folder, 'main');
+  git(folder, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', source, 'sub');
+  git(folder, 'commit', '-q', '-am', 'add submodule');
+  merge(repo, 'feat/submodule', 'Merge feat/submodule (Hal): nested work');
+  fs.writeFileSync(path.join(folder, 'sub', 'nested.txt'), 'uncommitted nested work\n');
+  fs.symlinkSync(dir, path.join(folder, 'node_modules'), 'dir');
+  const svc = service(dir);
+  assert.ok(!((await svc.project(project, true)).cleanup.folders.some(f => f.branch === 'feat/submodule')));
+  const result = await svc.cleanup(project, { projectId: project.id, folders: [folder], branches: ['feat/submodule'], forceFolders: [] });
+  assert.deepEqual(result.removed, { folders: [], branches: [] });
+  assert.equal(fs.readFileSync(path.join(folder, 'sub', 'nested.txt'), 'utf8'), 'uncommitted nested work\n');
+  // Removing the index entries must not bypass protection for an initialized submodule.
+  git(folder, 'rm', '--cached', '-f', 'sub', '.gitmodules');
+  fs.unlinkSync(path.join(folder, '.gitmodules'));
+  const forced = await svc.cleanup(project, { projectId: project.id, folders: [folder], branches: [], forceFolders: [folder] });
+  assert.deepEqual(forced.removed.folders, []);
+  assert.equal(fs.readFileSync(path.join(folder, 'sub', 'nested.txt'), 'utf8'), 'uncommitted nested work\n');
+});

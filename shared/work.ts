@@ -1,4 +1,15 @@
 import type { GraphEdge } from './graph.ts';
+import type { ChangedFile, FileDiff } from './types.ts';
+
+/** Stable identifiers from a project's Work view; never an arbitrary revision or disk root. */
+export type WorkTarget = { kind: 'branch' | 'commit' | 'merge'; id: string };
+export type WorkTab = 'graph' | 'active' | 'merged';
+export interface WorkChanges {
+  files: ChangedFile[];
+  basis: 'uncommitted' | 'branch' | 'commit';
+  truncated: boolean;
+}
+export interface WorkDiff extends FileDiff { truncated: boolean }
 
 // The Work view (ACH-D17): what every agent is working on, what was merged into each project's
 // main and whether it is on GitHub, a short graph of main, and what can be cleaned up. Built by
@@ -122,6 +133,8 @@ export interface WorkProject {
   defaultBranch: string | null;
   /** origin's main as last fetched by someone else; PodCode never fetches. */
   remote: string | null;
+  /** FETCH_HEAD's timestamp, if available. Refreshing Work does not fetch from the remote. */
+  fetchedAt?: number | null;
   /** Changes on local main (first-parent: a merge counts once) that origin's main does not have. */
   notPushed: number;
   inProgress: WorkBranch[];

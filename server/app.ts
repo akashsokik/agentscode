@@ -9,7 +9,7 @@ import { DEV_WEB_PORT, IN_DESKTOP_APP, PORT } from './config.ts';
 import { HttpError } from './errors.ts';
 import { BRIDGE_HEADER, bridgeTokenMatches } from './browserBridge.ts';
 import type { AgentManager } from './manager.ts';
-import type { CleanupRequest } from '../shared/work.ts';
+import type { CleanupRequest, WorkTarget } from '../shared/work.ts';
 import { listProjectFiles } from './fileList.ts';
 import { listDirs, normalizeDir } from './projects.ts';
 import { Terminals } from './terminals.ts';
@@ -248,6 +248,17 @@ export function createApp(
     const project = manager.project(String(body.projectId ?? ''));
     const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, 500) : []);
     res.json(await manager.work.cleanup(project, { projectId: project.id, folders: list(body.folders), branches: list(body.branches), forceFolders: list(body.forceFolders) }));
+  });
+  const workTarget = (req: Request): WorkTarget => {
+    const kind = query(req, 'kind');
+    if (kind !== 'branch' && kind !== 'commit' && kind !== 'merge') throw new HttpError(400, 'Choose a branch or commit.');
+    return { kind, id: query(req, 'id') };
+  };
+  app.get('/api/work/changes', async (req, res) => {
+    res.json(await manager.work.changes(manager.project(query(req, 'project')), workTarget(req)));
+  });
+  app.get('/api/work/diff', async (req, res) => {
+    res.json(await manager.work.diff(manager.project(query(req, 'project')), workTarget(req), query(req, 'path')));
   });
   // Project notes and decisions, read only: the Notes tab and the id chips.
   app.get('/api/refs', (_req, res) => {
