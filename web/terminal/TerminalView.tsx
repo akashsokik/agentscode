@@ -9,11 +9,11 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { findLocalUrls } from '../../shared/browser.ts';
 import type { TerminalInfo, TerminalServerMessage } from '../../shared/types.ts';
 import { IS_MAC } from '../platform.ts';
-import { MOD, runShortcut } from '../shortcuts.ts';
+import { runShortcut } from '../shortcuts.ts';
+import { ContextMenu } from '../ui/ContextMenu.tsx';
 import { toast, updateTerminals } from '../store.ts';
 import { cx, MenuDivider, MenuRow } from '../ui/common.tsx';
 import { ClipboardPaste, Copy, Eraser, Maximize2, Minimize2, SplitColumns, SplitRows, X } from '../mono/icons.tsx';
-import { Popover } from '../mono/Popover.tsx';
 import {
   closeTerminals, equalizeSplits, focusSplit, newTerminal, notePreviewUrls, noteTerminalFocus, noteTerminalSize, setTerminalTitle,
   shellExited, splitTerminal, toggleZoom, useFocusRequest,
@@ -24,8 +24,8 @@ import type { Rect } from './splits.ts';
 
 /** A shell that fails this soon after starting gets a toast, since its tab closes at once. */
 const QUICK_EXIT_MS = 3000;
-/** Shortcut hints for the menu; the split keys are macOS only. */
-const HINT = IS_MAC ? { right: '⌘D', down: '⇧⌘D', zoom: '⇧⌘↩', equalize: '⌃⌘=', close: '⌘W' } : null;
+/** Shortcuts for the menu (ACH-D26); Ghostty's split keys are macOS only (web/terminal/keys.ts). */
+const HINT = IS_MAC ? { right: 'Mod+D', down: 'Shift+Mod+D', zoom: 'Shift+Mod+Enter', equalize: 'Ctrl+Mod+=', close: 'Mod+W' } : null;
 
 const percent = (n: number) => `${(n * 100).toFixed(4)}%`;
 
@@ -259,21 +259,21 @@ export function TerminalView({ info, rect, dimmed, split, zoomed }: {
         </div>
       ) : null}
       {menu ? (
-        <Popover anchor={{ x: menu.x, y: menu.y }} side="bottom" align="start" width={232} constrainHeight={false} onDismiss={() => setMenu(null)} className="p-1.5">
+        <ContextMenu anchor={{ x: menu.x, y: menu.y }} onClose={() => setMenu(null)} label="Terminal">
           <MenuRow icon={Copy} title="Copy" hint={menu.selection ? undefined : 'Select text first. Selecting copies it too.'} disabled={!menu.selection} onSelect={run(() => {
             const text = termRef.current?.getSelection();
             if (text) void navigator.clipboard.writeText(text).catch(() => document.execCommand('copy'));
           })} />
-          <MenuRow icon={ClipboardPaste} title="Paste" hint={`${MOD}V`} onSelect={run(() => void paste())} />
+          <MenuRow icon={ClipboardPaste} title="Paste" shortcut="Mod+V" onSelect={run(() => void paste())} />
           <MenuDivider />
-          <MenuRow icon={SplitColumns} title="Split right" hint={HINT?.right} onSelect={run(() => void splitTerminal(info, 'right'))} />
-          <MenuRow icon={SplitRows} title="Split down" hint={HINT?.down} onSelect={run(() => void splitTerminal(info, 'down'))} />
-          {split ? <MenuRow icon={zoomed ? Minimize2 : Maximize2} title={zoomed ? 'Show all splits' : 'Zoom this split'} hint={HINT?.zoom} onSelect={run(() => toggleZoom(info))} /> : null}
-          {split && !zoomed ? <MenuRow icon={SplitColumns} title="Make splits equal" hint={HINT?.equalize} onSelect={run(() => equalizeSplits(info))} /> : null}
+          <MenuRow icon={SplitColumns} title="Split right" shortcut={HINT?.right} onSelect={run(() => void splitTerminal(info, 'right'))} />
+          <MenuRow icon={SplitRows} title="Split down" shortcut={HINT?.down} onSelect={run(() => void splitTerminal(info, 'down'))} />
+          {split ? <MenuRow icon={zoomed ? Minimize2 : Maximize2} title={zoomed ? 'Show all splits' : 'Zoom this split'} shortcut={HINT?.zoom} onSelect={run(() => toggleZoom(info))} /> : null}
+          {split && !zoomed ? <MenuRow icon={SplitColumns} title="Make splits equal" shortcut={HINT?.equalize} onSelect={run(() => equalizeSplits(info))} /> : null}
           <MenuDivider />
           <MenuRow icon={Eraser} title="Clear" hint="Screen and scrollback." onSelect={run(clear)} />
-          <MenuRow icon={X} title={split ? 'Close split' : 'Close terminal'} hint={HINT?.close} danger onSelect={run(() => void closeTerminals([info.id]))} />
-        </Popover>
+          <MenuRow icon={X} title={split ? 'Close split' : 'Close terminal'} shortcut={HINT?.close} danger onSelect={run(() => void closeTerminals([info.id]))} />
+        </ContextMenu>
       ) : null}
     </div>
   );

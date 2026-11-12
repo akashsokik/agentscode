@@ -6,6 +6,8 @@
  * streams. It fills the desktop app's floating window (quick.html) and, in a browser, the in-app
  * quick bar (web/ui/SuperQuickBar.tsx).
  */
+import { formatKeys, type KeySpec } from '../keys.ts';
+import { Kbd } from '../ui/Kbd.tsx';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { ENGINES, type Agent, type EngineKind, type Entry, type SuperAsk } from '../../shared/types.ts';
 import { api } from '../api.ts';
@@ -31,7 +33,8 @@ type Picker = 'target' | 'project' | 'model' | null;
 const DRAFT_KEY = 'podcode:quick-draft';
 const TARGET_KEY = 'podcode:quick-target';
 const FIELD_MAX = 220;
-const MOD = IS_MAC ? '⌘' : 'Ctrl+';
+/** A shortcut as this platform shows it (ACH-D26); the quick window does not load web/shortcuts.ts. */
+const keys = (spec: KeySpec) => formatKeys(spec, IS_MAC);
 /** Card motion, as MonoCode's picker motion: a quick ease-out on height, a fade on the panel. */
 const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
@@ -246,7 +249,7 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
       ) : null}
 
       <header className="flex shrink-0 items-center gap-2 px-4 pt-3.5">
-        <ToolbarButton active={picker === 'target'} onClick={() => setPicker(p => (p === 'target' ? null : 'target'))} title={`Who to talk to (${MOD}K)`}>
+        <ToolbarButton active={picker === 'target'} onClick={() => setPicker(p => (p === 'target' ? null : 'target'))} title={`Who to talk to (${keys('Mod+K')})`}>
           <TargetIcon target={live} agent={replier} />
           <span className="truncate font-medium text-content/85">{targetName(live, replier)}</span>
           <ChevronDown className="size-3 shrink-0 opacity-50" />
@@ -254,7 +257,7 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
         {live.kind === 'agent' && replier ? <AgentStateLine agent={replier} /> : null}
         <span className="flex-1" />
         {live.kind === 'new' ? (
-          <ToolbarButton active={picker === 'project'} onClick={() => setPicker(p => (p === 'project' ? null : 'project'))} title={`Project (${MOD}P)`}>
+          <ToolbarButton active={picker === 'project'} onClick={() => setPicker(p => (p === 'project' ? null : 'project'))} title={`Project (${keys('Mod+P')})`}>
             <Folder className="size-3.5 shrink-0 opacity-70" strokeWidth={1.75} />
             <span className="truncate">{project?.name ?? 'All projects'}</span>
             <ChevronDown className="size-3 shrink-0 opacity-50" />
@@ -314,13 +317,13 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
 
       <footer className="flex shrink-0 items-center gap-1.5 border-t border-stroke px-3 py-2">
         {live.kind === 'new' ? (
-          <ToolbarButton active={picker === 'model'} onClick={() => setPicker(p => (p === 'model' ? null : 'model'))} title={`Engine and model (${MOD}.)`}>
+          <ToolbarButton active={picker === 'model'} onClick={() => setPicker(p => (p === 'model' ? null : 'model'))} title={`Engine and model (${keys('Mod+.')})`}>
             <EngineIcon engine={live.engine} className="size-3.5 shrink-0" />
             <span className="truncate">{modelName(live.engine, live.model, snapshot?.models[live.engine]?.models)}</span>
             <ChevronDown className="size-3 shrink-0 opacity-50" />
           </ToolbarButton>
         ) : (
-          <ToolbarButton onClick={() => pick(asNew({}))} title={`Start a new agent instead (${MOD}P for its project)`}>
+          <ToolbarButton onClick={() => pick(asNew({}))} title={`Start a new agent instead (${keys('Mod+P')} for its project)`}>
             <Plus className="size-3.5 shrink-0 opacity-70" strokeWidth={1.75} />
             <span>New agent</span>
           </ToolbarButton>
@@ -328,9 +331,9 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
         <span className="ml-auto flex min-w-0 items-center gap-3 text-[11px] text-content/40">
           {error ? <span role="alert" title={error} className="min-w-0 truncate text-danger">{error}</span> : (
             <>
-              <Hint keys="↵">send</Hint>
-              <Hint keys={`${MOD}↵`}>send and open</Hint>
-              <Hint keys="⇧↵">new line</Hint>
+              <Hint spec="Enter">send</Hint>
+              <Hint spec="Mod+Enter">send and open</Hint>
+              <Hint spec="Shift+Enter">new line</Hint>
             </>
           )}
         </span>
@@ -357,7 +360,7 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
                   key: a.id, label: a.name, hint: `${projectLabel(a.projectIds, snapshot?.projects, 'All projects')} · ${stateWord(a)}`,
                   icon: <AgentAvatar agent={a} className="size-3.5" />, checked: live.kind === 'agent' && live.agentId === a.id, onPick: () => pick({ kind: 'agent', agentId: a.id }),
                 })),
-                { key: 'new', label: 'New agent…', hint: `${MOD}P picks its project`, icon: <Plus className="size-3.5" strokeWidth={1.75} />, checked: live.kind === 'new', onPick: () => pick(asNew({})) },
+                { key: 'new', label: 'New agent…', hint: `${keys('Mod+P')} picks its project`, icon: <Plus className="size-3.5" strokeWidth={1.75} />, checked: live.kind === 'new', onPick: () => pick(asNew({})) },
               ]}
             />
           ) : picker === 'project' ? (
@@ -441,10 +444,10 @@ function ToolbarButton({ active = false, title, onClick, children }: { active?: 
   );
 }
 
-function Hint({ keys, children }: { keys: string; children: ReactNode }) {
+function Hint({ spec, children }: { spec: KeySpec; children: ReactNode }) {
   return (
     <span className="flex shrink-0 items-center gap-1 max-[560px]:hidden">
-      <kbd className="rounded border border-content/12 px-1 font-sans text-[10px] leading-4 text-content/55">{keys}</kbd>
+      <Kbd spec={spec} />
       {children}
     </span>
   );

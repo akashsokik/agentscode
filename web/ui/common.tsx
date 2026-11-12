@@ -2,7 +2,9 @@
  * Small pieces of MonoCode markup used across PodCode, lifted as-is from the
  * components named beside each one so every surface shares MonoCode's look.
  */
-import type { ComponentPropsWithoutRef, ReactNode } from 'react';
+import type { KeySpec } from '../keys.ts';
+import { Kbd } from './Kbd.tsx';
+import { createContext, useContext, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import { Check, type IconComponent } from '../mono/icons.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
@@ -173,10 +175,17 @@ export function MenuDivider() {
 }
 
 /** A popover row with icon, title and hint: the composer's mode rows and AccessPicker options. */
-export function MenuRow({ icon: Icon, title, hint, selected, checked, highlighted, onSelect, disabled, danger }: {
+/** Rows inside a ContextMenu are menu items; elsewhere (pickers) they are options. */
+export const MenuRowRole = createContext<'option' | 'menuitem'>('option');
+
+export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, highlighted, onSelect, disabled, danger, role: roleProp }: {
   icon?: IconComponent;
   title: ReactNode;
   hint?: ReactNode;
+  /** A keyboard shortcut at the end of the row, as a quiet key chip (ACH-D26). */
+  shortcut?: KeySpec;
+  /** Defaults to MenuRowRole: 'menuitem' inside a ContextMenu, 'option' in pickers. */
+  role?: 'option' | 'menuitem';
   selected?: boolean;
   /** Multi-select: a check mark without the selected fill, so the keyboard highlight stays readable. */
   checked?: boolean;
@@ -186,11 +195,13 @@ export function MenuRow({ icon: Icon, title, hint, selected, checked, highlighte
   /** Destructive actions read red, like SecondaryButton's danger variant. */
   danger?: boolean;
 }) {
+  const contextRole = useContext(MenuRowRole);
+  const role = roleProp ?? contextRole;
   return (
     <button
       type="button"
-      role="option"
-      aria-selected={selected ?? checked}
+      role={role}
+      aria-selected={role === 'option' ? selected ?? checked : undefined}
       disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onSelect}
@@ -203,6 +214,7 @@ export function MenuRow({ icon: Icon, title, hint, selected, checked, highlighte
         <span className="block text-[13px] font-medium leading-5">{title}</span>
         {hint ? <span className="mt-0.5 block text-[11px] leading-4 text-content/50">{hint}</span> : null}
       </span>
+      {shortcut ? <Kbd spec={shortcut} quiet className="mt-0.5" /> : null}
       {selected || checked ? <Check className="mt-0.5 size-3.5 shrink-0" strokeWidth={2.25} /> : null}
     </button>
   );

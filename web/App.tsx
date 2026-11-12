@@ -1,5 +1,5 @@
 import { startProjectId } from '../shared/agentProjects.ts';
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react';
 import type { Agent, Snapshot } from '../shared/types.ts';
 import { AddProjectDialog } from './dialogs/AddProjectDialog.tsx';
 import { AgentSettingsDialog } from './dialogs/AgentSettingsDialog.tsx';
@@ -11,7 +11,9 @@ import { ProfileDialog } from './dialogs/UserProfile.tsx';
 import { SuperQuickBar } from './ui/SuperQuickBar.tsx';
 import { openAsks, openSuper, superLabel, useSuperAgent, useSuperBridge } from './super.ts';
 import { useGitStatus } from './git.ts';
-import { closeTab, focusedAgentId, open, pruneTabs, setProject, setRightPanel, setSidebar, setSidebarView, useLayout, type Pane, type Tab } from './layout.ts';
+import { closeOtherTabs, closeTab, closeTabsToRight, focusedAgentId, open, openToSide, pinTab, pruneTabs, reorderTab, setProject, setRightPanel, setSidebar, setSidebarView, toggleMaximize, useLayout, type Pane, type Tab } from './layout.ts';
+import { othersToClose, rightToClose } from './tabs.ts';
+import { ContextMenu, openContextMenu, type MenuAnchor } from './ui/ContextMenu.tsx';
 import { AgentPane } from './panes/AgentPane.tsx';
 import { BrowserPane } from './panes/BrowserPane.tsx';
 import { ChannelPane } from './panes/ChannelPane.tsx';
@@ -23,7 +25,7 @@ import { WalkthroughPane } from './panes/WalkthroughPane.tsx';
 import type { PaneChrome } from './panes/PaneFrame.tsx';
 import { RightPanel } from './right/RightPanel.tsx';
 import { IS_DESKTOP_APP } from './platform.ts';
-import { SHORTCUTS, useShortcuts } from './shortcuts.ts';
+import { MOD_CLICK, SHORTCUTS, useShortcuts } from './shortcuts.ts';
 import { paneGrow } from './paneSizes.ts';
 import { PaneDivider } from './ui/PaneDivider.tsx';
 import { openBrowser } from './browser.ts';
@@ -34,8 +36,8 @@ import { CommandPalette } from './ui/CommandPalette.tsx';
 import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
 import { UsageFooter } from './ui/UsageFooter.tsx';
-import { HeaderButton, StatusLabel } from './ui/common.tsx';
-import { AlertCircle, CheckCircle, GitBranch, Route, File, FileDiff, Globe, MessageMultiple, PanelLeft, PanelRight, Plus, Terminal, X } from './mono/icons.tsx';
+import { HeaderButton, MenuDivider, MenuRow, StatusLabel } from './ui/common.tsx';
+import { AlertCircle, CheckCircle, ChevronRight, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X } from './mono/icons.tsx';
 import { LAYER } from './mono/layers.ts';
 import { Shimmer } from './mono/Shimmer.tsx';
 import { TabLabel } from './mono/TabLabel.tsx';
@@ -113,6 +115,40 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
   };
 }
 
+/** Drag data type for reordering tabs within their group. */
+const TAB_DRAG = 'application/x-podcode-tab';
+
+/**
+ * Right-click on a tab (ACH-D27): Pin or Unpin, the close actions, Split right and Maximize pane.
+ * Items with nothing to do stay, greyed: Close others with no other unpinned tab, Close to the
+ * right with none after it, Maximize with one pane.
+ */
+function TabMenu({ tab, anchor, onClose }: { tab: Tab; anchor: MenuAnchor; onClose: () => void }) {
+  const layout = useLayout();
+  const { headline } = describeTab(tab, useApp(s => s.snapshot));
+  const run = (action: () => void) => () => { onClose(); action(); };
+  const pane = layout.panes.find(p => p.tabId === tab.id) ?? layout.panes.find(p => p.id === layout.focused);
+  const maximized = Boolean(pane && layout.maximized === pane.id);
+  return (
+    <ContextMenu anchor={anchor} onClose={onClose} label={`Tab ${headline}`}>
+      <MenuRow icon={tab.pinned ? PinOff : Pin} title={tab.pinned ? 'Unpin tab' : 'Pin tab'} onSelect={run(() => pinTab(tab.id, !tab.pinned))} />
+      <MenuDivider />
+      <MenuRow icon={X} title="Close" shortcut="Mod+W" onSelect={run(() => closeTab(tab.id))} />
+      <MenuRow icon={CircleX} title="Close others" shortcut="Alt+Mod+W" disabled={!othersToClose(layout.tabs, tab.id).length} onSelect={run(() => closeOtherTabs(tab.id))} />
+      <MenuRow icon={ChevronRight} title="Close to the right" disabled={!rightToClose(layout.tabs, tab.id).length} onSelect={run(() => closeTabsToRight(tab.id))} />
+      <MenuDivider />
+      <MenuRow icon={SplitColumns} title="Split right" onSelect={run(() => openToSide(tab.content))} />
+      <MenuRow
+        icon={maximized ? Minimize2 : Maximize2}
+        title={maximized ? 'Restore panes' : 'Maximize pane'}
+        shortcut="Shift+Mod+Enter"
+        disabled={layout.panes.length < 2 || !pane}
+        onSelect={run(() => { if (pane) toggleMaximize(pane.id); })}
+      />
+    </ContextMenu>
+  );
+}
+
 /**
  * MonoCode's tab strip: tabs, a quiet +, then the changes pill and the panel toggle. It heads the
  * main column, or the whole window in the desktop app with the navigation folded.
@@ -128,6 +164,11 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
   const { status } = useGitStatus(root, agent ? `${agent.status}:${agent.turns}` : undefined);
   const strip = useRef<HTMLDivElement>(null);
   const { displayed, tabNodeRef, finishMotion } = useTabCloseMotion(layout.tabs);
+  // The tab whose right-click menu is open (ACH-D27).
+  const [menu, setMenu] = useState<{ tabId: string; anchor: MenuAnchor } | null>(null);
+  const menuTab = menu ? layout.tabs.find(t => t.id === menu.tabId) : undefined;
+  const onTabMenu = (tabId: string) => (e: MouseEvent<HTMLElement>) =>
+    openContextMenu(e, anchor => setMenu(anchor && typeof anchor !== 'function' ? { tabId, anchor } : null));
 
   // The traffic lights end 76px in (electron/main.ts places them 16px from the edge); with the
   // strip's own 6px the first tab starts at 88px, 12px clear of them.
@@ -144,16 +185,53 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
         className="flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden overscroll-none pl-1.5 pr-2.5 [scrollbar-width:none]"
         onWheel={e => { if (strip.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) strip.current.scrollLeft += e.deltaY; }}
       >
-        {displayed.map(entry => {
+        {displayed.map((entry, index) => {
           const tab = entry.item;
           const { icon, headline, meta, busy, attention } = describeTab(tab, snapshot);
           const active = !entry.closing && focusedPane?.tabId === tab.id;
+          const pinned = Boolean(tab.pinned);
+          // A hairline ends the pinned group (ACH-D27); only when normal tabs follow.
+          const groupEnd = pinned && displayed[index + 1] && !displayed[index + 1].item.pinned;
           // As in MonoCode, a tab opens out from nothing and folds away when closed (useTabCloseMotion).
           const moving = entry.closing || entry.opening;
-          const shell = (
+          const status = attention
+            ? <span aria-hidden className="size-1.5 rounded-full bg-warning" />
+            : busy ? <TerminalSpinner className="text-content/45" /> : null;
+          const dragProps = {
+            draggable: !moving,
+            onDragStart: (e: DragEvent) => { e.dataTransfer.setData(TAB_DRAG, tab.id); e.dataTransfer.effectAllowed = 'move'; },
+            // Only within its own group: a pinned tab among the pinned, a normal one among the normal.
+            onDragOver: (e: DragEvent) => { if (e.dataTransfer.types.includes(TAB_DRAG)) e.preventDefault(); },
+            onDrop: (e: DragEvent) => { const id = e.dataTransfer.getData(TAB_DRAG); if (id) { e.preventDefault(); reorderTab(id, tab.id); } },
+          };
+          const shell = pinned ? (
+            // Pinned (variant B, ACH-D28): icon only at a fixed width, no close button, status at the
+            // top right of the icon; the full name is in the tooltip.
+            <div
+              ref={entry.closing ? undefined : tabNodeRef(tab.id)}
+              className={`relative flex h-full shrink-0 items-center ${moving ? 'w-full min-w-0 overflow-hidden' : ''}`}
+              onContextMenu={onTabMenu(tab.id)}
+              {...dragProps}
+            >
+              <button
+                type="button"
+                title={meta ? `${headline} · ${meta} (pinned)` : `${headline} (pinned)`}
+                aria-label={attention ? `${headline}, pinned, needs you` : `${headline}, pinned`}
+                aria-current={active ? 'page' : undefined}
+                onClick={() => open(tab.content)}
+                className={`relative grid h-7.5 w-8.5 place-items-center self-center rounded-md transition-colors duration-150 ${active || menu?.tabId === tab.id ? 'bg-selection text-content' : 'text-content/50 hover:bg-content/5 hover:text-content'}`}
+              >
+                <span className={`grid size-3.5 place-items-center ${active ? '' : 'opacity-55'}`}>{icon}</span>
+                {status ? <span className="pointer-events-none absolute right-1 top-1 grid scale-90 place-items-center">{status}</span> : null}
+              </button>
+              {groupEnd ? <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-content/10" /> : null}
+            </div>
+          ) : (
             <div
               ref={entry.closing ? undefined : tabNodeRef(tab.id)}
               className={`group relative flex h-full items-center ${moving ? 'w-full min-w-0 overflow-hidden' : 'w-56 min-w-28 shrink'}`}
+              onContextMenu={onTabMenu(tab.id)}
+              {...dragProps}
             >
               <button
                 type="button"
@@ -162,16 +240,14 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
                 aria-current={active ? 'page' : undefined}
                 onClick={() => open(tab.content)}
                 onAuxClick={e => { if (e.button === 1) closeTab(tab.id); }}
-                className={`relative flex h-7.5 min-w-0 flex-1 items-center gap-1.5 self-center rounded-md px-2 pr-7 text-left transition-colors duration-150 ${active ? 'bg-selection text-content' : 'text-content/50 hover:bg-content/5 hover:text-content'}`}
+                className={`relative flex h-7.5 min-w-0 flex-1 items-center gap-1.5 self-center rounded-md px-2 pr-7 text-left transition-colors duration-150 ${active || menu?.tabId === tab.id ? 'bg-selection text-content' : 'text-content/50 hover:bg-content/5 hover:text-content'}`}
               >
                 <span className={`grid size-3.5 shrink-0 place-items-center ${active ? '' : 'opacity-55'}`}>{icon}</span>
                 <TabLabel className="min-w-0 flex-1 text-[13px] leading-tight">{headline}</TabLabel>
               </button>
-              {attention || busy ? (
+              {status ? (
                 <span className="pointer-events-none absolute right-2 grid w-3.5 place-items-center group-hover:hidden group-has-[[data-tab-close]:focus-visible]:hidden">
-                  {attention
-                    ? <span aria-hidden className="size-1.5 rounded-full bg-warning" />
-                    : <TerminalSpinner className="text-content/45" />}
+                  {status}
                 </span>
               ) : null}
               <button
@@ -195,6 +271,7 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
           }
           return <div key={tab.id} className="contents">{shell}</div>;
         })}
+        {menuTab && menu?.anchor ? <TabMenu tab={menuTab} anchor={menu.anchor} onClose={() => setMenu(null)} /> : null}
         <button
           type="button"
           title={`New agent (${SHORTCUTS.newAgent})`}
@@ -220,7 +297,7 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
         <HeaderButton
           icon={Globe}
           label="New browser tab"
-          title={`New browser tab (${SHORTCUTS.browser}); Cmd+click to open it beside`}
+          title={`New browser tab (${SHORTCUTS.browser}); ${MOD_CLICK} to open it beside`}
           onClick={e => openBrowser('', e.metaKey || e.ctrlKey)}
         />
         <HeaderButton

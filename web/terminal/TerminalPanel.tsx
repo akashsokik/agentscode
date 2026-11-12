@@ -9,7 +9,7 @@ import { openBrowser } from '../browser.ts';
 import { shortPath } from '../format.ts';
 import { currentProjectId, setTerminalHeight, useLayout } from '../layout.ts';
 import { IS_MAC } from '../platform.ts';
-import { SHORTCUTS } from '../shortcuts.ts';
+import { SHORTCUTS, keys } from '../shortcuts.ts';
 import { useApp } from '../store.ts';
 import { cx, Empty, HeaderButton, PRIMARY } from '../ui/common.tsx';
 import { Globe, Maximize2, Minimize2, PanelBottom, Plus, SplitColumns, SplitRows, Terminal as TerminalIcon, X } from '../mono/icons.tsx';
@@ -30,7 +30,10 @@ const MAX_SHARE = 0.75;
 const MIN_SPLIT_WIDTH = 150;
 const MIN_SPLIT_HEIGHT = 52;
 const FULL: Rect = { x: 0, y: 0, w: 1, h: 1 };
-const SPLIT_HINT = IS_MAC ? { right: ' (⌘D)', down: ' (⇧⌘D)', zoom: ' (⇧⌘↩)' } : { right: '', down: '', zoom: '' };
+/** Ghostty's split keys, macOS only (web/terminal/keys.ts), as tooltip text (ACH-D26). */
+const SPLIT_HINT = IS_MAC
+  ? { right: ` (${keys('Mod+D')})`, down: ` (${keys('Shift+Mod+D')})`, zoom: ` (${keys('Shift+Mod+Enter')})` }
+  : { right: '', down: '', zoom: '' };
 
 const percent = (n: number) => `${(n * 100).toFixed(4)}%`;
 
@@ -327,7 +330,7 @@ export function TerminalPanel() {
           ))}
           <button
             type="button"
-            title={project ? `New terminal in ${project.name}${IS_MAC ? ' (⌘T in a terminal)' : ''}` : 'New terminal'}
+            title={project ? `New terminal in ${project.name}${IS_MAC ? ` (${keys('Mod+T')} in a terminal)` : ''}` : 'New terminal'}
             aria-label="New terminal"
             disabled={!project}
             onClick={() => void newTerminal(projectId)}

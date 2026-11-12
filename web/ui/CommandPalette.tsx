@@ -12,7 +12,9 @@ import { shortPath } from '../format.ts';
 import { closeTab, currentProjectId, focusedAgentId, focusedChannelId, open, openToSide, setProject, setRightPanel, setSidebar, setSidebarView, useLayout } from '../layout.ts';
 import { rankCommands } from '../paletteMatch.ts';
 import { IS_MAC } from '../platform.ts';
-import { MOD, SHORTCUTS } from '../shortcuts.ts';
+import { SHORTCUT_KEYS, SHORTCUTS } from '../shortcuts.ts';
+import type { KeySpec } from '../keys.ts';
+import { Kbd } from './Kbd.tsx';
 import { projectLabel, projectNames } from '../projects.ts';
 import { showsWorkspace } from '../sidebar/agentRail.ts';
 import { attempt, useApp } from '../store.ts';
@@ -49,7 +51,8 @@ interface Command {
   icon: ReactNode;
   /** A status mark at the end of the row: a spinner, or the warning dot. */
   status?: ReactNode;
-  shortcut?: string;
+  /** Shown at the end of the row as a quiet key chip (ACH-D26). */
+  shortcut?: KeySpec;
   checked?: boolean;
   danger?: boolean;
   priority: number;
@@ -120,7 +123,7 @@ function useCommands(actions: PaletteActions): Command[] {
     }
 
     const action = (command: Omit<Command, 'group' | 'icon'> & { icon: IconComponent }) => commands.push({ ...command, group: 'Actions', icon: icon(command.icon) });
-    action({ id: 'new-agent', title: 'New agent', keywords: 'create add session', icon: Plus, shortcut: SHORTCUTS.newAgent, priority: 3, run: () => actions.newAgent(layout.projectId ?? undefined) });
+    action({ id: 'new-agent', title: 'New agent', keywords: 'create add session', icon: Plus, shortcut: SHORTCUT_KEYS.newAgent, priority: 3, run: () => actions.newAgent(layout.projectId ?? undefined) });
     action({ id: 'new-channel', title: 'New channel', keywords: 'create add room', icon: MessageSquarePlus, priority: 3, run: actions.newChannel });
     action({ id: 'add-project', title: 'Add project', keywords: 'open folder create new', icon: FolderPlus, priority: 3, run: actions.addProject });
     action({ id: 'comms', title: 'Open Comms', keywords: 'messages conversations delegations', icon: MessageMultiple, priority: 2, run: side => (side ? openToSide : open)({ kind: 'comms' }) });
@@ -140,18 +143,18 @@ function useCommands(actions: PaletteActions): Command[] {
     }
 
     const pane = layout.panes.find(p => p.id === layout.focused);
-    if (pane?.tabId) action({ id: 'close-tab', title: 'Close tab', icon: X, shortcut: SHORTCUTS.closeTab, priority: 1, run: () => closeTab(pane.tabId!) });
-    action({ id: 'sidebar', title: layout.sidebar ? 'Hide sidebar' : 'Show sidebar', keywords: 'toggle navigation', icon: PanelLeft, shortcut: SHORTCUTS.sidebar, priority: 1, run: () => setSidebar(!layout.sidebar) });
-    action({ id: 'panel', title: layout.rightPanel ? 'Hide panel' : 'Show panel', keywords: 'toggle right overview', icon: PanelRight, shortcut: SHORTCUTS.panel, priority: 1, run: () => setRightPanel(!layout.rightPanel) });
-    action({ id: 'browser', title: 'New browser tab', keywords: 'web preview localhost url page open site', icon: Globe, shortcut: SHORTCUTS.browser, priority: 1, run: side => openBrowser('', side) });
+    if (pane?.tabId) action({ id: 'close-tab', title: 'Close tab', icon: X, shortcut: SHORTCUT_KEYS.closeTab, priority: 1, run: () => closeTab(pane.tabId!) });
+    action({ id: 'sidebar', title: layout.sidebar ? 'Hide sidebar' : 'Show sidebar', keywords: 'toggle navigation', icon: PanelLeft, shortcut: SHORTCUT_KEYS.sidebar, priority: 1, run: () => setSidebar(!layout.sidebar) });
+    action({ id: 'panel', title: layout.rightPanel ? 'Hide panel' : 'Show panel', keywords: 'toggle right overview', icon: PanelRight, shortcut: SHORTCUT_KEYS.panel, priority: 1, run: () => setRightPanel(!layout.rightPanel) });
+    action({ id: 'browser', title: 'New browser tab', keywords: 'web preview localhost url page open site', icon: Globe, shortcut: SHORTCUT_KEYS.browser, priority: 1, run: side => openBrowser('', side) });
     const terminalProject = snapshot.projects.find(p => p.id === (layout.projectId ?? snapshot.projects[0]?.id)) ?? snapshot.projects[0];
     if (terminalProject) {
-      action({ id: 'terminal', title: layout.terminal ? 'Hide terminal' : 'Show terminal', keywords: `toggle shell console panel ${terminalProject.name}`, hint: layout.terminal ? undefined : terminalProject.name, icon: PanelBottom, shortcut: SHORTCUTS.terminal, priority: 1, run: () => (layout.terminal ? hideTerminal() : showTerminal(terminalProject.id)) });
+      action({ id: 'terminal', title: layout.terminal ? 'Hide terminal' : 'Show terminal', keywords: `toggle shell console panel ${terminalProject.name}`, hint: layout.terminal ? undefined : terminalProject.name, icon: PanelBottom, shortcut: SHORTCUT_KEYS.terminal, priority: 1, run: () => (layout.terminal ? hideTerminal() : showTerminal(terminalProject.id)) });
       action({ id: 'new-terminal', title: 'New terminal', keywords: `shell console ${terminalProject.name}`, hint: terminalProject.name, icon: Terminal, priority: 1, run: () => void newTerminal(terminalProject.id) });
       if (layout.terminal) {
-        const inTerminal = IS_MAC ? 'In a terminal: ' : '';
-        action({ id: 'split-terminal-right', title: 'Split terminal right', keywords: 'shell pane side by side', hint: IS_MAC ? `${inTerminal}⌘D` : undefined, icon: SplitColumns, priority: 1, run: () => splitFront('right') });
-        action({ id: 'split-terminal-down', title: 'Split terminal down', keywords: 'shell pane below stacked', hint: IS_MAC ? `${inTerminal}⇧⌘D` : undefined, icon: SplitRows, priority: 1, run: () => splitFront('down') });
+        // Ghostty's split keys, which only a Mac's terminal takes (web/terminal/keys.ts).
+        action({ id: 'split-terminal-right', title: 'Split terminal right', keywords: 'shell pane side by side', hint: IS_MAC ? 'In a terminal' : undefined, shortcut: IS_MAC ? 'Mod+D' : undefined, icon: SplitColumns, priority: 1, run: () => splitFront('right') });
+        action({ id: 'split-terminal-down', title: 'Split terminal down', keywords: 'shell pane below stacked', hint: IS_MAC ? 'In a terminal' : undefined, shortcut: IS_MAC ? 'Shift+Mod+D' : undefined, icon: SplitRows, priority: 1, run: () => splitFront('down') });
       }
     }
     // Files and changes live in the workspace column, which a project with no agents does not have.
@@ -159,7 +162,7 @@ function useCommands(actions: PaletteActions): Command[] {
       action({ id: 'view-files', title: 'Show files', keywords: 'sidebar tree browse', icon: FolderTree, priority: 1, run: () => setSidebarView('files') });
       action({ id: 'view-changes', title: 'Show changes', keywords: 'sidebar git diff', icon: GitCompare, priority: 1, run: () => setSidebarView('changes') });
     }
-    action({ id: 'settings', title: 'Settings', keywords: 'preferences options', icon: Settings, shortcut: SHORTCUTS.settings, priority: 1, run: actions.settings });
+    action({ id: 'settings', title: 'Settings', keywords: 'preferences options', icon: Settings, shortcut: SHORTCUT_KEYS.settings, priority: 1, run: actions.settings });
 
     for (const project of snapshot.projects) {
       commands.push({
@@ -256,7 +259,7 @@ export function CommandPalette({ actions, onClose }: { actions: PaletteActions; 
             spellCheck={false}
             className="min-w-0 flex-1 bg-transparent text-[14px] text-content outline-none placeholder:text-content/35"
           />
-          <kbd className="shrink-0 rounded border border-content/10 px-1.5 py-0.5 text-[10px] text-content/40">Esc</kbd>
+          <Kbd spec="Escape" />
         </label>
         <div id={listId} role="listbox" aria-label="Commands" className="max-h-[min(420px,55vh)] overflow-y-auto overscroll-contain p-1.5">
           {flat.length ? sections.map(section => (
@@ -286,7 +289,7 @@ export function CommandPalette({ actions, onClose }: { actions: PaletteActions; 
                     {command.hint ? <span className="min-w-0 flex-1 truncate text-[12px] text-content/45">{command.hint}</span> : <span className="flex-1" />}
                     {command.status ? <span className="flex shrink-0 items-center">{command.status}</span> : null}
                     {command.checked ? <Check className="size-3.5 shrink-0 text-content/70" strokeWidth={2.25} /> : null}
-                    {command.shortcut ? <kbd className="shrink-0 text-[11px] text-content/40">{command.shortcut}</kbd> : null}
+                    {command.shortcut ? <Kbd spec={command.shortcut} quiet /> : null}
                     {section.group ? null : <span className="w-14 shrink-0 text-right text-[11px] text-content/35">{KIND[command.group]}</span>}
                   </div>
                 );
@@ -295,10 +298,10 @@ export function CommandPalette({ actions, onClose }: { actions: PaletteActions; 
           )) : <p className="px-2.5 py-6 text-center text-[13px] text-content/45">Nothing matches “{query.trim()}”.</p>}
         </div>
         <div className="flex h-8 shrink-0 items-center gap-4 border-t border-content/7 px-4 text-[11px] text-content/40">
-          <span>↑↓ to move</span>
-          <span>↵ to run</span>
-          <span>{MOD}↵ to open beside</span>
-          <span className="ml-auto">{SHORTCUTS.palette} to close</span>
+          <span className="flex items-center gap-1"><Kbd spec="Up" /><Kbd spec="Down" /> to move</span>
+          <span className="flex items-center gap-1"><Kbd spec="Enter" /> to run</span>
+          <span className="flex items-center gap-1"><Kbd spec="Mod+Enter" /> to open beside</span>
+          <span className="ml-auto flex items-center gap-1"><Kbd spec={SHORTCUT_KEYS.palette} /> to close</span>
         </div>
       </div>
     </Modal>

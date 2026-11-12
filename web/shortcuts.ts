@@ -4,26 +4,41 @@
  */
 import { useEffect } from 'react';
 import { openBrowser } from './browser.ts';
-import { closeTab, getLayout, open, setRightPanel, setSidebar, toggleMaximize } from './layout.ts';
+import { formatClick, formatKeys, type KeySpec } from './keys.ts';
+import { shortcutFor } from './shortcutMap.ts';
+import { closeOtherTabs, closeTab, getLayout, open, setRightPanel, setSidebar, toggleMaximize } from './layout.ts';
 import { IS_MAC } from './platform.ts';
 import { isConfirmingClose, toggleTerminal } from './terminal/actions.ts';
 import { isTerminalToggle } from './terminal/keys.ts';
-/** The key a shortcut hint shows: ⌘ on macOS, Ctrl+ elsewhere. */
-export const MOD = IS_MAC ? '⌘' : 'Ctrl+';
+/** A shortcut as this platform shows it (ACH-D26): '⇧⌘⏎' on a Mac, 'Ctrl+Shift+Enter' elsewhere. */
+export function keys(spec: KeySpec): string {
+  return formatKeys(spec, IS_MAC);
+}
 
-export const SHORTCUTS = {
-  newAgent: `${MOD}N`,
-  closeTab: `${MOD}W`,
-  settings: `${MOD},`,
-  palette: `${MOD}K`,
-  sidebar: `${MOD}B`,
-  panel: IS_MAC ? '⌥⌘B' : 'Ctrl+Alt+B',
-  terminal: `${MOD}J`,
-  browser: IS_MAC ? '⇧⌘B' : 'Ctrl+Shift+B',
-  maximize: IS_MAC ? '⇧⌘↩' : 'Ctrl+Shift+Enter',
+/** A modifier-click in a tooltip: '⌘-click' on a Mac, 'Ctrl+click' elsewhere. */
+export const MOD_CLICK = formatClick(IS_MAC);
+
+/** Every app shortcut, written once for every platform (web/keys.ts). Kbd chips take these. */
+export const SHORTCUT_KEYS = {
+  newAgent: 'Mod+N',
+  closeTab: 'Mod+W',
+  /** Close every unpinned tab but the current one (ACH-D27). */
+  closeOthers: 'Alt+Mod+W',
+  settings: 'Mod+,',
+  palette: 'Mod+K',
+  sidebar: 'Mod+B',
+  panel: 'Alt+Mod+B',
+  terminal: 'Mod+J',
+  browser: 'Shift+Mod+B',
+  maximize: 'Shift+Mod+Enter',
   /** The SuperAgent's quick bar; the desktop app also takes it system-wide. Never Cmd+J, the terminal's. */
-  superQuick: IS_MAC ? '⇧⌘Space' : 'Ctrl+Shift+Space',
-} as const;
+  superQuick: 'Shift+Mod+Space',
+} as const satisfies Record<string, KeySpec>;
+
+/** The same shortcuts as text for tooltips and labels: symbols on a Mac ('⇧⌘B'), words elsewhere. */
+export const SHORTCUTS = Object.fromEntries(
+  Object.entries(SHORTCUT_KEYS).map(([name, spec]) => [name, keys(spec)]),
+) as Record<keyof typeof SHORTCUT_KEYS, string>;
 
 function cycleTab(step: number): void {
   const layout = getLayout();
@@ -51,7 +66,6 @@ let handlers: Handlers | null = null;
  */
 export function runShortcut(e: KeyboardEvent): boolean {
   if (!handlers || handlers.blocked || isConfirmingClose()) return false;
-  const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
   // Ctrl+Tab cycles tabs and Ctrl+` shows or hides the terminal (as Cmd+J does), on every platform.
   if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Tab') {
     cycleTab(e.shiftKey ? -1 : 1);
@@ -61,32 +75,30 @@ export function runShortcut(e: KeyboardEvent): boolean {
     toggleTerminal();
     return true;
   }
-  if (!mod) return false;
+  const action = shortcutFor(e, IS_MAC);
+  if (!action) return false;
   const layout = getLayout();
-  let handled = true;
-  // e.code, not e.key: Option changes the character a key types on macOS.
-  if (e.code === 'KeyB' && e.altKey && !e.shiftKey) setRightPanel(!layout.rightPanel);
-  else if (e.altKey) handled = false;
-  else if (e.code === 'Space' && e.shiftKey) handlers.superQuick();
-  else if (e.code === 'KeyB' && e.shiftKey) openBrowser();
-  else if ((e.code === 'Enter' || e.code === 'NumpadEnter') && e.shiftKey) toggleMaximize(layout.focused);
-  else if (e.code === 'KeyB' && !e.shiftKey) setSidebar(!layout.sidebar);
-  else if (e.code === 'KeyN' && !e.shiftKey) handlers.newAgent();
-  else if (e.code === 'KeyK' && !e.shiftKey) handlers.palette();
-  else if (e.code === 'KeyJ' && !e.shiftKey) toggleTerminal();
-  else if (e.code === 'Comma' && !e.shiftKey) handlers.settings();
-  else if (e.code === 'KeyW' && !e.shiftKey) {
-    const pane = layout.panes.find(p => p.id === layout.focused);
-    if (pane?.tabId) closeTab(pane.tabId);
-  } else if (e.shiftKey && e.code === 'BracketLeft') cycleTab(-1);
-  else if (e.shiftKey && e.code === 'BracketRight') cycleTab(1);
-  else if (!e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
-    // Cmd+1 to Cmd+8 pick that tab; Cmd+9 is always the last, as in browsers.
-    const n = Number(e.code.slice(5));
-    const tab = n === 9 ? layout.tabs.at(-1) : layout.tabs[n - 1];
-    if (tab) open(tab.content);
-  } else handled = false;
-  return handled;
+  const pane = layout.panes.find(p => p.id === layout.focused);
+  switch (action.kind) {
+    case 'panel': setRightPanel(!layout.rightPanel); break;
+    case 'closeOthers': if (pane?.tabId) closeOtherTabs(pane.tabId); break;
+    case 'superQuick': handlers.superQuick(); break;
+    case 'browser': openBrowser(); break;
+    case 'maximize': toggleMaximize(layout.focused); break;
+    case 'sidebar': setSidebar(!layout.sidebar); break;
+    case 'newAgent': handlers.newAgent(); break;
+    case 'palette': handlers.palette(); break;
+    case 'terminal': toggleTerminal(); break;
+    case 'settings': handlers.settings(); break;
+    case 'closeTab': if (pane?.tabId) closeTab(pane.tabId); break;
+    case 'cycle': cycleTab(action.step); break;
+    case 'pickTab': {
+      const tab = action.n === 9 ? layout.tabs.at(-1) : layout.tabs[action.n - 1];
+      if (tab) open(tab.content);
+      break;
+    }
+  }
+  return true;
 }
 
 /** Listens for the shortcuts while the app is mounted. `blocked` holds them off while a dialog is open. */

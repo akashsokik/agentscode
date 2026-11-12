@@ -12,13 +12,16 @@ import { SidebarUpdateFooter, useDesktopUpdate } from './SidebarUpdate.tsx';
 import { isUpdateActionable, updateLabel } from '../../shared/updates.ts';
 import { DreamNowMenuRow } from '../ui/DreamNowMenuRow.tsx';
 import { ResizeHandle, useColumnWidth, useWindowWidth } from '../ui/ResizeHandle.tsx';
-import { SHORTCUTS } from '../shortcuts.ts';
+import { SHORTCUTS, SHORTCUT_KEYS, MOD_CLICK } from '../shortcuts.ts';
+import type { KeySpec } from '../keys.ts';
+import { Kbd } from '../ui/Kbd.tsx';
 import { showTerminal } from '../terminal/actions.ts';
 import { cx, Empty, HeaderButton, Loading, MenuDivider, MenuLabel, MenuRow, StatusLabel } from '../ui/common.tsx';
 import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, Sparkles, SplitColumns, Square, StickyNote, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
+import { ContextMenu, openContextMenu, toggleMenu, type MenuAnchor } from '../ui/ContextMenu.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { AGENT_GROUP_LABEL, agentsSummary, groupAgents, railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
@@ -41,31 +44,8 @@ export interface SidebarActions {
   palette: () => void;
 }
 
-/** A context menu opens at the pointer, or at its trigger when opened from a button or the keyboard. */
-type MenuAnchor = HTMLElement | { x: number; y: number };
-type SetMenu = (update: MenuAnchor | null | ((m: MenuAnchor | null) => MenuAnchor | null)) => void;
-
-/** Right-click handler: replaces the browser menu with ours. */
-function openContextMenu(e: MouseEvent<HTMLElement>, setMenu: SetMenu): void {
-  e.preventDefault();
-  // React bubbles events out of portals: a right-click inside the open menu is not a new one.
-  if (!e.currentTarget.contains(e.target as Node)) return;
-  // The context-menu key fires with no pointer position; anchor to the element instead.
-  setMenu(e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : e.currentTarget);
-}
-
-/** Click handler for a ... button: toggles a menu anchored to the button. */
-function toggleMenu(e: MouseEvent<HTMLElement>, setMenu: SetMenu): void {
-  const el = e.currentTarget;
-  setMenu(m => (m ? null : el));
-}
-
 function SidebarMenu({ anchor, onClose, children }: { anchor: MenuAnchor; onClose: () => void; children: ReactNode }) {
-  return (
-    <Popover anchor={anchor} side="bottom" align="start" width={232} constrainHeight={false} onDismiss={onClose} className="p-1.5">
-      {children}
-    </Popover>
-  );
+  return <ContextMenu anchor={anchor} onClose={onClose} label="Actions">{children}</ContextMenu>;
 }
 
 /** Everything you can do to an agent from the sidebar: right-click a card, or its ... button. */
@@ -187,7 +167,7 @@ function AgentCard({ agent, selected, now, actions }: { agent: Agent; selected: 
       <button
         type="button"
         onClick={e => (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'agent', agentId: agent.id })}
-        title="Click to open, Cmd+click to open beside, right-click for more"
+        title={`Click to open, ${MOD_CLICK} to open beside, right-click for more`}
         aria-current={selected ? 'page' : undefined}
         className={cx('grid w-full grid-cols-[28px_minmax(0,1fr)] items-start gap-x-2.5 rounded-lg px-2.5 py-2 text-left font-sans transition-colors duration-100', selected || menu ? 'bg-selection text-content' : 'text-content/80 hover:bg-content/5 hover:text-content')}
       >
@@ -332,7 +312,7 @@ function FileTree({ projectId }: { projectId?: string }) {
 // ---- MonoCode's Classic shell: a navigation column, then the workspace column ----------------
 
 /** A row at the top or foot of the navigation column: MonoCode's RailAction. */
-function RailAction({ icon: Icon, mark, label, hint, active = false, onClick, children }: { icon: IconComponent; mark?: ReactNode; label: string; hint?: string; active?: boolean; onClick: () => void; children?: ReactNode }) {
+function RailAction({ icon: Icon, mark, label, hint, active = false, onClick, children }: { icon: IconComponent; mark?: ReactNode; label: string; hint?: KeySpec; active?: boolean; onClick: () => void; children?: ReactNode }) {
   return (
     <button
       type="button"
@@ -344,7 +324,7 @@ function RailAction({ icon: Icon, mark, label, hint, active = false, onClick, ch
       <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight">{label}</span>
       {children}
       {/* MonoCode's shortcut hint at the end of the row, as in "Settings ⌘,". */}
-      {hint ? <kbd className="shrink-0 font-sans text-[11px] text-content/40">{hint}</kbd> : null}
+      {hint ? <Kbd spec={hint} quiet /> : null}
     </button>
   );
 }
@@ -478,7 +458,7 @@ function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: bo
       <button
         type="button"
         onClick={e => openRailAgent(agent, e)}
-        title={`${agent.name}, works across all projects. Click to open, Cmd+click to open beside, right-click for more.`}
+        title={`${agent.name}, works across all projects. Click to open, ${MOD_CLICK} to open beside, right-click for more.`}
         aria-current={selected ? 'page' : undefined}
         className={cx(railRow(Boolean(menu)), railRowState(selected || Boolean(menu)))}
       >
@@ -504,7 +484,7 @@ function ChannelRailRow({ channel, selected, actions }: { channel: Channel; sele
       <button
         type="button"
         onClick={e => (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'channel', channelId: channel.id })}
-        title={`${channel.topic || `#${channel.name}`}. Click to open, Cmd+click to open beside, right-click for more.`}
+        title={`${channel.topic || `#${channel.name}`}. Click to open, ${MOD_CLICK} to open beside, right-click for more.`}
         aria-current={selected ? 'page' : undefined}
         className={cx(railRow(waiting || working || channel.unread || Boolean(menu)), channel.unread && !waiting && !working && !menu && 'pr-10', railRowState(selected || Boolean(menu)))}
       >
@@ -608,7 +588,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
         >
           <Plus className="size-4 shrink-0 opacity-70" strokeWidth={1.75} />
           <span className="min-w-0 flex-1 truncate">New agent</span>
-          <kbd className="shrink-0 font-sans text-[11px] font-normal text-content/40">{SHORTCUTS.newAgent}</kbd>
+          <Kbd spec={SHORTCUT_KEYS.newAgent} quiet className="font-normal" />
         </button>
         <button
           type="button"
@@ -624,7 +604,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
         <RailAction icon={MessageMultiple} label="Comms" active={commsOpen} onClick={() => open({ kind: 'comms' })}>
           {inFlight ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${inFlight} in flight`}>{inFlight}</span> : null}
         </RailAction>
-        <RailAction icon={Sparkles} mark={<SuperMark superId={superId} />} label="SuperAgent" hint={SHORTCUTS.superQuick} active={Boolean(superId) && agentId === superId} onClick={() => void openSuper()}>
+        <RailAction icon={Sparkles} mark={<SuperMark superId={superId} />} label="SuperAgent" hint={SHORTCUT_KEYS.superQuick} active={Boolean(superId) && agentId === superId} onClick={() => void openSuper()}>
           {superWaiting ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${superWaiting} waiting for you`}>{superWaiting}</span> : null}
         </RailAction>
       </div>

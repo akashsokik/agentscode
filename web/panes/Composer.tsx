@@ -4,6 +4,7 @@
  * AccessPicker and ComposerAction, and the workspace bar under the box. As in MonoCode, `/` opens
  * the commands and skills picker and `@` the project files picker, right above the box.
  */
+import { Kbd } from '../ui/Kbd.tsx';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type { ComposerCommand } from '../../shared/composer.ts';
 import { noProjectFolder, type Agent, type Approval, type AgentPatch, type Project } from '../../shared/types.ts';
@@ -66,9 +67,6 @@ export function ToolButton({ active, disabled, label, onClick, children }: { act
 }
 
 /** A key name in the composer's hints. */
-function KeyHint({ children }: { children: ReactNode }) {
-  return <kbd className="mr-1 rounded bg-content/[0.07] px-1 py-px font-sans text-content/50">{children}</kbd>;
-}
 
 /** MonoCode's ComposerAction: send, or stop while the agent works. */
 function ComposerAction({ busy, hasValue, onSend, onStop }: { busy: boolean; hasValue: boolean; onSend: () => void; onStop: () => void }) {
@@ -430,8 +428,8 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
             {/* The quick composer's key hints, while there is something to send and room to say it. */}
             {text.trim() ? (
               <span aria-hidden className="flex items-center gap-2.5 font-sans text-[11px] text-content/35 @max-xl/composer:hidden">
-                <span><KeyHint>Enter</KeyHint>{busy ? 'queue' : 'send'}</span>
-                <span><KeyHint>Shift Enter</KeyHint>new line</span>
+                <span className="flex items-center gap-1"><Kbd spec="Enter" />{busy ? 'queue' : 'send'}</span>
+                <span className="flex items-center gap-1"><Kbd spec="Shift+Enter" />new line</span>
               </span>
             ) : null}
             <ComposerAction busy={busy} hasValue={canSend} onSend={() => void send()} onStop={() => void attempt(() => api.stop(agent.id))} />

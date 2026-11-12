@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Root } from './api.ts';
 import { closedWeights, prunedWeights, weightOf } from './paneSizes.ts';
+import { moveTab, orderTabs, othersToClose, rightToClose, setPinned } from './tabs.ts';
 import type { SplitTree } from './terminal/splits.ts';
 
 /** What a tab shows. Tabs are keyed by content, so opening the same thing twice focuses it. */
@@ -24,6 +25,8 @@ export type TabContent =
 export interface Tab {
   id: string;
   content: TabContent;
+  /** Pinned (ACH-D27): first in the strip, icon only, kept by Close others and across restarts. */
+  pinned?: boolean;
 }
 
 export interface Pane {
@@ -107,6 +110,8 @@ function initial(): Layout {
     const { superLog: _log, ...kept } = saved as Layout & { superLog?: unknown };
     const { superLog: _width, ...widths } = (kept.widths ?? {}) as Record<string, number>;
     const restored: Layout = { ...fallback, ...kept, ...(kept.widths ? { widths } : {}) };
+    // Pinned tabs come first; a layout saved before pins existed has none and keeps its order.
+    restored.tabs = orderTabs(restored.tabs);
     const ids = restored.panes.map(p => p.id);
     return { ...restored, paneWeights: prunedWeights(restored.paneWeights, ids), maximized: restored.maximized && ids.includes(restored.maximized) && ids.length > 1 ? restored.maximized : null };
   } catch {
@@ -280,6 +285,31 @@ export function closeTab(tabId: string): void {
   const paneWeights = closedWeights(layout.paneWeights, layout.panes.map(p => p.id), ids);
   const maximized = layout.maximized && ids.includes(layout.maximized) && ids.length > 1 ? layout.maximized : null;
   set({ ...layout, tabs, panes, focused, paneWeights, maximized });
+}
+
+/** Pin or unpin a tab (ACH-D27): pinned tabs sit first and stay through Close others. */
+export function pinTab(tabId: string, pinned: boolean): void {
+  const tabs = setPinned(layout.tabs, tabId, pinned);
+  if (tabs !== layout.tabs) set({ ...layout, tabs });
+}
+
+/** Close every unpinned tab but this one, and show this one. */
+export function closeOtherTabs(tabId: string): void {
+  const keep = layout.tabs.find(t => t.id === tabId);
+  if (!keep) return;
+  for (const tab of othersToClose(layout.tabs, tabId)) closeTab(tab.id);
+  open(keep.content);
+}
+
+/** Close the unpinned tabs after this one. */
+export function closeTabsToRight(tabId: string): void {
+  for (const tab of rightToClose(layout.tabs, tabId)) closeTab(tab.id);
+}
+
+/** Drag a tab to another tab's place, within its own group (pinned or not). */
+export function reorderTab(tabId: string, targetId: string): void {
+  const tabs = moveTab(layout.tabs, tabId, targetId);
+  if (tabs !== layout.tabs) set({ ...layout, tabs });
 }
 
 /** Drop tabs whose agent or channel was removed. */

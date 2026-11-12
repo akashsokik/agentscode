@@ -7,7 +7,9 @@ import { open, openToSide } from '../layout.ts';
 import { projectLabel } from '../projects.ts';
 import { homeRecent, homeTarget, sendQuick, type QuickTarget } from '../quick/route.ts';
 import { whereabouts } from '../whereabouts.ts';
-import { SHORTCUTS } from '../shortcuts.ts';
+import { SHORTCUTS, SHORTCUT_KEYS, MOD_CLICK } from '../shortcuts.ts';
+import type { KeySpec } from '../keys.ts';
+import { Kbd } from '../ui/Kbd.tsx';
 import type { SidebarActions } from '../sidebar/Sidebar.tsx';
 import { attempt, useApp } from '../store.ts';
 import { ArrowUp } from '../mono/icons.tsx';
@@ -60,11 +62,11 @@ export function HomePane({ chrome, actions }: { chrome: PaneChrome; actions: Sid
           ) : null}
 
           <nav aria-label="Start" className="mt-auto flex flex-wrap justify-center gap-x-1 gap-y-0.5 pt-7">
-            <StartLink label="New agent" hint={SHORTCUTS.newAgent} onClick={() => actions.newAgent()} />
+            <StartLink label="New agent" hint={SHORTCUT_KEYS.newAgent} onClick={() => actions.newAgent()} />
             <StartLink label="Add project" onClick={actions.addProject} />
             <StartLink label="New channel" onClick={actions.newChannel} />
-            <StartLink label="Palette" hint={SHORTCUTS.palette} onClick={actions.palette} />
-            <StartLink label="Settings" hint={SHORTCUTS.settings} onClick={actions.settings} />
+            <StartLink label="Palette" hint={SHORTCUT_KEYS.palette} onClick={actions.palette} />
+            <StartLink label="Settings" hint={SHORTCUT_KEYS.settings} onClick={actions.settings} />
           </nav>
         </div>
       </div>
@@ -198,7 +200,7 @@ function AgentRow({ agent, pending, place, now }: { agent: Agent; pending: boole
     <button
       type="button"
       onClick={e => (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'agent', agentId: agent.id })}
-      title={`${agent.name}, ${place}. Cmd+click to open beside.`}
+      title={`${agent.name}, ${place}. ${MOD_CLICK} to open beside.`}
       className="flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-[12.5px] transition-colors duration-150 hover:bg-content/[0.06] focus-visible:bg-content/[0.06] focus-visible:outline-none"
     >
       <AgentAvatar agent={agent} className="size-5" />
@@ -210,11 +212,11 @@ function AgentRow({ agent, pending, place, now }: { agent: Agent; pending: boole
 }
 
 /** One of the few things to start from Home, as a quiet word with its shortcut. */
-function StartLink({ label, hint, onClick }: { label: string; hint?: string; onClick: () => void }) {
+function StartLink({ label, hint, onClick }: { label: string; hint?: KeySpec; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] text-content/45 transition-colors duration-150 hover:bg-content/[0.06] hover:text-content focus-visible:bg-content/[0.06] focus-visible:outline-none">
       {label}
-      {hint ? <kbd className="font-sans text-[11px] text-content/30">{hint}</kbd> : null}
+      {hint ? <Kbd spec={hint} quiet /> : null}
     </button>
   );
 }

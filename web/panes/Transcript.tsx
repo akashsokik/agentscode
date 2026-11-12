@@ -10,6 +10,9 @@
  * runs on, branches, and the row rises in), new prose fades in word by word, and a prompt you send
  * rises into place at the top of the view before the rest of its turn fades in under it.
  */
+import { formatKeys, type KeySpec } from '../keys.ts';
+import { Kbd } from '../ui/Kbd.tsx';
+import { IS_MAC } from '../platform.ts';
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { Agent, Approval, Entry, ToolCall, TurnMeta } from '../../shared/types.ts';
 import { turnMetricsText } from '../../shared/turnUsage.ts';
@@ -802,7 +805,8 @@ function ApprovalRow({ approval }: { approval: Approval }) {
     };
   }, [approval.id]);
 
-  const key = (label: string) => <kbd className="font-sans font-normal opacity-45">{label}</kbd>;
+  // Inside a chip button the key reads quietly, as the chip's own text (ACH-D26).
+  const key = (spec: KeySpec) => <Kbd spec={spec} quiet className="font-normal opacity-80" />;
   return (
     <div ref={root} data-approval={approval.id} className={cx(GUTTER, 'px-4 py-1.5 font-sans')}>
       <AgentAvatar agent={agent ?? { id: approval.agentId }} className="size-[22px]" />
@@ -824,15 +828,15 @@ function ApprovalRow({ approval }: { approval: Approval }) {
           ) : null}
           {approval.description ? <p className="mt-1.5 text-xs text-warning">{approval.description}</p> : null}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            <ChipButton primary data-approval-allow title={`${plan ? 'Approve plan' : 'Allow'} (Enter)`} onClick={() => void decide(true)}>{plan ? 'Approve plan' : 'Allow'} {key('Enter')}</ChipButton>
+            <ChipButton primary data-approval-allow title={`${plan ? 'Approve plan' : 'Allow'} (${formatKeys('Enter', IS_MAC)})`} onClick={() => void decide(true)}>{plan ? 'Approve plan' : 'Allow'} {key('Enter')}</ChipButton>
             {approval.canAlwaysAllow ? <ChipButton onClick={() => void decide(true, true)}>Always allow</ChipButton> : null}
             <ChipButton
               aria-expanded={plan ? undefined : noting}
-              title={`${plan ? 'Keep planning' : 'Deny'} (Esc), or click to say why`}
+              title={`${plan ? 'Keep planning' : 'Deny'} (${formatKeys('Escape', IS_MAC)}), or click to say why`}
               onClick={() => (noting ? deny() : setNoting(true))}
               className="bg-transparent text-content/60 hover:bg-content/10"
             >
-              {plan ? 'Keep planning' : 'Deny'} {key('Esc')}
+              {plan ? 'Keep planning' : 'Deny'} {key('Escape')}
             </ChipButton>
             {text.hidden ? (
               <TextButton aria-expanded={details} className="ml-auto" onClick={() => setDetails(v => !v)}>{details ? 'Hide details' : 'Show details'}</TextButton>
