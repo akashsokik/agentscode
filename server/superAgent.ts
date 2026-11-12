@@ -75,11 +75,14 @@ export class SuperStore {
   private write(stored: Stored): void {
     const open = stored.asks.filter(isOpen);
     const closed = stored.asks.filter(a => !isOpen(a)).slice(0, Math.max(0, ASKS_KEPT - open.length));
-    const next: Stored = {
+    const next: Stored & { goals: SuperIssue[] } = {
       asks: [...open, ...closed].sort((a, b) => b.createdAt - a.createdAt), log: stored.log.slice(0, LOG_KEPT), wakes: stored.wakes.slice(-100),
       ...(stored.autoSpend ? { autoSpend: stored.autoSpend } : {}),
       ...(stored.briefDay ? { briefDay: stored.briefDay } : {}),
       issues: orderIssues(stored.issues),
+      // For one release, the same list under its old name too, so a build from before the rename
+      // (a manual downgrade) still finds the backlog (ACH-D38). Read ignores it while "issues" has any.
+      goals: orderIssues(stored.issues),
       routines: stored.routines,
     };
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
@@ -357,9 +360,18 @@ export function storedIssues(raw: { issues?: unknown; goals?: unknown }): unknow
 }
 export function migrateAction(action: SuperAction): SuperAction {
   const undo = action.undo as unknown as { kind?: string; goalId?: string; before?: unknown } | undefined;
-  if (undo?.kind !== 'goal') return action;
+  const summary = /goal/.test(action.tool) ? issueWording(action.summary) : action.summary;
+  if (undo?.kind !== 'goal') return summary === action.summary ? action : { ...action, summary };
   const { goalId, ...rest } = undo;
-  return { ...action, undo: { ...rest, kind: 'issue', issueId: goalId } as SuperAction['undo'] };
+  return { ...action, summary, undo: { ...rest, kind: 'issue', issueId: goalId } as SuperAction['undo'] };
+}
+
+/** The server's own words in a goal command's log line, as they read now: only its fixed prefixes, never the goal's text. */
+export function issueWording(summary: string): string {
+  return summary
+    .replace(/^Added the goal "/, 'Added the issue "')
+    .replace(/^Completed the goal "/, 'Completed the issue "')
+    .replace(/^Goal "/, 'Issue "');
 }
 
 /** An issue as super.json must hold it; anything else (a hand edit gone wrong) is left out. */

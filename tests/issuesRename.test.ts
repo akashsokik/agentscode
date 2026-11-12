@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { canonicalTool } from '../server/comms/tools.ts';
-import { migrateAction, storedIssues, SuperStore } from '../server/superAgent.ts';
+import { issueWording, migrateAction, storedIssues, SuperStore } from '../server/superAgent.ts';
+import { claudeToolPolicy, superMayUse } from '../server/agents/claude.ts';
 import { currentToolName, ISSUE_TOOL_ALIASES } from '../shared/issues.ts';
 import type { SuperAction } from '../shared/types.ts';
 import { migrateSuperView } from '../web/layout.ts';
@@ -51,10 +52,13 @@ test('super.json written before the rename: goals read as issues, goal undo reco
   const view = store.view(null);
   assert.deepEqual(view.issues.map(i => i.id), ['g1'], 'nothing lost');
   assert.deepEqual(view.log[0].undo, { kind: 'issue', issueId: 'g1', before: null });
+  assert.equal(view.log[0].summary, 'Added the issue "Ship dark mode"', 'the server\'s own goal wording reads as Issue');
   store.updateIssue('g1', { status: 'in_progress' });
   const written = JSON.parse(fs.readFileSync(path.join(dir, 'super.json'), 'utf8'));
-  assert.equal(written.goals, undefined, 'the old key is gone after a write');
   assert.deepEqual(written.issues.map((i: { id: string; status: string }) => [i.id, i.status]), [['g1', 'in_progress']]);
+  assert.deepEqual(written.goals, written.issues, 'for one release the same list is also written as "goals", so a downgrade keeps the backlog');
+  // A build from before the rename reads only "goals": it finds the current backlog there.
+  assert.deepEqual(written.goals.map((i: { id: string; status: string }) => [i.id, i.status]), [['g1', 'in_progress']]);
   const again = new SuperStore(dir).view(null);
   assert.deepEqual(again.issues.map(i => [i.id, i.status]), [['g1', 'in_progress']], 'reading again changes nothing');
   assert.deepEqual(storedIssues({ issues: [], goals: [goal] }), [goal], 'an empty new list does not hide old goals');
@@ -84,4 +88,25 @@ test('GitHub issues are named as such wherever the backlog could be confused wit
   const roles = fs.readFileSync(new URL('../shared/roles.ts', import.meta.url), 'utf8');
   assert.match(roles, /issues backlog, PodCode\\'s own and not GitHub issues/);
   assert.match(roles, /gh_issues \(GitHub issues, not your issues backlog\)/);
+});
+
+test('the SuperAgent\'s engine allows the old goal names (they are not refused before the IDE maps them)', () => {
+  for (const name of ['list_goals', 'add_goal', 'update_goal', 'complete_goal', 'list_issues', 'add_issue', 'update_issue', 'complete_issue']) {
+    assert.equal(superMayUse(`mcp__podcode__${name}`), true, name);
+  }
+  const allowed = claudeToolPolicy({ role: 'super', autonomy: 'readonly', useMcp: false }, true).allowedTools ?? [];
+  assert.ok(allowed.includes('mcp__podcode__add_goal') && allowed.includes('mcp__podcode__add_issue'));
+  const dev = claudeToolPolicy({ role: 'dev', autonomy: 'full', useMcp: false }, true).allowedTools ?? [];
+  assert.ok(!dev.includes('mcp__podcode__add_goal') && !dev.includes('mcp__podcode__add_issue'), 'other agents get neither');
+});
+
+test('old log lines: only the server\'s fixed goal wording becomes Issue, only for goal commands, never the text itself', () => {
+  assert.equal(issueWording('Added the goal "Ship the goal page"'), 'Added the issue "Ship the goal page"');
+  assert.equal(issueWording('Completed the goal "x"'), 'Completed the issue "x"');
+  assert.equal(issueWording('Goal "Reach the goal": in progress, given to Ada'), 'Issue "Reach the goal": in progress, given to Ada');
+  assert.equal(issueWording('Messaged Ada: our goal is calm'), 'Messaged Ada: our goal is calm');
+  const message = { id: 'm', at: 1, tool: 'send_message', summary: 'Goal "x" is near', why: '' } as SuperAction;
+  assert.equal(migrateAction(message), message, 'a message that happens to start with Goal is left alone');
+  const update = { id: 'u', at: 1, tool: 'update_goal', summary: 'Goal "x": done', why: '' } as SuperAction;
+  assert.equal(migrateAction(update).summary, 'Issue "x": done');
 });

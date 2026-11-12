@@ -1,3 +1,4 @@
+import { ISSUE_TOOL_ALIASES } from '../../shared/issues.ts';
 import {
   query,
   type CanUseTool,
@@ -46,7 +47,8 @@ export function claudeToolPolicy(agent: Pick<Agent, 'role' | 'autonomy' | 'useMc
 } {
   const mcp = (names: string[]) => names.map(name => `mcp__${COMMS_SERVER}__${name}`);
   if (agent.role === 'super') {
-    const own = [...COMMS_TOOLS.filter(t => !BROWSER_TOOLS.includes(t as never)), ...SUPER_BROWSER_TOOLS, ...SUPER_TOOLS, ...EYES_TOOLS];
+    // The old goal names stay allowed (ACH-D38): a session from before the rename calls them, and the IDE maps them to the issue commands.
+    const own = [...COMMS_TOOLS.filter(t => !BROWSER_TOOLS.includes(t as never)), ...SUPER_BROWSER_TOOLS, ...SUPER_TOOLS, ...Object.keys(ISSUE_TOOL_ALIASES), ...EYES_TOOLS];
     return { tools: [...SUPER_CLAUDE_TOOLS], disallowedTools: [...SUPER_DISALLOWED_TOOLS], allowedTools: comms ? mcp(own) : undefined, permissionMode: 'default', strictMcpConfig: true };
   }
   return { allowedTools: comms ? mcp([...COMMS_TOOLS, ...(hasEyes(agent.role) ? EYES_TOOLS : [])]) : undefined, permissionMode: MODE[agent.autonomy], strictMcpConfig: !agent.useMcp };
