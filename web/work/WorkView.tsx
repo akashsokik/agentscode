@@ -9,9 +9,10 @@ import { Empty, HeaderButton, IconTab, Loading, MenuRow, TextButton } from '../u
 import { CleanupRow } from './WorkCleanup.tsx';
 import { WorkDetails } from './WorkDetails.tsx';
 import { WorkGraph } from './WorkGraph.tsx';
-import { BranchState, branchState, targetKey, WorkRow, WorkWho } from './WorkParts.tsx';
+import { BranchState, branchState, MergeState, targetKey, WorkRow, WorkOwnerLabel } from './WorkParts.tsx';
 import { day, DEFAULT_WORK_UI, loadWork, setWorkUi, useWork, useWorkData } from './workData.ts';
 import { mergeGroups, selectedWork } from './workModel.ts';
+import { workIdentity } from './workPresentation.ts';
 
 // ACH-D19/D23/D24: current project, graph-first tabs and one selected-item inspector.
 // The existing MonoCode components, graph, cleanup confirmation and diff renderer are reused.
@@ -36,13 +37,13 @@ function useProject() {
 
 function BranchRows({ branches, selected, onSelect }: { branches: WorkBranch[]; selected: WorkTarget | null; onSelect: (target: WorkTarget) => void }) {
   return <>{branches.map(b => <WorkRow key={b.folder} target={{ kind: 'branch', id: b.folder }} selected={selected?.kind === 'branch' && selected.id === b.folder} onSelect={onSelect} title={`${b.branch}, ${b.agentName ?? 'no owner'}, ${branchState(b)}`}>
-    <WorkWho id={b.agentId} name={b.agentName} />{b.agentName ? <span className="max-w-14 shrink-0 truncate text-content/55">{b.agentName}</span> : null}<span className="min-w-0 flex-1 truncate text-content/90">{b.last?.subject ?? b.branch}</span><BranchState branch={b} />
+    <WorkOwnerLabel id={b.agentId} name={b.agentName} /><span className="min-w-0 flex-1 truncate text-content/90" title={b.last?.subject}>{b.branch}</span><BranchState branch={b} />
   </WorkRow>)}</>;
 }
 
 function MergeRows({ merges, selected, onSelect, remote }: { merges: WorkMerge[]; selected: WorkTarget | null; onSelect: (target: WorkTarget) => void; remote: string }) {
   return <>{merges.map(m => <WorkRow key={m.originalHash} target={{ kind: 'merge', id: m.originalHash }} selected={selected?.kind === 'merge' && selected.id === m.originalHash} onSelect={onSelect} title={`${m.branch}, ${m.names.join(', ') || 'owner not recorded'}, ${remote}`}>
-    <WorkWho id={m.agentIds[0]} name={m.names[0]} /><span className="min-w-0 flex-1 truncate text-content/90">{m.branch}</span><span className="shrink-0 text-[11px] text-content/50">{remote}</span>
+    <WorkOwnerLabel {...workIdentity(m)} /><span className="min-w-0 flex-1 truncate text-content/90">{m.branch}</span><MergeState merge={m} />
   </WorkRow>)}</>;
 }
 

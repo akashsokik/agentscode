@@ -28,6 +28,24 @@ export type GitRunner = (args: string[], cwd: string) => Promise<GitResult>;
 /** About how many commits the graph shows (ACH-D18). */
 export const GRAPH_ROWS = 20;
 
+/** Keep branch tips visible without adding rows or drawing a parent before its child. */
+async function graphWindow(recent: string[], context: string[], tips: string[], main: string | undefined, git: GitRunner, root: string): Promise<string[]> {
+  if (!context.length) return recent;
+  const candidates = new Map([...context, ...recent].map(line => [line.split('\x1f')[0], line]));
+  const pinned = new Set([main, ...tips].filter((hash): hash is string => Boolean(hash)).slice(0, GRAPH_ROWS));
+  const selected = new Map([...candidates].filter(([hash]) => pinned.has(hash)));
+  for (const [hash, line] of candidates) if (selected.size < GRAPH_ROWS) selected.set(hash, line);
+  if (selected.size < 2) return [...selected.values()];
+  // Let Git order the full ancestry before filtering to our window. Sorting only
+  // visible parents misorders stacked branches when intermediate commits are omitted.
+  const base = await git(['merge-base', '--octopus', ...selected.keys()], root);
+  const boundary = base.ok ? base.out.trim() : '';
+  const ordered = await git(['rev-list', '--topo-order', ...selected.keys(), ...(boundary ? ['--not', boundary] : [])], root);
+  const hashes = [...ordered.out.trim().split('\n'), ...(boundary ? [boundary] : [])];
+  const rows = hashes.flatMap(hash => selected.has(hash) ? [selected.get(hash)!] : []);
+  return ordered.ok && rows.length === selected.size ? rows : recent;
+}
+
 /** Git with nothing that runs another program or takes optional locks. */
 const GIT_FLAGS = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.untrackedCache=false', '-c', 'diff.submodule=short', '-c', 'status.submoduleSummary=false'];
 // GIT_LITERAL_PATHSPECS: a file name is only ever a name (":!x" is not an exclude, "*" not a glob).
@@ -42,7 +60,7 @@ const READ_COMMANDS: Record<string, (args: string[]) => boolean> = {
   status: a => a.includes('--porcelain'),
   'ls-files': a => a.length === 3 && a[1] === '--stage' && a[2] === '-z',
   'rev-parse': () => true,
-  'merge-base': a => a[1] === '--is-ancestor' || (a.length === 3 && !a[1].startsWith('-') && !a[2].startsWith('-')),
+  'merge-base': a => a[1] === '--is-ancestor' || (a[1] === '--octopus' && a.length >= 4 && a.slice(2).every(h => /^[0-9a-f]{40}$/.test(h))) || (a.length === 3 && !a[1].startsWith('-') && !a[2].startsWith('-')),
   // Comparing content only, with no external diff or textconv program, and no output file.
   diff: a => a.includes('--no-ext-diff') && a.includes('--no-textconv') && ['--quiet', '--name-only', '--numstat', '--patch'].some(flag => a.includes(flag)),
   show: a => a.includes('--no-ext-diff') && a.includes('--no-textconv') && a.includes('--format=') && ['--numstat', '--patch'].some(flag => a.includes(flag)),
@@ -727,14 +745,28 @@ export class WorkService {
     // parents and refs; main's own line is 'main', an open branch's lane its owner, a merged branch's
     // lane the merge's author (lazygit colours a lane by what opened it).
     const tips = inProgress.map(b => b.branch);
-    const glog = await this.git(['log', '--topo-order', `-${GRAPH_ROWS}`, '--decorate=full', '--format=%H%x1f%P%x1f%T%x1f%s%x1f%ct%x1f%D', defaultBranch, ...tips.map(b => `refs/heads/${b}`)], root);
+    const graphFormat = '--format=%H%x1f%P%x1f%T%x1f%s%x1f%ct%x1f%D';
+    const glog = await this.git(['log', '--topo-order', `-${GRAPH_ROWS}`, '--decorate=full', graphFormat, defaultBranch, ...tips.map(b => `refs/heads/${b}`)], root);
     const mainLine = new Set(history.map(c => c.hash));
     const tipOwner = new Map<string, string>();
     for (const b of inProgress) {
       const tip = await this.git(['rev-parse', '--verify', '--quiet', `refs/heads/${b.branch}`], root);
       if (tip.ok) tipOwner.set(tip.out.trim(), b.agentName ?? b.branch);
     }
-    const commits = glog.out.split('\n').filter(Boolean).map(line => {
+    const recent = glog.out.split('\n').filter(Boolean);
+    const present = new Set(recent.map(line => line.split('\x1f')[0]));
+    const mainHead = history[0]?.hash;
+    const required = [mainHead, ...tipOwner.keys()].filter((hash): hash is string => Boolean(hash)).slice(0, GRAPH_ROWS);
+    const context: string[] = [];
+    // A busy main can fill the entire recent window and hide every older open branch.
+    // Reserve their tips and one parent of context within the same 20-row budget.
+    for (const hash of required.filter(hash => !present.has(hash))) {
+      // Only unmerged branch context: including an old main ancestor here would make
+      // a gap in main's first-parent line. Off-window parents remain boundary edges.
+      const extra = await this.git(['log', '--topo-order', hash === mainHead ? '-1' : '-2', '--decorate=full', graphFormat, hash, ...(hash === mainHead ? [] : ['--not', defaultBranch])], root);
+      if (extra.ok) context.push(...extra.out.split('\n').filter(Boolean));
+    }
+    const commits = (await graphWindow(recent, context, [...tipOwner.keys()], mainHead, this.git, root)).map(line => {
       const [hash, parents, tree, subject, at, deco] = line.split('\x1f');
       const r = records.find(x => x.hash === hash) ?? records.find(x => x.tree === tree);
       const names = r?.names.length ? r.names : namesInMergeSubject(subject ?? '');

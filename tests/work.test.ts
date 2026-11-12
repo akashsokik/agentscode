@@ -767,3 +767,50 @@ test('cleanup preserves dirty submodules even with a dependency link that would 
   assert.deepEqual(forced.removed.folders, []);
   assert.equal(fs.readFileSync(path.join(folder, 'sub', 'nested.txt'), 'utf8'), 'uncommitted nested work\n');
 });
+
+test('old active branches retain their owner lanes when recent main history fills the graph window', async () => {
+  const { dir, repo, project } = setup();
+  const agents = ['fen', 'ada'].map(id => ({ id, name: id === 'fen' ? 'Fen' : 'Ada', role: 'dev', status: 'idle', worktree: null })) as unknown as Agent[];
+  const tips: string[] = [];
+  for (const [i, agent] of agents.entries()) {
+    const folder = path.join(dir, 'data', 'agents', agent.id, 'workspace', 'branch');
+    git(repo, 'worktree', 'add', '-q', '-b', `feat/${agent.id}-old`, folder, 'main');
+    if (i) commit(folder, `${agent.id}-1.txt`, 'one', 'old branch parent');
+    tips.push(commit(folder, `${agent.id}-2.txt`, 'two', 'old branch tip'));
+  }
+  for (let i = 0; i < 25; i++) commit(repo, 'recent.txt', String(i), `recent main ${i}`);
+  const view = await service(dir, agents).project(project, true);
+  assert.equal(view.graph.length, 20);
+  assert.ok(view.graph.some(c => c.head && c.key === 'main'), 'main is retained');
+  for (const [i, tip] of tips.entries()) {
+    const row = view.graph.find(c => c.hash === tip)!;
+    assert.ok(row, 'old active tip is visible');
+    assert.equal(row.key, agents[i].name);
+    assert.ok(row.lane > 0);
+    assert.equal(view.laneOwners[row.key!], agents[i].id);
+    assert.ok(view.graphEdges.some(e => e.key === agents[i].name));
+  }
+  const positions = new Map(view.graph.map((c, i) => [c.hash, i]));
+  for (const [i, c] of view.graph.entries()) {
+    if (c.key === 'main') assert.equal(c.lane, 0, 'sparse context never shifts main to a side lane');
+    for (const parent of c.parents) if (positions.has(parent)) assert.ok(positions.get(parent)! > i, 'a visible parent stays below its child');
+  }
+});
+
+test('sparse graph retains Git ancestry order across omitted commits in stacked active branches', async () => {
+  const { dir, repo, project } = setup();
+  const tips: string[] = [];
+  for (const [name, base] of [['a', 'main'], ['b', 'feat/stack-a']]) {
+    const folder = path.join(dir, 'data', 'agents', name, 'workspace', 'branch');
+    git(repo, 'worktree', 'add', '-q', '-b', `feat/stack-${name}`, folder, base);
+    for (let i = 0; i < 4; i++) commit(folder, `${name}.txt`, String(i), `stack ${name} ${i}`);
+    tips.push(git(folder, 'rev-parse', 'HEAD'));
+  }
+  for (let i = 0; i < 26; i++) commit(repo, 'recent.txt', String(i), `recent main ${i}`);
+  const view = await service(dir).project(project, true);
+  const index = (hash: string) => view.graph.findIndex(c => c.hash === hash);
+  assert.equal(view.graph.length, 20);
+  assert.ok(index(tips[1]) >= 0 && index(tips[0]) > index(tips[1]), 'descendant B appears before ancestor A even with a gap');
+  const onMain = new Set(git(repo, 'rev-list', '--first-parent', 'main').split('\n'));
+  for (const c of view.graph) if (onMain.has(c.hash)) assert.equal(c.lane, 0);
+});
