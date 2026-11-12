@@ -53,3 +53,18 @@ export function fitPanelTabs<V extends string>(tabs: FitTab<V>[], active: V, ava
   const visible = open && !first.includes(open.view) ? [...first.slice(0, keep - 1), open.view] : first;
   return { allLabelled: false, activeLabelled: false, visible, overflow: views.filter(v => !visible.includes(v)) };
 }
+
+/**
+ * The tab an arrow key, Home or End moves to among all the panel's tabs (wrapping), or null when
+ * the key is not the strip's. It may be one in the "…" menu: picking it makes it the open tab,
+ * which fitPanelTabs always keeps in the strip, so focus can follow it there after the re-render.
+ */
+export function stripKeyTarget<V extends string>(views: V[], current: V, key: string): V | null {
+  const at = views.indexOf(current);
+  if (at < 0 || !views.length) return null;
+  if (key === 'ArrowRight') return views[(at + 1) % views.length];
+  if (key === 'ArrowLeft') return views[(at - 1 + views.length) % views.length];
+  if (key === 'Home') return views[0];
+  if (key === 'End') return views[views.length - 1];
+  return null;
+}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fitPanelTabs, labelWidth, MORE_WIDTH, TAB_GAP, TAB_ICON_WIDTH, type FitTab, type TabsFit } from '../web/right/panelTabsFit.ts';
+import { fitPanelTabs, labelWidth, MORE_WIDTH, stripKeyTarget, TAB_GAP, TAB_ICON_WIDTH, type FitTab, type TabsFit } from '../web/right/panelTabsFit.ts';
 
 const SUPER: FitTab<string>[] = ['Overview', 'Decisions', 'Goals', 'Routines', 'Comms', 'Notes', 'Work'].map(label => ({ view: label.toLowerCase(), label }));
 const AGENT: FitTab<string>[] = ['Overview', 'Comms', 'Changes', 'Notes', 'Work'].map(label => ({ view: label.toLowerCase(), label }));
@@ -56,4 +56,24 @@ test('a count badge makes the open tab\'s name wider, so it folds sooner', () =>
   const countFit = fitPanelTabs(withCount, 'decisions', 305);
   assert.equal(plainFit.activeLabelled, true);
   assert.equal(countFit.activeLabelled, false);
+});
+
+test('arrow keys, Home and End never lose focus: the tab they reach is always in the strip', () => {
+  assert.equal(stripKeyTarget(['a', 'b', 'c'], 'c', 'ArrowRight'), 'a', 'wraps');
+  assert.equal(stripKeyTarget(['a', 'b', 'c'], 'a', 'ArrowLeft'), 'c');
+  assert.equal(stripKeyTarget(['a', 'b', 'c'], 'b', 'Home'), 'a');
+  assert.equal(stripKeyTarget(['a', 'b', 'c'], 'b', 'End'), 'c');
+  assert.equal(stripKeyTarget(['a', 'b', 'c'], 'b', 'Enter'), null);
+  // The key opens the tab it reaches; at every width the open tab is shown, so focus can go there.
+  for (const tabs of [SUPER, AGENT]) {
+    const views = tabs.map(t => t.view);
+    for (let available = TAB_ICON_WIDTH + TAB_GAP + MORE_WIDTH; available <= 700; available += 6) {
+      for (const from of views) {
+        for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End']) {
+          const to = stripKeyTarget(views, from, key)!;
+          assert.ok(fitPanelTabs(tabs, to, available).visible.includes(to), `${key} from ${from} at ${available}px reaches ${to}, which is shown`);
+        }
+      }
+    }
+  }
 });

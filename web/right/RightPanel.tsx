@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { kindWords, messagePreview, outcomeWords, reportKind, taskTitle } from '../peerText.ts';
 import type { Agent, ChangedFile, GitStatus } from '../../shared/types.ts';
 import { AgentOverview } from './AgentOverview.tsx';
@@ -13,7 +13,7 @@ import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
 import { Empty, HeaderButton, IconTab, Loading, MenuRow, TextButton } from '../ui/common.tsx';
 import { ContextMenu, type MenuAnchor } from '../ui/ContextMenu.tsx';
-import { fitPanelTabs } from './panelTabsFit.ts';
+import { fitPanelTabs, stripKeyTarget } from './panelTabsFit.ts';
 import { useElementWidth } from '../ui/useElementWidth.ts';
 import { Bot, CheckCircle, CircleDot, Clock, DashboardSquare, FileDiff, Folder, GitBranch, ListBullet, MessageMultiple, MoreHorizontal, PanelRight, RefreshCw, StickyNote, type IconComponent } from '../mono/icons.tsx';
 import { NotesView } from '../notes/NotesView.tsx';
@@ -318,15 +318,26 @@ export function RightPanel() {
     : fitPanelTabs(tabs.map(t => ({ view: t.view, label: t.label, count: count(t.view) })), view, stripWidth);
   const shown = tabs.filter(t => fit.visible.includes(t.view));
   const hidden = tabs.filter(t => fit.overflow.includes(t.view));
+  // An arrow key may pick a tab that sits in the "…" menu; picking it opens it, and the open tab
+  // is always in the strip, so focus follows it once the strip has re-rendered (panelTabsFit.ts).
+  const focusAfterPick = useRef<PanelView | null>(null);
+  useEffect(() => {
+    const target = focusAfterPick.current;
+    if (!target) return;
+    focusAfterPick.current = null;
+    list.current?.querySelector<HTMLElement>(`#panel-tab-${target}`)?.focus();
+  }, [view, fit.visible.join(' ')]);
   const onKeyDown = (event: React.KeyboardEvent) => {
-    const at = tabs.findIndex(t => t.view === view);
-    const to = event.key === 'ArrowRight' ? (at + 1) % tabs.length
-      : event.key === 'ArrowLeft' ? (at - 1 + tabs.length) % tabs.length
-      : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
-    if (to < 0) return;
+    const to = stripKeyTarget(tabs.map(t => t.view), view, event.key);
+    if (!to) return;
     event.preventDefault();
-    pick(tabs[to].view);
-    list.current?.querySelector<HTMLElement>(`#panel-tab-${tabs[to].view}`)?.focus();
+    focusAfterPick.current = to;
+    pick(to);
+    // Already open (End on the last tab, say): no re-render to wait for.
+    if (to === view) {
+      focusAfterPick.current = null;
+      list.current?.querySelector<HTMLElement>(`#panel-tab-${to}`)?.focus();
+    }
   };
   return (
     <aside aria-label="Panel" style={{ width: column.width }} className="body-glass relative flex shrink-0 flex-col max-xl:absolute max-xl:inset-y-0 max-xl:right-0 max-xl:z-20 max-xl:border-l max-xl:border-stroke">
