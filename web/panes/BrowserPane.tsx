@@ -58,6 +58,8 @@ function AddressBar({ id, url, onSubmit }: { id: string; url: string; onSubmit: 
       <input
         ref={input}
         value={draft}
+        // Typed text only once it differs from the page's address (web/unsent.ts).
+        data-unsent-baseline={url}
         onChange={e => { setDraft(e.target.value); setEditing(true); }}
         onFocus={e => { setEditing(true); e.currentTarget.select(); }}
         onBlur={() => setEditing(false)}

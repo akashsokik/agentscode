@@ -164,6 +164,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
       <div ref={box} data-composer-box className="relative z-10 rounded-[14px] border border-content/10 has-focus:border-content/20" {...images.dropProps}>
         <ComposerImageTray images={images} />
         <textarea
+          data-draft // a composer: its text is a draft, kept across a reload (web/draftStore.ts)
           ref={field}
           value={text}
           rows={2}

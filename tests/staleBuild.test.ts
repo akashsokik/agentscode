@@ -11,7 +11,7 @@ import { createServer } from '../server/app.ts';
 import { Hub } from '../server/hub.ts';
 import { AgentManager } from '../server/manager.ts';
 import { Store } from '../server/store.ts';
-import { staleAction } from '../shared/staleBuild.ts';
+import { staleAction, typedOutsideComposers } from '../shared/staleBuild.ts';
 import { draftsHaveText, registerDraftStore, stashDrafts } from '../web/draftStore.ts';
 import { tempDir } from './helpers.ts';
 
@@ -126,4 +126,21 @@ test('composer drafts count as unsent text and come back after a reload in the s
   } finally {
     (globalThis as { sessionStorage?: unknown }).sessionStorage = saved;
   }
+});
+
+test('Reload asks first whenever a field outside the composers has text, drafts or not (review M1)', () => {
+  const draft = { value: 'half a message to Ada', draft: true };
+  const issue = { value: 'Stale tabs reload', draft: false };
+  assert.equal(typedOutsideComposers([draft, issue]), true, 'a draft plus a half-typed issue: ask');
+  assert.equal(typedOutsideComposers([issue]), true);
+  assert.equal(typedOutsideComposers([draft]), false, 'only drafts: they are kept, so no question');
+  assert.equal(typedOutsideComposers([{ value: '   ', draft: false }]), false, 'blank fields do not count');
+  assert.equal(typedOutsideComposers([]), false);
+});
+
+test('the browser pane\'s address bar counts only once the user changed it (review L1)', () => {
+  const url = 'http://localhost:5173/';
+  assert.equal(typedOutsideComposers([{ value: url, draft: false, baseline: url }]), false, 'showing its page\'s address');
+  assert.equal(typedOutsideComposers([{ value: 'http://localhost:5173/sett', draft: false, baseline: url }]), true, 'being edited');
+  assert.equal(typedOutsideComposers([{ value: url, draft: false, baseline: null }]), true, 'a field without a baseline counts as typed');
 });

@@ -359,6 +359,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
         ) : null}
         {images.error ? <p role="alert" className="px-3 pt-2 font-sans text-xs text-danger">{images.error}</p> : null}
         <textarea
+          data-draft // a composer: its text is a draft, kept across a reload (web/draftStore.ts)
           ref={field}
           value={text}
           rows={2}

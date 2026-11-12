@@ -48,15 +48,17 @@ export function useStaleBuild(): string | null {
       if (next === 'reload') reloadFor(server);
       else setAction(next);
     };
+    // Any sign someone is there: moving the pointer, reading with focus, coming back to the page.
     const input = () => { lastInput = Date.now(); };
-    const events = ['pointerdown', 'keydown', 'wheel'] as const;
+    const events = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'focus'] as const;
     for (const e of events) window.addEventListener(e, input, { passive: true, capture: true });
-    document.addEventListener('visibilitychange', check);
+    const visibility = () => { if (document.visibilityState === 'visible') input(); check(); };
+    document.addEventListener('visibilitychange', visibility);
     const timer = window.setInterval(check, 30_000);
     check();
     return () => {
       for (const e of events) window.removeEventListener(e, input, { capture: true });
-      document.removeEventListener('visibilitychange', check);
+      document.removeEventListener('visibilitychange', visibility);
       window.clearInterval(timer);
     };
   }, [server]);

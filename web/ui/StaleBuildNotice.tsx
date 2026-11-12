@@ -1,5 +1,4 @@
 import { reloadFor, useStaleBuild } from '../staleBuild.ts';
-import { draftsHaveText } from '../draftStore.ts';
 import { fieldsHaveText } from '../unsent.ts';
 import { Kbd } from './Kbd.tsx';
 import { TextButton } from './common.tsx';
@@ -14,7 +13,8 @@ export function StaleBuildNotice() {
   const server = useStaleBuild();
   if (!server) return null;
   const reload = () => {
-    if (fieldsHaveText() && !draftsHaveText() && !window.confirm('Reload PodCode? Text typed outside a composer is not kept.')) return;
+    // Composer drafts are kept; text in any other field (an issue, a routine, a rename) is not, so ask.
+    if (fieldsHaveText() && !window.confirm('Reload PodCode? Text typed outside a composer is not kept.')) return;
     reloadFor(server);
   };
   return (
