@@ -11,6 +11,7 @@ import { MermaidDiagram } from '../ui/MermaidDiagram.tsx';
 import { codeChanged, stepQuestion } from '../walkthrough.ts';
 import { languageOf, parseDiff, useLoad } from './FilePane.tsx';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
+import { ExpandableImage } from '../ui/ImageViewer.tsx';
 
 const KIND_ICON: Record<WalkthroughStep['kind'], IconComponent> = { note: StickyNote, code: Code, diff: FileDiff, command: Terminal, image: ImagePlus, diagram: Workflow };
 
@@ -128,7 +129,7 @@ function StepView({ walkthrough, agentId, index, step }: { walkthrough: Walkthro
           : step.kind === 'diff' ? <DiffStep step={step} />
           : step.kind === 'command' ? <CommandStep step={step} agentName={walkthrough.agentName} />
           : step.kind === 'diagram' && step.source ? <MermaidDiagram source={step.source} className="!my-0" />
-          : step.kind === 'image' && step.image ? <img src={walkthroughImageUrl(agentId, walkthrough.id, step.image.file)} alt={step.title} className="max-h-[70vh] max-w-full rounded-lg border border-content/10" />
+          : step.kind === 'image' && step.image ? <ExpandableImage src={walkthroughImageUrl(agentId, walkthrough.id, step.image.file)} alt={step.title} className="max-h-[70vh] max-w-full rounded-lg border border-content/10" />
           : null}
       </div>
       <AskBox walkthrough={walkthrough} agentId={agentId} index={index} step={step} />

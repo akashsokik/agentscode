@@ -2,7 +2,8 @@
  * The desktop app's bridge to the page, as `window.podcodeDesktop`:
  * - `updates`, which the sidebar's update row reads (web/sidebar/SidebarUpdate.tsx);
  * - `browser`, the integrated browser's controls and events (web/browser.ts);
- * - `super`, the SuperAgent's menu bar item and system-wide shortcut (web/super.ts, electron/superTray.ts).
+ * - `super`, the SuperAgent's menu bar item and system-wide shortcut (web/super.ts, electron/superTray.ts);
+ * - `viewer`, so an open diagram or image viewer gets Cmd+Plus, Cmd+Minus and Cmd+0 (web/ui/ZoomViewer.tsx).
  * The page is the PodCode server's own UI on 127.0.0.1; main.ts answers only that origin, and
  * browser tabs run without any preload. CommonJS because sandboxed preload scripts cannot be ES
  * modules; tsc compiles this .cts to preload.cjs.
@@ -10,6 +11,7 @@
 import type { DesktopBrowser } from '../shared/browser.ts';
 import type { DesktopQuick, DesktopSuper, SuperCommand } from '../shared/superAgent.ts';
 import type { DesktopUpdates, UpdateSnapshot } from '../shared/updates.ts';
+import type { DesktopViewer } from '../shared/viewerKeys.ts';
 
 const { contextBridge, ipcRenderer } = require('electron') as typeof import('electron');
 
@@ -70,4 +72,8 @@ const quick: DesktopQuick = {
   },
 };
 
-contextBridge.exposeInMainWorld('podcodeDesktop', { updates, browser, super: superAgent, quick });
+const viewer: DesktopViewer = {
+  captureZoomKeys: on => ipcRenderer.send('viewer:zoom-keys', Boolean(on)),
+};
+
+contextBridge.exposeInMainWorld('podcodeDesktop', { updates, browser, super: superAgent, quick, viewer });

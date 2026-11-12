@@ -15,6 +15,7 @@ import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSna
 import { startSuperBridge, stopSuperBridge } from './superTray.ts';
 import { QuickWindow } from './quickWindow.ts';
 import { captureApp } from './appShot.ts';
+import { isMenuZoomKey } from '../shared/viewerKeys.ts';
 
 // The app was called AgentsCode before 0.3.0, and Electron names the userData folder after the app.
 // That folder holds the window's localStorage (layout, drafts), the integrated browser's logins
@@ -38,6 +39,8 @@ let window: BrowserWindow | null = null;
 let quick: QuickWindow | null = null;
 let ready = false;
 let quitting = false;
+/** Web contents with a diagram or image viewer open (viewer:zoom-keys). */
+const zoomKeysTo = new Set<number>();
 const recentOutput: string[] = [];
 /** Resolves whoever waits in stopServer() once the bundled server has exited. */
 const serverStopped: Array<() => void> = [];
@@ -326,6 +329,13 @@ function showWindow(): void {
     openLink(url, disposition === 'background-tab');
     return { action: 'deny' };
   });
+  // While a viewer is open, Cmd+Plus, Cmd+Minus and Cmd+0 skip the View menu's app zoom and reach
+  // the page; every other menu shortcut works as usual (Electron's documented per-key pattern).
+  const contents = window.webContents;
+  contents.on('before-input-event', (_event, input) => {
+    contents.setIgnoreMenuShortcuts(zoomKeysTo.has(contents.id) && isMenuZoomKey(input, process.platform === 'darwin'));
+  });
+  contents.on('destroyed', () => zoomKeysTo.delete(contents.id));
   window.webContents.on('will-navigate', (event) => {
     if (new URL(event.url).origin === ORIGIN) return;
     event.preventDefault();
@@ -363,6 +373,12 @@ function fromApp(event: IpcMainInvokeEvent | IpcMainEvent): boolean {
 
 /** The bridge behind window.podcodeDesktop.updates (electron/preload.cts). */
 function serveUpdates(): void {
+  // An open viewer (web/ui/ZoomViewer.tsx) takes Cmd+Plus, Cmd+Minus and Cmd+0 from the View menu.
+  ipcMain.on('viewer:zoom-keys', (event, on: unknown) => {
+    if (!fromApp(event)) return;
+    if (on === true) zoomKeysTo.add(event.sender.id);
+    else zoomKeysTo.delete(event.sender.id);
+  });
   ipcMain.handle('updates:get', event => (fromApp(event) ? updateSnapshot() : null));
   ipcMain.handle('updates:install', event => (fromApp(event) ? installUpdate() : undefined));
   ipcMain.handle('updates:check', event => (fromApp(event) ? checkForUpdates(true) : undefined));
