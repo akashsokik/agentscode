@@ -11,8 +11,11 @@ import { ALL_PROJECTS } from '../projects.ts';
 import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
-import { Empty, HeaderButton, IconTab, Loading, TextButton } from '../ui/common.tsx';
-import { Bot, CheckCircle, CircleDot, Clock, DashboardSquare, FileDiff, Folder, GitBranch, ListBullet, MessageMultiple, PanelRight, RefreshCw, StickyNote, type IconComponent } from '../mono/icons.tsx';
+import { Empty, HeaderButton, IconTab, Loading, MenuRow, TextButton } from '../ui/common.tsx';
+import { ContextMenu, type MenuAnchor } from '../ui/ContextMenu.tsx';
+import { fitPanelTabs } from './panelTabsFit.ts';
+import { useElementWidth } from '../ui/useElementWidth.ts';
+import { Bot, CheckCircle, CircleDot, Clock, DashboardSquare, FileDiff, Folder, GitBranch, ListBullet, MessageMultiple, MoreHorizontal, PanelRight, RefreshCw, StickyNote, type IconComponent } from '../mono/icons.tsx';
 import { NotesView } from '../notes/NotesView.tsx';
 import { WorkPanel } from '../work/WorkView.tsx';
 import { Segmented } from '../mono/settings.tsx';
@@ -294,8 +297,12 @@ export function RightPanel() {
   const superTabs = useSuperTabs(isSuper ? view : '');
   const column = useColumnWidth('panel', 320, 260, 0.4);
   const list = useRef<HTMLDivElement>(null);
-  // Every tab keeps its name while the panel has room for them all; narrower, only the open one does.
-  const labelled = column.width >= tabs.length * 88 + 40;
+  // How the tabs fit the strip's real width (panelTabsFit.ts): names first, then the open tab's
+  // name, then the last tabs go into a "…" menu. The strip never reaches the collapse button.
+  // Measured on the area that holds the tabs and the "…" button, so that button is counted once.
+  const area = useRef<HTMLDivElement>(null);
+  const stripWidth = useElementWidth(area);
+  const [moreAnchor, setMoreAnchor] = useState<MenuAnchor | null>(null);
   const count = (tab: PanelView): number | undefined => {
     if (tab === 'comms') return inFlight || undefined;
     if (isSuper && (tab === 'decisions' || tab === 'goals' || tab === 'routines')) return superTabs.counts[tab] || undefined;
@@ -305,6 +312,12 @@ export function RightPanel() {
     if (tab === 'changes') return view !== 'changes' && Boolean(git?.files.length);
     return isSuper && (tab === 'decisions' || tab === 'goals' || tab === 'routines') && superTabs.dots[tab];
   };
+  // Before the first measure, icons only: no names that open and then fold away.
+  const fit = stripWidth === null
+    ? { allLabelled: false, activeLabelled: false, visible: tabs.map(t => t.view), overflow: [] as PanelView[] }
+    : fitPanelTabs(tabs.map(t => ({ view: t.view, label: t.label, count: count(t.view) })), view, stripWidth);
+  const shown = tabs.filter(t => fit.visible.includes(t.view));
+  const hidden = tabs.filter(t => fit.overflow.includes(t.view));
   const onKeyDown = (event: React.KeyboardEvent) => {
     const at = tabs.findIndex(t => t.view === view);
     const to = event.key === 'ArrowRight' ? (at + 1) % tabs.length
@@ -317,9 +330,12 @@ export function RightPanel() {
   };
   return (
     <aside aria-label="Panel" style={{ width: column.width }} className="body-glass relative flex shrink-0 flex-col max-xl:absolute max-xl:inset-y-0 max-xl:right-0 max-xl:z-20 max-xl:border-l max-xl:border-stroke">
-      <div className="flex h-9 shrink-0 items-stretch border-b border-stroke">
-        <div ref={list} role="tablist" aria-label="Panel" onKeyDown={onKeyDown} className="flex min-w-0 flex-1 items-center gap-0.5 pl-2">
-          {tabs.map(tab => {
+      {/* One gap between every tab and before the collapse button (ACH-D30); the strip is clipped, so
+          it can never reach under that button. */}
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke pl-2 pr-1.5">
+        <div ref={area} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+        <div ref={list} role="tablist" aria-label="Panel" onKeyDown={onKeyDown} className="flex min-w-0 items-center gap-1">
+          {shown.map(tab => {
             const n = count(tab.view);
             const fresh = dot(tab.view);
             const words = [tab.label, n ? COUNT_WORDS[tab.view]?.(n) : null, fresh ? 'new' : null].filter(Boolean).join(', ');
@@ -336,7 +352,7 @@ export function RightPanel() {
                 aria-label={words}
                 title={words}
                 selected={view === tab.view}
-                labelled={labelled}
+                showLabel={fit.allLabelled || (view === tab.view && fit.activeLabelled)}
                 count={n}
                 dot={fresh}
                 onClick={() => pick(tab.view)}
@@ -344,9 +360,26 @@ export function RightPanel() {
             );
           })}
         </div>
-        <div className="flex shrink-0 items-center gap-0.5 px-1.5">
-          <HeaderButton icon={PanelRight} label="Hide panel" onClick={() => setRightPanel(false)} />
+        {hidden.length ? (
+          <HeaderButton
+            icon={MoreHorizontal}
+            label={`More: ${hidden.map(t => t.label).join(', ')}`}
+            active={Boolean(moreAnchor)}
+            aria-haspopup="menu"
+            aria-expanded={Boolean(moreAnchor)}
+            onClick={e => { const el = e.currentTarget; setMoreAnchor(a => (a ? null : el)); }}
+          />
+        ) : null}
         </div>
+        <HeaderButton icon={PanelRight} label="Hide panel" onClick={() => setRightPanel(false)} />
+        {moreAnchor && hidden.length ? (
+          <ContextMenu anchor={moreAnchor} onClose={() => setMoreAnchor(null)} label="More panel tabs" width={200}>
+            {hidden.map(tab => {
+              const n = count(tab.view);
+              return <MenuRow key={tab.view} icon={tab.icon} title={n ? `${tab.label} (${n})` : tab.label} onSelect={() => { setMoreAnchor(null); pick(tab.view); }} />;
+            })}
+          </ContextMenu>
+        ) : null}
       </div>
       <div id="panel-view" role="tabpanel" aria-labelledby={`panel-tab-${view}`} className="flex min-h-0 flex-1 flex-col">
         {view === 'overview' ? <OverviewView agent={agent} git={git} />

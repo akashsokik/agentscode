@@ -70,7 +70,7 @@ export function ChipButton({ primary = false, className = '', type = 'button', .
  * its name and count, and folds back into the icon when not (unless `labelled`). `dot` marks a
  * tab that holds something new.
  */
-export function IconTab({ icon: Icon, label, selected, count, dot = false, labelled = false, className = '', ...props }: Omit<ComponentPropsWithoutRef<'button'>, 'children'> & {
+export function IconTab({ icon: Icon, label, selected, count, dot = false, labelled = false, showLabel, className = '', ...props }: Omit<ComponentPropsWithoutRef<'button'>, 'children'> & {
   icon: IconComponent;
   label: string;
   selected: boolean;
@@ -78,8 +78,10 @@ export function IconTab({ icon: Icon, label, selected, count, dot = false, label
   dot?: boolean;
   /** There is room for every tab's name, so none folds to its icon. */
   labelled?: boolean;
+  /** Overrides both: false folds even the open tab to its icon, when its strip is short of room (ACH-D30). */
+  showLabel?: boolean;
 }) {
-  const open = selected || labelled;
+  const open = showLabel ?? (selected || labelled);
   return (
     <button
       type="button"

@@ -76,7 +76,7 @@ export function WorkBody({ project, wide, at }: { project: WorkProject; wide: bo
     e.preventDefault(); pickTab(TABS[next].id); e.currentTarget.querySelector<HTMLButtonElement>(`[data-work-tab="${TABS[next].id}"]`)?.focus();
   };
   return <div ref={area} className="flex min-h-0 flex-1 flex-col" onKeyDown={e => { if (e.key === 'Escape' && ui.selected) { e.stopPropagation(); back(); } }}>
-    <div role="tablist" aria-label="Work views" onKeyDown={onTabsKey} className="flex shrink-0 items-center gap-0.5 px-2 pb-2">{TABS.map(t => <IconTab key={t.id} data-work-tab={t.id} role="tab" aria-selected={ui.tab === t.id} tabIndex={ui.tab === t.id ? 0 : -1} icon={t.icon} label={t.label} selected={ui.tab === t.id} labelled onClick={() => pickTab(t.id)} />)}</div>
+    <div role="tablist" aria-label="Work views" onKeyDown={onTabsKey} className="flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto px-2 pb-2 [scrollbar-width:none]">{TABS.map(t => <IconTab key={t.id} data-work-tab={t.id} role="tab" aria-selected={ui.tab === t.id} tabIndex={ui.tab === t.id ? 0 : -1} icon={t.icon} label={t.label} selected={ui.tab === t.id} labelled onClick={() => pickTab(t.id)} />)}</div>
     <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
       <div role="tabpanel" aria-label={TABS.find(t => t.id === ui.tab)!.label} className="grid items-start gap-7" style={{ gridTemplateColumns: split ? 'minmax(0, 1.45fr) minmax(260px, 1fr)' : 'minmax(0, 1fr)' }}>
         {!ui.selected || split ? <section aria-label="Work list" className="min-w-0">
@@ -105,7 +105,7 @@ function Content({ project, wide, at }: { project?: WorkProject; wide: boolean; 
 
 export function WorkPanel() {
   useWorkData(); const { all, project, view } = useProject(); const loading = useWork(s => s.loading);
-  return <div className="flex min-h-0 flex-1 flex-col"><div className="flex h-10 shrink-0 items-center gap-1 pl-2 pr-1.5"><Scope project={project} projects={all} /><HeaderButton icon={RefreshCw} label="Refresh Work" className="ml-auto" disabled={loading} onClick={() => void loadWork(true)} /><HeaderButton icon={Maximize2} label="Open Work as a pane" onClick={() => open({ kind: 'work' })} /></div><Content project={project} wide={false} at={view?.at ?? 0} /></div>;
+  return <div className="flex min-h-0 flex-1 flex-col"><div className="flex h-10 shrink-0 items-center gap-1 pl-2 pr-1.5"><div className="flex min-w-0 flex-1 items-center overflow-hidden"><Scope project={project} projects={all} /></div><HeaderButton icon={RefreshCw} label="Refresh Work" disabled={loading} onClick={() => void loadWork(true)} /><HeaderButton icon={Maximize2} label="Open Work as a pane" onClick={() => open({ kind: 'work' })} /></div><Content project={project} wide={false} at={view?.at ?? 0} /></div>;
 }
 
 export function WorkPane({ chrome }: { chrome: PaneChrome }) {

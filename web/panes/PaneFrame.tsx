@@ -29,7 +29,8 @@ export function PaneFrame({ chrome, title, actions, children }: { chrome: PaneCh
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
     >
       <PaneHeader className={`transition-opacity duration-150 ${chrome.multiple && !chrome.focused ? 'opacity-65' : ''}`}>
-        <div className="flex min-w-0 flex-1 items-center">{title}</div>
+        {/* Clipped, so a long title never runs under the buttons beside it (ACH-D30). */}
+        <div className="flex min-w-0 flex-1 items-center overflow-hidden">{title}</div>
         {actions}
         {chrome.multiple ? (
           <HeaderButton
