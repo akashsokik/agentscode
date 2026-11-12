@@ -11,6 +11,16 @@ export function tempDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `podcode-${prefix}-`));
 }
 
+/**
+ * This process's environment without any PODCODE_* or AGENTSCODE_* setting. Scripts under test
+ * (install.sh, restart-desktop.sh) read those as overrides for real paths, and the PodCode name wins
+ * over the AgentsCode one: an agent started by an app that was itself launched with, say,
+ * PODCODE_PREV set would hand that real path to every test run. Each test sets the ones it means.
+ */
+export function scriptEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(PODCODE|AGENTSCODE)_/.test(key)));
+}
+
 export const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 
 export async function settle(rounds = 6): Promise<void> {

@@ -3,7 +3,7 @@ import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { tempDir } from './helpers.ts';
+import { scriptEnv, tempDir } from './helpers.ts';
 
 const SCRIPT = path.join(import.meta.dirname, '..', 'scripts', 'restart-desktop.sh');
 /** The script drives a Mac app (ditto, osascript, open, a .app bundle), so it is tested only on macOS; CI checks run on Linux. */
@@ -48,7 +48,7 @@ function world(quit: 'exits' | 'hangs' | 'holds') {
   };
   for (const [name, body] of Object.entries(fakes)) fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   const env = {
-    ...process.env,
+    ...scriptEnv(),
     PATH: `${bin}:${process.env.PATH}`,
     AGENTSCODE_APP: app,
     AGENTSCODE_PREV: path.join(dir, 'PodCode.app.prev'),

@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { tempDir } from './helpers.ts';
+import { scriptEnv, tempDir } from './helpers.ts';
 
 const SCRIPT = path.join(import.meta.dirname, '..', 'install.sh');
 /** The installer is for macOS (uname, sysctl, lsappinfo, codesign), so it is tested only there; CI checks run on Linux. */
@@ -31,7 +31,7 @@ function run(runningFrom: (dir: string) => string | null, installDir = (dir: str
     curl: `echo "$*" >> "${downloads}"; ${serveSums}exit 22`,
   };
   for (const [name, body] of Object.entries(fakes)) fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, AGENTSCODE_INSTALL_DIR: installDir(target), AGENTSCODE_NO_OPEN: '1', TMPDIR: dir };
+  const env = { ...scriptEnv(), PATH: `${bin}:${process.env.PATH}`, AGENTSCODE_INSTALL_DIR: installDir(target), AGENTSCODE_NO_OPEN: '1', TMPDIR: dir };
   return new Promise<{ code: number; out: string; downloaded: boolean; requests: string; app: string }>(resolve => {
     execFile('/bin/bash', [SCRIPT], { env, timeout: 30_000 }, (err, stdout, stderr) => resolve({
       code: err ? Number((err as { code?: number }).code ?? 1) : 0,
