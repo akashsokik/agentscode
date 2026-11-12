@@ -212,3 +212,49 @@ test('stacked branches: commits a lower branch still has are never credited to t
   assert.deepEqual([by(x1), by(x2)], [[], []], 'feat/x still has them: not Cy\'s, left unknown rather than wrong');
   void agents;
 });
+
+test('a merge first read after a new branch was made from main still credits its owner', async () => {
+  const { repo, home, work, project } = setup();
+  const adaWt = path.join(home('ada'), 'wt-x');
+  git(repo, ['worktree', 'add', '-q', '-b', 'feat/x', adaWt, 'main']);
+  work.noteBranch('p1', adaWt, 'feat/x', { id: 'ada', name: 'Ada' });
+  const x1 = commit(adaWt, 'x1.txt', 'x one');
+  git(repo, ['merge', '-q', '--no-ff', 'feat/x', '-m', 'Merge feat/x: x']);
+  git(repo, ['branch', 'feat/z', 'main']); // a new task's branch, made before the Work view is read
+  const view = await work.project(project, true);
+  assert.deepEqual(view.graph.find(c => c.hash === x1)?.names, ['Ada'], 'feat/z contains the merged work and does not block it');
+});
+
+test('stacked, lower branch merged first: the lower owner keeps its commits while open and after its merge', async () => {
+  const { repo, home, work, project } = setup();
+  const adaWt = path.join(home('ada'), 'wt-x');
+  git(repo, ['worktree', 'add', '-q', '-b', 'feat/x', adaWt, 'main']);
+  const x1 = commit(adaWt, 'x1.txt', 'x one');
+  const x2 = commit(adaWt, 'x2.txt', 'x two');
+  const fenWt = path.join(home('fen'), 'wt-y');
+  git(repo, ['worktree', 'add', '-q', '-b', 'feat/y', fenWt, 'feat/x']);
+  const y1 = commit(fenWt, 'y1.txt', 'y one');
+  const open = await work.project(project, true);
+  const names = (v: typeof open, h: string) => v.graph.find(c => c.hash === h)?.names;
+  assert.deepEqual([names(open, x1), names(open, x2), names(open, y1)], [['Ada'], ['Ada'], ['Fen']]);
+  git(repo, ['worktree', 'remove', adaWt]);
+  git(repo, ['merge', '-q', '--no-ff', 'feat/x', '-m', 'Merge feat/x: x']);
+  git(repo, ['branch', '-D', 'feat/x']);
+  const after = await work.project(project, true);
+  assert.deepEqual([names(after, x1), names(after, x2)], [['Ada'], ['Ada']]);
+});
+
+test('stacked, lower branch merged before any Work read: the merge still credits the lower owner, never the upper one', async () => {
+  const { repo, home, work, project } = setup();
+  const adaWt = path.join(home('ada'), 'wt-x');
+  git(repo, ['worktree', 'add', '-q', '-b', 'feat/x', adaWt, 'main']);
+  work.noteBranch('p1', adaWt, 'feat/x', { id: 'ada', name: 'Ada' });
+  const x1 = commit(adaWt, 'x1.txt', 'x one');
+  const fenWt = path.join(home('fen'), 'wt-y');
+  git(repo, ['worktree', 'add', '-q', '-b', 'feat/y', fenWt, 'feat/x']);
+  const y1 = commit(fenWt, 'y1.txt', 'y one');
+  git(repo, ['merge', '-q', '--no-ff', 'feat/x', '-m', 'Merge feat/x: x']);
+  const view = await work.project(project, true);
+  assert.deepEqual(view.graph.find(c => c.hash === x1)?.names, ['Ada'], 'feat/y contains x and does not block its credit');
+  assert.deepEqual(view.graph.find(c => c.hash === y1)?.names, ['Fen']);
+});
