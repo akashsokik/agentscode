@@ -6,7 +6,7 @@
  * hover and in the shared right-click menu (ACH-D27), which ⇧F10 or the menu key also opens.
  * Flat, theme colours only (ACH-D7, ACH-D14).
  */
-import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { ChevronDown, Plus, Search, X } from '../mono/icons.tsx';
 import { isKeyboardFocus, isMenuKey } from '../panelList.ts';
 import { ContextMenu, openContextMenu, type MenuAnchor } from './ContextMenu.tsx';
@@ -182,9 +182,9 @@ export function RowIcon({ icon: IconC, label, onClick, disabled }: { icon: Icon;
 }
 
 /** A button inside an expanded row: a quiet outlined one. */
-export function DetailButton({ children, onClick, disabled, danger = false, label }: { children: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; label?: string }) {
+export function DetailButton({ children, onClick, disabled, danger = false, label, ref }: { children: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; label?: string; ref?: Ref<HTMLButtonElement> }) {
   return (
-    <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className={`h-6 rounded-md border border-content/12 px-2 font-sans text-[11.5px] transition-colors hover:bg-content/5 disabled:opacity-40 ${danger ? 'text-danger' : 'text-content/75 hover:text-content'}`}>
+    <button ref={ref} type="button" aria-label={label} disabled={disabled} onClick={onClick} className={`h-6 rounded-md border border-content/12 px-2 font-sans text-[11.5px] transition-colors hover:bg-content/5 disabled:opacity-40 ${danger ? 'text-danger' : 'text-content/75 hover:text-content'}`}>
       {children}
     </button>
   );
