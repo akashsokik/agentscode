@@ -145,3 +145,29 @@ test('one check per folder at a time, in the caller\'s own worktree when it has 
   assert.ok(cwds.every(cwd => cwd === '/wt/tess'), 'its own worktree');
   await call({ project: 'web', command: 'git log' });
 });
+
+test('a check started under a git hook (GIT_DIR and GIT_INDEX_FILE set) reads the project\'s own repository', () => {
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@e', ...args], { cwd, env: gitEnv(), encoding: 'utf8' }).trim();
+  const victim = path.join(tempDir('checks-hook-victim'), 'repo');
+  const repo = path.join(tempDir('checks-hook-own'), 'repo');
+  for (const dir of [victim, repo]) {
+    fs.mkdirSync(dir);
+    git(dir, 'init', '-q');
+    git(dir, 'commit', '-q', '--allow-empty', '-m', path.basename(path.dirname(dir)));
+  }
+  fs.writeFileSync(path.join(repo, 'new.txt'), 'x\n');
+  const own = git(repo, 'rev-parse', 'HEAD');
+  const indexBefore = fs.readFileSync(path.join(victim, '.git', 'index'));
+  // A child process, so the variables are set when server/checks.ts loads and nothing dropped them first.
+  const script = `const { runCheck } = await import(${JSON.stringify(path.resolve('server', 'checks.ts'))});
+const head = await runCheck(${JSON.stringify(repo)}, 'git rev-parse');
+const status = await runCheck(${JSON.stringify(repo)}, 'git status');
+process.stdout.write(JSON.stringify({ head: head.output.trim(), status: status.output }));`;
+  const out = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', GIT_DIR: path.join(victim, '.git'), GIT_INDEX_FILE: path.join(victim, '.git', 'index') },
+  })) as { head: string; status: string };
+  assert.equal(out.head, own, 'rev-parse names the project\'s own HEAD');
+  assert.match(out.status, /\?\? new\.txt/);
+  assert.deepEqual(fs.readFileSync(path.join(victim, '.git', 'index')), indexBefore, 'the hook\'s repository is untouched');
+});

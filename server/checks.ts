@@ -13,6 +13,7 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { gitEnv } from './envHygiene.ts';
 
 export const CHECK_COMMANDS = [
   'git status', 'git log', 'git diff', 'git show', 'git branch', 'git rev-parse', 'git worktree list',
@@ -115,7 +116,8 @@ export function tail(text: string): { output: string; note?: string } {
  */
 export async function runCheck(projectPath: string, command: string, options: CheckOptions & { scripts?: boolean } = {}, exec: CheckExec = realExec): Promise<{ command: string; exitCode: number; output: string; note?: string }> {
   const spec = checkArgs(command, options);
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', NO_COLOR: '1', FORCE_COLOR: '0', CI: '1' };
+  // Without GIT_DIR and the like (server/envHygiene.ts): a check runs on this project's repository, whatever started the app.
+  const env = gitEnv({ GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', NO_COLOR: '1', FORCE_COLOR: '0', CI: '1' });
   if (spec.bin === 'git') {
     const key = await gitConfigProblem(projectPath, exec, env);
     if (key) throw new CheckError(`Refused: this repository's own git config sets ${key}, which names a program git could run. Ask the user to look at it.`);
