@@ -8,6 +8,11 @@ export interface KeyPress {
   ctrlKey: boolean;
   altKey: boolean;
   shiftKey: boolean;
+  /**
+   * AltGr is held (KeyboardEvent.getModifierState('AltGraph')). On Windows and Linux layouts it
+   * arrives as Ctrl+Alt, so Ctrl+Alt+W or Ctrl+Alt+B may just be someone typing a character.
+   */
+  altGraph?: boolean;
 }
 
 export type ShortcutAction =
@@ -21,7 +26,7 @@ export function shortcutFor(e: KeyPress, mac: boolean): ShortcutAction | null {
   const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
   if (!mod) return null;
   if (e.altKey) {
-    if (e.shiftKey) return null;
+    if (e.shiftKey || e.altGraph) return null;
     if (e.code === 'KeyB') return { kind: 'panel' };
     // Close others (ACH-D27): every unpinned tab but the one in focus.
     if (e.code === 'KeyW') return { kind: 'closeOthers' };

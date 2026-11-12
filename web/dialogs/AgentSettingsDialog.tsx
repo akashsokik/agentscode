@@ -1,3 +1,4 @@
+import { formatKeys } from '../keys.ts';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { noProjectFolder, type Agent, type AgentRole, type MemoryEntry } from '../../shared/types.ts';
 import { ROLES } from '../../shared/roles.ts';
@@ -137,7 +138,7 @@ export function AgentSettingsDialog({ agent, onClose, section: requested }: { ag
               aria-selected={section === item.id}
               aria-controls={`${ids}-panel`}
               tabIndex={section === item.id ? 0 : -1}
-              title={`${item.label} (${IS_MAC ? 'Cmd' : 'Ctrl'}+${index + 1})`}
+              title={`${item.label} (${formatKeys(`Mod+${index + 1}`, IS_MAC)})`}
               onClick={() => setSection(item.id)}
               className={`flex shrink-0 items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors ${section === item.id ? 'bg-selection text-content' : 'text-content/60 hover:bg-content/5 hover:text-content'}`}
             >

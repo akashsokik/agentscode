@@ -1,4 +1,6 @@
 /** MonoCode's composer box for a channel, with the same @ picker as the agent composer. */
+import { IS_MAC } from '../platform.ts';
+import { formatKeys } from '../keys.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Agent, Channel } from '../../shared/types.ts';
 import { channelRecipients, findMentions } from '../../shared/mentions.ts';
@@ -99,7 +101,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
   const hint = !members.length
     ? 'Add members to start agents from here.'
     : confirming
-      ? `Starts ${mentioned.length} agents: ${someNames(mentioned.map(m => m.name))}. Press Enter again to post.`
+      ? `Starts ${mentioned.length} agents: ${someNames(mentioned.map(m => m.name))}. Press ${formatKeys('Enter', IS_MAC)} again to post.`
     : mentioned.length
       ? `Starts ${someNames(mentioned.map(m => m.name))}.${busy.length ? ` ${someNames(busy.map(m => m.name))} ${busy.length > 1 ? 'are' : 'is'} busy and will get to it next.` : ''}`
       // Short enough for the thread panel; the placeholder no longer repeats this.

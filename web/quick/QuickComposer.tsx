@@ -264,7 +264,7 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
           </ToolbarButton>
         ) : null}
         {mode === 'window' ? (
-          <button type="button" aria-label="Close" title="Close (Esc)" onClick={onDismiss} className="grid size-6 shrink-0 place-items-center rounded-md text-content/35 transition-colors hover:bg-selection-hover hover:text-content">
+          <button type="button" aria-label="Close" title={`Close (${keys('Escape')})`} onClick={onDismiss} className="grid size-6 shrink-0 place-items-center rounded-md text-content/35 transition-colors hover:bg-selection-hover hover:text-content">
             <X className="size-3.5" strokeWidth={1.75} />
           </button>
         ) : null}

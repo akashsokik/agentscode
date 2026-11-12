@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { Popover } from '../mono/Popover.tsx';
 import { MenuRowRole } from './common.tsx';
+import { focusFirstOnOpen, menuKeyTarget } from './menuFocus.ts';
 
 /**
  * The app's right-click menu (ACH-D27), one for every item that has actions: tabs today, and the
@@ -20,29 +21,21 @@ export function ContextMenu({ anchor, onClose, label, width = 232, children }: {
   const surface = useRef<HTMLDivElement | null>(null);
   const items = () => [...(surface.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
 
-  // Opened from the keyboard, the first row takes focus so the arrows work at once.
+  // The first row takes focus however the menu opened, so the arrows work at once (menuFocus.ts).
   useEffect(() => {
-    if (!(anchor instanceof HTMLElement)) return;
+    if (!focusFirstOnOpen(anchor)) return;
     const frame = requestAnimationFrame(() => items()[0]?.focus());
     return () => cancelAnimationFrame(frame);
   }, [anchor]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const list = items();
-    if (!list.length) return;
-    const at = list.indexOf(document.activeElement as HTMLButtonElement);
-    const next = (() => {
-      switch (e.key) {
-        case 'ArrowDown': return list[(at + 1) % list.length];
-        case 'ArrowUp': return list[(at - 1 + list.length) % list.length];
-        case 'Home': return list[0];
-        case 'End': return list[list.length - 1];
-        default: return null;
-      }
-    })();
-    if (!next) return;
+    const target = menuKeyTarget(list.length, list.indexOf(document.activeElement as HTMLButtonElement), e.key);
+    if (target === null) return;
     e.preventDefault();
-    next.focus();
+    // Keys stay in the menu: nothing under it (a terminal's shell) sees them.
+    e.stopPropagation();
+    list[target].focus();
   };
 
   return (

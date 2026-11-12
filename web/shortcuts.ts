@@ -75,7 +75,7 @@ export function runShortcut(e: KeyboardEvent): boolean {
     toggleTerminal();
     return true;
   }
-  const action = shortcutFor(e, IS_MAC);
+  const action = shortcutFor({ code: e.code, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, altGraph: e.getModifierState?.('AltGraph') ?? false }, IS_MAC);
   if (!action) return false;
   const layout = getLayout();
   const pane = layout.panes.find(p => p.id === layout.focused);

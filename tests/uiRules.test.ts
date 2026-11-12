@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import { formatClick, formatKeys } from '../web/keys.ts';
 import { shortcutFor, type KeyPress } from '../web/shortcutMap.ts';
 import { moveTab, orderTabs, othersToClose, rightToClose, setPinned } from '../web/tabs.ts';
+import { focusFirstOnOpen, menuKeyTarget } from '../web/ui/menuFocus.ts';
 import { closeOtherTabs, closeTabsToRight, getLayout, open, pinTab, reorderTab, type Tab } from '../web/layout.ts';
 
 test('shortcuts read as key symbols in Apple order on a Mac, short words elsewhere (ACH-D26)', () => {
@@ -129,4 +132,55 @@ test('restarts keep pinned tabs first; a layout saved before pins existed loads 
   const old = await restore({ tabs: [{ id: 't1', content: { kind: 'comms' } }, { id: 't2', content: { kind: 'agent', agentId: 'a' } }], panes: pane, focused: 'p1' }, 'old');
   assert.deepEqual(old.tabs.map(x => x.id), ['t1', 't2']);
   assert.ok(old.tabs.every(x => !x.pinned));
+});
+
+test('AltGr chords are characters, not shortcuts: Ctrl+Alt+W and Ctrl+Alt+B are ignored with AltGraph held', () => {
+  assert.equal(shortcutFor(press('KeyW', { ctrlKey: true, altKey: true, altGraph: true }), false), null);
+  assert.equal(shortcutFor(press('KeyB', { ctrlKey: true, altKey: true, altGraph: true }), false), null);
+  assert.equal(shortcutFor(press('KeyW', { metaKey: true, altKey: true, altGraph: true }), true), null);
+  assert.deepEqual(shortcutFor(press('KeyW', { ctrlKey: true, altKey: true, altGraph: false }), false), { kind: 'closeOthers' }, 'without AltGr it is still Close others');
+  assert.deepEqual(shortcutFor(press('KeyB', { ctrlKey: true, altKey: true }), false), { kind: 'panel' });
+});
+
+test('a context menu takes focus however it opened, and the keys move within it', () => {
+  assert.equal(focusFirstOnOpen({ x: 10, y: 20 }), true, 'opened by a right-click');
+  assert.equal(focusFirstOnOpen({} as HTMLElement), true, 'opened from the keyboard or a button');
+  assert.equal(menuKeyTarget(4, -1, 'ArrowDown'), 0, 'nothing focused yet: Down goes to the first row');
+  assert.equal(menuKeyTarget(4, -1, 'ArrowUp'), 3);
+  assert.equal(menuKeyTarget(4, 3, 'ArrowDown'), 0, 'wraps');
+  assert.equal(menuKeyTarget(4, 0, 'ArrowUp'), 3);
+  assert.equal(menuKeyTarget(4, 2, 'Home'), 0);
+  assert.equal(menuKeyTarget(4, 0, 'End'), 3);
+  assert.equal(menuKeyTarget(4, 1, 'a'), null, 'other keys are not the menu\'s');
+  assert.equal(menuKeyTarget(0, -1, 'ArrowDown'), null);
+});
+
+/** Every .ts and .tsx file under web/, with comments taken out so only code and UI text are left. */
+function webSources(): { file: string; code: string }[] {
+  const root = path.join(import.meta.dirname, '..', 'web');
+  const out: { file: string; code: string }[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(entry.name)) {
+        const code = fs.readFileSync(full, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+        out.push({ file: path.relative(root, full), code });
+      }
+    }
+  };
+  walk(root);
+  return out;
+}
+
+test('no spelled-out keys in UI text (ACH-D26): no "Cmd+", "(Esc)" or a written-out Enter', () => {
+  const found: string[] = [];
+  for (const { file, code } of webSources()) {
+    // web/keys.ts is where the words for other platforms live.
+    if (file === 'keys.ts') continue;
+    code.split('\n').forEach((line, i) => {
+      if (/Cmd\+|\(Esc\)|\(Escape\)|Shift Enter|Press Enter|\(Enter\)|>\s*Enter\s*</.test(line)) found.push(`web/${file}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(found, [], `Spelled-out keys; use keys()/formatKeys() or <Kbd>:\n${found.join('\n')}`);
 });

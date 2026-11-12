@@ -3,6 +3,8 @@
  * the root post, its replies and a reply box. Mentions there start agents whose replies land
  * in the thread. Below a container width of 44rem it takes the whole pane instead.
  */
+import { IS_MAC } from '../platform.ts';
+import { formatKeys } from '../keys.ts';
 import { useEffect, useRef } from 'react';
 import type { Agent, Channel, ChannelPost } from '../../shared/types.ts';
 import type { Thread } from '../threads.ts';
@@ -46,7 +48,7 @@ export function ChannelThread({ channel, root, thread, members, agents, focused,
           <span className="min-w-0 truncate font-normal text-content/45">#{channel.name}</span>
         </h3>
         <div className="flex shrink-0 items-center gap-0.5 px-3">
-          <button type="button" title="Close thread (Esc)" aria-label="Close thread" onClick={onClose} className="grid size-6 place-items-center rounded-md text-content/50 hover:bg-content/10 hover:text-content">
+          <button type="button" title={`Close thread (${formatKeys('Escape', IS_MAC)})`} aria-label="Close thread" onClick={onClose} className="grid size-6 place-items-center rounded-md text-content/50 hover:bg-content/10 hover:text-content">
             <X className="size-3.5" strokeWidth={1.75} />
           </button>
         </div>

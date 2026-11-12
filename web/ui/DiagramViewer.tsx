@@ -1,3 +1,5 @@
+import { IS_MAC } from '../platform.ts';
+import { formatKeys } from '../keys.ts';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { fitView, svgSize, zoomAt, type View } from '../diagramView.ts';
@@ -116,7 +118,7 @@ export function DiagramViewer({ svg, title = 'Diagram', onClose }: { svg: string
             <Maximize2 className="size-3.5" strokeWidth={1.75} />
           </button>
           <span aria-hidden className="mx-1 h-4 w-px bg-content/10" />
-          <button type="button" className={button} onClick={onClose} title="Close (Esc)" aria-label="Close">
+          <button type="button" className={button} onClick={onClose} title={`Close (${formatKeys('Escape', IS_MAC)})`} aria-label="Close">
             <X className="size-3.5" strokeWidth={1.75} />
           </button>
         </div>
