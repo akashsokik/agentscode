@@ -134,3 +134,28 @@ export function notesSections<T extends { kind: 'D' | 'N'; state: string; num?: 
     replaced: entries.filter(e => e.state === 'replaced' && shown(e)),
   };
 }
+
+/**
+ * Where Up and Down move an open issue: to its neighbour's place within the same section (the
+ * server's move takes a position in the whole open backlog). null at a section's end, so the
+ * button is off rather than doing nothing visible.
+ */
+export function issueMoves(sections: readonly Group<SuperIssue>[], backlog: readonly SuperIssue[]): Map<string, { up: number | null; down: number | null }> {
+  const at = new Map(backlog.map((g, i) => [g.id, i]));
+  const moves = new Map<string, { up: number | null; down: number | null }>();
+  for (const s of sections) {
+    s.items.forEach((g, i) => {
+      const above = s.items[i - 1];
+      const below = s.items[i + 1];
+      moves.set(g.id, { up: above ? at.get(above.id) ?? null : null, down: below ? at.get(below.id) ?? null : null });
+    });
+  }
+  return moves;
+}
+
+/** The row to focus once a row is removed: the next one, else the one before, else none. */
+export function focusAfterRemoval(ids: readonly string[], removed: string): string | null {
+  const i = ids.indexOf(removed);
+  if (i < 0) return null;
+  return ids[i + 1] ?? ids[i - 1] ?? null;
+}

@@ -3,19 +3,19 @@
  * with the choices to click; in the right panel, its Decisions (anything it did on its own, which you
  * can undo), Issues and Routines tabs, drawn with the shared panel list (web/ui/PanelList.tsx, ACH-D37).
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { IssueStatus, RoutineSchedule, SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { openAsks } from '../super.ts';
 import { ISSUE_STATUS_LABEL, heldText, migrateSeen, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type SuperTab } from '../superText.ts';
-import { cleanSummary, decisionGroups, decisionKind, issueGroups, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
+import { cleanSummary, decisionGroups, decisionKind, focusAfterRemoval, issueGroups, issueMoves, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { MenuDivider, MenuRow, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
 import { Kbd } from '../ui/Kbd.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
-import { DetailButton, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar, RowAction, RowIcon } from '../ui/PanelList.tsx';
+import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar, RowAction, RowIcon } from '../ui/PanelList.tsx';
 import { Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleAlert, CircleDashed, CircleDot, Clock, Copy, CornerDownRight, ListBullet, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 
@@ -266,14 +266,18 @@ export function IssuesView() {
   const ordered = sections.flatMap(s => s.items);
   // The backlog's own order, for moving: positions are among all open issues, not a search's.
   const backlog = (issues ?? []).filter(g => g.status !== 'done').sort((a, b) => a.order - b.order);
+  const moves = issueMoves(sections, backlog);
+  const root = useRef<HTMLDivElement>(null);
   const toggle = (id: string) => setOpen(o => (o === id ? null : id));
-  const item = (issue: SuperIssue) => {
-    const index = backlog.findIndex(g => g.id === issue.id);
-    return <IssueItem key={issue.id} issue={issue} index={index} last={index === backlog.length - 1} expanded={open === issue.id} onToggle={() => toggle(issue.id)} />;
-  };
   const doneShown = filter === 'done' || showDone || Boolean(query.trim());
+  // The rows on screen, in order: where focus goes when one is removed.
+  const shownIds = [...ordered, ...(doneShown ? done : [])].map(g => g.id);
+  const item = (issue: SuperIssue) => (
+    <IssueItem key={issue.id} issue={issue} moves={moves.get(issue.id) ?? { up: null, down: null }} expanded={open === issue.id} onToggle={() => toggle(issue.id)} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, issue.id))} />
+  );
+  const closeAdd = () => { setAdding(false); focusAdd(root.current); };
   return (
-    <div className="flex min-h-0 flex-1 flex-col font-sans">
+    <div ref={root} className="flex min-h-0 flex-1 flex-col font-sans">
       <PanelToolbar
         query={query}
         onQuery={setQuery}
@@ -283,7 +287,7 @@ export function IssuesView() {
         addLabel="Add an issue"
       />
       {adding ? (
-        <Composer placeholder="Add an issue for the SuperAgent" label="New issue" onClose={() => setAdding(false)} onAdd={async text => Boolean(await attempt(() => api.addIssue({ text, projectId: projectId || null })))}>
+        <Composer placeholder="Add an issue for the SuperAgent" label="New issue" onClose={closeAdd} onAdd={async text => Boolean(await attempt(() => api.addIssue({ text, projectId: projectId || null })))}>
           <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} className="h-5 max-w-40 truncate rounded bg-content/5 px-1 text-[11px] text-content/65 outline-none">
             <option value="">Any project</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -307,12 +311,13 @@ export function IssuesView() {
           </section>
         ) : null}
         {query.trim() && !ordered.length && !done.length ? <PanelEmpty icon={<SearchIcon strokeWidth={1.5} />} title={`No issues about "${query.trim()}"`} /> : null}
+        {filter === 'done' && !done.length && !query.trim() ? <PanelEmpty icon={<CheckCircle strokeWidth={1.5} />} title="No done issues yet">Issues the SuperAgent or you mark done show here, newest first.</PanelEmpty> : null}
       </PanelList>
     </div>
   );
 }
 
-function IssueItem({ issue, index, last, expanded, onToggle }: { issue: SuperIssue; index: number; last: boolean; expanded: boolean; onToggle: () => void }) {
+function IssueItem({ issue, moves, expanded, onToggle, onRemoved }: { issue: SuperIssue; moves: { up: number | null; down: number | null }; expanded: boolean; onToggle: () => void; onRemoved: () => void }) {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === issue.projectId));
   const agent = useApp(s => (issue.agentId ? s.snapshot?.agents.find(a => a.id === issue.agentId) : undefined));
   const [editing, setEditing] = useState(false);
@@ -331,7 +336,9 @@ function IssueItem({ issue, index, last, expanded, onToggle }: { issue: SuperIss
   const status = (s: IssueStatus) => void run(() => api.updateIssue(issue.id, { status: s }));
   const edit = () => { setText(issue.text); setEditing(true); if (!expanded) onToggle(); };
   const { icon: StatusIcon, cls } = ISSUE_ICON[issue.status];
-  const remove = <RowAction label={`Confirm removing ${named}`} disabled={busy} onClick={() => void run(() => api.removeIssue(issue.id))}><span className="text-danger">Remove?</span></RowAction>;
+  const moveTo = (to: number | null) => { if (to !== null) void run(() => api.moveIssue(issue.id, to)); };
+  const removeNow = async () => { if (await run(() => api.removeIssue(issue.id))) onRemoved(); };
+  const remove = <RowAction label={`Confirm removing ${named}`} disabled={busy} onClick={() => void removeNow()}><span className="text-danger">Remove?</span></RowAction>;
   return (
     <PanelRow
       id={issue.id}
@@ -342,8 +349,8 @@ function IssueItem({ issue, index, last, expanded, onToggle }: { issue: SuperIss
       meta={<>{agent ? <AgentAvatar agent={agent} animate={false} className="size-3.5" /> : null}{project ? <span className="font-mono text-[10.5px]">{project.code ?? project.name}</span> : null}</>}
       actions={confirming ? remove : (
         <>
-          {!done ? <RowIcon icon={ChevronUp} label={`Move ${named} up`} disabled={busy || index <= 0} onClick={() => void run(() => api.moveIssue(issue.id, index - 1))} /> : null}
-          {!done ? <RowIcon icon={ChevronDown} label={`Move ${named} down`} disabled={busy || last} onClick={() => void run(() => api.moveIssue(issue.id, index + 1))} /> : null}
+          {!done ? <RowIcon icon={ChevronUp} label={`Move ${named} up`} disabled={busy || moves.up === null} onClick={() => moveTo(moves.up)} /> : null}
+          {!done ? <RowIcon icon={ChevronDown} label={`Move ${named} down`} disabled={busy || moves.down === null} onClick={() => moveTo(moves.down)} /> : null}
           <RowIcon icon={Pencil} label={`Edit ${named}`} disabled={busy} onClick={edit} />
           <RowIcon icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => setConfirming(true)} />
         </>
@@ -357,8 +364,8 @@ function IssueItem({ issue, index, last, expanded, onToggle }: { issue: SuperIss
           <MenuRow icon={Pencil} title="Edit" onSelect={() => { close(); edit(); }} />
           {!done ? (
             <>
-              <MenuRow icon={ChevronUp} title="Move up" disabled={busy || index <= 0} onSelect={() => { close(); void run(() => api.moveIssue(issue.id, index - 1)); }} />
-              <MenuRow icon={ChevronDown} title="Move down" disabled={busy || last} onSelect={() => { close(); void run(() => api.moveIssue(issue.id, index + 1)); }} />
+              <MenuRow icon={ChevronUp} title="Move up" disabled={busy || moves.up === null} onSelect={() => { close(); moveTo(moves.up); }} />
+              <MenuRow icon={ChevronDown} title="Move down" disabled={busy || moves.down === null} onSelect={() => { close(); moveTo(moves.down); }} />
             </>
           ) : null}
           <MenuDivider />
@@ -401,7 +408,7 @@ function IssueItem({ issue, index, last, expanded, onToggle }: { issue: SuperIss
           {(Object.keys(ISSUE_STATUS_LABEL) as IssueStatus[]).map(s => <option key={s} value={s}>{ISSUE_STATUS_LABEL[s]}</option>)}
         </select>
         {!editing ? <DetailButton onClick={edit}>Edit</DetailButton> : null}
-        {confirming ? <DetailButton danger disabled={busy} onClick={() => void run(() => api.removeIssue(issue.id))}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
+        {confirming ? <DetailButton danger disabled={busy} onClick={() => void removeNow()}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
       </div>
     </PanelRow>
   );
@@ -418,15 +425,18 @@ export function RoutinesView() {
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const groups = routineGroups(routines, query);
+  const root = useRef<HTMLDivElement>(null);
+  const shownIds = groups.flatMap(g => g.items.map(r => r.id));
+  const closeAdd = () => { setAdding(false); focusAdd(root.current); };
   return (
-    <div className="flex min-h-0 flex-1 flex-col font-sans">
+    <div ref={root} className="flex min-h-0 flex-1 flex-col font-sans">
       <PanelToolbar query={query} onQuery={setQuery} searchLabel="Search routines" onAdd={() => setAdding(a => !a)} addLabel="Add a routine" />
-      {adding ? <RoutineForm onClose={() => setAdding(false)} /> : null}
+      {adding ? <RoutineForm onClose={closeAdd} /> : null}
       <PanelList label="Routines">
         {groups.map(g => (
           <section key={g.key} aria-label={g.label}>
             <PanelSection label={g.label} count={g.items.length} />
-            {g.items.map(r => <RoutineItem key={r.id} routine={r} expanded={open === r.id} onToggle={() => setOpen(o => (o === r.id ? null : r.id))} />)}
+            {g.items.map(r => <RoutineItem key={r.id} routine={r} expanded={open === r.id} onToggle={() => setOpen(o => (o === r.id ? null : r.id))} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, r.id))} />)}
           </section>
         ))}
         {!groups.length ? (
@@ -482,14 +492,14 @@ function RoutineForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-function RoutineItem({ routine, expanded, onToggle }: { routine: SuperRoutine; expanded: boolean; onToggle: () => void }) {
+function RoutineItem({ routine, expanded, onToggle, onRemoved }: { routine: SuperRoutine; expanded: boolean; onToggle: () => void; onRemoved: () => void }) {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === routine.projectId));
   const [busy, setBusy] = useState(false);
-  const run = async (action: () => Promise<unknown>) => { setBusy(true); await attempt(action); setBusy(false); };
+  const run = async (action: () => Promise<unknown>) => { setBusy(true); const ok = await attempt(action); setBusy(false); return ok; };
   const named = `"${routine.name}"`;
   const paused = !routine.enabled && !routine.proposed;
   const confirm = () => void run(() => api.updateRoutine(routine.id, { confirm: true }));
-  const reject = () => void run(() => api.removeRoutine(routine.id));
+  const reject = () => void run(() => api.removeRoutine(routine.id)).then(ok => { if (ok) onRemoved(); });
   const pause = () => void run(() => api.updateRoutine(routine.id, { enabled: !routine.enabled }));
   return (
     <PanelRow

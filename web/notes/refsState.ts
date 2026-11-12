@@ -25,9 +25,11 @@ export interface NotesState {
   everywhere: boolean;
   /** The entry open in the Notes tab. */
   openId: string | null;
+  /** The Replaced section is open: kept here, so going back from a replaced entry finds its row. */
+  showReplaced: boolean;
 }
 
-let state: NotesState = { index: null, byId: new Map(), idsKey: '', error: null, code: null, filter: 'all', query: '', everywhere: false, openId: null };
+let state: NotesState = { index: null, byId: new Map(), idsKey: '', error: null, code: null, filter: 'all', query: '', everywhere: false, openId: null, showReplaced: false };
 const listeners = new Set<() => void>();
 
 function set(next: Partial<NotesState>): void {
@@ -89,6 +91,7 @@ export function setNotesFilter(filter: NotesFilter): void { set({ filter }); }
 export function setNotesQuery(query: string): void { set({ query, ...(query ? {} : { everywhere: false }) }); }
 export function setNotesEverywhere(everywhere: boolean): void { set({ everywhere }); }
 export function openNote(id: string | null): void { set({ openId: id }); }
+export function setNotesShowReplaced(showReplaced: boolean): void { set({ showReplaced }); }
 
 /** What a server event means for the notes: added ones, and new text that may cite one. */
 export function refsHeard(event: ServerEvent): void {

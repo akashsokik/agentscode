@@ -12,7 +12,7 @@ import { authorLabel, notesSections } from '../panelList.ts';
 import { Markdown } from '../ui/Markdown.tsx';
 import { citeTime, Highlight, kindWord, NoteGlyph, shortDate, StaticChip, StatusPill, WhoAvatar } from './parts.tsx';
 import { RefChip } from './RefChip.tsx';
-import { loadRefs, openNote, setNotesCode, setNotesEverywhere, setNotesFilter, setNotesQuery, useNotes, type NotesFilter } from './refsState.ts';
+import { loadRefs, openNote, setNotesCode, setNotesEverywhere, setNotesFilter, setNotesQuery, setNotesShowReplaced, useNotes, type NotesFilter } from './refsState.ts';
 
 /*
  * The Notes tab: a project's decisions and notes, read only. One list per kind under quiet labels
@@ -145,9 +145,8 @@ function NotesList({ project, switchable, projects, switcherLabel, entries }: { 
   const query = useNotes(s => s.query);
   const everywhere = useNotes(s => s.everywhere);
   const mine = useMemo(() => entries.filter(e => e.code === project.code), [entries, project.code]);
-  const shown = (e: RefSummary) => filter === 'all' || e.kind === filter;
   const { decisions, notes, replaced, counts } = notesSections(mine, filter);
-  const [showReplaced, setShowReplaced] = useState(false);
+  const showReplaced = useNotes(s => s.showReplaced);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Header trailing={<span className="ml-auto shrink-0 font-mono text-[12px] text-content/40">{project.code}</span>}>
@@ -172,7 +171,7 @@ function NotesList({ project, switchable, projects, switcherLabel, entries }: { 
           <>
             {decisions.length ? <><PanelSection label="Decisions" count={decisions.length} />{decisions.map(e => <Row key={e.id} entry={e} />)}</> : null}
             {notes.length ? <><PanelSection label="Notes" count={notes.length} />{notes.map(e => <Row key={e.id} entry={e} />)}</> : null}
-            {replaced.length ? <><PanelSection label="Replaced" count={replaced.length} folded={!showReplaced} onToggle={() => setShowReplaced(v => !v)} />{showReplaced ? replaced.map(e => <Row key={e.id} entry={e} />) : null}</> : null}
+            {replaced.length ? <><PanelSection label="Replaced" count={replaced.length} folded={!showReplaced} onToggle={() => setNotesShowReplaced(!showReplaced)} />{showReplaced ? replaced.map(e => <Row key={e.id} entry={e} />) : null}</> : null}
           </>
         )}
       </PanelList>
@@ -239,9 +238,11 @@ function NoteDetail({ id }: { id: string }) {
   }, [id, summary]);
   useEffect(() => { back.current?.focus({ preventScroll: true }); }, [id]);
   const goBack = () => {
+    // A replaced entry's row is in the folded section: open it, so the row is there to focus.
+    if (summary?.state === 'replaced') setNotesShowReplaced(true);
     openNote(null);
     // Focus the row it came from once the list is back.
-    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-panel-row="${id}"] [data-panel-row-main]`)?.focus());
+    requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-panel-row="${CSS.escape(id)}"] [data-panel-row-main]`)?.focus()));
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={e => { if (e.key === 'Escape' && !e.defaultPrevented) { e.stopPropagation(); goBack(); } }}>

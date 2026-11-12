@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../shared/types.ts';
-import { authorLabel, cleanSummary, dayLabel, decisionGroups, decisionKind, issueGroups, groupByDay, isMenuKey, matches, notesSections, routineGroups, shortSchedule, shortWhen } from '../web/panelList.ts';
+import { authorLabel, cleanSummary, dayLabel, decisionGroups, decisionKind, focusAfterRemoval, issueGroups, issueMoves, groupByDay, isMenuKey, matches, notesSections, routineGroups, shortSchedule, shortWhen } from '../web/panelList.ts';
 
 // The SuperAgent's right-panel tabs read alike (ACH-D37): one line per item, grouped, searched and
 // filtered the same way.
@@ -106,4 +106,43 @@ test('the row menu opens from the keyboard with ⇧F10 or the menu key, not with
   assert.equal(isMenuKey({ key: 'ContextMenu', shiftKey: false }), true);
   assert.equal(isMenuKey({ key: 'F10', shiftKey: false }), false);
   assert.equal(isMenuKey({ key: 'Enter', shiftKey: true }), false);
+});
+
+test('Up and Down move within the section (Rhea\'s probe: A, B, C queued, then C in progress); off at section ends', async () => {
+  const { SuperStore } = await import('../server/superAgent.ts');
+  const { tempDir } = await import('./helpers.ts');
+  const store = new SuperStore(tempDir('moves'));
+  const a = store.addIssue({ text: 'A', projectId: null, by: 'user' });
+  const b = store.addIssue({ text: 'B', projectId: null, by: 'user' });
+  const c = store.addIssue({ text: 'C', projectId: null, by: 'user' });
+  store.updateIssue(c.id, { status: 'in_progress' });
+  const view = () => {
+    const issues = store.issues();
+    const { open } = issueGroups(issues, 'open', '');
+    const backlog = issues.filter(i => i.status !== 'done').sort((x, y) => x.order - y.order);
+    return { open, moves: issueMoves(open, backlog), shown: open.map(s => `${s.label}: ${s.items.map(i => i.text).join(', ')}`).join(' | ') };
+  };
+  let v = view();
+  assert.equal(v.shown, 'In progress: C | Queued: A, B');
+  assert.deepEqual(v.moves.get(c.id), { up: null, down: null }, 'C is alone in its section: both off');
+  assert.equal(v.moves.get(b.id)!.down, null, 'B is last in Queued: Down off');
+  assert.equal(v.moves.get(a.id)!.up, null, 'A is first in Queued: Up off');
+  // Every enabled move changes what the section shows.
+  store.moveIssue(b.id, v.moves.get(b.id)!.up!);
+  v = view();
+  assert.equal(v.shown, 'In progress: C | Queued: B, A');
+  store.moveIssue(b.id, v.moves.get(b.id)!.down!);
+  assert.equal(view().shown, 'In progress: C | Queued: A, B');
+  // With another status between them in the backlog, the move still lands next to the neighbour.
+  store.moveIssue(c.id, 1);
+  v = view();
+  store.moveIssue(a.id, v.moves.get(a.id)!.down!);
+  assert.equal(view().shown, 'In progress: C | Queued: B, A');
+});
+
+test('after a row is removed, focus goes to the next row, else the one before, else nowhere', () => {
+  assert.equal(focusAfterRemoval(['a', 'b', 'c'], 'b'), 'c');
+  assert.equal(focusAfterRemoval(['a', 'b', 'c'], 'c'), 'b');
+  assert.equal(focusAfterRemoval(['a'], 'a'), null);
+  assert.equal(focusAfterRemoval(['a'], 'zz'), null);
 });

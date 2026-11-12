@@ -69,7 +69,7 @@ export function PanelToolbar<T extends string>({ query, onQuery, searchLabel, fi
       ) : null}
       {children}
       {onAdd ? (
-        <button type="button" aria-label={addLabel} title={addLabel} onClick={onAdd} className="grid size-[26px] shrink-0 place-items-center rounded-[7px] text-content/50 transition-colors hover:bg-content/5 hover:text-content">
+        <button type="button" data-panel-add aria-label={addLabel} title={addLabel} onClick={onAdd} className="grid size-[26px] shrink-0 place-items-center rounded-[7px] text-content/50 transition-colors hover:bg-content/5 hover:text-content">
           <Plus className="size-3.5" strokeWidth={1.75} />
         </button>
       ) : null}
@@ -120,6 +120,9 @@ export function PanelRow({ id, lead, title, label, meta, actions, dim = false, s
   children?: ReactNode;
 }) {
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
+  // Keyboard focus shows the actions as hover does. Tracked here: the app's group-focus-within
+  // variant (styles.css) is for unnamed groups only, and a row sits inside other groups.
+  const [focused, setFocused] = useState(false);
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (menu && isMenuKey(e)) { e.preventDefault(); setAnchor(e.currentTarget); return; }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -129,7 +132,10 @@ export function PanelRow({ id, lead, title, label, meta, actions, dim = false, s
   };
   return (
     <div data-panel-row={id} onContextMenu={menu ? e => openContextMenu(e, setAnchor) : undefined}>
-      <div className={`group/row relative flex h-[30px] items-center rounded-[7px] transition-colors ${selected || expanded || anchor ? 'bg-selection' : 'hover:bg-content/5'}`}>
+      <div
+        onFocus={() => setFocused(true)}
+        onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false); }}
+        className={`group/row flex h-[30px] items-center rounded-[7px] transition-colors ${selected || expanded || anchor ? 'bg-selection' : focused ? 'bg-content/5' : 'hover:bg-content/5'}`}>
         <button
           type="button"
           data-panel-row-main
@@ -142,10 +148,11 @@ export function PanelRow({ id, lead, title, label, meta, actions, dim = false, s
         >
           {lead !== undefined ? <span aria-hidden className="grid w-4 shrink-0 place-items-center text-content/45">{lead}</span> : null}
           <span className={`min-w-0 flex-1 truncate ${dim ? 'text-content/45' : 'text-content/85'}`}>{title}</span>
-          {meta ? <span className={`flex shrink-0 items-center gap-1.5 text-[11px] tabular-nums text-content/45 ${actions ? 'group-hover/row:invisible group-focus-within/row:invisible' : ''}`}>{meta}</span> : null}
+          {meta ? <span className={`flex shrink-0 items-center gap-1.5 text-[11px] tabular-nums text-content/45 ${actions ? (focused ? 'hidden' : 'group-hover/row:hidden') : ''}`}>{meta}</span> : null}
         </button>
+        {/* The actions take the meta's place in the row (as in the demo), so the title truncates before them, never under them. */}
         {actions ? (
-          <span className="absolute right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100">{actions}</span>
+          <span data-panel-row-actions className={`shrink-0 items-center gap-0.5 pr-1 ${focused ? 'flex' : 'hidden group-hover/row:flex'}`}>{actions}</span>
         ) : null}
       </div>
       {expanded && children ? <div className="pb-2 pl-[30px] pr-2 pt-0.5 font-sans text-[12px] leading-relaxed text-content/75">{children}</div> : null}
@@ -191,6 +198,19 @@ export function PanelEmpty({ icon, title, children, action }: { icon: ReactNode;
       {action ? <div className="mt-3">{action}</div> : null}
     </div>
   );
+}
+
+/** Focus a row's main button by its id, once the list has re-rendered. */
+export function focusRow(root: ParentNode | null | undefined, id: string | null): void {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const el = id ? root?.querySelector<HTMLElement>(`[data-panel-row="${CSS.escape(id)}"] [data-panel-row-main]`) : null;
+    (el ?? root?.querySelector<HTMLElement>('[data-panel-add]'))?.focus({ preventScroll: false });
+  }));
+}
+
+/** Focus the toolbar's + button (after an add form closes). */
+export function focusAdd(root: ParentNode | null | undefined): void {
+  requestAnimationFrame(() => root?.querySelector<HTMLElement>('[data-panel-add]')?.focus());
 }
 
 /** The scrolling list under the toolbar; rows inside move focus with ↑ and ↓. */
