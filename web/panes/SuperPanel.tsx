@@ -1,19 +1,22 @@
 /**
  * The SuperAgent's own parts of the app: in its pane, the questions it waits on you for, as cards
  * with the choices to click; in the right panel, its Decisions (anything it did on its own, which you
- * can undo), Goals and Routines tabs.
+ * can undo), Goals and Routines tabs, drawn with the shared panel list (web/ui/PanelList.tsx, ACH-D37).
  */
-import { useEffect, useRef, useState } from 'react';
-import type { GoalStatus, RoutineSchedule, SuperAsk, SuperGoal, SuperRoutine } from '../../shared/types.ts';
+import { useEffect, useState, type ReactNode } from 'react';
+import type { GoalStatus, RoutineSchedule, SuperAction, SuperAsk, SuperGoal, SuperRoutine } from '../../shared/types.ts';
 import { api } from '../api.ts';
-import { memoryDate } from '../memory.ts';
 import { openAsks } from '../super.ts';
-import { decisionRows, GOAL_STATUS_LABEL, goalSections, heldText, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type DecisionRow, type SuperTab } from '../superText.ts';
+import { GOAL_STATUS_LABEL, heldText, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type SuperTab } from '../superText.ts';
+import { cleanSummary, decisionGroups, decisionKind, goalGroups, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type GoalsFilter } from '../panelList.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
-import { cx, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
+import { MenuDivider, MenuRow, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
+import { Kbd } from '../ui/Kbd.tsx';
 import { useNow } from '../ui/useNow.ts';
-import { ChevronDown, ChevronUp, CircleDot, Clock, ListBullet, Pencil, Trash2 } from '../mono/icons.tsx';
+import { AgentAvatar } from '../ui/Avatar.tsx';
+import { DetailButton, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar, RowAction, RowIcon } from '../ui/PanelList.tsx';
+import { Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleAlert, CircleDashed, CircleDot, Clock, Copy, CornerDownRight, ListBullet, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
@@ -60,59 +63,6 @@ function AskCard({ ask }: { ask: SuperAsk }) {
   );
 }
 
-const time = (ts: number) => `${memoryDate(ts)} ${new Date(ts).toTimeString().slice(0, 5)}`;
-
-/**
- * The Decisions tab: what the SuperAgent did on its own, newest first, each with why and Undo, then
- * what you answered it. Kept live by `super` events.
- */
-export function DecisionsView() {
-  const log = useApp(s => s.snapshot?.super.log);
-  const asks = useApp(s => s.snapshot?.super.asks);
-  const rows = decisionRows(log);
-  const answered = (asks ?? []).filter(a => a.answeredAt !== undefined);
-  const undoable = rows.filter(r => r.undoable).length;
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 font-sans">
-      {rows.length ? (
-        <>
-          <p className="px-4 pb-1 pt-3 text-[12px] leading-relaxed text-content/45">
-            What it did on its own.{undoable ? ' Undo puts it back, and the SuperAgent hears that you did.' : ''}
-          </p>
-          <ol>{rows.map(row => <DecisionItem key={row.id} row={row} />)}</ol>
-        </>
-      ) : (
-        <TabEmpty icon={ListBullet} title="No decisions yet">When the SuperAgent creates agents or channels, delegates or nudges, it shows here with why, and you can undo it.</TabEmpty>
-      )}
-      {answered.length ? (
-        <section aria-label="Your answers" className="pt-4">
-          <h3 className="px-4 pb-1 text-[12px] font-medium text-content/50">Your answers</h3>
-          <ol>
-            {answered.map(ask => (
-              <li key={ask.id} className="px-4 py-2">
-                <p className="text-[12px] leading-5 text-content/75">{ask.question}</p>
-                <p className="text-[12px] leading-5 text-content/45">{ask.dismissed ? 'Put aside' : ask.answer}</p>
-                <p className="text-[11px] text-content/30">{time(ask.answeredAt!)}</p>
-              </li>
-            ))}
-          </ol>
-        </section>
-      ) : null}
-    </div>
-  );
-}
-
-/** An empty tab: a quiet icon, what goes here, and how it gets there. */
-function TabEmpty({ icon: Icon, title, children }: { icon: typeof ListBullet; title: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col items-center px-6 pb-6 pt-10 text-center font-sans">
-      <Icon className="size-5 text-content/25" strokeWidth={1.5} />
-      <p className="mt-2.5 text-[13px] text-content/60">{title}</p>
-      <p className="mt-1 text-[12px] leading-relaxed text-content/40">{children}</p>
-    </div>
-  );
-}
-
 const SEEN_KEY = 'podcode:super-tabs-seen';
 function readSeen(): Partial<Record<SuperTab, number>> {
   try {
@@ -144,160 +94,284 @@ export function useSuperTabs(selected: string): { counts: Record<SuperTab, numbe
   return { counts: superTabCounts(lists, now), dots: superTabDots(latest, seen, selected) };
 }
 
+const fullTime = (ts: number) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+const KIND_ICON: Record<DecisionKind, typeof ListBullet> = { delegate: CornerDownRight, message: MessageSquare, goal: CircleDot, agent: Bot, channel: MessageMultiple, other: ListBullet };
+
 /**
- * The goals backlog: what you want done, in order. The SuperAgent works it top down, giving each
- * goal to a free agent; you add, edit, reorder and remove goals here, and see who is on each.
+ * The Decisions tab (ACH-D37): what the SuperAgent did on its own, one line each, grouped by day,
+ * with Undo on hover, in the row's menu and when it is open; Answers shows what you answered it.
+ * Search covers summaries and why. Kept live by `super` events.
  */
-export function GoalsView() {
-  const goals = useApp(s => s.snapshot?.super.goals);
-  const projects = useApp(s => s.snapshot?.projects) ?? [];
-  const { open, done } = goalSections(goals);
-  const list = useRef<HTMLOListElement>(null);
-  const addBox = useRef<HTMLTextAreaElement>(null);
-  // After a goal is removed, focus moves to the row now in its place, or the add box when none is.
-  const focusAfterRemove = (index: number) => requestAnimationFrame(() => requestAnimationFrame(() => {
-    const rows = list.current?.querySelectorAll<HTMLElement>('[data-goal]');
-    const next = rows?.[Math.min(index, rows.length - 1)]?.querySelector<HTMLElement>('select, button');
-    (next ?? addBox.current)?.focus({ preventScroll: true });
-  }));
-  const [text, setText] = useState('');
-  const [projectId, setProjectId] = useState<string>('');
+export function DecisionsView() {
+  const log = useApp(s => s.snapshot?.super.log);
+  const asks = useApp(s => s.snapshot?.super.asks);
+  const now = useNow();
+  const [filter, setFilter] = useState<DecisionsFilter>('actions');
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  const { counts, actions, answers } = decisionGroups(log, asks, filter, query, now);
+  const toggle = (id: string) => setOpen(o => (o === id ? null : id));
+  const groups = filter === 'actions' ? actions : answers;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col font-sans">
+      <PanelToolbar
+        query={query}
+        onQuery={setQuery}
+        searchLabel={filter === 'actions' ? 'Search what the SuperAgent did' : 'Search your answers'}
+        filter={{ label: 'Show', value: filter, onChange: setFilter, options: [{ value: 'actions', label: 'Actions', count: counts.actions }, { value: 'answers', label: 'Answers', count: counts.answers }] }}
+      />
+      <PanelList label={filter === 'actions' ? 'What the SuperAgent did' : 'Your answers'}>
+        {!groups.length ? (
+          query.trim() ? <PanelEmpty icon={<SearchIcon strokeWidth={1.5} />} title={`Nothing about "${query.trim()}"`} />
+            : filter === 'actions' ? <PanelEmpty icon={<ListBullet strokeWidth={1.5} />} title="No decisions yet">When the SuperAgent creates agents or channels, delegates or nudges on its own, it shows here with why, and you can undo it.</PanelEmpty>
+              : <PanelEmpty icon={<Chatting strokeWidth={1.5} />} title="No answers yet">Questions the SuperAgent asks you show here once you answer them.</PanelEmpty>
+        ) : filter === 'actions' ? actions.map(g => (
+          <section key={g.key} aria-label={g.label}>
+            <PanelSection label={g.label} count={g.items.length} />
+            {g.items.map(a => <DecisionItem key={a.id} action={a} now={now} expanded={open === a.id} onToggle={() => toggle(a.id)} />)}
+          </section>
+        )) : answers.map(g => (
+          <section key={g.key} aria-label={g.label}>
+            <PanelSection label={g.label} count={g.items.length} />
+            {g.items.map(a => <AnswerItem key={a.id} ask={a} now={now} expanded={open === a.id} onToggle={() => toggle(a.id)} />)}
+          </section>
+        ))}
+      </PanelList>
+    </div>
+  );
+}
+
+function DecisionItem({ action, now, expanded, onToggle }: { action: SuperAction; now: number; expanded: boolean; onToggle: () => void }) {
   const [busy, setBusy] = useState(false);
-  const [showDone, setShowDone] = useState(false);
+  const undone = action.undoneAt !== undefined;
+  const undoable = Boolean(action.undo) && !undone;
+  const summary = cleanSummary(action.summary);
+  const undo = async () => { setBusy(true); await attempt(() => api.undoSuper(action.id)); setBusy(false); };
+  const KindIcon = KIND_ICON[decisionKind(action.tool)];
+  return (
+    <PanelRow
+      id={action.id}
+      lead={<KindIcon className="size-3.5" strokeWidth={1.6} />}
+      title={summary}
+      label={`${summary}${undone ? ', undone' : ''}, ${fullTime(action.at)}`}
+      dim={undone}
+      meta={<time dateTime={new Date(action.at).toISOString()}>{undone ? 'Undone · ' : ''}{shortWhen(action.at, now)}</time>}
+      actions={undoable ? <RowAction label={`Undo: ${summary}`} disabled={busy} onClick={() => void undo()}>{busy ? 'Undoing…' : 'Undo'}</RowAction> : undefined}
+      expanded={expanded}
+      onOpen={onToggle}
+      menuLabel={`Decision: ${summary}`}
+      menu={close => (
+        <>
+          <MenuRow icon={expanded ? ChevronUp : ChevronDown} title={expanded ? 'Close' : 'Open'} shortcut="Enter" onSelect={() => { close(); onToggle(); }} />
+          <MenuRow icon={Undo2} title="Undo" disabled={!undoable || busy} onSelect={() => { close(); void undo(); }} />
+          <MenuDivider />
+          <MenuRow icon={Copy} title="Copy summary" onSelect={() => { close(); void navigator.clipboard?.writeText(action.summary); }} />
+        </>
+      )}
+    >
+      <p className="whitespace-pre-wrap break-words">{action.summary}</p>
+      {action.why ? <p className="mt-1 text-content/50">Why: {action.why}</p> : null}
+      <p className="mt-1 text-[11px] text-content/40">{fullTime(action.at)}{undone ? ` · undone ${fullTime(action.undoneAt!)}` : ''}</p>
+      {undoable ? <div className="mt-2 flex gap-1.5"><DetailButton disabled={busy} onClick={() => void undo()}>{busy ? 'Undoing…' : 'Undo'}</DetailButton></div> : null}
+    </PanelRow>
+  );
+}
+
+function AnswerItem({ ask, now, expanded, onToggle }: { ask: SuperAsk; now: number; expanded: boolean; onToggle: () => void }) {
+  const answer = ask.dismissed ? 'Put aside' : ask.answer ?? '';
+  return (
+    <PanelRow
+      id={ask.id}
+      lead={<Chatting className="size-3.5" strokeWidth={1.6} />}
+      title={ask.question}
+      label={`${ask.question}: ${answer}, ${fullTime(ask.answeredAt!)}`}
+      meta={<><span className="max-w-24 truncate">{answer}</span><span>· {shortWhen(ask.answeredAt!, now)}</span></>}
+      expanded={expanded}
+      onOpen={onToggle}
+      menuLabel={`Answer: ${ask.question}`}
+      menu={close => (
+        <>
+          <MenuRow icon={expanded ? ChevronUp : ChevronDown} title={expanded ? 'Close' : 'Open'} shortcut="Enter" onSelect={() => { close(); onToggle(); }} />
+          <MenuRow icon={Copy} title="Copy question and answer" onSelect={() => { close(); void navigator.clipboard?.writeText(`${ask.question}\n${answer}`); }} />
+        </>
+      )}
+    >
+      <p className="whitespace-pre-wrap break-words">{ask.question}</p>
+      {ask.detail ? <p className="mt-1 text-content/50">{ask.detail}</p> : null}
+      <p className="mt-1">Your answer: <span className="text-content">{answer}</span></p>
+      <p className="mt-1 text-[11px] text-content/40">{fullTime(ask.answeredAt!)}</p>
+    </PanelRow>
+  );
+}
+
+/** Goals are one line; line breaks typed or pasted become spaces. */
+const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ');
+
+const GOAL_ICON: Record<GoalStatus, { icon: typeof ListBullet; cls: string }> = {
+  queued: { icon: CircleDashed, cls: '' },
+  in_progress: { icon: CircleDot, cls: 'text-content/75' },
+  blocked: { icon: CircleAlert, cls: 'text-warning' },
+  done: { icon: CheckCircle, cls: '' },
+};
+
+/** A one-line composer: Enter adds, Escape closes. Opened by +. */
+function Composer({ placeholder, label, onAdd, onClose, children }: { placeholder: string; label: string; onAdd: (text: string) => Promise<boolean>; onClose: () => void; children?: ReactNode }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
   const add = async () => {
     if (!text.trim() || busy) return;
     setBusy(true);
-    const ok = await attempt(() => api.addGoal({ text: text.trim(), projectId: projectId || null }));
+    const ok = await onAdd(text.trim());
     setBusy(false);
     if (ok) setText('');
   };
   return (
-    <div className="flex min-h-0 flex-1 flex-col font-sans">
-      <div className="shrink-0 px-4 pb-2 pt-3">
-        <textarea
-          ref={addBox}
-          aria-label="New goal"
-          value={text}
-          rows={2}
-          maxLength={500}
-          // A goal is one line: Enter adds it, and pasted line breaks become spaces.
-          onChange={e => setText(oneLine(e.target.value))}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void add(); } }}
-          placeholder="Add a goal for the SuperAgent"
-          className={`${TEXTAREA} text-[13px]`}
-        />
-        <div className="mt-1.5 flex items-center gap-2">
-          <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} className="h-6 min-w-0 flex-1 truncate rounded-md border border-content/12 bg-transparent px-1.5 text-[12px] text-content/70 outline-none">
-            <option value="">Any project</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <button type="button" className={PRIMARY} disabled={busy || !text.trim()} onClick={() => void add()}>{busy ? 'Adding…' : 'Add'}</button>
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
-        {open.length ? (
-          <ol ref={list} aria-label="Open goals">
-            {open.map((goal, i) => <GoalItem key={goal.id} goal={goal} index={i} last={i === open.length - 1} onRemoved={() => focusAfterRemove(i)} />)}
-          </ol>
-        ) : (
-          <TabEmpty icon={CircleDot} title="No goals yet">Add what you want done. The SuperAgent works through them top down, giving each to a free agent, and asks you when it needs to.</TabEmpty>
-        )}
-        {done.length ? (
-          <section aria-label="Done goals" className="pt-4">
-            <button type="button" aria-expanded={showDone} onClick={() => setShowDone(v => !v)} className="flex w-full items-center gap-1.5 px-4 py-1 text-left text-[12px] font-medium text-content/50 hover:text-content/80">
-              <ChevronDown className={cx('size-3 transition-transform', showDone ? '' : '-rotate-90')} strokeWidth={2} />
-              Done <span className="font-normal tabular-nums">{done.length}</span>
-            </button>
-            {showDone ? <ol>{done.map((goal, i) => <GoalItem key={goal.id} goal={goal} index={i} last />)}</ol> : null}
-          </section>
-        ) : null}
+    <div className="mx-2.5 mb-1.5 rounded-lg border border-content/12 px-2 py-1.5 font-sans" onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } }}>
+      <input
+        autoFocus
+        aria-label={label}
+        value={text}
+        maxLength={500}
+        disabled={busy}
+        onChange={e => setText(oneLine(e.target.value))}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void add(); } }}
+        placeholder={placeholder}
+        className="h-6 w-full bg-transparent text-[12.5px] text-content outline-none placeholder:text-content/40"
+      />
+      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-content/45">
+        {children}
+        <span className="ml-auto inline-flex items-center gap-1"><Kbd spec="Enter" quiet /> add <Kbd spec="Escape" quiet /> close</span>
       </div>
     </div>
   );
 }
 
-function GoalItem({ goal, index, last, onRemoved }: { goal: SuperGoal; index: number; last: boolean; onRemoved?: () => void }) {
+/**
+ * The goals backlog (ACH-D37): what you want done, in order. Open goals by status (needs you, in
+ * progress, queued), then Done folded at the end; + opens a one-line composer. A goal opens in
+ * place with its notes, who has it, its status and Edit; move, mark done and remove are also in
+ * its menu and, on hover, its icons.
+ */
+export function GoalsView() {
+  const goals = useApp(s => s.snapshot?.super.goals);
+  const projects = useApp(s => s.snapshot?.projects) ?? [];
+  const [filter, setFilter] = useState<GoalsFilter>('open');
+  const [query, setQuery] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [projectId, setProjectId] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  const [showDone, setShowDone] = useState(false);
+  const { counts, open: sections, done } = goalGroups(goals, filter, query);
+  const ordered = sections.flatMap(s => s.items);
+  // The backlog's own order, for moving: positions are among all open goals, not a search's.
+  const backlog = (goals ?? []).filter(g => g.status !== 'done').sort((a, b) => a.order - b.order);
+  const toggle = (id: string) => setOpen(o => (o === id ? null : id));
+  const item = (goal: SuperGoal) => {
+    const index = backlog.findIndex(g => g.id === goal.id);
+    return <GoalItem key={goal.id} goal={goal} index={index} last={index === backlog.length - 1} expanded={open === goal.id} onToggle={() => toggle(goal.id)} />;
+  };
+  const doneShown = filter === 'done' || showDone || Boolean(query.trim());
+  return (
+    <div className="flex min-h-0 flex-1 flex-col font-sans">
+      <PanelToolbar
+        query={query}
+        onQuery={setQuery}
+        searchLabel="Search goals"
+        filter={{ label: 'Show', value: filter, onChange: setFilter, options: [{ value: 'open', label: 'Open', count: counts.open }, { value: 'done', label: 'Done', count: counts.done }] }}
+        onAdd={() => setAdding(a => !a)}
+        addLabel="Add a goal"
+      />
+      {adding ? (
+        <Composer placeholder="Add a goal for the SuperAgent" label="New goal" onClose={() => setAdding(false)} onAdd={async text => Boolean(await attempt(() => api.addGoal({ text, projectId: projectId || null })))}>
+          <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} className="h-5 max-w-40 truncate rounded bg-content/5 px-1 text-[11px] text-content/65 outline-none">
+            <option value="">Any project</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </Composer>
+      ) : null}
+      <PanelList label="Goals">
+        {filter === 'open' && !ordered.length && !query.trim() ? (
+          <PanelEmpty icon={<CircleDot strokeWidth={1.5} />} title="No open goals" action={<DetailButton onClick={() => setAdding(true)}>Add goal</DetailButton>}>The SuperAgent works through goals top down, giving each to a free agent.</PanelEmpty>
+        ) : null}
+        {sections.map(s => (
+          <section key={s.key} aria-label={s.label}>
+            <PanelSection label={s.label} count={s.items.length} />
+            {s.items.map(item)}
+          </section>
+        ))}
+        {done.length ? (
+          <section aria-label="Done">
+            {filter === 'done' ? <PanelSection label="Done" count={done.length} /> : <PanelSection label="Done" count={done.length} folded={!doneShown} onToggle={() => setShowDone(v => !v)} />}
+            {doneShown ? done.map(item) : null}
+          </section>
+        ) : null}
+        {query.trim() && !ordered.length && !done.length ? <PanelEmpty icon={<SearchIcon strokeWidth={1.5} />} title={`No goals about "${query.trim()}"`} /> : null}
+      </PanelList>
+    </div>
+  );
+}
+
+function GoalItem({ goal, index, last, expanded, onToggle }: { goal: SuperGoal; index: number; last: boolean; expanded: boolean; onToggle: () => void }) {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === goal.projectId));
   const agent = useApp(s => (goal.agentId ? s.snapshot?.agents.find(a => a.id === goal.agentId) : undefined));
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(goal.text);
   const [busy, setBusy] = useState(false);
-  // Remove asks once: the first press arms it for a few seconds, the second removes. If it runs out
-  // while the confirm has focus, focus goes back to the Remove button rather than to the page.
   const [confirming, setConfirming] = useState(false);
-  const trash = useRef<HTMLButtonElement>(null);
-  const refocus = useRef(false);
   useEffect(() => {
-    if (!confirming) {
-      // After React has put the Remove button back: focus it if the confirm had focus when it ran out.
-      if (refocus.current) trash.current?.focus({ preventScroll: true });
-      refocus.current = false;
-      return;
-    }
-    const timer = setTimeout(() => {
-      refocus.current = document.activeElement instanceof Element && Boolean(document.activeElement.closest('[data-goal-confirm]'));
-      setConfirming(false);
-    }, 4000);
+    if (!confirming) return;
+    const timer = setTimeout(() => setConfirming(false), 4000);
     return () => clearTimeout(timer);
   }, [confirming]);
-  // After Save or Cancel, focus goes back to the Edit button, not to the page.
-  const editButton = useRef<HTMLButtonElement>(null);
-  const wasEditing = useRef(false);
-  useEffect(() => {
-    if (wasEditing.current && !editing) editButton.current?.focus();
-    wasEditing.current = editing;
-  }, [editing]);
-  // Every control names its goal, so a screen reader can tell the rows apart.
   const named = `"${goal.text.length > 60 ? `${goal.text.slice(0, 59)}…` : goal.text}"`;
-  const run = async (action: () => Promise<unknown>) => {
-    setBusy(true);
-    const ok = await attempt(action);
-    setBusy(false);
-    return ok;
-  };
-  const save = async () => {
-    if (!text.trim()) return;
-    if (await run(() => api.updateGoal(goal.id, { text: text.trim() }))) setEditing(false);
-  };
+  const run = async (action: () => Promise<unknown>) => { setBusy(true); const ok = await attempt(action); setBusy(false); return ok; };
+  const save = async () => { if (text.trim() && await run(() => api.updateGoal(goal.id, { text: text.trim() }))) setEditing(false); };
   const done = goal.status === 'done';
+  const status = (s: GoalStatus) => void run(() => api.updateGoal(goal.id, { status: s }));
+  const edit = () => { setText(goal.text); setEditing(true); if (!expanded) onToggle(); };
+  const { icon: StatusIcon, cls } = GOAL_ICON[goal.status];
+  const remove = <RowAction label={`Confirm removing ${named}`} disabled={busy} onClick={() => void run(() => api.removeGoal(goal.id))}><span className="text-danger">Remove?</span></RowAction>;
   return (
-    <li data-goal={goal.id} data-goal-status={goal.status} className="group/goal px-4 py-2.5">
-      <div className="flex items-center gap-1">
-        <select
-          aria-label={`Status of ${named}`}
-          value={goal.status}
-          disabled={busy}
-          onChange={e => void run(() => api.updateGoal(goal.id, { status: e.target.value as GoalStatus }))}
-          className={cx('h-5 shrink-0 rounded bg-transparent text-[11px] outline-none hover:bg-selection-hover', goal.status === 'blocked' ? 'text-warning' : goal.status === 'in_progress' ? 'text-content/80' : 'text-content/45')}
-        >
-          {(Object.keys(GOAL_STATUS_LABEL) as GoalStatus[]).map(s => <option key={s} value={s}>{GOAL_STATUS_LABEL[s]}</option>)}
-        </select>
-        {project ? <span className="min-w-0 truncate text-[11px] text-content/35">· {project.name}</span> : null}
-        <span className="flex-1" />
-        <span className={cx('flex shrink-0 items-center transition-opacity group-hover/goal:opacity-100 focus-within:opacity-100', confirming ? 'opacity-100' : 'opacity-0')}>
+    <PanelRow
+      id={goal.id}
+      lead={<StatusIcon className={`size-3.5 ${cls}`} strokeWidth={1.6} />}
+      title={goal.text}
+      label={`${GOAL_STATUS_LABEL[goal.status]}: ${goal.text}${agent ? `, with ${agent.name}` : ''}${project ? `, ${project.name}` : ''}`}
+      dim={done}
+      meta={<>{agent ? <AgentAvatar agent={agent} animate={false} className="size-3.5" /> : null}{project ? <span className="font-mono text-[10.5px]">{project.code ?? project.name}</span> : null}</>}
+      actions={confirming ? remove : (
+        <>
+          {!done ? <RowIcon icon={ChevronUp} label={`Move ${named} up`} disabled={busy || index <= 0} onClick={() => void run(() => api.moveGoal(goal.id, index - 1))} /> : null}
+          {!done ? <RowIcon icon={ChevronDown} label={`Move ${named} down`} disabled={busy || last} onClick={() => void run(() => api.moveGoal(goal.id, index + 1))} /> : null}
+          <RowIcon icon={Pencil} label={`Edit ${named}`} disabled={busy} onClick={edit} />
+          <RowIcon icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => setConfirming(true)} />
+        </>
+      )}
+      expanded={expanded}
+      onOpen={onToggle}
+      menuLabel={`Goal ${named}`}
+      menu={close => (
+        <>
+          <MenuRow icon={expanded ? ChevronUp : ChevronDown} title={expanded ? 'Close' : 'Open'} shortcut="Enter" onSelect={() => { close(); onToggle(); }} />
+          <MenuRow icon={Pencil} title="Edit" onSelect={() => { close(); edit(); }} />
           {!done ? (
             <>
-              <IconButton icon={ChevronUp} label={`Move ${named} up`} disabled={busy || index === 0} onClick={() => void run(() => api.moveGoal(goal.id, index - 1))} />
-              <IconButton icon={ChevronDown} label={`Move ${named} down`} disabled={busy || last} onClick={() => void run(() => api.moveGoal(goal.id, index + 1))} />
+              <MenuRow icon={ChevronUp} title="Move up" disabled={busy || index <= 0} onSelect={() => { close(); void run(() => api.moveGoal(goal.id, index - 1)); }} />
+              <MenuRow icon={ChevronDown} title="Move down" disabled={busy || last} onSelect={() => { close(); void run(() => api.moveGoal(goal.id, index + 1)); }} />
             </>
           ) : null}
-          <IconButton ref={editButton} icon={Pencil} label={`Edit ${named}`} disabled={busy} onClick={() => { setText(goal.text); setEditing(true); }} />
-          {confirming ? (
-            <button
-              type="button"
-              // The confirm takes focus, so a keyboard press of Remove can be confirmed with Enter.
-              autoFocus
-              data-goal-confirm
-              aria-label={`Confirm removing ${named}`}
-              disabled={busy}
-              onClick={async () => { if (await run(() => api.removeGoal(goal.id))) onRemoved?.(); }} className="h-5 rounded px-1.5 text-[11px] font-medium text-danger transition-colors hover:bg-selection-hover disabled:opacity-30">
-              Remove?
-            </button>
-          ) : <IconButton ref={trash} icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => setConfirming(true)} />}
-        </span>
-      </div>
+          <MenuDivider />
+          {(Object.keys(GOAL_STATUS_LABEL) as GoalStatus[]).map(s => (
+            <MenuRow key={s} title={s === 'done' ? 'Mark done' : GOAL_STATUS_LABEL[s]} checked={goal.status === s} disabled={busy} onSelect={() => { close(); status(s); }} />
+          ))}
+          <MenuDivider />
+          <MenuRow icon={Trash2} title="Remove" danger disabled={busy} onSelect={() => { close(); setConfirming(true); }} />
+        </>
+      )}
+    >
       {editing ? (
-        <div className="mt-1 flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5" onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(false); } }}>
           <textarea
             autoFocus
             aria-label={`Edit ${named}`}
@@ -305,79 +379,66 @@ function GoalItem({ goal, index, last, onRemoved }: { goal: SuperGoal; index: nu
             rows={2}
             maxLength={500}
             onChange={e => setText(oneLine(e.target.value))}
-            onKeyDown={e => {
-              // Escape cancels the edit and stops here, so a panel around it does not also close.
-              if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(false); }
-              if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void save(); }
-            }}
-            className={`${TEXTAREA} text-[13px]`}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void save(); } }}
+            className={`${TEXTAREA} text-[12.5px]`}
           />
           <div className="flex justify-end gap-1.5">
             <TextButton onClick={() => setEditing(false)}>Cancel</TextButton>
             <button type="button" className={PRIMARY} disabled={busy || !text.trim()} onClick={() => void save()}>Save</button>
           </div>
         </div>
-      ) : (
-        <p className={cx('mt-0.5 whitespace-pre-wrap break-words text-[13px] leading-5', done ? 'text-content/40 line-through decoration-content/25' : 'text-content/85')}>{goal.text}</p>
-      )}
-      {agent || goal.notes ? (
-        <div className="mt-1 flex flex-col gap-0.5">
-          {agent ? (
-            <button type="button" onClick={() => open({ kind: 'agent', agentId: agent.id })} className="self-start rounded text-[12px] text-content/55 underline decoration-content/20 underline-offset-2 hover:text-content">
-              {done ? 'Done by' : 'With'} {agent.name}
-            </button>
-          ) : null}
-          {goal.notes ? <p className="text-[12px] leading-relaxed text-content/40">{goal.notes}</p> : null}
-        </div>
-      ) : null}
-    </li>
-  );
-}
-
-/** Goals are one line; line breaks typed or pasted become spaces. */
-const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ');
-
-function IconButton({ icon: Icon, label, disabled, onClick, ref }: { icon: typeof Pencil; label: string; disabled?: boolean; onClick: () => void; ref?: React.Ref<HTMLButtonElement> }) {
-  return (
-    <button ref={ref} type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick} className="grid size-5 place-items-center rounded text-content/40 transition-colors hover:bg-selection-hover hover:text-content disabled:pointer-events-none disabled:opacity-30">
-      <Icon className="size-3" strokeWidth={1.75} />
-    </button>
-  );
-}
-
-function DecisionItem({ row }: { row: DecisionRow }) {
-  const [busy, setBusy] = useState(false);
-  const undo = async () => {
-    setBusy(true);
-    await attempt(() => api.undoSuper(row.id));
-    setBusy(false);
-  };
-  const undone = row.undoneAt !== undefined;
-  return (
-    <li data-super-action={row.id} className="group/decision px-4 py-2.5">
-      <div className="flex items-baseline gap-2">
-        <time dateTime={new Date(row.at).toISOString()} title={new Date(row.at).toLocaleString()} className="min-w-0 flex-1 truncate text-[11px] tabular-nums text-content/35">
-          {time(row.at)}{undone ? ' · undone' : ''}
-        </time>
-        {row.undoable ? (
-          <TextButton aria-label={`Undo: ${row.summary}`} disabled={busy} onClick={() => void undo()} className="shrink-0 opacity-70 transition-opacity group-hover/decision:opacity-100 focus-visible:opacity-100">
-            {busy ? 'Undoing…' : 'Undo'}
-          </TextButton>
-        ) : null}
+      ) : <p className="whitespace-pre-wrap break-words">{goal.text}</p>}
+      {goal.notes ? <p className="mt-1 text-content/50">{goal.notes}</p> : null}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {agent ? <DetailButton onClick={() => open({ kind: 'agent', agentId: agent.id })}>{done ? 'Done by' : 'With'} {agent.name}</DetailButton> : null}
+        <select
+          aria-label={`Status of ${named}`}
+          value={goal.status}
+          disabled={busy}
+          onChange={e => status(e.target.value as GoalStatus)}
+          className="h-6 rounded-md border border-content/12 bg-transparent px-1 text-[11.5px] text-content/75 outline-none"
+        >
+          {(Object.keys(GOAL_STATUS_LABEL) as GoalStatus[]).map(s => <option key={s} value={s}>{GOAL_STATUS_LABEL[s]}</option>)}
+        </select>
+        {!editing ? <DetailButton onClick={edit}>Edit</DetailButton> : null}
+        {confirming ? <DetailButton danger disabled={busy} onClick={() => void run(() => api.removeGoal(goal.id))}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
       </div>
-      <p className={cx('mt-0.5 text-[13px] leading-5', undone ? 'text-content/40 line-through decoration-content/25' : 'text-content/85')}>{row.summary}</p>
-      {row.why ? <p className="mt-0.5 text-[12px] leading-relaxed text-content/45">{row.why}</p> : null}
-    </li>
+    </PanelRow>
   );
 }
 
 /**
- * Scheduled routines: what the SuperAgent does on its own at set times, in your words. Each becomes
- * an update at its time, so every wake limit and the daily budget apply. Proposals from the
- * SuperAgent wait here until you confirm them.
+ * Scheduled routines (ACH-D37): what the SuperAgent does on its own at set times. Proposals wait
+ * for you first; + opens the form. Each becomes an update at its time, within the wake limits and
+ * the daily budget.
  */
 export function RoutinesView() {
-  const routines = useApp(s => s.snapshot?.super.routines) ?? [];
+  const routines = useApp(s => s.snapshot?.super.routines);
+  const [query, setQuery] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
+  const groups = routineGroups(routines, query);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col font-sans">
+      <PanelToolbar query={query} onQuery={setQuery} searchLabel="Search routines" onAdd={() => setAdding(a => !a)} addLabel="Add a routine" />
+      {adding ? <RoutineForm onClose={() => setAdding(false)} /> : null}
+      <PanelList label="Routines">
+        {groups.map(g => (
+          <section key={g.key} aria-label={g.label}>
+            <PanelSection label={g.label} count={g.items.length} />
+            {g.items.map(r => <RoutineItem key={r.id} routine={r} expanded={open === r.id} onToggle={() => setOpen(o => (o === r.id ? null : r.id))} />)}
+          </section>
+        ))}
+        {!groups.length ? (
+          query.trim() ? <PanelEmpty icon={<SearchIcon strokeWidth={1.5} />} title={`No routines about "${query.trim()}"`} />
+            : !adding ? <PanelEmpty icon={<Clock strokeWidth={1.5} />} title="No routines yet" action={<DetailButton onClick={() => setAdding(true)}>Add routine</DetailButton>}>Things the SuperAgent does on a schedule, such as a morning CI check. They run within your wake limits and daily budget.</PanelEmpty> : null
+        ) : null}
+      </PanelList>
+    </div>
+  );
+}
+
+function RoutineForm({ onClose }: { onClose: () => void }) {
   const projects = useApp(s => s.snapshot?.projects) ?? [];
   const [name, setName] = useState('');
   const [instruction, setInstruction] = useState('');
@@ -386,8 +447,6 @@ export function RoutinesView() {
   const [at, setAt] = useState('09:00');
   const [hours, setHours] = useState('6');
   const [busy, setBusy] = useState(false);
-  const proposed = routines.filter(r => r.proposed);
-  const own = routines.filter(r => !r.proposed);
   const ready = Boolean(name.trim() && instruction.trim()) && (kind === 'daily' ? /^\d{1,2}:\d{2}$/.test(at) : Number(hours) >= 1 && Number(hours) <= 168);
   const add = async () => {
     if (!ready || busy) return;
@@ -395,68 +454,91 @@ export function RoutinesView() {
     const schedule: RoutineSchedule = kind === 'daily' ? { kind, at } : { kind, hours: Math.trunc(Number(hours)) };
     const ok = await attempt(() => api.addRoutine({ name: name.trim(), instruction: instruction.trim(), projectId: projectId || null, schedule }));
     setBusy(false);
-    if (ok) { setName(''); setInstruction(''); }
+    if (ok) { setName(''); setInstruction(''); onClose(); }
   };
   const field = 'h-6 rounded-md border border-content/12 bg-transparent px-1.5 text-[12px] text-content/75 outline-none';
   return (
-    <div className="flex min-h-0 flex-1 flex-col font-sans">
-      <div className="shrink-0 px-4 pb-2 pt-3">
-        <input aria-label="Routine name" value={name} maxLength={80} onChange={e => setName(e.target.value)} placeholder="Name, for example Morning CI check" className={`${field} h-7 w-full text-[13px]`} />
-        <textarea aria-label="What the SuperAgent should do" value={instruction} rows={2} maxLength={1000} onChange={e => setInstruction(e.target.value)} placeholder="What the SuperAgent should do each time" className={`${TEXTAREA} mt-1.5 text-[13px]`} />
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          <select aria-label="How often" value={kind} onChange={e => setKind(e.target.value as RoutineSchedule['kind'])} className={field}>
-            <option value="daily">Daily at</option>
-            <option value="every">Every</option>
-          </select>
-          {kind === 'daily'
-            ? <input type="time" aria-label="Time" value={at} onChange={e => setAt(e.target.value)} className={`${field} w-24`} />
-            : <><input type="number" aria-label="Hours" min={1} max={168} value={hours} onChange={e => setHours(e.target.value)} className={`${field} w-14`} /><span className="text-[12px] text-content/45">hours</span></>}
-          <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} className={`${field} min-w-0 flex-1 truncate`}>
-            <option value="">Any project</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <button type="button" className={PRIMARY} disabled={!ready || busy} onClick={() => void add()}>{busy ? 'Adding…' : 'Add'}</button>
-        </div>
+    <div className="mx-2.5 mb-1.5 flex flex-col gap-1.5 rounded-lg border border-content/12 p-2 font-sans" onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } }}>
+      <input autoFocus aria-label="Routine name" value={name} maxLength={80} onChange={e => setName(e.target.value)} placeholder="Name, for example Morning CI check" className="h-6 bg-transparent text-[12.5px] text-content outline-none placeholder:text-content/40" />
+      <textarea aria-label="What the SuperAgent should do" value={instruction} rows={2} maxLength={1000} onChange={e => setInstruction(e.target.value)} placeholder="What the SuperAgent should do each time" className={`${TEXTAREA} text-[12.5px]`} />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <select aria-label="How often" value={kind} onChange={e => setKind(e.target.value as RoutineSchedule['kind'])} className={field}>
+          <option value="daily">Daily at</option>
+          <option value="every">Every</option>
+        </select>
+        {kind === 'daily'
+          ? <input type="time" aria-label="Time" value={at} onChange={e => setAt(e.target.value)} className={`${field} w-24`} />
+          : <><input type="number" aria-label="Hours" min={1} max={168} value={hours} onChange={e => setHours(e.target.value)} className={`${field} w-14`} /><span className="text-[12px] text-content/45">hours</span></>}
+        <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} className={`${field} min-w-24 flex-1 truncate`}>
+          <option value="">Any project</option>
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
-        {proposed.length ? (
-          <section aria-label="Proposed by the SuperAgent" className="pb-2 pt-2">
-            <h3 className="px-4 pb-1 text-[12px] font-medium text-content/50">Proposed, waiting for you</h3>
-            <ol>{proposed.map(r => <RoutineItem key={r.id} routine={r} />)}</ol>
-          </section>
-        ) : null}
-        {own.length ? <ol aria-label="Routines">{own.map(r => <RoutineItem key={r.id} routine={r} />)}</ol> : !proposed.length ? (
-          <TabEmpty icon={Clock} title="No routines yet">Add something the SuperAgent should do on a schedule, such as checking CI every morning. It runs within your wake limits and daily budget.</TabEmpty>
-        ) : null}
+      <div className="flex items-center justify-end gap-1.5">
+        <TextButton onClick={onClose}>Cancel</TextButton>
+        <button type="button" className={PRIMARY} disabled={!ready || busy} onClick={() => void add()}>{busy ? 'Adding…' : 'Add'}</button>
       </div>
     </div>
   );
 }
 
-function RoutineItem({ routine }: { routine: SuperRoutine }) {
+function RoutineItem({ routine, expanded, onToggle }: { routine: SuperRoutine; expanded: boolean; onToggle: () => void }) {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === routine.projectId));
   const [busy, setBusy] = useState(false);
   const run = async (action: () => Promise<unknown>) => { setBusy(true); await attempt(action); setBusy(false); };
   const named = `"${routine.name}"`;
+  const paused = !routine.enabled && !routine.proposed;
+  const confirm = () => void run(() => api.updateRoutine(routine.id, { confirm: true }));
+  const reject = () => void run(() => api.removeRoutine(routine.id));
+  const pause = () => void run(() => api.updateRoutine(routine.id, { enabled: !routine.enabled }));
   return (
-    <li data-routine={routine.id} className="group/routine px-4 py-2.5">
-      <div className="flex items-center gap-2">
-        <p className={cx('min-w-0 flex-1 truncate text-[13px] font-medium', routine.enabled || routine.proposed ? 'text-content/85' : 'text-content/45')}>{routine.name}</p>
+    <PanelRow
+      id={routine.id}
+      lead={paused ? <Pause className="size-3.5 text-content/35" strokeWidth={1.6} /> : <Clock className="size-3.5" strokeWidth={1.6} />}
+      title={routine.name}
+      label={`${routine.name}, ${scheduleLabel(routine.schedule)}${project ? `, ${project.name}` : ''}${routine.proposed ? ', proposed by the SuperAgent' : paused ? ', paused' : ''}`}
+      dim={paused}
+      meta={<span>{paused ? 'Paused · ' : ''}{shortSchedule(routine.schedule)}{project ? ` · ${project.code ?? project.name}` : ''}</span>}
+      actions={routine.proposed
+        ? <RowAction label={`Confirm ${named}`} disabled={busy} onClick={confirm}>Confirm</RowAction>
+        : <RowAction label={`${routine.enabled ? 'Pause' : 'Resume'} ${named}`} disabled={busy} onClick={pause}>{routine.enabled ? 'Pause' : 'Resume'}</RowAction>}
+      expanded={expanded}
+      onOpen={onToggle}
+      menuLabel={`Routine ${named}`}
+      menu={close => (
+        <>
+          <MenuRow icon={expanded ? ChevronUp : ChevronDown} title={expanded ? 'Close' : 'Open'} shortcut="Enter" onSelect={() => { close(); onToggle(); }} />
+          {routine.proposed ? (
+            <>
+              <MenuRow icon={Check} title="Confirm" disabled={busy} onSelect={() => { close(); confirm(); }} />
+              <MenuRow icon={X} title="Reject" danger disabled={busy} onSelect={() => { close(); reject(); }} />
+            </>
+          ) : (
+            <>
+              <MenuRow icon={routine.enabled ? Pause : Play} title={routine.enabled ? 'Pause' : 'Resume'} disabled={busy} onSelect={() => { close(); pause(); }} />
+              <MenuDivider />
+              <MenuRow icon={Trash2} title="Remove" danger disabled={busy} onSelect={() => { close(); reject(); }} />
+            </>
+          )}
+        </>
+      )}
+    >
+      <p className="whitespace-pre-wrap break-words">{routine.instruction}</p>
+      {routine.proposed && routine.why ? <p className="mt-1 text-content/50">Why: {routine.why}</p> : null}
+      <p className="mt-1 text-[11px] text-content/40">{scheduleLabel(routine.schedule)}{project ? ` · ${project.name}` : ''}</p>
+      <div className="mt-2 flex gap-1.5">
         {routine.proposed ? (
           <>
-            <TextButton aria-label={`Reject ${named}`} disabled={busy} onClick={() => void run(() => api.removeRoutine(routine.id))}>Reject</TextButton>
-            <button type="button" aria-label={`Confirm ${named}`} className={PRIMARY} disabled={busy} onClick={() => void run(() => api.updateRoutine(routine.id, { confirm: true }))}>Confirm</button>
+            <DetailButton disabled={busy} onClick={confirm}>Confirm</DetailButton>
+            <DetailButton danger disabled={busy} onClick={reject}>Reject</DetailButton>
           </>
         ) : (
           <>
-            <TextButton aria-label={`${routine.enabled ? 'Pause' : 'Resume'} ${named}`} disabled={busy} onClick={() => void run(() => api.updateRoutine(routine.id, { enabled: !routine.enabled }))}>{routine.enabled ? 'Pause' : 'Resume'}</TextButton>
-            <IconButton icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => void run(() => api.removeRoutine(routine.id))} />
+            <DetailButton disabled={busy} onClick={pause}>{routine.enabled ? 'Pause' : 'Resume'}</DetailButton>
+            <DetailButton danger disabled={busy} onClick={reject}>Remove</DetailButton>
           </>
         )}
       </div>
-      <p className="mt-0.5 text-[11px] text-content/40">{scheduleLabel(routine.schedule)}{project ? ` · ${project.name}` : ''}{routine.enabled ? '' : routine.proposed ? ' · proposed by the SuperAgent' : ' · paused'}</p>
-      <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-content/65">{routine.instruction}</p>
-      {routine.proposed && routine.why ? <p className="mt-0.5 text-[12px] leading-relaxed text-content/40">Why: {routine.why}</p> : null}
-    </li>
+    </PanelRow>
   );
 }

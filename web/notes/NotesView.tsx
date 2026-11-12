@@ -3,10 +3,12 @@ import { queryWords, type RefDetail, type RefProject, type RefSearchHit, type Re
 import type { Agent } from '../../shared/types.ts';
 import { api, ApiError } from '../api.ts';
 import { open, useLayout } from '../layout.ts';
-import { ChevronLeft, ChevronsUpDown, Search, X } from '../mono/icons.tsx';
+import { ChevronLeft, ChevronsUpDown, Copy, ExternalLink, Search } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { useApp } from '../store.ts';
 import { Loading, MenuLabel, MenuRow } from '../ui/common.tsx';
+import { DetailButton, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar } from '../ui/PanelList.tsx';
+import { authorLabel, notesSections } from '../panelList.ts';
 import { Markdown } from '../ui/Markdown.tsx';
 import { citeTime, Highlight, kindWord, NoteGlyph, shortDate, StaticChip, StatusPill, WhoAvatar } from './parts.tsx';
 import { RefChip } from './RefChip.tsx';
@@ -54,7 +56,7 @@ export function NotesView({ agent }: { agent: Agent | undefined }) {
   useEffect(() => { void loadRefs(); }, []);
   if (openId) return <NoteDetail id={openId} />;
   if (!index) return error ? <p className="p-4 font-sans text-[12px] text-danger">{error}</p> : <Loading className="px-4 py-4" />;
-  if (!project) return <EmptyState icon={<NoteGlyph className="size-[18px]" />}>No projects yet.</EmptyState>;
+  if (!project) return <PanelEmpty icon={<NoteGlyph />} title="No projects yet" />;
   return <NotesList project={project} switchable={switchable} projects={options} switcherLabel={label} entries={index.entries} />;
 }
 
@@ -98,99 +100,43 @@ function ProjectSwitcher({ project, projects, label }: { project: RefProject; pr
   );
 }
 
-const FILTERS: { value: NotesFilter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'D', label: 'Decisions' },
-  { value: 'N', label: 'Notes' },
-];
-
-function Tools({ query }: { query: string }) {
-  const filter = useNotes(s => s.filter);
-  const input = useRef<HTMLInputElement>(null);
-  return (
-    <div className="flex items-center gap-2 px-1 pb-1.5">
-      <label className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-[7px] bg-content/5 px-2 text-[12.5px] text-content/35 focus-within:text-content">
-        <SearchGlyph />
-        <input
-          ref={input}
-          value={query}
-          onChange={e => setNotesQuery(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Escape' && query) { e.stopPropagation(); setNotesQuery(''); } }}
-          placeholder="Search"
-          aria-label="Search notes and decisions"
-          className="min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-content/35"
-        />
-        {query ? (
-          <button type="button" aria-label="Clear the search" onClick={() => { setNotesQuery(''); input.current?.focus(); }} className="grid size-4 shrink-0 place-items-center rounded text-content/40 hover:text-content">
-            <X className="size-3" strokeWidth={1.75} />
-          </button>
-        ) : null}
-      </label>
-      <div role="group" aria-label="Show" className="inline-grid shrink-0 grid-cols-3 gap-0.5 rounded-[7px] bg-content/5 p-0.5 text-[12px]">
-        {FILTERS.map(f => (
-          <button
-            key={f.value}
-            type="button"
-            aria-pressed={filter === f.value}
-            onClick={() => setNotesFilter(f.value)}
-            className={`rounded-[5px] px-[9px] py-[3px] transition-colors ${filter === f.value ? 'bg-content/10 text-content' : 'text-content/55 hover:text-content/80'}`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function SectionLabel({ label, count, className = 'px-1.5 pb-1.5 pt-3.5' }: { label: string; count?: number; className?: string }) {
-  return (
-    <h4 className={`flex justify-between font-sans text-[11px] font-medium uppercase tracking-[0.04em] text-content/40 ${className}`}>
-      <span>{label}</span>
-      {count !== undefined ? <span className="tabular-nums">{count}</span> : null}
-    </h4>
-  );
-}
-
-/** One entry in the list: chip, title, date; who below, and what it replaced or what replaced it. */
-function Row({ entry, words = [], hint }: { entry: RefSummary; words?: readonly string[]; hint?: ReactNode }) {
+/**
+ * One entry in the list, one line (ACH-D37): chip (no glyph here), title, then quiet meta: who,
+ * only when it is not you, and the date; a replaced entry shows what replaced it instead. ⏎ or a
+ * click opens it; right-click or ⇧F10 shows its menu.
+ */
+function Row({ entry, words = [] }: { entry: RefSummary; words?: readonly string[] }) {
   const old = entry.state === 'replaced';
-  const extra = entry.replacedBy ? [entry.kind === 'N' ? 'Outdated by' : 'Replaced by', entry.replacedBy] : entry.replaces ? ['Replaces', entry.replaces] : null;
+  const author = authorLabel(entry.by);
+  const status = old ? (entry.kind === 'N' ? ', outdated' : ', replaced') : '';
   return (
-    <>
-      <button
-        type="button"
-        data-note-row={entry.id}
-        onClick={() => openNote(entry.id)}
-        aria-label={`${kindWord(entry.kind)} ${entry.id}: ${entry.title}${old ? (entry.kind === 'N' ? ', outdated' : ', replaced') : ''}`}
-        className={`grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-[7px] px-1.5 py-[7px] text-left font-sans text-[13px] transition-colors hover:bg-content/5 focus-visible:bg-content/7 focus-visible:outline-none ${old ? 'opacity-50' : ''}`}
-      >
-        <StaticChip summary={entry} />
-        <span className="truncate text-content/90"><Highlight text={entry.title} words={words} /></span>
-        <span className="text-[12px] tabular-nums text-content/35">{shortDate(entry.date)}</span>
-        <span className="col-start-2 col-end-4 flex min-w-0 items-center gap-1.5 text-[12px] text-content/40">
-          <WhoAvatar name={entry.by} />
-          <span className="truncate">{entry.by || 'Unknown'}</span>
-          {extra ? (
-            <>
-              <span className="text-content/35">·</span>
-              <span className="shrink-0">{extra[0]} <span className="font-mono">{extra[1]}</span></span>
-            </>
-          ) : null}
-        </span>
-      </button>
-      {hint}
-    </>
+    <PanelRow
+      id={entry.id}
+      title={<span className="flex min-w-0 items-center gap-2"><StaticChip summary={entry} glyph={false} /><span className="truncate"><Highlight text={entry.title} words={words} /></span></span>}
+      label={`${kindWord(entry.kind)} ${entry.id}: ${entry.title}${status}${entry.by ? `, by ${entry.by}` : ''}, ${shortDate(entry.date)}${entry.replacedBy ? `, ${entry.kind === 'N' ? 'outdated' : 'replaced'} by ${entry.replacedBy}` : entry.replaces ? `, replaces ${entry.replaces}` : ''}`}
+      dim={old}
+      meta={old && entry.replacedBy
+        ? <span className="font-mono text-[10.5px]">→ {entry.replacedBy}</span>
+        : <span>{author ? `${author} · ` : ''}{shortDate(entry.date)}</span>}
+      onOpen={() => openNote(entry.id)}
+      menuLabel={`${kindWord(entry.kind)} ${entry.id}`}
+      menu={close => (
+        <>
+          <MenuRow icon={ExternalLink} title="Open" shortcut="Enter" onSelect={() => { close(); openNote(entry.id); }} />
+          <MenuRow icon={Copy} title="Copy ID" onSelect={() => { close(); void navigator.clipboard?.writeText(entry.id); }} />
+        </>
+      )}
+    />
   );
 }
 
-function EmptyState({ icon, children, action }: { icon: ReactNode; children: ReactNode; action?: ReactNode }) {
+/** A heading inside an open entry: sentence case like the list's sections (ACH-D37). */
+function SectionLabel({ label, count, className }: { label: string; count?: number; className: string }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-7 py-10 text-center font-sans text-[12px] leading-normal text-content/55">
-      <span aria-hidden className="text-content/55">{icon}</span>
-      <span>{children}</span>
-      {action}
-    </div>
+    <h4 className={`flex justify-between font-sans text-[11px] font-medium text-content/50 ${className}`}>
+      <span>{label}</span>
+      {count !== undefined ? <span className="font-normal tabular-nums">{count}</span> : null}
+    </h4>
   );
 }
 
@@ -200,32 +146,36 @@ function NotesList({ project, switchable, projects, switcherLabel, entries }: { 
   const everywhere = useNotes(s => s.everywhere);
   const mine = useMemo(() => entries.filter(e => e.code === project.code), [entries, project.code]);
   const shown = (e: RefSummary) => filter === 'all' || e.kind === filter;
-  const decisions = mine.filter(e => e.state === 'active' && shown(e));
-  const notes = mine.filter(e => e.state === 'note' && shown(e));
-  const replaced = mine.filter(e => e.state === 'replaced' && shown(e));
+  const { decisions, notes, replaced, counts } = notesSections(mine, filter);
+  const [showReplaced, setShowReplaced] = useState(false);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Header trailing={<span className="ml-auto shrink-0 font-mono text-[12px] text-content/40">{project.code}</span>}>
         {switchable ? <ProjectSwitcher project={project} projects={projects} label={switcherLabel} /> : <h3 className="min-w-0 truncate pl-1.5 text-[13px] font-medium text-content">{project.name}</h3>}
       </Header>
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pb-3 pt-1">
-        {mine.length || query ? <Tools query={query} /> : null}
+      {mine.length || query ? (
+        <PanelToolbar
+          query={query}
+          onQuery={setNotesQuery}
+          searchLabel="Search notes and decisions"
+          filter={{ label: 'Show', value: filter, onChange: setNotesFilter, options: [{ value: 'all', label: 'All', count: counts.all }, { value: 'D', label: 'Decisions', count: counts.D }, { value: 'N', label: 'Notes', count: counts.N }] }}
+        />
+      ) : null}
+      <PanelList label="Notes and decisions">
         {query.trim() ? (
           <SearchResults query={query} project={project} everywhere={everywhere} filter={filter} />
         ) : !mine.length ? (
-          <EmptyState icon={<NoteGlyph className="size-[18px]" />}>
-            No decisions or notes for {project.name} yet.<br />Agents add them as they work; ask any agent to record one.
-          </EmptyState>
+          <PanelEmpty icon={<NoteGlyph />} title={`No decisions or notes for ${project.name} yet`}>Agents add them as they work; ask any agent to record one.</PanelEmpty>
         ) : !decisions.length && !notes.length && !replaced.length ? (
-          <EmptyState icon={<NoteGlyph className="size-[18px]" />}>No {filter === 'D' ? 'decisions' : 'notes'} for {project.name} yet.</EmptyState>
+          <PanelEmpty icon={<NoteGlyph />} title={`No ${filter === 'D' ? 'decisions' : 'notes'} for ${project.name} yet`} />
         ) : (
           <>
-            {decisions.length ? <><SectionLabel label="Decisions" count={decisions.length} />{decisions.map(e => <Row key={e.id} entry={e} />)}</> : null}
-            {notes.length ? <><SectionLabel label="Notes" count={notes.length} />{notes.map(e => <Row key={e.id} entry={e} />)}</> : null}
-            {replaced.length ? <><SectionLabel label="Replaced" count={replaced.length} />{replaced.map(e => <Row key={e.id} entry={e} />)}</> : null}
+            {decisions.length ? <><PanelSection label="Decisions" count={decisions.length} />{decisions.map(e => <Row key={e.id} entry={e} />)}</> : null}
+            {notes.length ? <><PanelSection label="Notes" count={notes.length} />{notes.map(e => <Row key={e.id} entry={e} />)}</> : null}
+            {replaced.length ? <><PanelSection label="Replaced" count={replaced.length} folded={!showReplaced} onToggle={() => setShowReplaced(v => !v)} />{showReplaced ? replaced.map(e => <Row key={e.id} entry={e} />) : null}</> : null}
           </>
         )}
-      </div>
+      </PanelList>
     </div>
   );
 }
@@ -250,30 +200,25 @@ function SearchResults({ query, project, everywhere, filter }: { query: string; 
   const where = everywhere ? 'any project' : project.name;
   if (!shown.length) {
     return (
-      <EmptyState
+      <PanelEmpty
         icon={<SearchGlyph />}
-        action={everywhere ? null : (
-          <button type="button" onClick={() => setNotesEverywhere(true)} className="text-[12px] text-[var(--link-color)] hover:underline">Search every project</button>
-        )}
-      >
-        Nothing about "{query.trim()}" in {where}.
-      </EmptyState>
+        title={`Nothing about "${query.trim()}" in ${where}`}
+        action={everywhere ? null : <DetailButton onClick={() => setNotesEverywhere(true)}>Search every project</DetailButton>}
+      />
     );
   }
   return (
     <>
-      <SectionLabel label={`${shown.length} ${shown.length === 1 ? 'result' : 'results'}${everywhere ? ' in every project' : ''}`} />
+      <PanelSection label={`${shown.length} ${shown.length === 1 ? 'result' : 'results'}${everywhere ? ' in every project' : ''}`} />
       {shown.map(hit => (
-        <Row
-          key={hit.entry.id}
-          entry={hit.entry}
-          words={words}
-          hint={hit.line ? (
-            <p className="-mt-1 pb-1 pl-10 pr-1.5 font-sans text-[11.5px] leading-snug text-content/35">
+        <div key={hit.entry.id}>
+          <Row entry={hit.entry} words={words} />
+          {hit.line ? (
+            <p className="-mt-0.5 truncate pb-1 pl-[30px] pr-1.5 font-sans text-[11.5px] leading-snug text-content/40">
               {hit.field === 'why' ? 'Why: ' : ''}"<Highlight text={hit.line} words={words} />"
             </p>
           ) : null}
-        />
+        </div>
       ))}
     </>
   );
@@ -296,7 +241,7 @@ function NoteDetail({ id }: { id: string }) {
   const goBack = () => {
     openNote(null);
     // Focus the row it came from once the list is back.
-    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-note-row="${id}"]`)?.focus());
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-panel-row="${id}"] [data-panel-row-main]`)?.focus());
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={e => { if (e.key === 'Escape' && !e.defaultPrevented) { e.stopPropagation(); goBack(); } }}>

@@ -25,10 +25,10 @@ export function chipClass(summary: Pick<RefSummary, 'kind' | 'state'> | undefine
 }
 
 /** A chip that only shows (a row in the list): no hover, no button. */
-export function StaticChip({ summary, small = true }: { summary: RefSummary; small?: boolean }) {
+export function StaticChip({ summary, small = true, glyph = true }: { summary: RefSummary; small?: boolean; /** List rows drop the glyph: the section already says the kind (ACH-D37 amends ACH-D13). */ glyph?: boolean }) {
   return (
     <span className={chipClass(summary, summary.id, small)}>
-      {summary.kind === 'D' ? <DecisionGlyph /> : <NoteGlyph />}
+      {glyph ? summary.kind === 'D' ? <DecisionGlyph /> : <NoteGlyph /> : null}
       {summary.id}
     </span>
   );
