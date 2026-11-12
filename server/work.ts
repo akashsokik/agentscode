@@ -8,8 +8,9 @@ import { parsePorcelainZ } from './projects.ts';
 import { readFile, resolveInside } from './workspace.ts';
 import { findRefIds } from '../shared/refs.ts';
 import { layoutGraph } from '../shared/graph.ts';
-import { mentionsBranch, namesInMergeSubject, parseDecorations, type CleanupBranch, type CleanupFolder, type CleanupRequest, type CleanupResult, type FolderChanges, type WorkBranch, type WorkCommit, type WorkMerge, type WorkProject, type WorkState, type WorkView } from '../shared/work.ts';
+import { mentionsBranch, namesInMergeSubject, parseDecorations, type CleanupBranch, type CleanupFolder, type CleanupRequest, type CleanupResult, type FolderChanges, type WorkBranch, type WorkCommit, type WorkMerge, type WorkProject, type WorkState, type WorkView, isStaleBranch } from '../shared/work.ts';
 import { realPathThroughParents } from './dataDir.ts';
+import { WorkOwners, ownableBranch, reflogMerges, type Owner } from './workOwners.ts';
 import { HttpError } from './errors.ts';
 
 // The Work view's data (ACH-D17). Read only: every git command it runs for the view goes through
@@ -292,6 +293,8 @@ export interface WorkContext {
   /** <dataDir>: cleanup only ever lists folders under it (agent homes, PodCode's worktrees) or an agent's recorded worktree. */
   dataDir: string;
   knownRef: (id: string) => boolean;
+  /** Who owns each branch and commit (ACH-D34); kept in memory when not given. */
+  owners?: WorkOwners;
 }
 
 interface RepoFacts {
@@ -342,6 +345,7 @@ export class WorkService {
   private records: MergeRecords;
   private git: GitRunner;
   private ctx: WorkContext;
+  private owners: WorkOwners;
   /** How long a project's view is reused before git is asked again. */
   ttlMs = 10_000;
 
@@ -349,6 +353,40 @@ export class WorkService {
     this.records = records;
     this.ctx = ctx;
     this.git = git;
+    this.owners = ctx.owners ?? new WorkOwners(null);
+  }
+
+  /**
+   * An agent is on this branch in this folder (ACH-D34): the branch is the agent's when the folder is
+   * its own (its worktree, or a folder under its home), whether PodCode or plain git made the branch.
+   */
+  noteBranch(projectId: string, folder: string, branch: string | null | undefined, agent: Pick<Agent, 'id' | 'name'>): void {
+    if (!ownableBranch(branch)) return;
+    if (this.owner(folder, this.ctx.agents())?.id !== agent.id) return;
+    this.owners.noteBranch(projectId, branch, { agentId: agent.id, name: agent.name });
+    this.owners.save();
+  }
+
+  /**
+   * Read main's merges not read before and give the commits each brought in to the owner its branch
+   * had then: a fast-forward's old..new range, or a merge commit and its second parent's side.
+   */
+  private async captureOwners(project: Project, root: string, defaultBranch: string): Promise<void> {
+    const log = await this.git(['reflog', 'show', '--date=unix', '--format=%H%x1f%gs%x1f%gd', `refs/heads/${defaultBranch}`], root);
+    if (!log.ok) return;
+    const done: string[] = [];
+    for (const m of reflogMerges(log.out, defaultBranch)) {
+      if (this.owners.seen(project.id, m.entry)) continue;
+      const owner = this.owners.branchOwner(project.id, m.branch, m.at ? m.at + 60_000 : undefined);
+      if (!owner) continue; // not known yet: read it again next time
+      const range = m.fastForward ? (m.before ? [`${m.before}..${m.hash}`] : null) : [`${m.hash}^1..${m.hash}^2`];
+      if (range) {
+        const list = await this.git(['rev-list', '--max-count=500', ...range], root);
+        if (list.ok) this.owners.noteCommits(project.id, [...(m.fastForward ? [] : [m.hash]), ...list.out.split('\n').filter(Boolean)], owner);
+      }
+      done.push(m.entry);
+    }
+    this.owners.markSeen(project.id, done);
   }
 
   async view(projects: Project[], fresh = false): Promise<WorkView> {
@@ -682,6 +720,7 @@ export class WorkService {
       const main = realOrSelf(wt.path) === realRoot;
       if (main && (!wt.branch || wt.branch === defaultBranch)) continue;
       const agent = this.owner(wt.path, agents);
+      if (agent && !wt.prunable) this.owners.noteBranch(project.id, wt.branch, { agentId: agent.id, name: agent.name });
       if (wt.prunable || !fs.existsSync(wt.path)) {
         // git gives real paths (/private/var on macOS), so compare with the data folder's real path.
         if (!main && !wt.locked && inside(realOrSelf(wt.path), dataDir)) folders.push({ path: wt.path, branch: wt.branch, ...(agent ? { agentId: agent.id, agentName: agent.name } : {}), reason: 'missing', changes: { changed: 0, untracked: 0, links: 0, built: 0, ignored: [] }, dirty: false });
@@ -715,9 +754,11 @@ export class WorkService {
       // Working: its owner is mid-turn in this very folder (its worktree, or where its tools last ran).
       const here = agent && (realOrSelf(agent.worktree?.path ?? '') === realOrSelf(wt.path) || (agent.workingIn && inside(realOrSelf(agent.workingIn.root), realOrSelf(wt.path))));
       const state: WorkState = info.reviewer ? 'approved' : info.reviewing ? 'reviewing' : agent?.status === 'working' && here ? 'working' : 'open';
+      // The folder's owner, else whoever the records say has the branch (work done in the project's own folder).
+      const recordedOwner = agent ? undefined : this.owners.branchOwner(project.id, wt.branch);
       inProgress.push({
         branch: wt.branch, folder: wt.path, inPlace: main,
-        ...(agent ? { agentId: agent.id, agentName: agent.name } : {}),
+        ...(agent ? { agentId: agent.id, agentName: agent.name } : recordedOwner ? { agentId: recordedOwner.agentId, agentName: recordedOwner.name } : {}),
         state, ...(info.reviewer || info.reviewing ? { reviewer: info.reviewer ?? info.reviewing } : {}),
         ahead: ahead || 0, behind: behind || 0, changed: changes.changed, untracked: changes.untracked - changes.links + changes.ignored.length,
         ...(lh ? { last: { hash: lh, subject: ls ?? '', at: Number(lt) * 1000 } } : {}),
@@ -746,12 +787,24 @@ export class WorkService {
     // The graph (ACH-D18): about 20 commits of main and the open branches, in topological order, with
     // parents and refs; main's own line is 'main', an open branch's lane its owner, a merged branch's
     // lane the merge's author (lazygit colours a lane by what opened it).
-    const tips = inProgress.map(b => b.branch);
+    // An owned open branch's commits are its owner's; then main's merges since the last look.
+    for (const b of inProgress) {
+      if (!b.agentId || !b.agentName) continue;
+      const ahead = await this.git(['rev-list', '--max-count=200', `refs/heads/${defaultBranch}..refs/heads/${b.branch}`], root);
+      if (ahead.ok) this.owners.noteCommits(project.id, ahead.out.split('\n').filter(Boolean), { agentId: b.agentId, name: b.agentName });
+    }
+    await this.captureOwners(project, root, defaultBranch);
+    this.owners.save();
+    const ownerOf = (hash: string): Owner | undefined => this.owners.commitOwner(project.id, hash);
+
+    // Stale branches (ACH-D34) fold into one row in the client and take no lane or rows here.
+    const now = Date.now();
+    const tips = inProgress.filter(b => !isStaleBranch(b, now)).map(b => b.branch);
     const graphFormat = '--format=%H%x1f%P%x1f%T%x1f%s%x1f%ct%x1f%D';
     const glog = await this.git(['log', '--topo-order', `-${GRAPH_ROWS}`, '--decorate=full', graphFormat, defaultBranch, ...tips.map(b => `refs/heads/${b}`)], root);
     const mainLine = new Set(history.map(c => c.hash));
     const tipOwner = new Map<string, string>();
-    for (const b of inProgress) {
+    for (const b of inProgress.filter(x => tips.includes(x.branch))) {
       const tip = await this.git(['rev-parse', '--verify', '--quiet', `refs/heads/${b.branch}`], root);
       if (tip.ok) tipOwner.set(tip.out.trim(), b.agentName ?? b.branch);
     }
@@ -771,12 +824,14 @@ export class WorkService {
     const commits = (await graphWindow(recent, context, [...tipOwner.keys()], mainHead, this.git, root)).map(line => {
       const [hash, parents, tree, subject, at, deco] = line.split('\x1f');
       const r = records.find(x => x.hash === hash) ?? records.find(x => x.tree === tree);
-      const names = r?.names.length ? r.names : namesInMergeSubject(subject ?? '');
+      const named = r?.names.length ? r.names : namesInMergeSubject(subject ?? '');
+      const recorded = named.length ? undefined : ownerOf(hash ?? '');
+      const names = recorded ? [recorded.name] : named;
       const parentList = (parents ?? '').split(' ').filter(Boolean);
       const { refs, head } = parseDecorations(deco ?? '');
       return {
         hash, parents: parentList, subject: subject ?? '', at: Number(at) * 1000, merge: parentList.length > 1,
-        names, agentIds: ids(names), ...(r?.reviewer ? { reviewer: r.reviewer } : {}), refs, head,
+        names, agentIds: recorded ? [recorded.agentId] : ids(names), ...(r?.reviewer ? { reviewer: r.reviewer } : {}), refs, head,
         key: mainLine.has(hash) ? 'main' : tipOwner.get(hash) ?? null, mergeKey: names[0] ?? null,
       };
     });

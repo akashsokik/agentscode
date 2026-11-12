@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
-import type { WorkProject, WorkRef, WorkTarget } from '../../shared/work.ts';
+import { useMemo, useState } from 'react';
+import type { WorkBranch, WorkProject, WorkTarget } from '../../shared/work.ts';
 import { edgePath } from '../../shared/graph.ts';
-import { Check } from '../mono/icons.tsx';
+import { ChevronDown, ChevronRight } from '../mono/icons.tsx';
 import { useApp } from '../store.ts';
 import { day } from './workData.ts';
-import { BranchState, MergeState, WorkOwnerLabel, WorkRow, WorkWho as Who } from './WorkParts.tsx';
-import { branchStatus, commitIdentity, mergeStatus, refWork, workIdentity, workOwner } from './workPresentation.ts';
+import { WorkRow, WorkWho as Who } from './WorkParts.tsx';
+import { branchStatus, workOwner } from './workPresentation.ts';
+import { branchCount, rowOwners, rowText, shortBranch, splitBranches, tagNames, tipLabels } from './graphRows.ts';
 
 const ROW_H = 30;
 const LANE_W = 13;
@@ -43,67 +44,75 @@ function Lanes({ project }: { project: WorkProject }) {
   );
 }
 
-function PillIcon({ kind }: { kind: 'branch' | 'globe' | 'tag' }) {
-  const paths = {
-    branch: <><circle cx="4.5" cy="3.5" r="1.6" /><circle cx="4.5" cy="12.5" r="1.6" /><circle cx="11.5" cy="5" r="1.6" /><path d="M4.5 5.1v5.8M11.5 6.6c0 3-3 3-7 4.3" /></>,
-    globe: <><circle cx="8" cy="8" r="6" /><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12" /></>,
-    tag: <><path d="M2.5 2.5h5.5l6 6-5.5 5.5-6-6Z" /><circle cx="5.5" cy="5.5" r="1" /></>,
-  };
-  return <svg aria-hidden viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} className="size-2.5 shrink-0">{paths[kind]}</svg>;
-}
-
-/** Ref pills (ACH-D18): local solid with a branch icon (and a globe when its GitHub copy is here too), GitHub dashed with a globe, tags filled. */
-function Pill({ r, project }: { r: WorkRef; project: WorkProject }) {
+/** An open branch tip's label (ACH-D34): a dot in its owner's colour and the short name; the full name on hover. */
+function TipLabel({ branch }: { branch: WorkBranch }) {
   const agents = useApp(s => s.snapshot?.agents);
-  const identity = workIdentity(refWork(project, r));
-  const owner = workOwner(agents ?? [], identity.id, identity.name);
-  const ownedBranch = r.kind !== 'tag' && r.name !== project.defaultBranch && r.name !== project.remote;
-  const tint = owner.colour ? { borderColor: `color-mix(in srgb, ${owner.colour} 60%, transparent)`, backgroundColor: `color-mix(in srgb, ${owner.colour} 12%, transparent)` } : undefined;
-  const avatar = ownedBranch ? <Who id={owner.id} name={owner.name} size="size-3" /> : null;
-  const base = 'mr-1.5 inline-flex h-[17px] max-w-full items-center gap-[3px] rounded-[5px] px-[5px] align-[1px] font-mono text-[10.5px] font-medium';
-  if (r.kind === 'local') {
-    return (
-      <span className={`${base} border border-content/20 text-content/85`} style={tint} title={`${r.name}${owner.name ? `, ${owner.name}` : ownedBranch ? ', owner not recorded' : ''}${r.remote ? `, on remote as ${r.remote} at last fetch` : ''}`}>
-        <PillIcon kind="branch" />{avatar}<span className="truncate">{r.name}</span>
-        {r.remote ? <span className="ml-1 inline-flex text-success"><PillIcon kind="globe" /></span> : null}
-      </span>
-    );
-  }
-  if (r.kind === 'remote') return <span className={`${base} border border-dashed border-success/40 text-success`} title={`${r.name}, on remote at last fetch`}><PillIcon kind="globe" />{avatar}<span className="truncate">{r.name}</span></span>;
-  return <span className={`${base} bg-content/7 text-content/70`}><PillIcon kind="tag" />{r.name}</span>;
-}
-
-/** In the panel, at most two pills and "+N"; the pane shows them all. */
-function Pills({ refs, wide, project }: { refs: WorkRef[]; wide: boolean; project: WorkProject }) {
-  const shown = wide || refs.length <= 2 ? refs : refs.slice(0, 2);
-  const more = refs.length - shown.length;
+  const owner = workOwner(agents ?? [], branch.agentId, branch.agentName);
+  const status = branchStatus(branch);
   return (
-    <>
-      {shown.map(r => <Pill key={`${r.kind}:${r.name}`} r={r} project={project} />)}
-      {more ? <span className="mr-1.5 align-[1px] font-mono text-[10.5px] text-content/45" title={refs.slice(2).map(r => r.remote ?? r.name).join(', ')}>+{more}</span> : null}
-    </>
+    <span className="inline-flex min-w-0 max-w-[108px] shrink-0 items-center gap-[5px] text-[11.5px] text-content/80" title={`${branch.branch}${owner.name ? ` · ${owner.name}` : ''} · ${status.label}${branch.ahead ? ` · ${branch.ahead} ahead` : ''}`}>
+      <span aria-hidden className="size-[7px] shrink-0 rounded-full" style={{ background: owner.colour ?? 'color-mix(in srgb, var(--color-content) 45%, transparent)' }} />
+      <span className="truncate">{shortBranch(branch.branch)}</span>
+    </span>
   );
 }
 
+/** Who made a row's commit: up to three avatars, the name when there is one; nothing when nobody was recorded. */
+function RowOwners({ owners }: { owners: { id?: string; name: string }[] }) {
+  if (!owners.length) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center" title={owners.map(o => o.name).join(', ')}>
+      {owners.map((o, i) => <span key={`${o.id ?? o.name}:${i}`} className={i ? '-ml-1' : ''}><Who id={o.id} name={o.name} size="size-3.5" /></span>)}
+      {owners.length === 1 ? <span className="ml-1.5 max-w-14 truncate text-content/55">{owners[0].name}</span> : null}
+    </span>
+  );
+}
+
+/** Stale open branches (ACH-D34), folded into one row at the bottom that opens to list them. */
+function OlderBranches({ branches, selected, onSelect }: { branches: WorkBranch[]; selected: WorkTarget | null; onSelect: (target: WorkTarget) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!branches.length) return null;
+  const names = [...new Set(branches.map(b => b.agentName).filter((n): n is string => Boolean(n)))];
+  return <>
+    <button type="button" aria-expanded={open} onClick={() => setOpen(v => !v)} className="flex h-[30px] w-full min-w-0 items-center gap-2 whitespace-nowrap rounded-[7px] px-1.5 text-left font-sans text-[12px] text-content/55 transition-colors hover:bg-content/5">
+      {open ? <ChevronDown className="size-3 shrink-0 text-content/40" /> : <ChevronRight className="size-3 shrink-0 text-content/40" />}
+      <span className="shrink-0">{branches.length} older {branches.length === 1 ? 'branch' : 'branches'}</span>
+      {names.length ? <span className="min-w-0 flex-1 truncate text-content/40">· {names.join(', ')}</span> : <span className="flex-1" />}
+      <span className="inline-flex shrink-0 items-center">{names.slice(0, 4).map((n, i) => { const b = branches.find(x => x.agentName === n)!; return <span key={n} className={i ? '-ml-1' : ''}><Who id={b.agentId} name={n} size="size-3.5" /></span>; })}</span>
+    </button>
+    {open ? branches.map(b => (
+      <WorkRow key={b.folder} target={{ kind: 'branch', id: b.folder }} selected={selected?.kind === 'branch' && selected.id === b.folder} title={`${b.branch}, ${b.agentName ?? 'owner not recorded'}, ${b.behind} behind main`} onSelect={onSelect}>
+        <span aria-hidden className="w-3 shrink-0" />
+        {b.agentName || b.agentId ? <Who id={b.agentId} name={b.agentName} size="size-3.5" /> : null}
+        <span className="min-w-0 flex-1 truncate text-content/80">{shortBranch(b.branch)}</span>
+        <span className="shrink-0 text-[11px] text-content/45">{b.agentName ? `${b.agentName} · ` : ''}{b.behind} behind</span>
+      </WorkRow>
+    )) : null}
+  </>;
+}
+
 export function WorkGraph({ project, wide, selected, onSelect }: { project: WorkProject; wide: boolean; selected: WorkTarget | null; onSelect: (target: WorkTarget) => void }) {
-  const agents = useApp(s => s.snapshot?.agents);
+  const { open, older } = useMemo(() => splitBranches(project, Date.now()), [project]);
   const gutter = LANE_PAD * 2 + Math.max(0, project.graphLanes - 1) * LANE_W;
-  return <><div className="flex h-8 items-center justify-between px-1.5 text-[11px] text-content/50"><span>Recent commits</span><span>{project.inProgress.length} open branches</span></div>
+  return <><div className="flex h-8 items-center justify-between px-1.5 text-[11px] text-content/50"><span>Recent commits</span><span>{branchCount(open.length, older.length)}</span></div>
     <div className="relative"><div className="pointer-events-none absolute left-1.5 top-0"><Lanes project={project} /></div>
       {project.graph.map(c => {
         const target: WorkTarget = { kind: 'commit', id: c.hash };
-        const identity = commitIdentity(project, c);
-        const owner = workOwner(agents ?? [], identity.id, identity.name);
-        const work = c.refs.map(r => refWork(project, r)).find(Boolean) ?? project.merged.find(m => m.hash === c.hash);
-        const status = work ? 'state' in work ? branchStatus(work) : mergeStatus(work) : undefined;
-        const label = [c.subject, c.refs.map(r => r.name).join(', '), owner.name ?? (work || c.lane !== 0 ? 'Owner not recorded' : undefined), status?.title, c.hash.slice(0, 7)].filter(Boolean).join(', ');
+        const row = rowText(project, c);
+        const labels = tipLabels(c, open, project.graph);
+        const owners = rowOwners(c);
+        const tags = tagNames(c);
+        const label = [c.subject, ...labels.map(b => b.branch), ...tags, owners.map(o => o.name).join(', '), ...labels.map(b => branchStatus(b).title), c.hash.slice(0, 7)].filter(Boolean).join(', ');
         return <WorkRow key={c.hash} target={target} selected={selected?.kind === 'commit' && selected.id === c.hash} title={label} onSelect={onSelect}>
           <span aria-hidden className="shrink-0" style={{ width: gutter }} />
-          <span className="min-w-0 flex-1 truncate text-content/90">{c.head ? <Check aria-label="HEAD" className="mr-1 inline-block size-3" /> : null}<Pills refs={c.refs} wide={wide} project={project} />{c.subject}</span>
-          {owner.id || owner.name || c.lane !== 0 || work ? <WorkOwnerLabel id={owner.id} name={owner.name} /> : null}
-          {work ? 'state' in work ? <BranchState branch={work} compact /> : <MergeState merge={work} compact /> : null}
+          <span className={`min-w-0 flex-1 truncate ${row.merge ? 'text-content/55' : 'text-content/90'}`}>{row.text}</span>
+          {labels.map(b => <TipLabel key={b.branch} branch={b} />)}
+          {tags.map(name => <span key={name} className="shrink-0 text-[11px] text-content/45">{name}</span>)}
+          <RowOwners owners={owners} />
           {wide ? <span className="shrink-0 text-[11px] text-content/45">{day(c.at)}</span> : null}
         </WorkRow>;
       })}
-    </div><p className="px-1.5 pt-4 text-[11px] text-content/50">Select a commit to inspect its changes.</p></>;
+    </div>
+    <OlderBranches branches={older} selected={selected} onSelect={onSelect} />
+    <p className="px-1.5 pt-4 text-[11px] text-content/50">Select a commit to inspect its changes.</p></>;
 }

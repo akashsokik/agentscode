@@ -89,6 +89,7 @@ import { createWalkthrough, deleteWalkthrough, listWalkthroughs, readWalkthrough
 import { migrateAgentProjects, type Store } from './store.ts';
 import { isAllProjects, normalizeProjectIds, startProjectId, worksOn } from '../shared/agentProjects.ts';
 import { createWorktree, removeWorktree } from './worktrees.ts';
+import { WorkOwners } from './workOwners.ts';
 import { listArchive, type ArchivedAgent } from './agentArchive.ts';
 
 const AUTONOMIES: Autonomy[] = ['readonly', 'ask', 'edits', 'full'];
@@ -243,6 +244,7 @@ export class AgentManager {
     this.refs = new ProjectRefs(path.join(store.dataDir, 'projects'));
     this.notes = new NotesApi({ refs: this.refs, mentions: new RefMentions(store), projects: () => this.store.projects.values() });
     this.work = new WorkService(new MergeRecords(path.join(store.dataDir, 'work')), {
+      owners: new WorkOwners(path.join(store.dataDir, 'work')),
       agents: () => [...this.store.agents.values()],
       messages: () => this.store.messages,
       agentsDir: path.join(store.dataDir, 'agents'),
@@ -714,6 +716,8 @@ export class AgentManager {
       throw error;
     }
     this.store.agents.set(agent.id, agent);
+    // Its worktree's branch is its own (ACH-D34), recorded now so the Work graph can show it later.
+    if (worktree && project) this.work.noteBranch(project.id, worktree.path, worktree.branch, agent);
     this.addEntry(agent.id, {
       id: randomUUID(),
       kind: 'system',
@@ -2585,12 +2589,15 @@ export class AgentManager {
     const branch = place.branch ?? (same ? agent.workingIn!.branch : null);
     agent.workingIn = { projectId: place.projectId, root: place.root, branch, at: now };
     if (!same) this.emitAgent(agent);
+    // A branch checked out in the agent's own folder is its own (ACH-D34), however it was made.
+    if (branch) this.work.noteBranch(place.projectId, place.root, branch, agent);
     if (place.branch) return;
     void this.branchOf(place.root, fresh).then((found) => {
       const live = this.store.agents.get(agent.id);
       if (!live?.workingIn || live.workingIn.root !== place.root || live.workingIn.branch === found) return;
       live.workingIn = { ...live.workingIn, branch: found };
       this.emitAgent(live);
+      if (found) this.work.noteBranch(place.projectId, place.root, found, live);
     });
   }
 

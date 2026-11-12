@@ -207,3 +207,15 @@ export function namesInMergeSubject(subject: string): string[] {
   if (!match) return [];
   return match[1].split(/\s*,\s*|\s+and\s+/).map(s => s.trim()).filter(s => /^[\w .-]{1,24}$/.test(s));
 }
+
+/**
+ * A stale open branch (ACH-D34): no commit for over a day, or 40 or more commits behind main. The
+ * graph folds these into one "N older branches" row and gives them no lane. A branch someone is
+ * working on, being reviewed, or with uncommitted changes is never stale.
+ */
+export const STALE_BEHIND = 40;
+export const STALE_IDLE_MS = 24 * 60 * 60 * 1000;
+export function isStaleBranch(b: Pick<WorkBranch, 'state' | 'behind' | 'changed' | 'untracked' | 'last'>, now: number): boolean {
+  if (b.state === 'working' || b.state === 'reviewing' || b.changed > 0 || b.untracked > 0) return false;
+  return b.behind >= STALE_BEHIND || (b.last ? now - b.last.at > STALE_IDLE_MS : false);
+}
