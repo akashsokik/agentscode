@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../shared/types.ts';
-import { authorLabel, cleanSummary, dayLabel, decisionGroups, decisionKind, focusAfterRemoval, issueGroups, issueMoves, groupByDay, isMenuKey, matches, notesSections, routineGroups, shortSchedule, shortWhen } from '../web/panelList.ts';
+import { armRemove, authorLabel, cleanSummary, keepArmed, dayLabel, decisionGroups, decisionKind, focusAfterRemoval, isKeyboardFocus, issueGroups, issueMoves, groupByDay, isMenuKey, matches, notesSections, routineGroups, shortSchedule, shortWhen } from '../web/panelList.ts';
 
 // The SuperAgent's right-panel tabs read alike (ACH-D37): one line per item, grouped, searched and
 // filtered the same way.
@@ -145,4 +145,20 @@ test('after a row is removed, focus goes to the next row, else the one before, e
   assert.equal(focusAfterRemoval(['a', 'b', 'c'], 'c'), 'b');
   assert.equal(focusAfterRemoval(['a'], 'a'), null);
   assert.equal(focusAfterRemoval(['a'], 'zz'), null);
+});
+
+test('a row shows its actions for keyboard focus only: :focus-visible, not a mouse click', () => {
+  const el = (visible: boolean) => ({ matches: (s: string) => s === ':focus-visible' && visible });
+  assert.equal(isKeyboardFocus(el(true)), true, 'Tab or the arrow keys');
+  assert.equal(isKeyboardFocus(el(false)), false, 'a click: hover already shows it, and a row the click closed looks closed');
+  assert.equal(isKeyboardFocus(null), false);
+  assert.equal(isKeyboardFocus({ matches: () => { throw new SyntaxError('unknown pseudo-class'); } }), true, 'an engine without :focus-visible keeps the keyboard working');
+});
+
+test('Remove from the menu opens the row and focuses its "Remove?"; the confirm stays armed while it has focus', () => {
+  assert.deepEqual(armRemove(false, true), { open: true, focusConfirm: true }, 'a closed row opens so the confirm is in view');
+  assert.deepEqual(armRemove(true, true), { open: false, focusConfirm: true }, 'an open row stays open');
+  assert.deepEqual(armRemove(false, false), { open: false, focusConfirm: false }, 'the hover trash arms in place, as before');
+  assert.equal(keepArmed(true), true);
+  assert.equal(keepArmed(false), false);
 });

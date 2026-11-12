@@ -159,3 +159,25 @@ export function focusAfterRemoval(ids: readonly string[], removed: string): stri
   if (i < 0) return null;
   return ids[i + 1] ?? ids[i - 1] ?? null;
 }
+
+/**
+ * Whether a row's focus should show its actions and tint: only keyboard focus (:focus-visible).
+ * A mouse click also focuses the row, but the pointer already shows hover, and a row a click
+ * just closed should look closed. An engine without :focus-visible counts as keyboard.
+ */
+export function isKeyboardFocus(el: { matches(selector: string): boolean } | null | undefined): boolean {
+  if (!el) return false;
+  try { return el.matches(':focus-visible'); } catch { return true; }
+}
+
+/**
+ * A row's armed "Remove?" (the second press confirms). Armed from the menu, the row opens so the
+ * confirm is in view, and focus goes to it; it disarms after a few seconds, but never while it
+ * has focus (someone is about to press it).
+ */
+export function armRemove(expanded: boolean, fromMenu: boolean): { open: boolean; focusConfirm: boolean } {
+  return { open: fromMenu && !expanded, focusConfirm: fromMenu };
+}
+export function keepArmed(confirmHasFocus: boolean): boolean {
+  return confirmHasFocus;
+}

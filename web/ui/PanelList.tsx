@@ -6,9 +6,9 @@
  * hover and in the shared right-click menu (ACH-D27), which ⇧F10 or the menu key also opens.
  * Flat, theme colours only (ACH-D7, ACH-D14).
  */
-import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { ChevronDown, Plus, Search, X } from '../mono/icons.tsx';
-import { isMenuKey } from '../panelList.ts';
+import { isKeyboardFocus, isMenuKey } from '../panelList.ts';
 import { ContextMenu, openContextMenu, type MenuAnchor } from './ContextMenu.tsx';
 import { useElementWidth } from './useElementWidth.ts';
 
@@ -120,7 +120,7 @@ export function PanelRow({ id, lead, title, label, meta, actions, dim = false, s
   children?: ReactNode;
 }) {
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
-  // Keyboard focus shows the actions as hover does. Tracked here: the app's group-focus-within
+  // Keyboard focus (not a click) shows the actions as hover does. Tracked here: the app's group-focus-within
   // variant (styles.css) is for unnamed groups only, and a row sits inside other groups.
   const [focused, setFocused] = useState(false);
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
@@ -133,7 +133,9 @@ export function PanelRow({ id, lead, title, label, meta, actions, dim = false, s
   return (
     <div data-panel-row={id} onContextMenu={menu ? e => openContextMenu(e, setAnchor) : undefined}>
       <div
-        onFocus={() => setFocused(true)}
+        // Keyboard focus only (:focus-visible): a mouse click focuses too, and hover covers the mouse.
+        onFocus={e => setFocused(isKeyboardFocus(e.target))}
+        onKeyUp={e => setFocused(isKeyboardFocus(e.target as Element))}
         onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false); }}
         className={`group/row flex h-[30px] items-center rounded-[7px] transition-colors ${selected || expanded || anchor ? 'bg-selection' : focused ? 'bg-content/5' : 'hover:bg-content/5'}`}>
         <button
@@ -180,9 +182,9 @@ export function RowIcon({ icon: IconC, label, onClick, disabled }: { icon: Icon;
 }
 
 /** A button inside an expanded row: a quiet outlined one. */
-export function DetailButton({ children, onClick, disabled, danger = false, label }: { children: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; label?: string }) {
+export function DetailButton({ children, onClick, disabled, danger = false, label, ref }: { children: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; label?: string; ref?: Ref<HTMLButtonElement> }) {
   return (
-    <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className={`h-6 rounded-md border border-content/12 px-2 font-sans text-[11.5px] transition-colors hover:bg-content/5 disabled:opacity-40 ${danger ? 'text-danger' : 'text-content/75 hover:text-content'}`}>
+    <button ref={ref} type="button" aria-label={label} disabled={disabled} onClick={onClick} className={`h-6 rounded-md border border-content/12 px-2 font-sans text-[11.5px] transition-colors hover:bg-content/5 disabled:opacity-40 ${danger ? 'text-danger' : 'text-content/75 hover:text-content'}`}>
       {children}
     </button>
   );

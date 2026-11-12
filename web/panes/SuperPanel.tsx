@@ -8,7 +8,7 @@ import type { IssueStatus, RoutineSchedule, SuperAction, SuperAsk, SuperIssue, S
 import { api } from '../api.ts';
 import { openAsks } from '../super.ts';
 import { ISSUE_STATUS_LABEL, heldText, migrateSeen, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type SuperTab } from '../superText.ts';
-import { cleanSummary, decisionGroups, decisionKind, focusAfterRemoval, issueGroups, issueMoves, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
+import { armRemove, cleanSummary, decisionGroups, keepArmed, decisionKind, focusAfterRemoval, issueGroups, issueMoves, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { MenuDivider, MenuRow, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
@@ -324,11 +324,27 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved }: { issue: Sup
   const [text, setText] = useState(issue.text);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const confirmButton = useRef<HTMLButtonElement>(null);
+  const [focusConfirm, setFocusConfirm] = useState(false);
+  // The confirm disarms after a few seconds, unless it has focus (someone is about to press it).
   useEffect(() => {
     if (!confirming) return;
-    const timer = setTimeout(() => setConfirming(false), 4000);
-    return () => clearTimeout(timer);
+    const timer = setInterval(() => { if (!keepArmed(document.activeElement === confirmButton.current)) setConfirming(false); }, 4000);
+    return () => clearInterval(timer);
   }, [confirming]);
+  // Armed from the menu: once the row is open and the menu has gone, focus the confirm.
+  useEffect(() => {
+    if (!focusConfirm || !confirming) return;
+    // After the menu's own focus restore (a frame), so that one finds focus already placed and keeps it.
+    const timer = setTimeout(() => { confirmButton.current?.focus(); setFocusConfirm(false); }, 50);
+    return () => clearTimeout(timer);
+  }, [focusConfirm, confirming]);
+  const armFromMenu = () => {
+    const next = armRemove(expanded, true);
+    if (next.open) onToggle();
+    setConfirming(true);
+    setFocusConfirm(next.focusConfirm);
+  };
   const named = `"${issue.text.length > 60 ? `${issue.text.slice(0, 59)}…` : issue.text}"`;
   const run = async (action: () => Promise<unknown>) => { setBusy(true); const ok = await attempt(action); setBusy(false); return ok; };
   const save = async () => { if (text.trim() && await run(() => api.updateIssue(issue.id, { text: text.trim() }))) setEditing(false); };
@@ -373,7 +389,7 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved }: { issue: Sup
             <MenuRow key={s} title={s === 'done' ? 'Mark done' : ISSUE_STATUS_LABEL[s]} checked={issue.status === s} disabled={busy} onSelect={() => { close(); status(s); }} />
           ))}
           <MenuDivider />
-          <MenuRow icon={Trash2} title="Remove" danger disabled={busy} onSelect={() => { close(); setConfirming(true); }} />
+          <MenuRow icon={Trash2} title="Remove…" danger disabled={busy} onSelect={() => { close(); armFromMenu(); }} />
         </>
       )}
     >
@@ -408,7 +424,7 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved }: { issue: Sup
           {(Object.keys(ISSUE_STATUS_LABEL) as IssueStatus[]).map(s => <option key={s} value={s}>{ISSUE_STATUS_LABEL[s]}</option>)}
         </select>
         {!editing ? <DetailButton onClick={edit}>Edit</DetailButton> : null}
-        {confirming ? <DetailButton danger disabled={busy} onClick={() => void removeNow()}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
+        {confirming ? <DetailButton ref={confirmButton} danger label={`Confirm removing ${named}`} disabled={busy} onClick={() => void removeNow()}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
       </div>
     </PanelRow>
   );
