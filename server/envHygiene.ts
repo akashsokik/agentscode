@@ -27,3 +27,24 @@ export function scrubScriptOverrides(env: NodeJS.ProcessEnv = process.env): stri
   for (const name of removed) delete env[name];
   return removed;
 }
+
+// ---- git: a command run in a folder acts on that folder's repository ---------------------------
+
+/**
+ * git reads these ahead of the folder it runs in; a git hook (pre-commit, pre-push) sets them to the
+ * repository being committed. The app runs git in a project's or agent's folder and means that one,
+ * so none of its git commands may inherit them, and nor may a test run started from a hook.
+ */
+export const GIT_REPO_ENV = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR'] as const;
+
+/** A copy of `env` without the settings that point git at a particular repository. */
+export function withoutGitRepoEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env };
+  for (const name of GIT_REPO_ENV) delete out[name];
+  return out;
+}
+
+/** The environment for a git command, built when it runs: this process's, without those settings, plus `extra`. */
+export function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return { ...withoutGitRepoEnv(process.env), ...extra };
+}

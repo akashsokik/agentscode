@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { gitEnv } from './envHygiene.ts';
 import type { DirListing } from '../shared/types.ts';
 
 export function expandHome(p: string): string {
@@ -50,7 +51,7 @@ export interface GitResult {
 
 export function gitRun(cwd: string, args: string[], timeout = 30_000): Promise<GitResult> {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd, env: gitEnv(), timeout, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ ok: !err, stdout: String(stdout), stderr: String(stderr) });
     });
   });

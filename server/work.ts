@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { gitEnv } from './envHygiene.ts';
 import type { Agent, ChangedFile, PeerMessage, Project } from '../shared/types.ts';
 import type { WorkChanges, WorkDiff, WorkTarget } from '../shared/work.ts';
 import { parsePorcelainZ } from './projects.ts';
@@ -49,7 +50,8 @@ async function graphWindow(recent: string[], context: string[], tips: string[], 
 /** Git with nothing that runs another program or takes optional locks. */
 const GIT_FLAGS = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.untrackedCache=false', '-c', 'diff.submodule=short', '-c', 'status.submoduleSummary=false'];
 // GIT_LITERAL_PATHSPECS: a file name is only ever a name (":!x" is not an exclude, "*" not a glob).
-const GIT_ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_LITERAL_PATHSPECS: '1' };
+// Built per call, without GIT_DIR and the like (server/envHygiene.ts): a command here acts on `cwd`'s repository only.
+const GIT_EXTRA = { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_LITERAL_PATHSPECS: '1' };
 
 /** The git commands the view may run: each reads, none writes refs, the index, config or the network. */
 const READ_COMMANDS: Record<string, (args: string[]) => boolean> = {
@@ -87,7 +89,7 @@ async function slot<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 function execGit(args: string[], cwd: string): Promise<GitResult & { code?: string | number }> {
-  return new Promise(resolve => execFile('git', [...GIT_FLAGS, ...args], { cwd, env: GIT_ENV, timeout: 15_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
+  return new Promise(resolve => execFile('git', [...GIT_FLAGS, ...args], { cwd, env: gitEnv(GIT_EXTRA), timeout: 15_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
     resolve({ ok: !error, out: String(stdout ?? ''), ...(error ? { code: error.code } : {}) });
   }));
 }

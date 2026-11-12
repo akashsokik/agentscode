@@ -72,6 +72,32 @@ test('readGit refuses anything that is not a read before git runs', async () => 
   await assert.rejects(readGit(['branch', '-D', 'main'], '/'), /Not a read-only git command/);
 });
 
+test('started from a git hook (GIT_DIR and GIT_INDEX_FILE set when work.ts loads), the view reads its own repository', () => {
+  // A child process, so the variables are there when server/work.ts is imported and nothing has
+  // dropped them first (the app's case: tests/isolate.ts is not involved).
+  const victim = path.join(tempDir('work-hook-victim'), 'repo');
+  fs.mkdirSync(victim);
+  git(victim, 'init', '-q');
+  git(victim, 'commit', '-q', '--allow-empty', '-m', 'victim');
+  const repo = path.join(tempDir('work-hook-own'), 'repo');
+  fs.mkdirSync(repo);
+  git(repo, 'init', '-q');
+  fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n');
+  const indexBefore = fs.readFileSync(path.join(victim, '.git', 'index'));
+  const work = JSON.stringify(path.resolve('server', 'work.ts'));
+  const script = `const { readGit } = await import(${work});
+const dir = await readGit(['rev-parse', '--path-format=absolute', '--absolute-git-dir'], ${JSON.stringify(repo)});
+const status = await readGit(['status', '--porcelain'], ${JSON.stringify(repo)});
+process.stdout.write(JSON.stringify({ dir: dir.out.trim(), status: status.out.trim() }));`;
+  const out = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', GIT_DIR: path.join(victim, '.git'), GIT_INDEX_FILE: path.join(victim, '.git', 'index') },
+  })) as { dir: string; status: string };
+  assert.equal(out.dir, fs.realpathSync(path.join(repo, '.git')), 'git ran on the folder it was given');
+  assert.equal(out.status, '?? a.txt');
+  assert.deepEqual(fs.readFileSync(path.join(victim, '.git', 'index')), indexBefore, 'the hook\'s repository is untouched');
+});
+
 test('branch names, merge messages, task ids and worktree lists parse safely', () => {
   assert.ok(mentionsBranch('Merge your feat/notes-tab (fefb31f) into main', 'feat/notes-tab'));
   assert.ok(!mentionsBranch('feat/notes-tab-2 is new', 'feat/notes-tab'));
