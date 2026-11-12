@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { SuperAction, SuperGoal, SuperRoutine } from '../shared/types.ts';
+import type { SuperAction, SuperIssue, SuperRoutine } from '../shared/types.ts';
 import { decisionRows, superPanelView, superTabCounts, superTabDots, superTabLatest } from '../web/superText.ts';
 import { getLayout, setRightPanel, showPanelForSuperOnce, SUPER_VIEWS } from '../web/layout.ts';
 import { harness, settle } from './helpers.ts';
@@ -35,14 +35,14 @@ test('undo from the log: the row turns undone and its action is put back', async
 });
 
 test('the right panel opens the SuperAgent on Decisions the first time, then on the tab you picked last', () => {
-  const views = ['overview', 'decisions', 'goals', 'routines', 'comms'] as const;
+  const views = ['overview', 'decisions', 'issues', 'routines', 'comms'] as const;
   assert.equal(superPanelView(undefined, views), 'decisions');
-  assert.equal(superPanelView('goals', views), 'goals');
+  assert.equal(superPanelView('issues', views), 'issues');
   assert.equal(superPanelView('overview', views), 'overview');
   assert.equal(superPanelView('changes', views), 'decisions', 'a tab the SuperAgent does not have');
 });
 
-test('tab counts: decisions made today that can still be undone, open goals, routines waiting for you', () => {
+test('tab counts: decisions made today that can still be undone, open issues, routines waiting for you', () => {
   const now = new Date(2026, 10, 9, 15, 0).getTime();
   const today = new Date(2026, 10, 9, 9, 0).getTime();
   const yesterday = new Date(2026, 10, 8, 23, 0).getTime();
@@ -54,23 +54,23 @@ test('tab counts: decisions made today that can still be undone, open goals, rou
       { id: 'c', at: today, tool: 'delegate_task', summary: '', why: '' },
       { id: 'd', at: yesterday, tool: 'create_channel', summary: '', why: '', undo },
     ],
-    goals: [goal('g1', 'queued', 1), goal('g2', 'blocked', 2), goal('g3', 'done', 3)],
+    issues: [issue('g1', 'queued', 1), issue('g2', 'blocked', 2), issue('g3', 'done', 3)],
     routines: [routine('r1', 1, true), routine('r2', 2, false)],
   }, now);
-  assert.deepEqual(counts, { decisions: 1, goals: 2, routines: 1 });
-  assert.deepEqual(superTabCounts({}, now), { decisions: 0, goals: 0, routines: 0 });
+  assert.deepEqual(counts, { decisions: 1, issues: 2, routines: 1 });
+  assert.deepEqual(superTabCounts({}, now), { decisions: 0, issues: 0, routines: 0 });
 });
 
 test('a dot shows on a tab with something newer than you last saw there, never on the open tab', () => {
   const latest = superTabLatest({
     log: [{ id: 'a', at: 50, tool: 'create_channel', summary: '', why: '' }, { id: 'b', at: 70, tool: 'nudge', summary: '', why: '' }],
-    goals: [goal('g1', 'queued', 30)],
+    issues: [issue('g1', 'queued', 30)],
     routines: [],
   });
-  assert.deepEqual(latest, { decisions: 70, goals: 30, routines: 0 });
-  assert.deepEqual(superTabDots(latest, {}, 'decisions'), { decisions: false, goals: true, routines: false }, 'never seen: new, except on the open tab and on an empty one');
-  assert.deepEqual(superTabDots(latest, { decisions: 50, goals: 30 }, 'goals'), { decisions: true, goals: false, routines: false });
-  assert.deepEqual(superTabDots(latest, { decisions: 70, goals: 30 }, 'overview'), { decisions: false, goals: false, routines: false }, 'all seen');
+  assert.deepEqual(latest, { decisions: 70, issues: 30, routines: 0 });
+  assert.deepEqual(superTabDots(latest, {}, 'decisions'), { decisions: false, issues: true, routines: false }, 'never seen: new, except on the open tab and on an empty one');
+  assert.deepEqual(superTabDots(latest, { decisions: 50, issues: 30 }, 'issues'), { decisions: true, issues: false, routines: false });
+  assert.deepEqual(superTabDots(latest, { decisions: 70, issues: 30 }, 'overview'), { decisions: false, issues: false, routines: false }, 'all seen');
 });
 
 test('opening the SuperAgent shows the right panel the first time only, on Decisions; after that the panel stays as you left it', () => {
@@ -88,7 +88,7 @@ test('opening the SuperAgent shows the right panel the first time only, on Decis
   assert.equal(getLayout().rightPanel, true, 'open: it stays open');
 });
 
-function goal(id: string, status: SuperGoal['status'], createdAt: number): SuperGoal {
+function issue(id: string, status: SuperIssue['status'], createdAt: number): SuperIssue {
   return { id, text: id, projectId: null, status, order: createdAt, createdAt, updatedAt: createdAt, by: 'user' };
 }
 

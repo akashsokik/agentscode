@@ -35,7 +35,7 @@ import {
   type Snapshot,
   type SuperAction,
   type SuperAsk,
-  type SuperGoal,
+  type SuperIssue,
   type SuperState,
   type TurnMeta,
   type UserProfile,
@@ -62,8 +62,8 @@ import { ScopedRunner, type ExecutionContext } from './agents/scoped.ts';
 import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
 import {
-  addGoalInput, agentCommandInput, proposeRoutineInput, askUserInput, completeGoalInput, updateGoalInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
-  SUPER_TOOLS, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
+  addIssueInput, agentCommandInput, proposeRoutineInput, askUserInput, completeIssueInput, updateIssueInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
+  SUPER_TOOLS, canonicalTool, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool, decisionAddInput, noteAddInput, refGetInput, refSearchInput, LESSON_LIMIT,
   appScreenshotInput, EYES_TOOLS, runCheckInput, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
 } from './comms/tools.ts';
@@ -1118,9 +1118,13 @@ export class AgentManager {
   // ---- comms tools -------------------------------------------------------
 
   /** Identity comes from the per-process token, never from caller-supplied agent IDs. */
-  async commsTool(token: string, tool: unknown, rawArgs: unknown): Promise<unknown> {
+  async commsTool(token: string, rawTool: unknown, givenArgs: unknown): Promise<unknown> {
     const id = token ? [...this.tokens].find(([, value]) => value === token)?.[0] : undefined;
     if (!id) throw new HttpError(401, 'Agent credentials expired.');
+    // The old goal commands (ACH-D38) run as the issue commands.
+    const legacy = typeof rawTool === 'string' ? canonicalTool(rawTool, givenArgs && typeof givenArgs === 'object' && !Array.isArray(givenArgs) ? givenArgs as Record<string, unknown> : {}) : null;
+    const tool: unknown = legacy ? legacy.tool : rawTool;
+    const rawArgs: unknown = legacy ? legacy.args : givenArgs;
     if (typeof tool !== 'string' || !(COMMS_TOOLS.includes(tool as CommsTool) || SUPER_TOOLS.includes(tool as SuperTool) || EYES_TOOLS.includes(tool as EyesTool))) throw new HttpError(400, 'Unknown comms tool.');
     const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs as Record<string, unknown> : {};
     const caller = this.agent(id);
@@ -1716,7 +1720,7 @@ export class AgentManager {
       this.publishSuper();
       return { asked: ask, note: 'The user sees it in PodCode; their answer arrives as a later turn. Do not wait or ask again.' };
     }
-    if (tool === 'list_goals') return { goals: this.superStore.goals() };
+    if (tool === 'list_issues') return { issues: this.superStore.issues() };
     if (tool === 'list_routines') return { routines: this.superStore.routines() };
     if (tool === 'propose_routine') {
       const parsed = proposeRoutineInput.safeParse(args);
@@ -1726,39 +1730,39 @@ export class AgentManager {
       this.recordSuper({ tool, why: input.why, undo: { kind: 'routine', routineId: routine.id }, summary: `Proposed the routine "${routine.name}" (${scheduleText(routine.schedule)})` });
       return { proposed: routine, note: 'It waits for the user to confirm it in the Routines tab; it never runs before that.' };
     }
-    if (tool === 'add_goal') {
-      const parsed = addGoalInput.safeParse(args);
-      if (!parsed.success) return fail('Give the goal in up to 500 characters, an optional project, and a why.');
-      const goal = this.superStore.addGoal({ text: parsed.data.text, projectId: parsed.data.project ? this.projectRef(parsed.data.project).id : null, by: 'super' });
-      this.recordSuper({ tool, why: parsed.data.why, undo: { kind: 'goal', goalId: goal.id, before: null }, summary: `Added the goal "${clip(goal.text, 120)}"` });
-      return { added: goal };
+    if (tool === 'add_issue') {
+      const parsed = addIssueInput.safeParse(args);
+      if (!parsed.success) return fail('Give the issue in up to 500 characters, an optional project, and a why.');
+      const issue = this.superStore.addIssue({ text: parsed.data.text, projectId: parsed.data.project ? this.projectRef(parsed.data.project).id : null, by: 'super' });
+      this.recordSuper({ tool, why: parsed.data.why, undo: { kind: 'issue', issueId: issue.id, before: null }, summary: `Added the issue "${clip(issue.text, 120)}"` });
+      return { added: issue };
     }
-    if (tool === 'update_goal' || tool === 'complete_goal') {
-      const parsed = tool === 'update_goal' ? updateGoalInput.safeParse(args) : completeGoalInput.safeParse(args);
-      if (!parsed.success) return fail('Give the goal id, what to change (status, text, agent_id, delegation_id or notes), and a why.');
-      const input = parsed.data as { goal_id: string; status?: SuperGoal['status']; text?: string; agent_id?: string; delegation_id?: string; notes?: string; why: string };
-      if (tool === 'update_goal' && [input.status, input.text, input.agent_id, input.delegation_id, input.notes].every(v => v === undefined)) {
+    if (tool === 'update_issue' || tool === 'complete_issue') {
+      const parsed = tool === 'update_issue' ? updateIssueInput.safeParse(args) : completeIssueInput.safeParse(args);
+      if (!parsed.success) return fail('Give the issue id, what to change (status, text, agent_id, delegation_id or notes), and a why.');
+      const input = parsed.data as { issue_id: string; status?: SuperIssue['status']; text?: string; agent_id?: string; delegation_id?: string; notes?: string; why: string };
+      if (tool === 'update_issue' && [input.status, input.text, input.agent_id, input.delegation_id, input.notes].every(v => v === undefined)) {
         return fail('Say what to change: status, text, agent_id, delegation_id or notes.');
       }
-      // Goals are handed out only in update turns. Mail about work you asked for skips the wake limits,
-      // so a goal started from it would skip them too: starting one (in progress, or given to an agent) there is refused.
-      if (tool === 'update_goal' && (input.status === 'in_progress' || input.agent_id) && this.inUserWorkMail(caller.id)) {
-        throw new HttpError(409, 'Hand out goals only in update turns, not while handling a report or reply on work the user asked for. Finish this turn; the next update lists the queued goals.');
+      // Issues are handed out only in update turns. Mail about work you asked for skips the wake limits,
+      // so an issue started from it would skip them too: starting one (in progress, or given to an agent) there is refused.
+      if (tool === 'update_issue' && (input.status === 'in_progress' || input.agent_id) && this.inUserWorkMail(caller.id)) {
+        throw new HttpError(409, 'Hand out issues only in update turns, not while handling a report or reply on work the user asked for. Finish this turn; the next update lists the queued issues.');
       }
-      const before = this.superStore.goal(input.goal_id);
+      const before = this.superStore.issue(input.issue_id);
       const agentId = input.agent_id === undefined ? undefined : input.agent_id === '' ? '' : this.teammate(input.agent_id).id;
-      const goal = this.superStore.updateGoal(before.id, {
-        ...(tool === 'complete_goal' ? { status: 'done' as const } : input.status ? { status: input.status } : {}),
+      const issue = this.superStore.updateIssue(before.id, {
+        ...(tool === 'complete_issue' ? { status: 'done' as const } : input.status ? { status: input.status } : {}),
         ...(input.text !== undefined ? { text: input.text } : {}),
         ...(agentId !== undefined ? { agentId } : {}),
         ...(input.delegation_id !== undefined ? { delegationId: input.delegation_id } : {}),
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
       });
-      const who = goal.agentId ? this.store.agents.get(goal.agentId)?.name : undefined;
-      const summary = tool === 'complete_goal' ? `Completed the goal "${clip(goal.text, 120)}"`
-        : `Goal "${clip(goal.text, 100)}": ${[goal.status !== before.status && goal.status.replace('_', ' '), who && goal.agentId !== before.agentId && `given to ${who}`, input.text !== undefined && 'reworded', input.notes !== undefined && 'notes'].filter(Boolean).join(', ') || 'updated'}`;
-      this.recordSuper({ tool, why: input.why, undo: { kind: 'goal', goalId: goal.id, before }, summary });
-      return { updated: goal };
+      const who = issue.agentId ? this.store.agents.get(issue.agentId)?.name : undefined;
+      const summary = tool === 'complete_issue' ? `Completed the issue "${clip(issue.text, 120)}"`
+        : `Issue "${clip(issue.text, 100)}": ${[issue.status !== before.status && issue.status.replace('_', ' '), who && issue.agentId !== before.agentId && `given to ${who}`, input.text !== undefined && 'reworded', input.notes !== undefined && 'notes'].filter(Boolean).join(', ') || 'updated'}`;
+      this.recordSuper({ tool, why: input.why, undo: { kind: 'issue', issueId: issue.id, before }, summary });
+      return { updated: issue };
     }
     if (tool === 'create_agent') {
       const parsed = createAgentInput.safeParse(args);
@@ -1861,54 +1865,54 @@ export class AgentManager {
     this.emitAgent(agent);
   }
 
-  // The user's own changes to the backlog. A new goal is news for the SuperAgent; the rest it sees
-  // in its next update's goal list.
+  // The user's own changes to the backlog. A new issue is news for the SuperAgent; the rest it sees
+  // in its next update's issue list.
 
-  addGoal(body: { text?: unknown; projectId?: unknown }): SuperState {
-    if (typeof body?.text !== 'string') throw new HttpError(400, 'Say what the goal is.');
-    const goal = this.superStore.addGoal({ text: body.text, projectId: this.goalProject(body.projectId), by: 'user' });
-    this.watcher.note({ agentId: 'user', key: `goal:${goal.id}`, text: `The user added a goal: "${goal.text}"` });
+  addIssue(body: { text?: unknown; projectId?: unknown }): SuperState {
+    if (typeof body?.text !== 'string') throw new HttpError(400, 'Say what the issue is.');
+    const issue = this.superStore.addIssue({ text: body.text, projectId: this.issueProject(body.projectId), by: 'user' });
+    this.watcher.note({ agentId: 'user', key: `issue:${issue.id}`, text: `The user added an issue: "${issue.text}"` });
     return this.publishSuper();
   }
 
-  updateGoal(id: string, body: { text?: unknown; projectId?: unknown; status?: unknown }): SuperState {
-    if (body?.text !== undefined && typeof body.text !== 'string') throw new HttpError(400, 'A goal is text.');
-    if (body?.status !== undefined && typeof body.status !== 'string') throw new HttpError(400, 'A goal is queued, in_progress, blocked or done.');
-    this.superStore.updateGoal(id, {
+  updateIssue(id: string, body: { text?: unknown; projectId?: unknown; status?: unknown }): SuperState {
+    if (body?.text !== undefined && typeof body.text !== 'string') throw new HttpError(400, 'An issue is text.');
+    if (body?.status !== undefined && typeof body.status !== 'string') throw new HttpError(400, 'An issue is queued, in_progress, blocked or done.');
+    this.superStore.updateIssue(id, {
       ...(typeof body?.text === 'string' ? { text: body.text } : {}),
-      ...(body?.projectId !== undefined ? { projectId: this.goalProject(body.projectId) } : {}),
-      ...(typeof body?.status === 'string' ? { status: body.status as SuperGoal['status'] } : {}),
+      ...(body?.projectId !== undefined ? { projectId: this.issueProject(body.projectId) } : {}),
+      ...(typeof body?.status === 'string' ? { status: body.status as SuperIssue['status'] } : {}),
     });
     return this.publishSuper();
   }
 
-  /** A goal's project from the app: a project id, or null (or nothing) for none. */
-  private goalProject(raw: unknown): string | null {
+  /** An issue's project from the app: a project id, or null (or nothing) for none. */
+  private issueProject(raw: unknown): string | null {
     if (raw === undefined || raw === null || raw === '') return null;
     if (typeof raw !== 'string') throw new HttpError(400, 'A project is given by its id.');
     return this.project(raw).id;
   }
 
-  removeGoal(id: string): SuperState {
-    this.superStore.removeGoal(id);
+  removeIssue(id: string): SuperState {
+    this.superStore.removeIssue(id);
     return this.publishSuper();
   }
 
-  moveGoal(id: string, to: unknown): SuperState {
+  moveIssue(id: string, to: unknown): SuperState {
     if (typeof to !== 'number' || !Number.isFinite(to)) throw new HttpError(400, 'Give the place to move it to, 0 first.');
-    this.superStore.moveGoal(id, to);
+    this.superStore.moveIssue(id, to);
     return this.publishSuper();
   }
 
   // The user's routines: add (on at once), change, confirm a proposal, turn on or off, remove.
 
   addRoutine(body: { name?: unknown; instruction?: unknown; projectId?: unknown; schedule?: unknown }): SuperState {
-    this.superStore.addRoutine({ name: body?.name, instruction: body?.instruction, projectId: this.goalProject(body?.projectId), schedule: body?.schedule }, 'user');
+    this.superStore.addRoutine({ name: body?.name, instruction: body?.instruction, projectId: this.issueProject(body?.projectId), schedule: body?.schedule }, 'user');
     return this.publishSuper();
   }
 
   updateRoutine(id: string, body: { name?: unknown; instruction?: unknown; projectId?: unknown; schedule?: unknown; enabled?: unknown; confirm?: unknown }): SuperState {
-    this.superStore.updateRoutine(id, { ...body, ...(body?.projectId !== undefined ? { projectId: this.goalProject(body.projectId) } : { projectId: undefined }) });
+    this.superStore.updateRoutine(id, { ...body, ...(body?.projectId !== undefined ? { projectId: this.issueProject(body.projectId) } : { projectId: undefined }) });
     return this.publishSuper();
   }
 
@@ -1953,8 +1957,8 @@ export class AgentManager {
     } else if (undo.kind === 'channel') {
       if (!this.store.channels.has(undo.channelId)) throw new HttpError(409, 'That channel is gone.');
       this.updateChannel(undo.channelId, { ...undo.before, memberIds: undo.before.memberIds.filter(m => this.store.agents.has(m)) });
-    } else if (undo.kind === 'goal') {
-      this.superStore.restoreGoal(undo.goalId, undo.before);
+    } else if (undo.kind === 'issue') {
+      this.superStore.restoreIssue(undo.issueId, undo.before);
     } else if (undo.kind === 'routine') {
       // Withdraw a proposal; one the user confirmed since is theirs now.
       const routine = this.superStore.routines().find(r => r.id === undo.routineId);
@@ -1978,12 +1982,12 @@ export class AgentManager {
     const superId = this.superId();
     if (!superId || agent.id === superId || result.stopped) return;
     if (task?.source === 'agent' && task.fromAgentId === superId) return;
-    // An agent came free (nothing queued for it) while goals wait: the SuperAgent picks the next one.
+    // An agent came free (nothing queued for it) while issues wait: the SuperAgent picks the next one.
     // Not after a turn you started, which is yours, and only through the watcher, so the wake switch,
     // quiet hours, budgets and the idle check all apply.
     const free = (result.pending ?? 0) === 0 && this.mailbox.pending(agent.id) === 0;
-    const queued = this.superStore.goals().filter(g => g.status === 'queued').length;
-    if (queued && free && task?.source !== 'user') this.watcher.note({ agentId: agent.id, key: 'goals', text: `${agent.name} is free and ${queued} queued ${queued === 1 ? 'goal waits' : 'goals wait'}` });
+    const queued = this.superStore.issues().filter(g => g.status === 'queued').length;
+    if (queued && free && task?.source !== 'user') this.watcher.note({ agentId: agent.id, key: 'issues', text: `${agent.name} is free and ${queued} queued ${queued === 1 ? 'issue waits' : 'issues wait'}` });
     const asked = task?.summary ? `Task: ${clip(task.summary, 160).replace(/\.$/, '')}. ` : '';
     if (result.ok) this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} finished a turn`, untrusted: `${asked}Result: ${clip(summarize(result.summary) || 'Finished.', 400)}` });
     else this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} hit a problem`, untrusted: `${asked}Error: ${clip(result.error ?? 'Something went wrong.', 400)}` });

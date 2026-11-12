@@ -1,14 +1,14 @@
 /**
  * The SuperAgent's own parts of the app: in its pane, the questions it waits on you for, as cards
  * with the choices to click; in the right panel, its Decisions (anything it did on its own, which you
- * can undo), Goals and Routines tabs, drawn with the shared panel list (web/ui/PanelList.tsx, ACH-D37).
+ * can undo), Issues and Routines tabs, drawn with the shared panel list (web/ui/PanelList.tsx, ACH-D37).
  */
 import { useEffect, useState, type ReactNode } from 'react';
-import type { GoalStatus, RoutineSchedule, SuperAction, SuperAsk, SuperGoal, SuperRoutine } from '../../shared/types.ts';
+import type { IssueStatus, RoutineSchedule, SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { openAsks } from '../super.ts';
-import { GOAL_STATUS_LABEL, heldText, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type SuperTab } from '../superText.ts';
-import { cleanSummary, decisionGroups, decisionKind, goalGroups, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type GoalsFilter } from '../panelList.ts';
+import { ISSUE_STATUS_LABEL, heldText, migrateSeen, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type SuperTab } from '../superText.ts';
+import { cleanSummary, decisionGroups, decisionKind, issueGroups, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { MenuDivider, MenuRow, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
@@ -66,7 +66,7 @@ function AskCard({ ask }: { ask: SuperAsk }) {
 const SEEN_KEY = 'podcode:super-tabs-seen';
 function readSeen(): Partial<Record<SuperTab, number>> {
   try {
-    const saved = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}') as Record<string, unknown>;
+    const saved = migrateSeen(JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}') as Record<string, unknown>);
     return Object.fromEntries(SUPER_TABS.filter(t => typeof saved[t] === 'number').map(t => [t, saved[t] as number]));
   } catch { return {}; }
 }
@@ -77,11 +77,11 @@ function readSeen(): Partial<Record<SuperTab, number>> {
  */
 export function useSuperTabs(selected: string): { counts: Record<SuperTab, number>; dots: Record<SuperTab, boolean> } {
   const log = useApp(s => s.snapshot?.super.log);
-  const goals = useApp(s => s.snapshot?.super.goals);
+  const issues = useApp(s => s.snapshot?.super.issues);
   const routines = useApp(s => s.snapshot?.super.routines);
   const now = useNow();
   const [seen, setSeen] = useState(readSeen);
-  const lists = { log, goals, routines };
+  const lists = { log, issues, routines };
   const latest = superTabLatest(lists);
   const shown = (SUPER_TABS as readonly string[]).includes(selected) ? selected as SuperTab : null;
   const shownLatest = shown ? latest[shown] : 0;
@@ -96,7 +96,7 @@ export function useSuperTabs(selected: string): { counts: Record<SuperTab, numbe
 
 const fullTime = (ts: number) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-const KIND_ICON: Record<DecisionKind, typeof ListBullet> = { delegate: CornerDownRight, message: MessageSquare, goal: CircleDot, agent: Bot, channel: MessageMultiple, other: ListBullet };
+const KIND_ICON: Record<DecisionKind, typeof ListBullet> = { delegate: CornerDownRight, message: MessageSquare, issue: CircleDot, agent: Bot, channel: MessageMultiple, other: ListBullet };
 
 /**
  * The Decisions tab (ACH-D37): what the SuperAgent did on its own, one line each, grouped by day,
@@ -205,10 +205,10 @@ function AnswerItem({ ask, now, expanded, onToggle }: { ask: SuperAsk; now: numb
   );
 }
 
-/** Goals are one line; line breaks typed or pasted become spaces. */
+/** Issues are one line; line breaks typed or pasted become spaces. */
 const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ');
 
-const GOAL_ICON: Record<GoalStatus, { icon: typeof ListBullet; cls: string }> = {
+const ISSUE_ICON: Record<IssueStatus, { icon: typeof ListBullet; cls: string }> = {
   queued: { icon: CircleDashed, cls: '' },
   in_progress: { icon: CircleDot, cls: 'text-content/75' },
   blocked: { icon: CircleAlert, cls: 'text-warning' },
@@ -248,28 +248,28 @@ function Composer({ placeholder, label, onAdd, onClose, children }: { placeholde
 }
 
 /**
- * The goals backlog (ACH-D37): what you want done, in order. Open goals by status (needs you, in
- * progress, queued), then Done folded at the end; + opens a one-line composer. A goal opens in
+ * The issues backlog (ACH-D37): what you want done, in order. Open issues by status (needs you, in
+ * progress, queued), then Done folded at the end; + opens a one-line composer. An issue opens in
  * place with its notes, who has it, its status and Edit; move, mark done and remove are also in
  * its menu and, on hover, its icons.
  */
-export function GoalsView() {
-  const goals = useApp(s => s.snapshot?.super.goals);
+export function IssuesView() {
+  const issues = useApp(s => s.snapshot?.super.issues);
   const projects = useApp(s => s.snapshot?.projects) ?? [];
-  const [filter, setFilter] = useState<GoalsFilter>('open');
+  const [filter, setFilter] = useState<IssuesFilter>('open');
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useState(false);
   const [projectId, setProjectId] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
-  const { counts, open: sections, done } = goalGroups(goals, filter, query);
+  const { counts, open: sections, done } = issueGroups(issues, filter, query);
   const ordered = sections.flatMap(s => s.items);
-  // The backlog's own order, for moving: positions are among all open goals, not a search's.
-  const backlog = (goals ?? []).filter(g => g.status !== 'done').sort((a, b) => a.order - b.order);
+  // The backlog's own order, for moving: positions are among all open issues, not a search's.
+  const backlog = (issues ?? []).filter(g => g.status !== 'done').sort((a, b) => a.order - b.order);
   const toggle = (id: string) => setOpen(o => (o === id ? null : id));
-  const item = (goal: SuperGoal) => {
-    const index = backlog.findIndex(g => g.id === goal.id);
-    return <GoalItem key={goal.id} goal={goal} index={index} last={index === backlog.length - 1} expanded={open === goal.id} onToggle={() => toggle(goal.id)} />;
+  const item = (issue: SuperIssue) => {
+    const index = backlog.findIndex(g => g.id === issue.id);
+    return <IssueItem key={issue.id} issue={issue} index={index} last={index === backlog.length - 1} expanded={open === issue.id} onToggle={() => toggle(issue.id)} />;
   };
   const doneShown = filter === 'done' || showDone || Boolean(query.trim());
   return (
@@ -277,22 +277,22 @@ export function GoalsView() {
       <PanelToolbar
         query={query}
         onQuery={setQuery}
-        searchLabel="Search goals"
+        searchLabel="Search issues"
         filter={{ label: 'Show', value: filter, onChange: setFilter, options: [{ value: 'open', label: 'Open', count: counts.open }, { value: 'done', label: 'Done', count: counts.done }] }}
         onAdd={() => setAdding(a => !a)}
-        addLabel="Add a goal"
+        addLabel="Add an issue"
       />
       {adding ? (
-        <Composer placeholder="Add a goal for the SuperAgent" label="New goal" onClose={() => setAdding(false)} onAdd={async text => Boolean(await attempt(() => api.addGoal({ text, projectId: projectId || null })))}>
+        <Composer placeholder="Add an issue for the SuperAgent" label="New issue" onClose={() => setAdding(false)} onAdd={async text => Boolean(await attempt(() => api.addIssue({ text, projectId: projectId || null })))}>
           <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} className="h-5 max-w-40 truncate rounded bg-content/5 px-1 text-[11px] text-content/65 outline-none">
             <option value="">Any project</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </Composer>
       ) : null}
-      <PanelList label="Goals">
+      <PanelList label="Issues">
         {filter === 'open' && !ordered.length && !query.trim() ? (
-          <PanelEmpty icon={<CircleDot strokeWidth={1.5} />} title="No open goals" action={<DetailButton onClick={() => setAdding(true)}>Add goal</DetailButton>}>The SuperAgent works through goals top down, giving each to a free agent.</PanelEmpty>
+          <PanelEmpty icon={<CircleDot strokeWidth={1.5} />} title="No open issues" action={<DetailButton onClick={() => setAdding(true)}>Add issue</DetailButton>}>The SuperAgent works through issues top down, giving each to a free agent.</PanelEmpty>
         ) : null}
         {sections.map(s => (
           <section key={s.key} aria-label={s.label}>
@@ -306,17 +306,17 @@ export function GoalsView() {
             {doneShown ? done.map(item) : null}
           </section>
         ) : null}
-        {query.trim() && !ordered.length && !done.length ? <PanelEmpty icon={<SearchIcon strokeWidth={1.5} />} title={`No goals about "${query.trim()}"`} /> : null}
+        {query.trim() && !ordered.length && !done.length ? <PanelEmpty icon={<SearchIcon strokeWidth={1.5} />} title={`No issues about "${query.trim()}"`} /> : null}
       </PanelList>
     </div>
   );
 }
 
-function GoalItem({ goal, index, last, expanded, onToggle }: { goal: SuperGoal; index: number; last: boolean; expanded: boolean; onToggle: () => void }) {
-  const project = useApp(s => s.snapshot?.projects.find(p => p.id === goal.projectId));
-  const agent = useApp(s => (goal.agentId ? s.snapshot?.agents.find(a => a.id === goal.agentId) : undefined));
+function IssueItem({ issue, index, last, expanded, onToggle }: { issue: SuperIssue; index: number; last: boolean; expanded: boolean; onToggle: () => void }) {
+  const project = useApp(s => s.snapshot?.projects.find(p => p.id === issue.projectId));
+  const agent = useApp(s => (issue.agentId ? s.snapshot?.agents.find(a => a.id === issue.agentId) : undefined));
   const [editing, setEditing] = useState(false);
-  const [text, setText] = useState(goal.text);
+  const [text, setText] = useState(issue.text);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   useEffect(() => {
@@ -324,46 +324,46 @@ function GoalItem({ goal, index, last, expanded, onToggle }: { goal: SuperGoal; 
     const timer = setTimeout(() => setConfirming(false), 4000);
     return () => clearTimeout(timer);
   }, [confirming]);
-  const named = `"${goal.text.length > 60 ? `${goal.text.slice(0, 59)}…` : goal.text}"`;
+  const named = `"${issue.text.length > 60 ? `${issue.text.slice(0, 59)}…` : issue.text}"`;
   const run = async (action: () => Promise<unknown>) => { setBusy(true); const ok = await attempt(action); setBusy(false); return ok; };
-  const save = async () => { if (text.trim() && await run(() => api.updateGoal(goal.id, { text: text.trim() }))) setEditing(false); };
-  const done = goal.status === 'done';
-  const status = (s: GoalStatus) => void run(() => api.updateGoal(goal.id, { status: s }));
-  const edit = () => { setText(goal.text); setEditing(true); if (!expanded) onToggle(); };
-  const { icon: StatusIcon, cls } = GOAL_ICON[goal.status];
-  const remove = <RowAction label={`Confirm removing ${named}`} disabled={busy} onClick={() => void run(() => api.removeGoal(goal.id))}><span className="text-danger">Remove?</span></RowAction>;
+  const save = async () => { if (text.trim() && await run(() => api.updateIssue(issue.id, { text: text.trim() }))) setEditing(false); };
+  const done = issue.status === 'done';
+  const status = (s: IssueStatus) => void run(() => api.updateIssue(issue.id, { status: s }));
+  const edit = () => { setText(issue.text); setEditing(true); if (!expanded) onToggle(); };
+  const { icon: StatusIcon, cls } = ISSUE_ICON[issue.status];
+  const remove = <RowAction label={`Confirm removing ${named}`} disabled={busy} onClick={() => void run(() => api.removeIssue(issue.id))}><span className="text-danger">Remove?</span></RowAction>;
   return (
     <PanelRow
-      id={goal.id}
+      id={issue.id}
       lead={<StatusIcon className={`size-3.5 ${cls}`} strokeWidth={1.6} />}
-      title={goal.text}
-      label={`${GOAL_STATUS_LABEL[goal.status]}: ${goal.text}${agent ? `, with ${agent.name}` : ''}${project ? `, ${project.name}` : ''}`}
+      title={issue.text}
+      label={`${ISSUE_STATUS_LABEL[issue.status]}: ${issue.text}${agent ? `, with ${agent.name}` : ''}${project ? `, ${project.name}` : ''}`}
       dim={done}
       meta={<>{agent ? <AgentAvatar agent={agent} animate={false} className="size-3.5" /> : null}{project ? <span className="font-mono text-[10.5px]">{project.code ?? project.name}</span> : null}</>}
       actions={confirming ? remove : (
         <>
-          {!done ? <RowIcon icon={ChevronUp} label={`Move ${named} up`} disabled={busy || index <= 0} onClick={() => void run(() => api.moveGoal(goal.id, index - 1))} /> : null}
-          {!done ? <RowIcon icon={ChevronDown} label={`Move ${named} down`} disabled={busy || last} onClick={() => void run(() => api.moveGoal(goal.id, index + 1))} /> : null}
+          {!done ? <RowIcon icon={ChevronUp} label={`Move ${named} up`} disabled={busy || index <= 0} onClick={() => void run(() => api.moveIssue(issue.id, index - 1))} /> : null}
+          {!done ? <RowIcon icon={ChevronDown} label={`Move ${named} down`} disabled={busy || last} onClick={() => void run(() => api.moveIssue(issue.id, index + 1))} /> : null}
           <RowIcon icon={Pencil} label={`Edit ${named}`} disabled={busy} onClick={edit} />
           <RowIcon icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => setConfirming(true)} />
         </>
       )}
       expanded={expanded}
       onOpen={onToggle}
-      menuLabel={`Goal ${named}`}
+      menuLabel={`Issue ${named}`}
       menu={close => (
         <>
           <MenuRow icon={expanded ? ChevronUp : ChevronDown} title={expanded ? 'Close' : 'Open'} shortcut="Enter" onSelect={() => { close(); onToggle(); }} />
           <MenuRow icon={Pencil} title="Edit" onSelect={() => { close(); edit(); }} />
           {!done ? (
             <>
-              <MenuRow icon={ChevronUp} title="Move up" disabled={busy || index <= 0} onSelect={() => { close(); void run(() => api.moveGoal(goal.id, index - 1)); }} />
-              <MenuRow icon={ChevronDown} title="Move down" disabled={busy || last} onSelect={() => { close(); void run(() => api.moveGoal(goal.id, index + 1)); }} />
+              <MenuRow icon={ChevronUp} title="Move up" disabled={busy || index <= 0} onSelect={() => { close(); void run(() => api.moveIssue(issue.id, index - 1)); }} />
+              <MenuRow icon={ChevronDown} title="Move down" disabled={busy || last} onSelect={() => { close(); void run(() => api.moveIssue(issue.id, index + 1)); }} />
             </>
           ) : null}
           <MenuDivider />
-          {(Object.keys(GOAL_STATUS_LABEL) as GoalStatus[]).map(s => (
-            <MenuRow key={s} title={s === 'done' ? 'Mark done' : GOAL_STATUS_LABEL[s]} checked={goal.status === s} disabled={busy} onSelect={() => { close(); status(s); }} />
+          {(Object.keys(ISSUE_STATUS_LABEL) as IssueStatus[]).map(s => (
+            <MenuRow key={s} title={s === 'done' ? 'Mark done' : ISSUE_STATUS_LABEL[s]} checked={issue.status === s} disabled={busy} onSelect={() => { close(); status(s); }} />
           ))}
           <MenuDivider />
           <MenuRow icon={Trash2} title="Remove" danger disabled={busy} onSelect={() => { close(); setConfirming(true); }} />
@@ -387,21 +387,21 @@ function GoalItem({ goal, index, last, expanded, onToggle }: { goal: SuperGoal; 
             <button type="button" className={PRIMARY} disabled={busy || !text.trim()} onClick={() => void save()}>Save</button>
           </div>
         </div>
-      ) : <p className="whitespace-pre-wrap break-words">{goal.text}</p>}
-      {goal.notes ? <p className="mt-1 text-content/50">{goal.notes}</p> : null}
+      ) : <p className="whitespace-pre-wrap break-words">{issue.text}</p>}
+      {issue.notes ? <p className="mt-1 text-content/50">{issue.notes}</p> : null}
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {agent ? <DetailButton onClick={() => open({ kind: 'agent', agentId: agent.id })}>{done ? 'Done by' : 'With'} {agent.name}</DetailButton> : null}
         <select
           aria-label={`Status of ${named}`}
-          value={goal.status}
+          value={issue.status}
           disabled={busy}
-          onChange={e => status(e.target.value as GoalStatus)}
+          onChange={e => status(e.target.value as IssueStatus)}
           className="h-6 rounded-md border border-content/12 bg-transparent px-1 text-[11.5px] text-content/75 outline-none"
         >
-          {(Object.keys(GOAL_STATUS_LABEL) as GoalStatus[]).map(s => <option key={s} value={s}>{GOAL_STATUS_LABEL[s]}</option>)}
+          {(Object.keys(ISSUE_STATUS_LABEL) as IssueStatus[]).map(s => <option key={s} value={s}>{ISSUE_STATUS_LABEL[s]}</option>)}
         </select>
         {!editing ? <DetailButton onClick={edit}>Edit</DetailButton> : null}
-        {confirming ? <DetailButton danger disabled={busy} onClick={() => void run(() => api.removeGoal(goal.id))}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
+        {confirming ? <DetailButton danger disabled={busy} onClick={() => void run(() => api.removeIssue(issue.id))}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
       </div>
     </PanelRow>
   );

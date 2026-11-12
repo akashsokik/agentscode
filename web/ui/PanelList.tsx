@@ -1,7 +1,7 @@
 /**
  * The shared list of the SuperAgent's right-panel tabs (ACH-D37): one toolbar (search, a segmented
  * filter with counts, + for adding), sentence-case section headers, a one-line row and one empty
- * state, used alike by Decisions, Goals, Routines and Notes. Rows follow Work's WorkRow (30px,
+ * state, used alike by Decisions, Issues, Routines and Notes. Rows follow Work's WorkRow (30px,
  * 12px text, quiet meta at the right); a row opens in place on click or ⏎, its actions show on
  * hover and in the shared right-click menu (ACH-D27), which ⇧F10 or the menu key also opens.
  * Flat, theme colours only (ACH-D7, ACH-D14).

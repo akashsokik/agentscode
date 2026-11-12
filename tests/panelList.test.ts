@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { SuperAction, SuperAsk, SuperGoal, SuperRoutine } from '../shared/types.ts';
-import { authorLabel, cleanSummary, dayLabel, decisionGroups, decisionKind, goalGroups, groupByDay, isMenuKey, matches, notesSections, routineGroups, shortSchedule, shortWhen } from '../web/panelList.ts';
+import type { SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../shared/types.ts';
+import { authorLabel, cleanSummary, dayLabel, decisionGroups, decisionKind, issueGroups, groupByDay, isMenuKey, matches, notesSections, routineGroups, shortSchedule, shortWhen } from '../web/panelList.ts';
 
 // The SuperAgent's right-panel tabs read alike (ACH-D37): one line per item, grouped, searched and
 // filtered the same way.
@@ -54,23 +54,23 @@ test('Decisions: actions or answers by filter, searched over summary and why; co
   assert.deepEqual(answers.actions, []);
   assert.equal(cleanSummary('Delegated implementation to Ada: polish...'), 'Delegated implementation to Ada: polish');
   assert.equal(cleanSummary('Ends with an ellipsis…'), 'Ends with an ellipsis');
-  assert.deepEqual(['delegate_task', 'send_message', 'nudge_agent', 'update_goal', 'create_agent', 'create_channel', 'other'].map(decisionKind), ['delegate', 'message', 'message', 'goal', 'agent', 'channel', 'other']);
+  assert.deepEqual(['delegate_task', 'send_message', 'nudge_agent', 'update_issue', 'create_agent', 'create_channel', 'other'].map(decisionKind), ['delegate', 'message', 'message', 'issue', 'agent', 'channel', 'other']);
 });
 
-test('Goals: open goals by status (needs you, in progress, queued) in backlog order; done newest first; search and filter', () => {
-  const g = (id: string, status: SuperGoal['status'], order: number, extra: Partial<SuperGoal> = {}) => ({ id, text: `goal ${id}`, status, order, updatedAt: order, ...extra }) as SuperGoal;
-  const goals = [g('q2', 'queued', 3), g('p', 'in_progress', 1), g('q1', 'queued', 2), g('b', 'blocked', 4, { notes: 'needs a key' }), g('d1', 'done', 0, { doneAt: 10 }), g('d2', 'done', 5, { doneAt: 20 })];
-  const open = goalGroups(goals, 'open', '');
+test('Issues: open issues by status (needs you, in progress, queued) in backlog order; done newest first; search and filter', () => {
+  const g = (id: string, status: SuperIssue['status'], order: number, extra: Partial<SuperIssue> = {}) => ({ id, text: `issue ${id}`, status, order, updatedAt: order, ...extra }) as SuperIssue;
+  const issues = [g('q2', 'queued', 3), g('p', 'in_progress', 1), g('q1', 'queued', 2), g('b', 'blocked', 4, { notes: 'needs a key' }), g('d1', 'done', 0, { doneAt: 10 }), g('d2', 'done', 5, { doneAt: 20 })];
+  const open = issueGroups(issues, 'open', '');
   assert.deepEqual(open.counts, { open: 4, done: 2 });
   assert.deepEqual(open.open.map(s => [s.label, s.items.map(i => i.id)]), [['Needs you', ['b']], ['In progress', ['p']], ['Queued', ['q1', 'q2']]]);
-  assert.deepEqual(open.done.map(i => i.id), ['d2', 'd1'], 'done goals stay listed (folded) under open');
-  const done = goalGroups(goals, 'done', '');
-  assert.deepEqual(done.open, [], 'the Done filter shows only done goals');
+  assert.deepEqual(open.done.map(i => i.id), ['d2', 'd1'], 'done issues stay listed (folded) under open');
+  const done = issueGroups(issues, 'done', '');
+  assert.deepEqual(done.open, [], 'the Done filter shows only done issues');
   assert.deepEqual(done.done.map(i => i.id), ['d2', 'd1']);
-  const key = goalGroups(goals, 'open', 'KEY');
+  const key = issueGroups(issues, 'open', 'KEY');
   assert.deepEqual(key.open.flatMap(s => s.items.map(i => i.id)), ['b'], 'searched in notes too');
   assert.deepEqual(key.counts, { open: 4, done: 2 });
-  assert.deepEqual(goalGroups(undefined, 'open', '').open, []);
+  assert.deepEqual(issueGroups(undefined, 'open', '').open, []);
 });
 
 test('Routines: proposals wait first, then yours; empty groups are left out; schedules read short', () => {

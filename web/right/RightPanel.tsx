@@ -20,7 +20,7 @@ import { NotesView } from '../notes/NotesView.tsx';
 import { WorkPanel } from '../work/WorkView.tsx';
 import { Segmented } from '../mono/settings.tsx';
 import { MessageStatus } from '../panes/CommsPane.tsx';
-import { DecisionsView, GoalsView, RoutinesView, useSuperTabs } from '../panes/SuperPanel.tsx';
+import { DecisionsView, IssuesView, RoutinesView, useSuperTabs } from '../panes/SuperPanel.tsx';
 import { superPanelView } from '../superText.ts';
 import { useNow } from '../ui/useNow.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
@@ -254,14 +254,14 @@ const PANEL_TABS: { view: Layout['rightView']; label: string; icon: IconComponen
 ];
 
 /**
- * The SuperAgent's tabs: its Overview, then its own Decisions, Goals and Routines, then Comms and the
+ * The SuperAgent's tabs: its Overview, then its own Decisions, Issues and Routines, then Comms and the
  * projects' Notes. No
  * Changes: it works across all projects and never edits, so it has no working tree of its own.
  */
 const SUPER_PANEL_TABS: { view: SuperView; label: string; icon: IconComponent }[] = [
   { view: 'overview', label: 'Overview', icon: DashboardSquare },
   { view: 'decisions', label: 'Decisions', icon: ListBullet },
-  { view: 'goals', label: 'Goals', icon: CircleDot },
+  { view: 'issues', label: 'Issues', icon: CircleDot },
   { view: 'routines', label: 'Routines', icon: Clock },
   { view: 'comms', label: 'Comms', icon: MessageMultiple },
   { view: 'notes', label: 'Notes', icon: StickyNote },
@@ -272,13 +272,13 @@ const SUPER_PANEL_TABS: { view: SuperView; label: string; icon: IconComponent }[
 const COUNT_WORDS: Partial<Record<PanelView, (n: number) => string>> = {
   comms: n => `${n} on the way`,
   decisions: n => `${n} you can undo today`,
-  goals: n => `${n} open`,
+  issues: n => `${n} open`,
   routines: n => `${n} waiting for you`,
 };
 
 /**
  * The right panel, with MonoCode's icon tabs: Overview, Comms, Changes and Notes for the focused
- * agent; for the SuperAgent, Overview, Decisions, Goals, Routines, Comms and Notes. The tabs follow the ARIA tabs
+ * agent; for the SuperAgent, Overview, Decisions, Issues, Routines, Comms and Notes. The tabs follow the ARIA tabs
  * pattern: one tab stop, the arrow keys (and Home and End) move between them and open the one reached.
  */
 export function RightPanel() {
@@ -305,12 +305,12 @@ export function RightPanel() {
   const [moreAnchor, setMoreAnchor] = useState<MenuAnchor | null>(null);
   const count = (tab: PanelView): number | undefined => {
     if (tab === 'comms') return inFlight || undefined;
-    if (isSuper && (tab === 'decisions' || tab === 'goals' || tab === 'routines')) return superTabs.counts[tab] || undefined;
+    if (isSuper && (tab === 'decisions' || tab === 'issues' || tab === 'routines')) return superTabs.counts[tab] || undefined;
     return undefined;
   };
   const dot = (tab: PanelView): boolean => {
     if (tab === 'changes') return view !== 'changes' && Boolean(git?.files.length);
-    return isSuper && (tab === 'decisions' || tab === 'goals' || tab === 'routines') && superTabs.dots[tab];
+    return isSuper && (tab === 'decisions' || tab === 'issues' || tab === 'routines') && superTabs.dots[tab];
   };
   // Before the first measure, icons only: no names that open and then fold away.
   const fit = stripWidth === null
@@ -396,7 +396,7 @@ export function RightPanel() {
         {view === 'overview' ? <OverviewView agent={agent} git={git} />
           : view === 'changes' ? <ChangesView agent={agent} />
           : view === 'decisions' ? <DecisionsView />
-          : view === 'goals' ? <GoalsView />
+          : view === 'issues' ? <IssuesView />
           : view === 'routines' ? <RoutinesView />
           : view === 'notes' ? <NotesView agent={agent} />
           : view === 'work' ? <WorkPanel />

@@ -1,7 +1,7 @@
-// The shared list of the SuperAgent's right-panel tabs (ACH-D37): Decisions, Goals, Routines and
+// The shared list of the SuperAgent's right-panel tabs (ACH-D37): Decisions, Issues, Routines and
 // Notes read the same way, one line per item, grouped under sentence-case headers. The rules are
 // pure, so they are tested without a DOM; web/ui/PanelList.tsx draws them.
-import type { GoalStatus, SuperAction, SuperAsk, SuperGoal, SuperRoutine } from '../shared/types.ts';
+import type { IssueStatus, SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../shared/types.ts';
 
 export interface Group<T> { key: string; label: string; items: T[] }
 
@@ -62,11 +62,11 @@ export function isMenuKey(e: { key: string; shiftKey: boolean }): boolean {
 
 // ---- Decisions ---------------------------------------------------------------------------------
 
-export type DecisionKind = 'delegate' | 'message' | 'goal' | 'agent' | 'channel' | 'other';
+export type DecisionKind = 'delegate' | 'message' | 'issue' | 'agent' | 'channel' | 'other';
 export function decisionKind(tool: string): DecisionKind {
   if (/^delegate/.test(tool)) return 'delegate';
   if (/message|nudge/.test(tool)) return 'message';
-  if (/goal/.test(tool)) return 'goal';
+  if (/issue|goal/.test(tool)) return 'issue';
   if (/agent/.test(tool)) return 'agent';
   if (/channel/.test(tool)) return 'channel';
   return 'other';
@@ -84,18 +84,18 @@ export function decisionGroups(log: readonly SuperAction[] | undefined, asks: re
   };
 }
 
-// ---- Goals -------------------------------------------------------------------------------------
+// ---- Issues -------------------------------------------------------------------------------------
 
-export type GoalsFilter = 'open' | 'done';
-/** Open goals in sections, in the order the SuperAgent needs you first; done goals last. */
-const OPEN_SECTIONS: { status: Exclude<GoalStatus, 'done'>; label: string }[] = [
+export type IssuesFilter = 'open' | 'done';
+/** Open issues in sections, in the order the SuperAgent needs you first; done issues last. */
+const OPEN_SECTIONS: { status: Exclude<IssueStatus, 'done'>; label: string }[] = [
   { status: 'blocked', label: 'Needs you' },
   { status: 'in_progress', label: 'In progress' },
   { status: 'queued', label: 'Queued' },
 ];
 
-export function goalGroups(goals: readonly SuperGoal[] | undefined, filter: GoalsFilter, query: string): { counts: { open: number; done: number }; open: Group<SuperGoal>[]; done: SuperGoal[] } {
-  const all = goals ?? [];
+export function issueGroups(issues: readonly SuperIssue[] | undefined, filter: IssuesFilter, query: string): { counts: { open: number; done: number }; open: Group<SuperIssue>[]; done: SuperIssue[] } {
+  const all = issues ?? [];
   const found = all.filter(g => matches(query, g.text, g.notes));
   const open = found.filter(g => g.status !== 'done').sort((a, b) => a.order - b.order);
   const done = found.filter(g => g.status === 'done').sort((a, b) => (b.doneAt ?? b.updatedAt) - (a.doneAt ?? a.updatedAt));

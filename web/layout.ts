@@ -77,8 +77,8 @@ export interface Layout {
 
 export type ColumnKey = 'nav' | 'workspace' | 'panel';
 
-/** The right panel's tabs for the SuperAgent: its Overview, its own Decisions, Goals and Routines, Comms, and project Notes. */
-export const SUPER_VIEWS = ['overview', 'decisions', 'goals', 'routines', 'comms', 'notes', 'work'] as const;
+/** The right panel's tabs for the SuperAgent: its Overview, its own Decisions, Issues and Routines, Comms, and project Notes. */
+export const SUPER_VIEWS = ['overview', 'decisions', 'issues', 'routines', 'comms', 'notes', 'work'] as const;
 export type SuperView = (typeof SUPER_VIEWS)[number];
 
 const STORAGE_KEY = 'podcode:layout';
@@ -101,6 +101,12 @@ export function tabKey(content: TabContent): string {
   }
 }
 
+/** A SuperAgent tab saved under an old name, as its tab now: "goals" became "issues" (ACH-D38). */
+export function migrateSuperView(view: string | undefined): SuperView | undefined {
+  if (view === 'goals') return 'issues';
+  return (SUPER_VIEWS as readonly string[]).includes(view ?? '') ? view as SuperView : undefined;
+}
+
 function initial(): Layout {
   const fallback: Layout = { tabs: [], panes: [{ id: 'p1', tabId: null }], focused: 'p1', sidebar: true, sidebarView: 'agents', rightPanel: true, rightView: 'overview' };
   try {
@@ -110,6 +116,8 @@ function initial(): Layout {
     const { superLog: _log, ...kept } = saved as Layout & { superLog?: unknown };
     const { superLog: _width, ...widths } = (kept.widths ?? {}) as Record<string, number>;
     const restored: Layout = { ...fallback, ...kept, ...(kept.widths ? { widths } : {}) };
+    // The Goals tab is the Issues tab now (ACH-D38).
+    restored.superView = migrateSuperView(restored.superView);
     // Pinned tabs come first; a layout saved before pins existed has none and keeps its order.
     restored.tabs = orderTabs(restored.tabs);
     const ids = restored.panes.map(p => p.id);
@@ -343,7 +351,7 @@ export function setSectionFolded(key: RailSectionKey, folded: boolean): void {
 export function setProject(projectId: string): void { if (layout.projectId !== projectId) set({ ...layout, projectId }); }
 export function setRightPanel(rightPanel: boolean): void { set({ ...layout, rightPanel }); }
 export function setSuperView(superView: SuperView): void { set({ ...layout, rightPanel: true, superView, superPanelShown: true }); }
-/** The first time the SuperAgent opens, show the right panel (where its Decisions, Goals and Routines are); never again after. */
+/** The first time the SuperAgent opens, show the right panel (where its Decisions, Issues and Routines are); never again after. */
 export function showPanelForSuperOnce(): void { if (!layout.superPanelShown) set({ ...layout, rightPanel: true, superPanelShown: true }); }
 export function setRightView(rightView: Layout['rightView']): void {
   // Work is a tab for the SuperAgent too, so asking for it shows it there as well.

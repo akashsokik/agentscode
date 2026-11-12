@@ -26,7 +26,7 @@ By [Orca](https://orcapods.ai) · [podcode.orcapods.ai](https://podcode.orcapods
 
 <br />
 
-<img src="docs/screenshots/hero.webp" alt="PodCode: the SuperAgent's conversation with its goals in the right panel, and the floating quick window in front with its @ picker open" width="100%" />
+<img src="docs/screenshots/hero.webp" alt="PodCode: the SuperAgent's conversation with its issues in the right panel, and the floating quick window in front with its @ picker open" width="100%" />
 
 </div>
 
@@ -54,7 +54,7 @@ PodCode was called AgentsCode until 0.3.0. Your agents, projects and settings ca
 - **Channels.** Slack-style rooms with agents from any project. `@mention` an agent to start it on
   your post; its reply lands in the thread.
 - **SuperAgent.** One read-only agent that runs the team across every project: it watches your
-  agents, works a goals backlog, messages and delegates, and asks you about the rest. Talk to it from
+  agents, works a issues backlog, messages and delegates, and asks you about the rest. Talk to it from
   anywhere with the quick window (Shift+Cmd+Space). See [SuperAgent](#superagent).
 - **Memory, soul and dreams.** Each agent keeps standing instructions (its soul) and what it learned
   (its memory), and reviews its own sessions to propose small updates. A shared user profile tells
@@ -307,7 +307,7 @@ OrcaCode (on Codex its commands run in the read-only sandbox), and every change 
 agent it delegates to. Open it from **SuperAgent** in the sidebar.
 
 - **What it does on its own.** It watches your agents (it wakes when one finishes, fails, gets
-  stuck or waits for you), works a goals backlog top down, creates agents and channels, adds or
+  stuck or waits for you), works a issues backlog top down, creates agents and channels, adds or
   removes channel members, delegates, nudges a stuck agent, starts a new session and stops a runaway
   turn. Each command carries a short reason.
 - **What it asks you first.** Merging, pushing or deploying, deleting anything, removing an agent,
@@ -319,7 +319,7 @@ agent it delegates to. Open it from **SuperAgent** in the sidebar.
   happened since yesterday, what is stuck, and what it proposes next.
 - **The right panel.** With the SuperAgent focused, the panel has three more tabs:
   - **Decisions**: what it did on its own, with why, and **Undo** for what can be put back.
-  - **Goals**: your backlog, in order. Add, edit, reorder, set the status of or remove a goal, and see
+  - **Issues**: your backlog, in order. Add, edit, reorder, set the status of or remove an issue, and see
     which agent is on it.
   - **Routines**: things it should do on a schedule (daily at a time, or every few hours). Routines
     it proposes wait until you confirm them.
@@ -421,7 +421,7 @@ Agents in the desktop app also get browser tools (`browser_open`, `browser_snaps
 `browser_screenshot`, `browser_console`, `browser_click`, `browser_type`, `browser_press` and more).
 The SuperAgent's browser tools only look (open, list, close, snapshot, screenshot, console). It adds
 its own commands (`create_agent`, `update_agent`, `new_session`, `stop_agent`, `create_channel`,
-`update_channel`, `ask_user`, `read_transcript`, the goal tools, `list_routines` and
+`update_channel`, `ask_user`, `read_transcript`, the issue tools for its own backlog (`list_issues`, `add_issue`, `update_issue`, `complete_issue`; the old goal names still work), `list_routines` and
 `propose_routine`), and the SuperAgent, reviewers and testers get the read-only `gh_*`,
 `run_check` and `app_screenshot` tools.
 
@@ -522,7 +522,7 @@ server/
   app.ts             REST API and localhost guards
   manager.ts         agents, projects, approvals, turn lifecycle
   agents/            Claude (Agent SDK), Codex (codex exec) and OrcaCode runners, per-agent FIFO
-  superAgent.ts      the SuperAgent's log, goals, routines, wake-ups and limits
+  superAgent.ts      the SuperAgent's log, issues, routines, wake-ups and limits
   dream.ts           dreaming; agentHome.ts and userProfile.ts for soul, memory and user.md
   github.ts          read-only gh tools; checks.ts for run_check
   comms/             mailbox, channels, MCP tool definitions, stdio MCP entry

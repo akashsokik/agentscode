@@ -25,7 +25,7 @@ import type {
   Settings,
   Snapshot,
   TerminalInfo,
-  GoalStatus,
+  IssueStatus,
   RoutineSchedule,
   SuperState,
   TreeListing,
@@ -149,11 +149,11 @@ export const api = {
   createSuper: () => request<Agent>('POST', '/api/super', {}),
   /** Answer one of its questions with a choice or your own words, or put it aside. */
   answerSuper: (askId: string, body: { answer: string } | { dismiss: true }) => request<SuperState>('POST', `/api/super/asks/${askId}`, body),
-  /** The goals backlog: add, change, remove and reorder (0 first). Changes also arrive as `super` events. */
-  addGoal: (body: { text: string; projectId: string | null }) => request<SuperState>('POST', '/api/super/goals', body),
-  updateGoal: (goalId: string, body: { text?: string; projectId?: string | null; status?: GoalStatus }) => request<SuperState>('PATCH', `/api/super/goals/${goalId}`, body),
-  removeGoal: (goalId: string) => request<SuperState>('DELETE', `/api/super/goals/${goalId}`),
-  moveGoal: (goalId: string, to: number) => request<SuperState>('POST', `/api/super/goals/${goalId}/move`, { to }),
+  /** The issues backlog: add, change, remove and reorder (0 first). Changes also arrive as `super` events. */
+  addIssue: (body: { text: string; projectId: string | null }) => request<SuperState>('POST', '/api/super/issues', body),
+  updateIssue: (issueId: string, body: { text?: string; projectId?: string | null; status?: IssueStatus }) => request<SuperState>('PATCH', `/api/super/issues/${issueId}`, body),
+  removeIssue: (issueId: string) => request<SuperState>('DELETE', `/api/super/issues/${issueId}`),
+  moveIssue: (issueId: string, to: number) => request<SuperState>('POST', `/api/super/issues/${issueId}/move`, { to }),
   /** Scheduled routines: add (on at once), change, confirm a proposal, turn on or off, remove. */
   addRoutine: (body: { name: string; instruction: string; projectId: string | null; schedule: RoutineSchedule }) => request<SuperState>('POST', '/api/super/routines', body),
   updateRoutine: (routineId: string, body: { name?: string; instruction?: string; projectId?: string | null; schedule?: RoutineSchedule; enabled?: boolean; confirm?: true }) => request<SuperState>('PATCH', `/api/super/routines/${routineId}`, body),

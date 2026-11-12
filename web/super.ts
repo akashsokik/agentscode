@@ -25,7 +25,7 @@ export function useSuperAgent(): Agent | undefined {
 
 /**
  * Open the SuperAgent's tab, setting it up first if there is none. The first time, the right panel
- * opens too (its Decisions, Goals and Routines live there); after that it stays as you left it.
+ * opens too (its Decisions, Issues and Routines live there); after that it stays as you left it.
  */
 export async function openSuper(): Promise<void> {
   const id = getState().snapshot?.super.agentId ?? (await attempt(() => api.createSuper()))?.id;

@@ -233,8 +233,8 @@ export type SuperUndo =
   | { kind: 'removeChannel'; channelId: string }
   | { kind: 'channel'; channelId: string; before: { name: string; topic: string; memberIds: string[] } }
   | { kind: 'agent'; agentId: string; before: { name: string; role: AgentRole; model: string; effort: string } }
-  /** A goal as it was before (null: the SuperAgent added it, so undo removes it). */
-  | { kind: 'goal'; goalId: string; before: SuperGoal | null }
+  /** An issue as it was before (null: the SuperAgent added it, so undo removes it). */
+  | { kind: 'issue'; issueId: string; before: SuperIssue | null }
   /** A routine the SuperAgent proposed: undo withdraws it. */
   | { kind: 'routine'; routineId: string };
 
@@ -255,15 +255,15 @@ export interface SuperAction {
 }
 
 /** queued: waiting its turn; in_progress: an agent is on it; blocked: waiting for the user; done. */
-export type GoalStatus = 'queued' | 'in_progress' | 'blocked' | 'done';
+export type IssueStatus = 'queued' | 'in_progress' | 'blocked' | 'done';
 
-/** One goal in the SuperAgent's backlog, which it works through on its own, in order. */
-export interface SuperGoal {
+/** One issue in the SuperAgent's backlog, which it works through on its own, in order. */
+export interface SuperIssue {
   id: string;
   text: string;
   /** The project it is about; null for none in particular. */
   projectId: string | null;
-  status: GoalStatus;
+  status: IssueStatus;
   /** Position in the backlog, 0 first. */
   order: number;
   createdAt: number;
@@ -307,8 +307,8 @@ export interface SuperState {
   asks: SuperAsk[];
   /** The latest decisions, newest first. */
   log: SuperAction[];
-  /** The goals backlog, in order. */
-  goals: SuperGoal[];
+  /** The issues backlog, in order. */
+  issues: SuperIssue[];
   /** Scheduled routines, oldest first. */
   routines: SuperRoutine[];
   /** Mail to the SuperAgent waiting until it may take a turn, and why; null when none waits. */

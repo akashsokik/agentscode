@@ -1,3 +1,4 @@
+import { currentToolName } from '../shared/issues.ts';
 import { commsTool, isCommsServer } from '../shared/commsTools.ts';
 import type { ToolCall } from '../shared/types.ts';
 
@@ -388,7 +389,8 @@ export function presentTool(tool: ToolCall): ToolShown {
         return { action, target: target === name || target.startsWith('{') ? '' : target };
       }
       const mcp = name.match(/^mcp__([^_]+(?:_[^_]+)*)__(.+)$/) ?? name.match(/^([^.]+)\.(.+)$/);
-      if (mcp) return { action: isCommsServer(mcp[1]) ? 'Comms' : mcp[1], target: mcp[2].replace(/_/g, ' ') };
+      // An old goal command (ACH-D38) reads with its issue name, so old transcripts match new ones.
+      if (mcp) return { action: isCommsServer(mcp[1]) ? 'Comms' : mcp[1], target: (isCommsServer(mcp[1]) ? currentToolName(mcp[2]) : mcp[2]).replace(/_/g, ' ') };
       return { action: name, target: target === name ? '' : target };
     }
   }

@@ -7,7 +7,7 @@ import type { SuperState } from '../shared/types.ts';
 import { createApp } from '../server/app.ts';
 import { HttpError } from '../server/errors.ts';
 import { SuperStore, updatePrompt, type SuperWatcher } from '../server/superAgent.ts';
-import { goalSections } from '../web/superText.ts';
+import { issueSections } from '../web/superText.ts';
 import { harness, projectDir, settle, tempDir } from './helpers.ts';
 
 function status(error: unknown): number {
@@ -15,42 +15,42 @@ function status(error: unknown): number {
   return error.status;
 }
 
-test('the goal store: add in order, update with links and done times, reorder, remove, restore; written to super.json', () => {
-  const dir = tempDir('goals');
+test('the issue store: add in order, update with links and done times, reorder, remove, restore; written to super.json', () => {
+  const dir = tempDir('issues');
   const store = new SuperStore(dir);
-  const a = store.addGoal({ text: '  Ship   dark mode ', projectId: 'web', by: 'user' });
-  const b = store.addGoal({ text: 'Write release notes', projectId: null, by: 'super' });
-  const c = store.addGoal({ text: 'Fix the flaky test', projectId: null, by: 'user' });
+  const a = store.addIssue({ text: '  Ship   dark mode ', projectId: 'web', by: 'user' });
+  const b = store.addIssue({ text: 'Write release notes', projectId: null, by: 'super' });
+  const c = store.addIssue({ text: 'Fix the flaky test', projectId: null, by: 'user' });
   assert.equal(a.text, 'Ship dark mode');
-  assert.deepEqual(store.goals().map(g => [g.text, g.order, g.status]), [['Ship dark mode', 0, 'queued'], ['Write release notes', 1, 'queued'], ['Fix the flaky test', 2, 'queued']]);
-  assert.throws(() => store.addGoal({ text: 'Ship dark mode', projectId: null, by: 'user' }), e => status(e) === 409);
-  assert.throws(() => store.addGoal({ text: '   ', projectId: null, by: 'user' }), e => status(e) === 400);
+  assert.deepEqual(store.issues().map(g => [g.text, g.order, g.status]), [['Ship dark mode', 0, 'queued'], ['Write release notes', 1, 'queued'], ['Fix the flaky test', 2, 'queued']]);
+  assert.throws(() => store.addIssue({ text: 'Ship dark mode', projectId: null, by: 'user' }), e => status(e) === 409);
+  assert.throws(() => store.addIssue({ text: '   ', projectId: null, by: 'user' }), e => status(e) === 400);
 
-  const started = store.updateGoal(a.id, { status: 'in_progress', agentId: 'ada', delegationId: 'm1', notes: 'Ada is on it' });
+  const started = store.updateIssue(a.id, { status: 'in_progress', agentId: 'ada', delegationId: 'm1', notes: 'Ada is on it' });
   assert.equal(started.agentId, 'ada');
   assert.equal(started.delegationId, 'm1');
-  const finished = store.updateGoal(a.id, { status: 'done' });
+  const finished = store.updateIssue(a.id, { status: 'done' });
   assert.ok(finished.doneAt);
-  assert.equal(store.updateGoal(a.id, { status: 'queued', agentId: '' }).doneAt, undefined, 'reopening clears the done time');
-  assert.equal(store.goal(a.id).agentId, undefined, 'an empty link is removed');
-  assert.throws(() => store.updateGoal(a.id, { status: 'later' as never }), e => status(e) === 400);
+  assert.equal(store.updateIssue(a.id, { status: 'queued', agentId: '' }).doneAt, undefined, 'reopening clears the done time');
+  assert.equal(store.issue(a.id).agentId, undefined, 'an empty link is removed');
+  assert.throws(() => store.updateIssue(a.id, { status: 'later' as never }), e => status(e) === 400);
 
   // Reopened, it went to the end; then the flaky test moves to the top.
-  assert.deepEqual(store.goals().map(g => g.text), ['Write release notes', 'Fix the flaky test', 'Ship dark mode']);
-  store.moveGoal(c.id, 0);
-  assert.deepEqual(store.goals().filter(g => g.status !== 'done').map(g => g.text), ['Fix the flaky test', 'Write release notes', 'Ship dark mode']);
-  // Undo puts a goal back as it was, or removes one that was added; never one removed since.
-  const before = store.goal(b.id);
-  store.updateGoal(b.id, { text: 'Write the release notes' });
-  store.restoreGoal(b.id, before);
-  assert.equal(store.goal(b.id).text, 'Write release notes');
-  store.restoreGoal(b.id, null);
-  assert.ok(!store.goals().some(g => g.id === b.id));
-  assert.throws(() => store.restoreGoal(b.id, before), e => status(e) === 409);
-  const saved = JSON.parse(fs.readFileSync(path.join(dir, 'super.json'), 'utf8')) as { goals: unknown[] };
-  assert.equal(saved.goals.length, 2);
+  assert.deepEqual(store.issues().map(g => g.text), ['Write release notes', 'Fix the flaky test', 'Ship dark mode']);
+  store.moveIssue(c.id, 0);
+  assert.deepEqual(store.issues().filter(g => g.status !== 'done').map(g => g.text), ['Fix the flaky test', 'Write release notes', 'Ship dark mode']);
+  // Undo puts an issue back as it was, or removes one that was added; never one removed since.
+  const before = store.issue(b.id);
+  store.updateIssue(b.id, { text: 'Write the release notes' });
+  store.restoreIssue(b.id, before);
+  assert.equal(store.issue(b.id).text, 'Write release notes');
+  store.restoreIssue(b.id, null);
+  assert.ok(!store.issues().some(g => g.id === b.id));
+  assert.throws(() => store.restoreIssue(b.id, before), e => status(e) === 409);
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, 'super.json'), 'utf8')) as { issues: unknown[] };
+  assert.equal(saved.issues.length, 2);
   assert.ok(!fs.existsSync(path.join(dir, 'super.json.tmp')), 'written through a temporary file');
-  assert.deepEqual(goalSections(store.goals()).open.map(g => g.order), [0, 1]);
+  assert.deepEqual(issueSections(store.issues()).open.map(g => g.order), [0, 1]);
 });
 
 async function team() {
@@ -69,50 +69,50 @@ async function team() {
   return { ...h, web, api, ada, bo, sup, runner, call, watcher };
 }
 
-test('the goal tools: add, list, start with links, complete; each in the decision log, and undoable', async () => {
+test('the issue tools: add, list, start with links, complete; each in the decision log, and undoable', async () => {
   const t = await team();
-  const { added } = await t.call('add_goal', { text: 'Ship dark mode', project: 'WEB', why: 'The user asked for it.' }) as { added: { id: string; projectId: string; by: string } };
+  const { added } = await t.call('add_issue', { text: 'Ship dark mode', project: 'WEB', why: 'The user asked for it.' }) as { added: { id: string; projectId: string; by: string } };
   assert.equal(added.projectId, t.web.id);
   assert.equal(added.by, 'super');
-  await assert.rejects(t.call('add_goal', { text: 'X', project: 'mobile', why: 'x' }), e => status(e) === 404);
-  const { goals } = await t.call('list_goals', {}) as { goals: { id: string }[] };
-  assert.deepEqual(goals.map(g => g.id), [added.id]);
+  await assert.rejects(t.call('add_issue', { text: 'X', project: 'mobile', why: 'x' }), e => status(e) === 404);
+  const { issues } = await t.call('list_issues', {}) as { issues: { id: string }[] };
+  assert.deepEqual(issues.map(g => g.id), [added.id]);
 
-  await t.call('update_goal', { goal_id: added.id, status: 'in_progress', agent_id: 'ada', delegation_id: 'msg-1', why: 'Ada is free.' });
-  let goal = t.manager.superView().goals[0];
-  assert.equal(goal.status, 'in_progress');
-  assert.equal(goal.agentId, t.ada.id);
+  await t.call('update_issue', { issue_id: added.id, status: 'in_progress', agent_id: 'ada', delegation_id: 'msg-1', why: 'Ada is free.' });
+  let issue = t.manager.superView().issues[0];
+  assert.equal(issue.status, 'in_progress');
+  assert.equal(issue.agentId, t.ada.id);
   assert.match(t.manager.superView().log[0].summary, /in progress, given to Ada/);
-  await t.call('complete_goal', { goal_id: added.id, notes: 'Merged after review.', why: 'Ada reported it passed.' });
-  goal = t.manager.superView().goals[0];
-  assert.equal(goal.status, 'done');
-  assert.equal(goal.notes, 'Merged after review.');
+  await t.call('complete_issue', { issue_id: added.id, notes: 'Merged after review.', why: 'Ada reported it passed.' });
+  issue = t.manager.superView().issues[0];
+  assert.equal(issue.status, 'done');
+  assert.equal(issue.notes, 'Merged after review.');
 
   // Undo, as the user: completing goes back to in progress, then adding goes away.
   const [completed, started, add] = t.manager.superView().log;
-  assert.equal(completed.tool, 'complete_goal');
+  assert.equal(completed.tool, 'complete_issue');
   await t.manager.undoSuper(completed.id);
-  assert.equal(t.manager.superView().goals[0].status, 'in_progress');
+  assert.equal(t.manager.superView().issues[0].status, 'in_progress');
   await t.manager.undoSuper(started.id);
-  assert.equal(t.manager.superView().goals[0].status, 'queued');
+  assert.equal(t.manager.superView().issues[0].status, 'queued');
   await t.manager.undoSuper(add.id);
-  assert.equal(t.manager.superView().goals.length, 0);
+  assert.equal(t.manager.superView().issues.length, 0);
 
   // Only the SuperAgent has them.
   t.manager.send(t.ada.id, 'Go.');
   await settle();
-  await assert.rejects(t.manager.commsTool(t.runners.get(t.ada.id)!.at(-1)!.ctx.commsToken!, 'add_goal', { text: 'Mine', why: 'x' }), e => status(e) === 403);
+  await assert.rejects(t.manager.commsTool(t.runners.get(t.ada.id)!.at(-1)!.ctx.commsToken!, 'add_issue', { text: 'Mine', why: 'x' }), e => status(e) === 403);
 });
 
-test('an agent coming free with queued goals wakes the SuperAgent, but only through the wake checks', async () => {
+test('an agent coming free with queued issues wakes the SuperAgent, but only through the wake checks', async () => {
   const t = await team();
   t.runner.complete();
-  t.manager.addGoal({ text: 'Write the release notes', projectId: t.web.id });
-  // A turn you start is yours: Ada coming free after it is no goal news.
+  t.manager.addIssue({ text: 'Write the release notes', projectId: t.web.id });
+  // A turn you start is yours: Ada coming free after it is no issue news.
   t.manager.send(t.ada.id, 'Fix the header.');
   await settle();
   t.runners.get(t.ada.id)!.at(-1)!.complete(true, 'Fixed it.');
-  assert.equal(t.watcher.waiting(), 2, 'the goal you added, and Ada finishing, but no goal line');
+  assert.equal(t.watcher.waiting(), 2, 'the issue you added, and Ada finishing, but no issue line');
   // Bo asks Ada something; when that turn ends with nothing more queued, Ada is free.
   t.manager.send(t.bo.id, 'Ask Ada about the header.');
   await settle();
@@ -120,7 +120,7 @@ test('an agent coming free with queued goals wakes the SuperAgent, but only thro
   await settle();
   t.runners.get(t.ada.id)!.at(-1)!.complete(true, 'Yes.');
   await settle();
-  assert.equal(t.watcher.waiting(), 3, 'now the goal line');
+  assert.equal(t.watcher.waiting(), 3, 'now the issue line');
 
   // Quiet hours around now: nothing goes.
   const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -140,30 +140,30 @@ test('an agent coming free with queued goals wakes the SuperAgent, but only thro
   await settle();
   const sent = t.runner.sent.at(-1)!;
   assert.equal(sent.task?.source, 'system');
-  assert.match(sent.text, /Ada is free and 1 queued goal waits/);
-  assert.match(sent.text, /Open goals, in order[^\n]*\n1\. \[\w+\] queued: Write the release notes/);
-  assert.match(sent.text, /The user added a goal: "Write the release notes"/);
+  assert.match(sent.text, /Ada is free and 1 queued issue waits/);
+  assert.match(sent.text, /Open issues, in order[^\n]*\n1\. \[\w+\] queued: Write the release notes/);
+  assert.match(sent.text, /The user added an issue: "Write the release notes"/);
 
-  // With no queued goals, a free agent is ordinary news, with no goal line.
+  // With no queued issues, a free agent is ordinary news, with no issue line.
   t.runner.complete();
-  t.manager.updateGoal(t.manager.superView().goals[0].id, { status: 'done' });
+  t.manager.updateIssue(t.manager.superView().issues[0].id, { status: 'done' });
   const bo = t.runners.get(t.bo.id)!.at(-1)!;
   if (bo.busy) bo.complete(true, 'Asked.');
   await settle();
   assert.ok(t.watcher.flush());
   await settle();
-  assert.doesNotMatch(t.runner.sent.at(-1)!.text, /queued goal|Open goals/);
+  assert.doesNotMatch(t.runner.sent.at(-1)!.text, /queued issue|Open issues/);
 });
 
-test('the update prompt lists open goals briefly, top down, and leaves done ones out', () => {
-  const goal = (id: string, order: number, status: 'queued' | 'in_progress' | 'done') => ({ id, text: `Goal ${id}`, projectId: null, status, order, createdAt: 0, updatedAt: 0, by: 'user' as const });
-  const goals = [goal('a', 1, 'queued'), goal('b', 0, 'in_progress'), goal('c', 2, 'done'), ...Array.from({ length: 9 }, (_, i) => goal(`x${i}`, 3 + i, 'queued'))];
-  const prompt = updatePrompt([], [], 0, goals);
-  assert.match(prompt, /1\. \[a\] queued: Goal a/);
-  assert.match(prompt, /2\. \[b\] in_progress: Goal b/);
-  assert.doesNotMatch(prompt, /Goal c/);
-  assert.match(prompt, /\(3 more; list_goals has them all\)/);
-  assert.doesNotMatch(updatePrompt([], [], 0, []), /Open goals/);
+test('the update prompt lists open issues briefly, top down, and leaves done ones out', () => {
+  const issue = (id: string, order: number, status: 'queued' | 'in_progress' | 'done') => ({ id, text: `Issue ${id}`, projectId: null, status, order, createdAt: 0, updatedAt: 0, by: 'user' as const });
+  const issues = [issue('a', 1, 'queued'), issue('b', 0, 'in_progress'), issue('c', 2, 'done'), ...Array.from({ length: 9 }, (_, i) => issue(`x${i}`, 3 + i, 'queued'))];
+  const prompt = updatePrompt([], [], 0, issues);
+  assert.match(prompt, /1\. \[a\] queued: Issue a/);
+  assert.match(prompt, /2\. \[b\] in_progress: Issue b/);
+  assert.doesNotMatch(prompt, /Issue c/);
+  assert.match(prompt, /\(3 more; list_issues has them all\)/);
+  assert.doesNotMatch(updatePrompt([], [], 0, []), /Open issues/);
 });
 
 test('the SuperAgent messages any agent whatever the team settings, but never one the user stopped; other agents keep their rules', async () => {
@@ -202,30 +202,30 @@ test('the daily creation cap is a setting: 25 by default, checked', () => {
   assert.equal(h.manager.updateSettings({ superMaxCreatesPerDay: 40 }).superMaxCreatesPerDay, 40);
 });
 
-test('the user manages goals over HTTP: add, edit, reorder, remove', async () => {
+test('the user manages issues over HTTP: add, edit, reorder, remove', async () => {
   const t = await team();
   const server = createApp(t.manager).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/super/goals`;
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/super/issues`;
   const send = (url: string, method: string, body?: unknown) => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
   try {
     await send(base, 'POST', { text: 'First', projectId: null });
     const two = await (await send(base, 'POST', { text: 'Second', projectId: t.web.id })).json() as SuperState;
-    const second = two.goals.find(g => g.text === 'Second')!;
+    const second = two.issues.find(g => g.text === 'Second')!;
     assert.equal(second.projectId, t.web.id);
     assert.equal(second.by, 'user');
     assert.equal((await send(base, 'POST', { text: '' })).status, 400);
     assert.equal((await send(base, 'POST', { text: 'X', projectId: 'nope' })).status, 404);
     const moved = await (await send(`${base}/${second.id}/move`, 'POST', { to: 0 })).json() as SuperState;
-    assert.deepEqual(moved.goals.map(g => g.text), ['Second', 'First']);
+    assert.deepEqual(moved.issues.map(g => g.text), ['Second', 'First']);
     const edited = await (await send(`${base}/${second.id}`, 'PATCH', { text: 'Second, reworded', status: 'blocked' })).json() as SuperState;
-    assert.equal(edited.goals[0].text, 'Second, reworded');
-    assert.equal(edited.goals[0].status, 'blocked');
+    assert.equal(edited.issues[0].text, 'Second, reworded');
+    assert.equal(edited.issues[0].status, 'blocked');
     assert.equal((await send(`${base}/${second.id}`, 'PATCH', { status: 'someday' })).status, 400);
     const left = await (await send(`${base}/${second.id}`, 'DELETE')).json() as SuperState;
-    assert.deepEqual(left.goals.map(g => g.text), ['First']);
+    assert.deepEqual(left.issues.map(g => g.text), ['First']);
     assert.equal((await send(`${base}/${second.id}`, 'DELETE')).status, 404);
-    assert.ok(t.events.some(e => e.type === 'super' && e.super.goals.length === 2));
+    assert.ok(t.events.some(e => e.type === 'super' && e.super.issues.length === 2));
   } finally {
     server.close();
   }
@@ -359,9 +359,9 @@ test('the daily budget holds only what it starts on its own, and says so; work y
   assert.equal(fromBo.status, 'delivering');
 });
 
-test('goals are handed out only in update turns, never from mail about work you asked for', async () => {
+test('issues are handed out only in update turns, never from mail about work you asked for', async () => {
   const t = await team();
-  const { added } = await t.call('add_goal', { text: 'Tidy the docs', why: 'x' }) as { added: { id: string } };
+  const { added } = await t.call('add_issue', { text: 'Tidy the docs', why: 'x' }) as { added: { id: string } };
   t.runner.complete();
   // Your turn delegates to Ada; her report comes back as a mail turn on your work.
   t.manager.send(t.sup.id, 'Write the notes.');
@@ -374,16 +374,16 @@ test('goals are handed out only in update turns, never from mail about work you 
   ada.complete(true, 'Reported.');
   await settle();
   assert.equal(t.runner.sent.at(-1)!.task?.source, 'agent');
-  await assert.rejects(t.call('update_goal', { goal_id: added.id, status: 'in_progress', agent_id: 'Bo', why: 'Bo is free.' }), e => status(e) === 409 && /update turns/.test((e as Error).message));
-  await assert.rejects(t.call('update_goal', { goal_id: added.id, agent_id: 'Bo', why: 'x' }), e => status(e) === 409);
-  // Notes and completing are fine there; starting a goal is fine in an update turn.
-  await t.call('update_goal', { goal_id: added.id, notes: 'Waiting for a free agent.', why: 'x' });
+  await assert.rejects(t.call('update_issue', { issue_id: added.id, status: 'in_progress', agent_id: 'Bo', why: 'Bo is free.' }), e => status(e) === 409 && /update turns/.test((e as Error).message));
+  await assert.rejects(t.call('update_issue', { issue_id: added.id, agent_id: 'Bo', why: 'x' }), e => status(e) === 409);
+  // Notes and completing are fine there; starting an issue is fine in an update turn.
+  await t.call('update_issue', { issue_id: added.id, notes: 'Waiting for a free agent.', why: 'x' });
   t.runner.complete();
   await settle();
   t.watcher.note({ agentId: t.bo.id, key: 'free', text: 'Bo is free' });
   assert.ok(t.watcher.flush());
-  await t.call('update_goal', { goal_id: added.id, status: 'in_progress', agent_id: 'Bo', why: 'Bo is free.' });
-  assert.equal(t.manager.superView().goals[0].status, 'in_progress');
+  await t.call('update_issue', { issue_id: added.id, status: 'in_progress', agent_id: 'Bo', why: 'Bo is free.' });
+  assert.equal(t.manager.superView().issues[0].status, 'in_progress');
 });
 
 test('the app hears about the SuperAgent only when something changed', async () => {
@@ -394,42 +394,42 @@ test('the app hears about the SuperAgent only when something changed', async () 
   tick();
   tick();
   assert.equal(t.events.filter(e => e.type === 'super').length, before, 'an unchanged view is not sent again');
-  t.manager.addGoal({ text: 'Something new' });
+  t.manager.addIssue({ text: 'Something new' });
   assert.equal(t.events.filter(e => e.type === 'super').length, before + 1);
 });
 
-test('goal undo refuses when the goal is gone or would repeat an open one; update_goal needs something to change', async () => {
+test('issue undo refuses when the issue is gone or would repeat an open one; update_issue needs something to change', async () => {
   const t = await team();
-  const { added } = await t.call('add_goal', { text: 'Ship it', why: 'x' }) as { added: { id: string } };
-  t.manager.removeGoal(added.id);
+  const { added } = await t.call('add_issue', { text: 'Ship it', why: 'x' }) as { added: { id: string } };
+  t.manager.removeIssue(added.id);
   await assert.rejects(t.manager.undoSuper(t.manager.superView().log[0].id), e => status(e) === 409);
-  assert.equal(t.manager.superView().goals.length, 0, 'not brought back');
+  assert.equal(t.manager.superView().issues.length, 0, 'not brought back');
 
-  const { added: two } = await t.call('add_goal', { text: 'Write docs', why: 'x' }) as { added: { id: string } };
-  await t.call('complete_goal', { goal_id: two.id, why: 'Done.' });
-  t.manager.addGoal({ text: 'Write docs' });
+  const { added: two } = await t.call('add_issue', { text: 'Write docs', why: 'x' }) as { added: { id: string } };
+  await t.call('complete_issue', { issue_id: two.id, why: 'Done.' });
+  t.manager.addIssue({ text: 'Write docs' });
   await assert.rejects(t.manager.undoSuper(t.manager.superView().log[0].id), e => status(e) === 409 && /same thing/.test((e as Error).message));
-  await assert.rejects(t.call('update_goal', { goal_id: two.id, why: 'Nothing.' }), e => status(e) === 400);
+  await assert.rejects(t.call('update_issue', { issue_id: two.id, why: 'Nothing.' }), e => status(e) === 400);
 });
 
-test('goals read from super.json are checked; the app must send text as text', async () => {
-  const dir = tempDir('goals-bad');
+test('issues read from super.json are checked; the app must send text as text', async () => {
+  const dir = tempDir('issues-bad');
   fs.writeFileSync(path.join(dir, 'super.json'), JSON.stringify({
     asks: [], log: [], wakes: [],
-    goals: [
+    issues: [
       { id: 'ok', text: 'Fine', projectId: null, status: 'queued', order: 0, createdAt: 1, updatedAt: 1, by: 'user' },
       { id: 'bad1', text: 42, projectId: null, status: 'queued', order: 1, createdAt: 1, updatedAt: 1, by: 'user' },
       { id: 'bad2', text: 'Odd', projectId: null, status: 'someday', order: 2, createdAt: 1, updatedAt: 1, by: 'user' },
       null,
     ],
   }));
-  assert.deepEqual(new SuperStore(dir).goals().map(g => g.id), ['ok']);
+  assert.deepEqual(new SuperStore(dir).issues().map(g => g.id), ['ok']);
   const t = await team();
-  assert.throws(() => t.manager.addGoal({ text: 42 as unknown as string }), e => status(e) === 400);
-  assert.throws(() => t.manager.addGoal({ text: 'X', projectId: 7 as unknown as string }), e => status(e) === 400);
-  t.manager.addGoal({ text: 'Two\nlines' });
-  assert.equal(t.manager.superView().goals[0].text, 'Two lines', 'a goal is one line');
-  assert.throws(() => t.manager.updateGoal(t.manager.superView().goals[0].id, { text: ['x'] }), e => status(e) === 400);
+  assert.throws(() => t.manager.addIssue({ text: 42 as unknown as string }), e => status(e) === 400);
+  assert.throws(() => t.manager.addIssue({ text: 'X', projectId: 7 as unknown as string }), e => status(e) === 400);
+  t.manager.addIssue({ text: 'Two\nlines' });
+  assert.equal(t.manager.superView().issues[0].text, 'Two lines', 'an issue is one line');
+  assert.throws(() => t.manager.updateIssue(t.manager.superView().issues[0].id, { text: ['x'] }), e => status(e) === 400);
 });
 
 test('an answer to its question is your turn: what it delegates there comes back with wake-ups off, no budget and the day spent', async () => {

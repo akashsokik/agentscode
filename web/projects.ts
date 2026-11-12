@@ -14,7 +14,7 @@ export const NO_PROJECTS = 'No projects';
 /**
  * The projects an agent works on, as one label: ALL_PROJECTS for every project, the project's name
  * for one, "first + N" for several (the start folder first, ACH-D15), or `missing` when its projects
- * are gone. A single id (a goal's, a terminal's) reads as that project.
+ * are gone. A single id (an issue's, a terminal's) reads as that project.
  */
 export function projectLabel(projectIds: string[] | string | null, projects: readonly { id: string; name: string }[] | undefined, missing = ''): string {
   if (projectIds === null) return ALL_PROJECTS;

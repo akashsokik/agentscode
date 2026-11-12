@@ -211,19 +211,24 @@ export function createApp(
   app.post('/api/super/asks/:askId', (req, res) => {
     res.json(manager.answerSuper(param(req, 'askId'), req.body ?? {}));
   });
-  // The goals backlog: the user adds, edits, reorders and removes goals.
-  app.post('/api/super/goals', (req, res) => {
-    res.json(manager.addGoal(req.body ?? {}));
+  // The issues backlog: the user adds, edits, reorders and removes issues.
+  app.post('/api/super/issues', (req, res) => {
+    res.json(manager.addIssue(req.body ?? {}));
   });
-  app.patch('/api/super/goals/:goalId', (req, res) => {
-    res.json(manager.updateGoal(param(req, 'goalId'), req.body ?? {}));
+  app.patch('/api/super/issues/:issueId', (req, res) => {
+    res.json(manager.updateIssue(param(req, 'issueId'), req.body ?? {}));
   });
-  app.delete('/api/super/goals/:goalId', (req, res) => {
-    res.json(manager.removeGoal(param(req, 'goalId')));
+  app.delete('/api/super/issues/:issueId', (req, res) => {
+    res.json(manager.removeIssue(param(req, 'issueId')));
   });
-  app.post('/api/super/goals/:goalId/move', (req, res) => {
-    res.json(manager.moveGoal(param(req, 'goalId'), req.body?.to));
+  app.post('/api/super/issues/:issueId/move', (req, res) => {
+    res.json(manager.moveIssue(param(req, 'issueId'), req.body?.to));
   });
+  // The same under the old name (ACH-D38), for a window still running the build before the rename.
+  app.post('/api/super/goals', (req, res) => { res.json(manager.addIssue(req.body ?? {})); });
+  app.patch('/api/super/goals/:issueId', (req, res) => { res.json(manager.updateIssue(param(req, 'issueId'), req.body ?? {})); });
+  app.delete('/api/super/goals/:issueId', (req, res) => { res.json(manager.removeIssue(param(req, 'issueId'))); });
+  app.post('/api/super/goals/:issueId/move', (req, res) => { res.json(manager.moveIssue(param(req, 'issueId'), req.body?.to)); });
   // Scheduled routines: the user adds, changes, confirms, turns on or off, and removes them.
   app.post('/api/super/routines', (req, res) => {
     res.json(manager.addRoutine(req.body ?? {}));

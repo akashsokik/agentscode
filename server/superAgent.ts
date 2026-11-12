@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { GoalStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperGoal, SuperRoutine, SuperState } from '../shared/types.ts';
+import type { IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
 import { HttpError } from './errors.ts';
 import { inQuietHours, validQuietTime } from '../shared/superAgent.ts';
 
@@ -11,7 +11,7 @@ export { inQuietHours, validQuietTime };
 // commands only (server/comms/tools.ts SUPER_TOOLS) and never edits: it has no edit tools or shell
 // on any engine (server/agents/claude.ts claudeToolPolicy; read-only autonomy for Codex and OrcaCode).
 // What it keeps lives in the data dir:
-//   super.json   its asks to the user and its decision log, newest first, capped; its goals backlog
+//   super.json   its asks to the user and its decision log, newest first, capped; its issues backlog
 // The watcher here wakes it: agents finishing, failing, getting stuck or waiting for the user are
 // batched into one update turn, only while it is idle, within a budget and outside quiet hours.
 
@@ -19,10 +19,10 @@ export const SUPER_NAME = 'SuperAgent';
 /** Asks and log entries kept; open asks are always kept. */
 const ASKS_KEPT = 50;
 const LOG_KEPT = 200;
-/** Goals kept: open ones always, then the latest done. */
-const DONE_GOALS_KEPT = 50;
-export const MAX_OPEN_GOALS = 50;
-export const GOAL_STATUSES: GoalStatus[] = ['queued', 'in_progress', 'blocked', 'done'];
+/** Issues kept: open ones always, then the latest done. */
+const DONE_ISSUES_KEPT = 50;
+export const MAX_OPEN_ISSUES = 50;
+export const ISSUE_STATUSES: IssueStatus[] = ['queued', 'in_progress', 'blocked', 'done'];
 /** Open asks at once: past this it must wait for answers. */
 export const MAX_OPEN_ASKS = 5;
 /** Updates wait this long for more to batch with. */
@@ -47,7 +47,7 @@ interface Stored {
   autoSpend?: { day: string; usd: number };
   /** The local day of the last morning brief. */
   briefDay?: string;
-  goals: SuperGoal[];
+  issues: SuperIssue[];
   routines: SuperRoutine[];
 }
 
@@ -57,18 +57,18 @@ export class SuperStore {
 
   private read(): Stored {
     try {
-      const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<Stored>;
+      const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<Stored> & LegacyStored;
       return {
         asks: Array.isArray(raw.asks) ? raw.asks : [],
-        log: Array.isArray(raw.log) ? raw.log : [],
+        log: Array.isArray(raw.log) ? raw.log.map(migrateAction) : [],
         wakes: Array.isArray(raw.wakes) ? raw.wakes.filter(n => typeof n === 'number') : [],
         ...(raw.autoSpend && typeof raw.autoSpend.usd === 'number' && typeof raw.autoSpend.day === 'string' ? { autoSpend: raw.autoSpend } : {}),
         ...(typeof raw.briefDay === 'string' ? { briefDay: raw.briefDay } : {}),
-        goals: Array.isArray(raw.goals) ? raw.goals.filter(validGoal) : [],
+        issues: storedIssues(raw).filter(validIssue),
         routines: Array.isArray(raw.routines) ? raw.routines.filter(validRoutine) : [],
       };
     } catch {
-      return { asks: [], log: [], wakes: [], goals: [], routines: [] };
+      return { asks: [], log: [], wakes: [], issues: [], routines: [] };
     }
   }
 
@@ -79,7 +79,7 @@ export class SuperStore {
       asks: [...open, ...closed].sort((a, b) => b.createdAt - a.createdAt), log: stored.log.slice(0, LOG_KEPT), wakes: stored.wakes.slice(-100),
       ...(stored.autoSpend ? { autoSpend: stored.autoSpend } : {}),
       ...(stored.briefDay ? { briefDay: stored.briefDay } : {}),
-      goals: orderGoals(stored.goals),
+      issues: orderIssues(stored.issues),
       routines: stored.routines,
     };
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
@@ -88,8 +88,8 @@ export class SuperStore {
   }
 
   view(agentId: string | null): SuperState {
-    const { asks, log, goals, routines } = this.read();
-    return { agentId, asks, log, goals, routines };
+    const { asks, log, issues, routines } = this.read();
+    return { agentId, asks, log, issues, routines };
   }
 
   // ---- routines -----------------------------------------------------------------------------
@@ -158,43 +158,43 @@ export class SuperStore {
     return due;
   }
 
-  // ---- goals --------------------------------------------------------------------------------
+  // ---- issues --------------------------------------------------------------------------------
 
-  goals(): SuperGoal[] {
-    return this.read().goals;
+  issues(): SuperIssue[] {
+    return this.read().issues;
   }
 
-  goal(id: string): SuperGoal {
-    const found = this.read().goals.find(g => g.id === id);
-    if (!found) throw new HttpError(404, 'No goal with that id.');
+  issue(id: string): SuperIssue {
+    const found = this.read().issues.find(g => g.id === id);
+    if (!found) throw new HttpError(404, 'No issue with that id.');
     return found;
   }
 
-  /** A new goal at the end of the backlog, queued. */
-  addGoal(input: { text: string; projectId: string | null; by: SuperGoal['by'] }, now = Date.now()): SuperGoal {
+  /** A new issue at the end of the backlog, queued. */
+  addIssue(input: { text: string; projectId: string | null; by: SuperIssue['by'] }, now = Date.now()): SuperIssue {
     const stored = this.read();
-    const text = goalText(input.text);
-    if (stored.goals.filter(g => g.status !== 'done').length >= MAX_OPEN_GOALS) throw new HttpError(409, `${MAX_OPEN_GOALS} goals are open already. Finish or remove some first.`);
-    if (stored.goals.some(g => g.status !== 'done' && g.text === text)) throw new HttpError(409, 'That goal is already in the backlog.');
-    const goal: SuperGoal = {
+    const text = issueText(input.text);
+    if (stored.issues.filter(g => g.status !== 'done').length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already. Finish or remove some first.`);
+    if (stored.issues.some(g => g.status !== 'done' && g.text === text)) throw new HttpError(409, 'That issue is already in the backlog.');
+    const issue: SuperIssue = {
       id: randomUUID().slice(0, 8), text, projectId: input.projectId, status: 'queued',
-      order: stored.goals.filter(g => g.status !== 'done').length, createdAt: now, updatedAt: now, by: input.by,
+      order: stored.issues.filter(g => g.status !== 'done').length, createdAt: now, updatedAt: now, by: input.by,
     };
-    this.write({ ...stored, goals: [...stored.goals, goal] });
-    return goal;
+    this.write({ ...stored, issues: [...stored.issues, issue] });
+    return issue;
   }
 
   /**
-   * Change a goal's text, project, status, links or notes. Done stamps doneAt; leaving done clears
+   * Change an issue's text, project, status, links or notes. Done stamps doneAt; leaving done clears
    * it. A link set to '' is removed.
    */
-  updateGoal(id: string, patch: Partial<Pick<SuperGoal, 'text' | 'projectId' | 'status' | 'agentId' | 'delegationId' | 'notes'>>, now = Date.now()): SuperGoal {
+  updateIssue(id: string, patch: Partial<Pick<SuperIssue, 'text' | 'projectId' | 'status' | 'agentId' | 'delegationId' | 'notes'>>, now = Date.now()): SuperIssue {
     const stored = this.read();
-    const old = stored.goals.find(g => g.id === id);
-    if (!old) throw new HttpError(404, 'No goal with that id.');
-    if (patch.status !== undefined && !GOAL_STATUSES.includes(patch.status)) throw new HttpError(400, 'A goal is queued, in_progress, blocked or done.');
-    const next: SuperGoal = { ...old, updatedAt: now };
-    if (patch.text !== undefined) next.text = goalText(patch.text);
+    const old = stored.issues.find(g => g.id === id);
+    if (!old) throw new HttpError(404, 'No issue with that id.');
+    if (patch.status !== undefined && !ISSUE_STATUSES.includes(patch.status)) throw new HttpError(400, 'An issue is queued, in_progress, blocked or done.');
+    const next: SuperIssue = { ...old, updatedAt: now };
+    if (patch.text !== undefined) next.text = issueText(patch.text);
     if (patch.projectId !== undefined) next.projectId = patch.projectId;
     if (patch.notes !== undefined) {
       const notes = String(patch.notes).replace(/\s+/g, ' ').trim().slice(0, 1000);
@@ -209,47 +209,47 @@ export class SuperStore {
       if (patch.status === 'done') next.doneAt = old.doneAt ?? now;
       else delete next.doneAt;
       // Reopened, it joins the end of the backlog.
-      if (old.status === 'done' && patch.status !== 'done') next.order = stored.goals.filter(g => g.status !== 'done').length;
+      if (old.status === 'done' && patch.status !== 'done') next.order = stored.issues.filter(g => g.status !== 'done').length;
     }
-    this.write({ ...stored, goals: stored.goals.map(g => (g.id === id ? next : g)) });
+    this.write({ ...stored, issues: stored.issues.map(g => (g.id === id ? next : g)) });
     return next;
   }
 
-  removeGoal(id: string): SuperGoal {
+  removeIssue(id: string): SuperIssue {
     const stored = this.read();
-    const goal = stored.goals.find(g => g.id === id);
-    if (!goal) throw new HttpError(404, 'No goal with that id.');
-    this.write({ ...stored, goals: stored.goals.filter(g => g.id !== id) });
-    return goal;
+    const issue = stored.issues.find(g => g.id === id);
+    if (!issue) throw new HttpError(404, 'No issue with that id.');
+    this.write({ ...stored, issues: stored.issues.filter(g => g.id !== id) });
+    return issue;
   }
 
-  /** Move an open goal to a place in the open backlog (0 first). */
-  moveGoal(id: string, to: number): SuperGoal[] {
+  /** Move an open issue to a place in the open backlog (0 first). */
+  moveIssue(id: string, to: number): SuperIssue[] {
     const stored = this.read();
-    const open = orderGoals(stored.goals).filter(g => g.status !== 'done');
+    const open = orderIssues(stored.issues).filter(g => g.status !== 'done');
     const from = open.findIndex(g => g.id === id);
-    if (from < 0) throw new HttpError(404, 'No open goal with that id.');
-    const [goal] = open.splice(from, 1);
-    open.splice(Math.max(0, Math.min(open.length, Math.round(to))), 0, goal);
+    if (from < 0) throw new HttpError(404, 'No open issue with that id.');
+    const [issue] = open.splice(from, 1);
+    open.splice(Math.max(0, Math.min(open.length, Math.round(to))), 0, issue);
     const order = new Map(open.map((g, i) => [g.id, i]));
-    this.write({ ...stored, goals: stored.goals.map(g => (order.has(g.id) ? { ...g, order: order.get(g.id)! } : g)) });
-    return this.read().goals;
+    this.write({ ...stored, issues: stored.issues.map(g => (order.has(g.id) ? { ...g, order: order.get(g.id)! } : g)) });
+    return this.read().issues;
   }
 
   /**
-   * Put a goal back as it was (undo); null removes it. Refused (409) when the goal is gone since, or
-   * when putting it back would break the open-goal cap or repeat another open goal.
+   * Put an issue back as it was (undo); null removes it. Refused (409) when the issue is gone since, or
+   * when putting it back would break the open-issue cap or repeat another open issue.
    */
-  restoreGoal(id: string, before: SuperGoal | null): void {
+  restoreIssue(id: string, before: SuperIssue | null): void {
     const stored = this.read();
-    const current = stored.goals.find(g => g.id === id);
-    if (!current) throw new HttpError(409, 'That goal was removed since, so there is nothing to undo.');
-    const rest = stored.goals.filter(g => g.id !== id);
+    const current = stored.issues.find(g => g.id === id);
+    if (!current) throw new HttpError(409, 'That issue was removed since, so there is nothing to undo.');
+    const rest = stored.issues.filter(g => g.id !== id);
     if (before && before.status !== 'done') {
-      if (current.status === 'done' && rest.filter(g => g.status !== 'done').length >= MAX_OPEN_GOALS) throw new HttpError(409, `${MAX_OPEN_GOALS} goals are open already.`);
-      if (rest.some(g => g.status !== 'done' && g.text === before.text)) throw new HttpError(409, 'Another open goal says the same thing now.');
+      if (current.status === 'done' && rest.filter(g => g.status !== 'done').length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already.`);
+      if (rest.some(g => g.status !== 'done' && g.text === before.text)) throw new HttpError(409, 'Another open issue says the same thing now.');
     }
-    this.write({ ...stored, goals: before ? [...rest, before] : rest });
+    this.write({ ...stored, issues: before ? [...rest, before] : rest });
   }
 
   openAsks(): SuperAsk[] {
@@ -345,18 +345,35 @@ export class SuperStore {
 
 const isOpen = (ask: SuperAsk) => ask.answeredAt === undefined;
 
-/** A goal as super.json must hold it; anything else (a hand edit gone wrong) is left out. */
-function validGoal(raw: unknown): raw is SuperGoal {
-  const g = raw as Partial<SuperGoal> | null;
+/**
+ * super.json as written before Goals became Issues (ACH-D38): the backlog under "goals" and undo
+ * records of kind "goal" with a goalId. Read either way; the next write keeps only the new names,
+ * so the move happens once and loses nothing.
+ */
+interface LegacyStored { goals?: unknown }
+export function storedIssues(raw: { issues?: unknown; goals?: unknown }): unknown[] {
+  if (Array.isArray(raw.issues) && raw.issues.length) return raw.issues;
+  return Array.isArray(raw.goals) ? raw.goals : Array.isArray(raw.issues) ? raw.issues : [];
+}
+export function migrateAction(action: SuperAction): SuperAction {
+  const undo = action.undo as unknown as { kind?: string; goalId?: string; before?: unknown } | undefined;
+  if (undo?.kind !== 'goal') return action;
+  const { goalId, ...rest } = undo;
+  return { ...action, undo: { ...rest, kind: 'issue', issueId: goalId } as SuperAction['undo'] };
+}
+
+/** An issue as super.json must hold it; anything else (a hand edit gone wrong) is left out. */
+function validIssue(raw: unknown): raw is SuperIssue {
+  const g = raw as Partial<SuperIssue> | null;
   return Boolean(g) && typeof g!.id === 'string' && typeof g!.text === 'string' && g!.text.trim() !== ''
-    && (g!.projectId === null || typeof g!.projectId === 'string') && GOAL_STATUSES.includes(g!.status as GoalStatus)
+    && (g!.projectId === null || typeof g!.projectId === 'string') && ISSUE_STATUSES.includes(g!.status as IssueStatus)
     && typeof g!.order === 'number' && Number.isFinite(g!.order) && typeof g!.createdAt === 'number' && typeof g!.updatedAt === 'number'
     && (g!.by === 'user' || g!.by === 'super')
     && (g!.agentId === undefined || typeof g!.agentId === 'string') && (g!.delegationId === undefined || typeof g!.delegationId === 'string')
     && (g!.notes === undefined || typeof g!.notes === 'string') && (g!.doneAt === undefined || typeof g!.doneAt === 'number');
 }
 
-/** One line: a goal is a short statement, so newlines and runs of space are folded (the inputs are single-line too). */
+/** One line: an issue is a short statement, so newlines and runs of space are folded (the inputs are single-line too). */
 export const MAX_ROUTINES = 30;
 
 /** "daily at 09:00", "every 6 hours". */
@@ -405,17 +422,17 @@ export function routineDue(routine: SuperRoutine, now: Date): number | null {
   return now.getTime() >= slot && last < slot ? slot : null;
 }
 
-function goalText(raw: unknown): string {
+function issueText(raw: unknown): string {
   const text = String(raw ?? '').replace(/\s+/g, ' ').trim();
-  if (!text) throw new HttpError(400, 'Say what the goal is.');
-  if (text.length > 500) throw new HttpError(400, 'Keep a goal under 500 characters.');
+  if (!text) throw new HttpError(400, 'Say what the issue is.');
+  if (text.length > 500) throw new HttpError(400, 'Keep an issue under 500 characters.');
   return text;
 }
 
-/** Open goals by their order (renumbered 0, 1, 2, ...), then the latest done ones, newest first. */
-export function orderGoals(goals: readonly SuperGoal[]): SuperGoal[] {
-  const open = goals.filter(g => g.status !== 'done').sort((a, b) => a.order - b.order || a.createdAt - b.createdAt).map((g, i) => ({ ...g, order: i }));
-  const done = goals.filter(g => g.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)).slice(0, DONE_GOALS_KEPT);
+/** Open issues by their order (renumbered 0, 1, 2, ...), then the latest done ones, newest first. */
+export function orderIssues(issues: readonly SuperIssue[]): SuperIssue[] {
+  const open = issues.filter(g => g.status !== 'done').sort((a, b) => a.order - b.order || a.createdAt - b.createdAt).map((g, i) => ({ ...g, order: i }));
+  const done = issues.filter(g => g.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)).slice(0, DONE_ISSUES_KEPT);
   return [...open, ...done];
 }
 const localDay = (now: Date) => `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
@@ -434,19 +451,19 @@ export interface SuperEvent {
  * The update turn: what happened, in PodCode's words, with every agent's own text inside
  * <untrusted> tags, so the SuperAgent reads it as data and never as instructions.
  */
-export function updatePrompt(events: SuperEvent[], openAsks: SuperAsk[], now: number, goals: readonly SuperGoal[] = [], held?: { count: number; reasons: string[] }): string {
+export function updatePrompt(events: SuperEvent[], openAsks: SuperAsk[], now: number, issues: readonly SuperIssue[] = [], held?: { count: number; reasons: string[] }): string {
   const shown = events.slice(-UPDATE_LINES);
   const time = (ts: number) => new Date(ts).toTimeString().slice(0, 5);
   const lines = shown.map(e => `- ${time(e.at)} ${e.text}${e.untrusted ? `: <untrusted>${e.untrusted.replace(/<\/?untrusted>/gi, '')}</untrusted>` : ''}`);
   const more = events.length > shown.length ? [`- (${events.length - shown.length} earlier updates left out)`] : [];
   const waiting = openAsks.length ? [``, `Still waiting for the user: ${openAsks.map(a => `"${a.question}"`).join('; ')}. Do not ask these again.`] : [];
-  const open = goals.filter(g => g.status !== 'done');
-  const shownGoals = open.slice(0, 8);
+  const open = issues.filter(g => g.status !== 'done');
+  const shownIssues = open.slice(0, 8);
   const backlog = open.length ? [
     '',
-    'Open goals, in order (work them top down: give the next queued one to a free agent and mark it in_progress with update_goal):',
-    ...shownGoals.map((g, i) => `${i + 1}. [${g.id}] ${g.status}: ${g.text}`),
-    ...(open.length > shownGoals.length ? [`(${open.length - shownGoals.length} more; list_goals has them all)`] : []),
+    'Open issues, in order (work them top down: give the next queued one to a free agent and mark it in_progress with update_issue):',
+    ...shownIssues.map((g, i) => `${i + 1}. [${g.id}] ${g.status}: ${g.text}`),
+    ...(open.length > shownIssues.length ? [`(${open.length - shownIssues.length} more; list_issues has them all)`] : []),
   ] : [];
   const waited = held ? ['', `While you could not take a turn (${held.reasons.join('; ')}), ${held.count} ${held.count === 1 ? 'message to you waited' : 'messages to you waited'}. ${held.count === 1 ? 'It comes' : 'They come'} as ${held.count === 1 ? 'its own turn' : 'their own turns'} after this update.`] : [];
   return [
@@ -569,7 +586,7 @@ export class SuperWatcher {
     const held = still.length ? { count: still.length, reasons: [...new Set(still.map(([, reason]) => reason))] } : undefined;
     this.heldMail.clear();
     this.host.store.noteWake(this.now());
-    this.host.deliver(updatePrompt(events, this.host.store.openAsks(), this.now(), this.host.store.goals(), held), events);
+    this.host.deliver(updatePrompt(events, this.host.store.openAsks(), this.now(), this.host.store.issues(), held), events);
     return true;
   }
 
