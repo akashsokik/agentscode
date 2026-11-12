@@ -1,13 +1,9 @@
 // How the right panel's tabs fit their strip (ACH-D30: header controls never touch or overlap).
-// The strip keeps one gap between tabs and before the collapse button; when it runs out of room it
-// gives up, in order: the other tabs' names, the open tab's name, then the last tabs, which move
-// into a "…" menu. The open tab always stays in the strip. Pure, so it is tested directly.
-//
-// Every tab behaves the same (ACH-D35): whether the open tab shows its name is decided for the
-// strip, not for the tab. Room is kept for the widest name (with its count), so at a given width
-// either every tab shows its name when open or none does. Judged per tab, a short name (Overview,
-// Notes) kept its label where a long one with a count (Decisions, Routines) lost it, so opening
-// different tabs looked different.
+// The strip keeps one gap between tabs and before the collapse button. When it runs out of room it
+// gives up, in order (ACH-D36): the other tabs' names, then the other tabs themselves, last first,
+// which move into a "…" menu, and only when even the open tab with its name and the "…" button do
+// not fit, the open tab's name. So a tab you open always shows its icon and name (ACH-D35: every
+// tab alike), down to the panel's narrowest width. Pure, so it is tested directly.
 
 /** An icon tab without its name (IconTab: 14px icon, 8px each side). */
 export const TAB_ICON_WIDTH = 30;
@@ -46,19 +42,27 @@ function width(n: number): number {
 export function fitPanelTabs<V extends string>(tabs: FitTab<V>[], active: V, available: number): TabsFit<V> {
   const views = tabs.map(t => t.view);
   const open = tabs.find(t => t.view === active) ?? tabs[0];
-  // The same for every tab: the widest name any tab would show when open (ACH-D35).
-  const openLabel = tabs.reduce((widest, t) => Math.max(widest, labelWidth(t.label, t.count)), 0);
+  if (!open) return { allLabelled: false, activeLabelled: false, visible: [], overflow: [] };
+  const openLabel = labelWidth(open.label, open.count);
   const everyLabel = tabs.reduce((sum, t) => sum + labelWidth(t.label, t.count), 0);
+  // 1. Every name. 2. Only the open tab's name, every tab in the strip.
   if (width(tabs.length) + everyLabel <= available) return { allLabelled: true, activeLabelled: true, visible: views, overflow: [] };
   if (width(tabs.length) + openLabel <= available) return { allLabelled: false, activeLabelled: true, visible: views, overflow: [] };
+  // 3. The open tab keeps its name; the last other tabs move into the "…" menu. k tabs take k
+  //    icons, k gaps (the last one before "…"), the open tab's name and the "…" button.
+  const keepNamed = Math.min(tabs.length - 1, Math.floor((available - openLabel - MORE_WIDTH) / (TAB_ICON_WIDTH + TAB_GAP)));
+  if (keepNamed >= 1) return { allLabelled: false, activeLabelled: true, ...split(views, open.view, keepNamed) };
+  // 4. Not even that: icons only, as many as fit with the "…" button, the open tab among them.
   if (width(tabs.length) <= available) return { allLabelled: false, activeLabelled: false, visible: views, overflow: [] };
-  // Not even every icon fits: keep as many as fit with the "…" button, the open tab among them.
-  // n icons, the gaps between them, one more gap and the "…" button.
-  let keep = Math.max(1, Math.floor((available - MORE_WIDTH) / (TAB_ICON_WIDTH + TAB_GAP)));
-  keep = Math.min(keep, tabs.length - 1);
-  const first = views.slice(0, keep);
-  const visible = open && !first.includes(open.view) ? [...first.slice(0, keep - 1), open.view] : first;
-  return { allLabelled: false, activeLabelled: false, visible, overflow: views.filter(v => !visible.includes(v)) };
+  const keep = Math.min(tabs.length - 1, Math.max(1, Math.floor((available - MORE_WIDTH) / (TAB_ICON_WIDTH + TAB_GAP))));
+  return { allLabelled: false, activeLabelled: false, ...split(views, open.view, keep) };
+}
+
+/** `keep` tabs in the strip, in their order, the open one always among them; the rest for the "…" menu. */
+function split<V extends string>(views: V[], open: V, keep: number): { visible: V[]; overflow: V[] } {
+  const others = views.filter(v => v !== open).slice(0, Math.max(0, keep - 1));
+  const visible = views.filter(v => v === open || others.includes(v));
+  return { visible, overflow: views.filter(v => !visible.includes(v)) };
 }
 
 /**
