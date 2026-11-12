@@ -26,6 +26,7 @@ export function ImageViewer({ src, title, onClose }: { src: string; title: strin
 export function ExpandableImage({ src, alt, className = '' }: { src: string; alt: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  // ZoomViewer puts focus back on what had it (this button); this covers a viewer opened by mouse.
   const close = () => {
     setOpen(false);
     requestAnimationFrame(() => trigger.current?.focus());

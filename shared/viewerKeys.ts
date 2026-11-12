@@ -70,6 +70,17 @@ export function trapFocusIndex(count: number, current: number, back: boolean): n
   return back ? (current - 1 + count) % count : (current + 1) % count;
 }
 
+/**
+ * Put focus back where it was before a viewer opened (the image, the diagram's expand button), if
+ * that element is still on the page. Returns whether it did. Without this, closing a viewer that
+ * took focus would leave it on the page body.
+ */
+export function refocus(target: { isConnected: boolean; focus(): void } | null | undefined): boolean {
+  if (!target || !target.isConnected) return false;
+  target.focus();
+  return true;
+}
+
 /** What the preload script puts on `window.podcodeDesktop.viewer` (electron/preload.cts). */
 export interface DesktopViewer {
   /** While true, Cmd+Plus, Cmd+Minus and Cmd+0 go to the page instead of the View menu. */

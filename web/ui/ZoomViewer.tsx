@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { DesktopViewer } from '../../shared/viewerKeys.ts';
-import { trapFocusIndex, viewerAction } from '../../shared/viewerKeys.ts';
+import { refocus, trapFocusIndex, viewerAction } from '../../shared/viewerKeys.ts';
 import { initialView, zoomAt, type View } from '../diagramView.ts';
 import { formatKeys } from '../keys.ts';
 import { Maximize2, Minus, Plus, X } from '../mono/icons.tsx';
@@ -46,9 +46,13 @@ export function ZoomViewer({ title, size, onClose, maxFit = 2, children }: { tit
     return () => desktopViewer()?.captureZoomKeys(false);
   }, []);
 
-  // Modal: focus moves in when it opens, and Tab goes round its own controls, never to the page
-  // behind it. Whoever opened it puts focus back when it closes (ExpandableImage does).
-  useEffect(() => { panel.current?.focus(); }, []);
+  // Modal: focus moves in when it opens, Tab goes round its own controls, never to the page behind
+  // it, and on close focus goes back to what had it before (the image, a diagram's expand button).
+  useEffect(() => {
+    const before = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+    panel.current?.focus();
+    return () => { refocus(before); };
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

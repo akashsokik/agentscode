@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fitView, initialView, zoomAt } from '../web/diagramView.ts';
-import { isMenuZoomKey, trapFocusIndex, viewerAction, ZoomKeyCapture } from '../shared/viewerKeys.ts';
+import { isMenuZoomKey, refocus, trapFocusIndex, viewerAction, ZoomKeyCapture } from '../shared/viewerKeys.ts';
 
 // The full-window viewer for diagrams and images (web/ui/ZoomViewer.tsx; issue cc25fa6e).
 
@@ -109,4 +109,14 @@ test('an image smaller than the window opens at 100%; a diagram may still grow t
   const tall = initialView({ width: 2680, height: 8040 }, WINDOW, 1);
   assert.ok(Math.abs(tall.k - 1236 / 2680) < 1e-9, 'tall content still fits to width');
   assert.equal(tall.y, 32);
+});
+
+test('closing a viewer puts focus back where it was, if that is still on the page (review L1 follow-up)', () => {
+  let focused = 0;
+  const button = { isConnected: true, focus: () => { focused++; } };
+  assert.equal(refocus(button), true, 'the diagram\'s expand button gets focus back');
+  assert.equal(focused, 1);
+  assert.equal(refocus({ isConnected: false, focus: () => { focused++; } }), false, 'an element that left the page is skipped');
+  assert.equal(refocus(null), false, 'nothing had focus (the body)');
+  assert.equal(focused, 1);
 });
