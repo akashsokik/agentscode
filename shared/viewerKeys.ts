@@ -34,6 +34,42 @@ export function isMenuZoomKey(input: { key: string; meta?: boolean; control?: bo
   return mod && !input.alt && ['=', '+', '-', '_', '0'].includes(input.key);
 }
 
+/**
+ * Which pages have a viewer open, so the View menu lets their Cmd+Plus, Cmd+Minus and Cmd+0
+ * through (electron/main.ts). A page's capture ends when its viewer closes and, whatever React did
+ * or did not get to run, when the page itself goes: a reload, a navigation, a crashed renderer or
+ * a closed window. Otherwise the app's own zoom keys would stay off with no viewer to take them.
+ */
+export class ZoomKeyCapture {
+  private pages = new Set<number>();
+
+  /** A page's viewer opened (true) or closed (false). */
+  set(page: number, on: boolean): void {
+    if (on) this.pages.add(page);
+    else this.pages.delete(page);
+  }
+
+  /** The page was reloaded, navigated, crashed or closed: its viewer is gone with it. */
+  pageGone(page: number): void {
+    this.pages.delete(page);
+  }
+
+  /** Whether the menu should let this key through to the page. */
+  menuSkips(page: number, input: { key: string; meta?: boolean; control?: boolean; alt?: boolean }, mac: boolean): boolean {
+    return this.pages.has(page) && isMenuZoomKey(input, mac);
+  }
+}
+
+/**
+ * Tab and Shift+Tab inside an open viewer go round its own controls, never to the page behind it
+ * (it is modal). From `current` (-1 when focus is not on one of them) among `count` controls.
+ */
+export function trapFocusIndex(count: number, current: number, back: boolean): number {
+  if (count <= 0) return -1;
+  if (current < 0) return back ? count - 1 : 0;
+  return back ? (current - 1 + count) % count : (current + 1) % count;
+}
+
 /** What the preload script puts on `window.podcodeDesktop.viewer` (electron/preload.cts). */
 export interface DesktopViewer {
   /** While true, Cmd+Plus, Cmd+Minus and Cmd+0 go to the page instead of the View menu. */

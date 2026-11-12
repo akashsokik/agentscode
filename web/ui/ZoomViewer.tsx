@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { DesktopViewer } from '../../shared/viewerKeys.ts';
-import { viewerAction } from '../../shared/viewerKeys.ts';
+import { trapFocusIndex, viewerAction } from '../../shared/viewerKeys.ts';
 import { initialView, zoomAt, type View } from '../diagramView.ts';
 import { formatKeys } from '../keys.ts';
 import { Maximize2, Minus, Plus, X } from '../mono/icons.tsx';
@@ -21,15 +21,16 @@ function desktopViewer(): DesktopViewer | null {
  * Cmd+0 or a double-click fits again, scroll or drag pans, and Escape or a click outside closes.
  * Flat, theme colours, no shadow. `size` is the content's own size; it shows once that is known.
  */
-export function ZoomViewer({ title, size, onClose, children }: { title: string; size: { width: number; height: number } | null; onClose: () => void; children: ReactNode }) {
+export function ZoomViewer({ title, size, onClose, maxFit = 2, children }: { title: string; size: { width: number; height: number } | null; onClose: () => void; /** The most it opens enlarged: 1 for an image (100%), 2 for a diagram. */ maxFit?: number; children: ReactNode }) {
   const viewport = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
   const [view, setView] = useState<View | null>(null);
 
   const fit = useCallback(() => {
     const box = viewport.current?.getBoundingClientRect();
-    if (box && size) setView(initialView(size, box));
-  }, [size]);
+    if (box && size) setView(initialView(size, box, maxFit));
+  }, [size, maxFit]);
   useLayoutEffect(fit, [fit]);
 
   const zoomBy = useCallback((factor: number, at?: { x: number; y: number }) => {
@@ -45,8 +46,20 @@ export function ZoomViewer({ title, size, onClose, children }: { title: string; 
     return () => desktopViewer()?.captureZoomKeys(false);
   }, []);
 
+  // Modal: focus moves in when it opens, and Tab goes round its own controls, never to the page
+  // behind it. Whoever opened it puts focus back when it closes (ExpandableImage does).
+  useEffect(() => { panel.current?.focus(); }, []);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Tab' && panel.current) {
+        const controls = [...panel.current.querySelectorAll<HTMLElement>('button:not([disabled])')];
+        const next = trapFocusIndex(controls.length, controls.indexOf(document.activeElement as HTMLElement), event.shiftKey);
+        event.preventDefault();
+        event.stopPropagation();
+        controls[next]?.focus();
+        return;
+      }
       const action = viewerAction(event, IS_MAC);
       if (!action) return;
       // Handled here, so an open thread or dialog underneath does not also react.
@@ -106,7 +119,7 @@ export function ZoomViewer({ title, size, onClose, children }: { title: string; 
       className="fixed inset-0 bg-black/60 p-6 sm:p-10"
       onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}
     >
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border border-content/10 bg-background-base">
+      <div ref={panel} tabIndex={-1} className="flex h-full w-full flex-col overflow-hidden rounded-xl border border-content/10 bg-background-base outline-none">
         <div className="flex h-11 shrink-0 items-center gap-1 border-b border-content/10 pl-4 pr-2 font-sans text-[12.5px]">
           <span className="min-w-0 flex-1 truncate text-content/70">{title}</span>
           <button type="button" className={button} onClick={() => zoomBy(1 / STEP)} title={`Zoom out (${keys('Mod+-')})`} aria-label="Zoom out">

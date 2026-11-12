@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fitView, initialView, zoomAt } from '../web/diagramView.ts';
-import { isMenuZoomKey, viewerAction } from '../shared/viewerKeys.ts';
+import { isMenuZoomKey, trapFocusIndex, viewerAction, ZoomKeyCapture } from '../shared/viewerKeys.ts';
 
 // The full-window viewer for diagrams and images (web/ui/ZoomViewer.tsx; issue cc25fa6e).
 
@@ -74,4 +74,39 @@ test('only the View menu\'s own zoom keys are taken from it while a viewer is op
   assert.equal(isMenuZoomKey({ key: '0', meta: true, alt: true }, true), false);
   assert.equal(isMenuZoomKey({ key: '=', control: true }, false), true);
   assert.equal(isMenuZoomKey({ key: '=', meta: true }, false), false);
+});
+
+test('a reload with a viewer open gives Cmd+Plus, Cmd+Minus and Cmd+0 back to the menu (review M1)', () => {
+  const zoom = new ZoomKeyCapture();
+  const plus = { key: '=', meta: true };
+  const minus = { key: '-', meta: true };
+  const fit = { key: '0', meta: true };
+  zoom.set(7, true);
+  for (const key of [plus, minus, fit]) assert.equal(zoom.menuSkips(7, key, true), true, `${key.key} goes to the open viewer`);
+  assert.equal(zoom.menuSkips(8, plus, true), false, 'another window keeps its menu');
+  // Reloaded with the viewer still open (Cmd+R, the stale-page reload): React never unmounted it.
+  zoom.pageGone(7);
+  for (const key of [plus, minus, fit]) assert.equal(zoom.menuSkips(7, key, true), false, `${key.key} is the menu's again`);
+  // Opened and closed normally.
+  zoom.set(7, true);
+  zoom.set(7, false);
+  assert.equal(zoom.menuSkips(7, plus, true), false);
+  assert.equal(zoom.menuSkips(7, { key: 'q', meta: true }, true), false, 'other keys never skip the menu');
+});
+
+test('Tab goes round the viewer\'s own controls (review L1)', () => {
+  assert.equal(trapFocusIndex(5, -1, false), 0, 'into the first control');
+  assert.equal(trapFocusIndex(5, -1, true), 4, 'Shift+Tab into the last');
+  assert.equal(trapFocusIndex(5, 4, false), 0, 'wraps forward');
+  assert.equal(trapFocusIndex(5, 0, true), 4, 'wraps back');
+  assert.equal(trapFocusIndex(5, 2, false), 3);
+  assert.equal(trapFocusIndex(0, -1, false), -1);
+});
+
+test('an image smaller than the window opens at 100%; a diagram may still grow to 200% (review L2)', () => {
+  assert.equal(initialView({ width: 300, height: 200 }, WINDOW, 1).k, 1, 'a small screenshot is not blown up');
+  assert.equal(initialView({ width: 300, height: 200 }, WINDOW).k, 2, 'a diagram keeps its scaling');
+  const tall = initialView({ width: 2680, height: 8040 }, WINDOW, 1);
+  assert.ok(Math.abs(tall.k - 1236 / 2680) < 1e-9, 'tall content still fits to width');
+  assert.equal(tall.y, 32);
 });

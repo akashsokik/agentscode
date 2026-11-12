@@ -75,5 +75,7 @@ const quick: DesktopQuick = {
 const viewer: DesktopViewer = {
   captureZoomKeys: on => ipcRenderer.send('viewer:zoom-keys', Boolean(on)),
 };
+// A page going away (reload, navigation) takes its viewer with it; main also clears it on did-navigate.
+(globalThis as unknown as { addEventListener(type: string, listener: () => void): void }).addEventListener('pagehide', () => ipcRenderer.send('viewer:zoom-keys', false));
 
 contextBridge.exposeInMainWorld('podcodeDesktop', { updates, browser, super: superAgent, quick, viewer });

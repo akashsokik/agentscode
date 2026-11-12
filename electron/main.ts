@@ -15,7 +15,7 @@ import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSna
 import { startSuperBridge, stopSuperBridge } from './superTray.ts';
 import { QuickWindow } from './quickWindow.ts';
 import { captureApp } from './appShot.ts';
-import { isMenuZoomKey } from '../shared/viewerKeys.ts';
+import { ZoomKeyCapture } from '../shared/viewerKeys.ts';
 
 // The app was called AgentsCode before 0.3.0, and Electron names the userData folder after the app.
 // That folder holds the window's localStorage (layout, drafts), the integrated browser's logins
@@ -40,7 +40,7 @@ let quick: QuickWindow | null = null;
 let ready = false;
 let quitting = false;
 /** Web contents with a diagram or image viewer open (viewer:zoom-keys). */
-const zoomKeysTo = new Set<number>();
+const zoomKeys = new ZoomKeyCapture();
 const recentOutput: string[] = [];
 /** Resolves whoever waits in stopServer() once the bundled server has exited. */
 const serverStopped: Array<() => void> = [];
@@ -333,9 +333,13 @@ function showWindow(): void {
   // the page; every other menu shortcut works as usual (Electron's documented per-key pattern).
   const contents = window.webContents;
   contents.on('before-input-event', (_event, input) => {
-    contents.setIgnoreMenuShortcuts(zoomKeysTo.has(contents.id) && isMenuZoomKey(input, process.platform === 'darwin'));
+    contents.setIgnoreMenuShortcuts(zoomKeys.menuSkips(contents.id, input, process.platform === 'darwin'));
   });
-  contents.on('destroyed', () => zoomKeysTo.delete(contents.id));
+  // The capture never outlives the page: a reload or navigation (the stale-page reload, Cmd+R), a
+  // crashed renderer, or a closed window ends it even when the viewer had no chance to say so.
+  contents.on('did-navigate', () => zoomKeys.pageGone(contents.id));
+  contents.on('render-process-gone', () => zoomKeys.pageGone(contents.id));
+  contents.on('destroyed', () => zoomKeys.pageGone(contents.id));
   window.webContents.on('will-navigate', (event) => {
     if (new URL(event.url).origin === ORIGIN) return;
     event.preventDefault();
@@ -376,8 +380,7 @@ function serveUpdates(): void {
   // An open viewer (web/ui/ZoomViewer.tsx) takes Cmd+Plus, Cmd+Minus and Cmd+0 from the View menu.
   ipcMain.on('viewer:zoom-keys', (event, on: unknown) => {
     if (!fromApp(event)) return;
-    if (on === true) zoomKeysTo.add(event.sender.id);
-    else zoomKeysTo.delete(event.sender.id);
+    zoomKeys.set(event.sender.id, on === true);
   });
   ipcMain.handle('updates:get', event => (fromApp(event) ? updateSnapshot() : null));
   ipcMain.handle('updates:install', event => (fromApp(event) ? installUpdate() : undefined));

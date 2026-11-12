@@ -5,7 +5,8 @@ import { ZoomViewer } from './ZoomViewer.tsx';
 export function ImageViewer({ src, title, onClose }: { src: string; title: string; onClose: () => void }) {
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   return (
-    <ZoomViewer title={title} size={size} onClose={onClose}>
+    // An image opens at most at 100%, as Preview does: a small screenshot is not blown up soft.
+    <ZoomViewer title={title} size={size} onClose={onClose} maxFit={1}>
       <img
         src={src}
         alt={title}
