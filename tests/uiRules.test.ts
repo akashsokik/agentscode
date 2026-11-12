@@ -5,7 +5,7 @@ import test from 'node:test';
 import { formatClick, formatKeys } from '../web/keys.ts';
 import { shortcutFor, type KeyPress } from '../web/shortcutMap.ts';
 import { moveTab, orderTabs, othersToClose, rightToClose, setPinned } from '../web/tabs.ts';
-import { focusFirstOnOpen, menuKeyTarget } from '../web/ui/menuFocus.ts';
+import { focusFirstOnOpen, focusToRestore, menuKeyTarget } from '../web/ui/menuFocus.ts';
 import { closeOtherTabs, closeTabsToRight, getLayout, open, pinTab, reorderTab, type Tab } from '../web/layout.ts';
 
 test('shortcuts read as key symbols in Apple order on a Mac, short words elsewhere (ACH-D26)', () => {
@@ -183,4 +183,21 @@ test('no spelled-out keys in UI text (ACH-D26): no "Cmd+", "(Esc)" or a written-
     });
   }
   assert.deepEqual(found, [], `Spelled-out keys; use keys()/formatKeys() or <Kbd>:\n${found.join('\n')}`);
+});
+
+test('closing a menu gives focus back to what had it, unless the action moved it on purpose', () => {
+  const body = 'body', terminal = 'terminal', menuRow = 'menu-row', newSplit = 'new-split', gone = 'gone';
+  const inMenu = (el: string) => el === menuRow;
+  const connected = (el: string) => el !== gone;
+  // Escape, or an action that only acts (Copy, Clear): focus is still in the menu.
+  assert.equal(focusToRestore(terminal, menuRow, body, inMenu, connected), terminal);
+  // The menu was removed first and focus fell to the page.
+  assert.equal(focusToRestore(terminal, body, body, inMenu, connected), terminal);
+  assert.equal(focusToRestore(terminal, null, body, inMenu, connected), terminal);
+  // The action focused something else (a new split, a dialog): it keeps focus.
+  assert.equal(focusToRestore(terminal, newSplit, body, inMenu, connected), null);
+  // Nothing to go back to: the opener left the page, or it was the page itself.
+  assert.equal(focusToRestore(gone, menuRow, body, inMenu, connected), null);
+  assert.equal(focusToRestore(body, menuRow, body, inMenu, connected), null);
+  assert.equal(focusToRestore(null, menuRow, body, inMenu, connected), null);
 });

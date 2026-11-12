@@ -23,3 +23,21 @@ export function menuKeyTarget(count: number, current: number, key: string): numb
     default: return null;
   }
 }
+
+/**
+ * Where focus goes back when a menu closes: to `opener` (what had focus when it opened, such as
+ * a terminal) if focus is still in the menu or has fallen to the page body, so after Escape,
+ * Copy or Clear you type on where you were. Not when the action moved focus somewhere on
+ * purpose (a new split, a dialog), and not to an opener that is gone. Null: leave focus alone.
+ */
+export function focusToRestore<T>(
+  opener: T | null,
+  active: T | null,
+  body: T,
+  inMenu: (el: T) => boolean,
+  connected: (el: T) => boolean,
+): T | null {
+  if (!opener || opener === body || !connected(opener)) return null;
+  if (active === null || active === body || inMenu(active)) return opener;
+  return null;
+}

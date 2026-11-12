@@ -1,7 +1,7 @@
-import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { Popover } from '../mono/Popover.tsx';
 import { MenuRowRole } from './common.tsx';
-import { focusFirstOnOpen, menuKeyTarget } from './menuFocus.ts';
+import { focusFirstOnOpen, focusToRestore, menuKeyTarget } from './menuFocus.ts';
 
 /**
  * The app's right-click menu (ACH-D27), one for every item that has actions: tabs today, and the
@@ -20,6 +20,22 @@ export function ContextMenu({ anchor, onClose, label, width = 232, children }: {
 }) {
   const surface = useRef<HTMLDivElement | null>(null);
   const items = () => [...(surface.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+
+  // What had focus when the menu opened (a terminal, a tab): it gets focus back on close, unless
+  // the chosen action moved focus somewhere on purpose (menuFocus.ts).
+  const opener = useRef<Element | null>(typeof document === 'undefined' ? null : document.activeElement);
+  useLayoutEffect(() => () => {
+    const menu = surface.current;
+    // Decided while the menu is still in the page, then done once it has gone.
+    const target = focusToRestore(opener.current, document.activeElement, document.body, el => Boolean(menu?.contains(el)), el => el.isConnected);
+    if (!(target instanceof HTMLElement)) return;
+    requestAnimationFrame(() => {
+      // Something else took focus meanwhile (a new split, a dialog): leave it there.
+      const now = document.activeElement;
+      if (now && now !== document.body && !menu?.contains(now)) return;
+      if (target.isConnected) target.focus({ preventScroll: true });
+    });
+  }, []);
 
   // The first row takes focus however the menu opened, so the arrows work at once (menuFocus.ts).
   useEffect(() => {
