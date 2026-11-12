@@ -25,7 +25,7 @@ const commit = (cwd: string, file: string, message: string, env: Record<string, 
 const branch = (b: Partial<WorkBranch>): WorkBranch => ({ branch: 'feat/x', folder: `/w/${b.branch ?? 'x'}`, inPlace: false, state: 'open', ahead: 1, behind: 0, changed: 0, untracked: 0, refs: [], ...b });
 const NOW = 1_800_000_000_000;
 
-test('stale: over a day idle or 40+ behind folds; working, in review or uncommitted changes never do', () => {
+test('stale: over a day idle or 40+ behind folds; working, in review or uncommitted changes never do, approved only when far behind', () => {
   const recent = { hash: 'a', subject: 's', at: NOW - 1000 };
   const old = { hash: 'a', subject: 's', at: NOW - STALE_IDLE_MS - 1 };
   assert.equal(isStaleBranch(branch({ last: recent }), NOW), false);
@@ -37,6 +37,7 @@ test('stale: over a day idle or 40+ behind folds; working, in review or uncommit
   assert.equal(isStaleBranch(branch({ last: old, changed: 1 }), NOW), false);
   assert.equal(isStaleBranch(branch({ last: old, untracked: 2 }), NOW), false);
   assert.equal(isStaleBranch(branch({ last: old, state: 'approved', behind: 47 }), NOW), true, 'approved but left behind still folds');
+  assert.equal(isStaleBranch(branch({ last: old, state: 'approved' }), NOW), false, 'an approved branch waiting to merge stays in view');
   const { open, older } = splitBranches({ inProgress: [branch({ branch: 'a', last: recent }), branch({ branch: 'b', last: old })] }, NOW);
   assert.deepEqual([open.map(b => b.branch), older.map(b => b.branch)], [['a'], ['b']]);
 });
@@ -187,4 +188,27 @@ test('a stale open branch takes no rows or lane in the graph but is still listed
   assert.equal(view.graphLanes, 2, 'main and the one fresh branch');
   const { older } = splitBranches(view as WorkProject, Date.now());
   assert.deepEqual(older.map(b => b.branch), ['feat/old']);
+});
+
+test('stacked branches: commits a lower branch still has are never credited to the one on top, whatever the order', async () => {
+  const { repo, home, agents, work, project } = setup();
+  // Fen's feat/x (2 commits); Cy's feat/y made from feat/x (1 commit). Fen's folder is gone, the branch kept.
+  const fenWt = path.join(home('fen'), 'wt-x');
+  git(repo, ['worktree', 'add', '-q', '-b', 'feat/x', fenWt, 'main']);
+  const x1 = commit(fenWt, 'x1.txt', 'x one');
+  const x2 = commit(fenWt, 'x2.txt', 'x two');
+  git(repo, ['worktree', 'remove', fenWt]);
+  const cyWt = path.join(home('cy'), 'wt-y');
+  git(repo, ['worktree', 'add', '-q', '-b', 'feat/y', cyWt, 'feat/x']);
+  const y1 = commit(cyWt, 'y1.txt', 'y one');
+  await work.project(project, true);
+  // Cy's branch is merged with a merge commit (which brings feat/x's commits in too).
+  git(repo, ['merge', '-q', '--no-ff', 'feat/y', '-m', 'Merge feat/y: on top of x']);
+  const m = git(repo, ['rev-parse', 'HEAD']);
+  const view = await work.project(project, true);
+  const by = (hash: string) => view.graph.find(c => c.hash === hash)?.names;
+  assert.deepEqual(by(y1), ['Cy']);
+  assert.deepEqual(by(m), ['Cy']);
+  assert.deepEqual([by(x1), by(x2)], [[], []], 'feat/x still has them: not Cy\'s, left unknown rather than wrong');
+  void agents;
 });

@@ -90,6 +90,11 @@ export class WorkOwners {
     return this.project(projectId).seen.includes(entry);
   }
 
+  /** The reflog entries already read, as a set for a whole scan. */
+  seenSet(projectId: string): Set<string> {
+    return new Set(this.project(projectId).seen);
+  }
+
   markSeen(projectId: string, entries: readonly string[]): void {
     const p = this.project(projectId);
     const fresh = entries.filter(e => !p.seen.includes(e));

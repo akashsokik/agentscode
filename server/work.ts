@@ -371,15 +371,17 @@ export class WorkService {
    * Read main's merges not read before and give the commits each brought in to the owner its branch
    * had then: a fast-forward's old..new range, or a merge commit and its second parent's side.
    */
-  private async captureOwners(project: Project, root: string, defaultBranch: string): Promise<void> {
+  private async captureOwners(project: Project, root: string, defaultBranch: string, others: (branch: string) => string[]): Promise<void> {
     const log = await this.git(['reflog', 'show', '--date=unix', '--format=%H%x1f%gs%x1f%gd', `refs/heads/${defaultBranch}`], root);
     if (!log.ok) return;
     const done: string[] = [];
+    const seen = this.owners.seenSet(project.id);
     for (const m of reflogMerges(log.out, defaultBranch)) {
-      if (this.owners.seen(project.id, m.entry)) continue;
+      if (seen.has(m.entry)) continue;
       const owner = this.owners.branchOwner(project.id, m.branch, m.at ? m.at + 60_000 : undefined);
       if (!owner) continue; // not known yet: read it again next time
-      const range = m.fastForward ? (m.before ? [`${m.before}..${m.hash}`] : null) : [`${m.hash}^1..${m.hash}^2`];
+      // Not commits another local branch still has (a branch stacked under this one owns those).
+      const range = m.fastForward ? (m.before ? [m.hash, '--not', m.before, ...others(m.branch)] : null) : [`${m.hash}^2`, '--not', `${m.hash}^1`, ...others(m.branch)];
       if (range) {
         const list = await this.git(['rev-list', '--max-count=500', ...range], root);
         if (list.ok) this.owners.noteCommits(project.id, [...(m.fastForward ? [] : [m.hash]), ...list.out.split('\n').filter(Boolean)], owner);
@@ -787,13 +789,17 @@ export class WorkService {
     // The graph (ACH-D18): about 20 commits of main and the open branches, in topological order, with
     // parents and refs; main's own line is 'main', an open branch's lane its owner, a merged branch's
     // lane the merge's author (lazygit colours a lane by what opened it).
-    // An owned open branch's commits are its owner's; then main's merges since the last look.
+    // An owned open branch's commits are its owner's; then main's merges since the last look. A
+    // commit another local branch also has is left uncredited (stacked branches: the one below
+    // owns it), better unknown than wrong.
+    const localHeads = heads.out.split('\n').map(line => line.split('\x1f')[0]).filter((n): n is string => Boolean(n) && n !== defaultBranch);
+    const others = (branch: string) => localHeads.filter(n => n !== branch).map(n => `refs/heads/${n}`);
     for (const b of inProgress) {
       if (!b.agentId || !b.agentName) continue;
-      const ahead = await this.git(['rev-list', '--max-count=200', `refs/heads/${defaultBranch}..refs/heads/${b.branch}`], root);
+      const ahead = await this.git(['rev-list', '--max-count=200', `refs/heads/${b.branch}`, '--not', `refs/heads/${defaultBranch}`, ...others(b.branch)], root);
       if (ahead.ok) this.owners.noteCommits(project.id, ahead.out.split('\n').filter(Boolean), { agentId: b.agentId, name: b.agentName });
     }
-    await this.captureOwners(project, root, defaultBranch);
+    await this.captureOwners(project, root, defaultBranch, others);
     this.owners.save();
     const ownerOf = (hash: string): Owner | undefined => this.owners.commitOwner(project.id, hash);
 
