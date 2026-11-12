@@ -43,7 +43,8 @@ function world(quit: 'exits' | 'hangs' | 'holds') {
     lsappinfo: `${alive} && echo "\\"pid\\"=$(cat "${pidFile}")"`,
     curl: `[ -f "${serverUp}" ] || exit 7; case "$*" in *"/dev/null"*) exit 0 ;; *) echo '{"agents":[]}' ;; esac`,
     // Opening the app starts a new stand-in.
-    open: `echo "$1" >> "${opened}"; sleep 600 >/dev/null 2>&1 & echo $! > "${pidFile}"; touch "${serverUp}"`,
+    // Also records any PODCODE_/AGENTSCODE_ setting the opened app would inherit.
+    open: `echo "$1" >> "${opened}"; env | grep -E '^(PODCODE|AGENTSCODE)_' >> "${opened}.env"; sleep 600 >/dev/null 2>&1 & echo $! > "${pidFile}"; touch "${serverUp}"`,
     pgrep: 'exit 1',
   };
   for (const [name, body] of Object.entries(fakes)) fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
@@ -77,6 +78,7 @@ test('a normal quit: the new build goes in, the old one is kept, and the app is 
     assert.equal(w.installed(), 'new');
     assert.equal(fs.readFileSync(path.join(w.dir, 'PodCode.app.prev', 'build.txt'), 'utf8'), 'old');
     assert.equal(fs.readFileSync(w.opened, 'utf8').trim(), w.app);
+    assert.equal(fs.readFileSync(`${w.opened}.env`, 'utf8'), '', 'the opened app inherits none of the path overrides it was given');
     assert.match(out, /Restarted onto/);
     assert.equal(fs.existsSync(w.env.AGENTSCODE_LOCK), false, 'the lock is released');
   } finally { w.cleanup(); }

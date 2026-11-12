@@ -34,6 +34,13 @@ LOCK=${PODCODE_LOCK:-${AGENTSCODE_LOCK:-/tmp/podcode-restart-waiter.lock}}
 # The lock an AgentsCode-era copy of this script takes; a live waiter holding it counts too.
 LEGACY_LOCK=${PODCODE_LEGACY_LOCK:-/tmp/agentscode-restart-waiter.lock}
 TICK=${PODCODE_TICK:-${AGENTSCODE_TICK:-1}}
+# Read once above; nothing this script starts (the app it opens above all) may inherit them, or
+# every agent and terminal in that app would carry these real paths (server/envHygiene.ts lists
+# the same names).
+unset PODCODE_APP AGENTSCODE_APP PODCODE_PREV AGENTSCODE_PREV PODCODE_NEW_BUILD \
+   AGENTSCODE_NEW_BUILD PODCODE_PORT AGENTSCODE_PORT PODCODE_LOCK AGENTSCODE_LOCK \
+   PODCODE_LEGACY_LOCK AGENTSCODE_LEGACY_LOCK PODCODE_TICK AGENTSCODE_TICK PODCODE_INSTALL_DIR \
+   AGENTSCODE_INSTALL_DIR PODCODE_VERSION AGENTSCODE_VERSION PODCODE_NO_OPEN AGENTSCODE_NO_OPEN
 
 say() { echo "$(date '+%H:%M:%S') $*"; }
 wait_ticks() { sleep "$(awk "BEGIN { print $1 * $TICK }")"; }

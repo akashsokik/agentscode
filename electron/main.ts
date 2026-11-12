@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { app, autoUpdater as nativeUpdater, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
 import { isLocalUrl } from '../shared/browser.ts';
+import { withoutScriptOverrides } from '../server/envHygiene.ts';
 import { BrowserError, BrowserHost, type Rect } from './browser.ts';
 import { BrowserBridge } from './bridge.ts';
 import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSnapshot } from './updater.ts';
@@ -84,7 +85,8 @@ function startServer(): void {
     serviceName: 'PodCode Server',
     stdio: 'pipe',
     // The server runs agents' comms tools with this binary, as plain Node (server/config.ts).
-    env: { ...process.env, PODCODE_NODE: process.execPath },
+    // Without the restart and install scripts' path overrides (server/envHygiene.ts), whatever started the app.
+    env: { ...withoutScriptOverrides(process.env), PODCODE_NODE: process.execPath },
   });
   for (const [stream, sink] of [[server.stdout, process.stdout], [server.stderr, process.stderr]] as const) {
     stream?.on('data', (chunk: Buffer) => {

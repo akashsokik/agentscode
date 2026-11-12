@@ -1,0 +1,29 @@
+// Settings the app and its agents must never carry on to the processes they start.
+//
+// scripts/restart-desktop.sh and install.sh take PODCODE_* (or the older AGENTSCODE_*) overrides
+// for real paths: the app to replace, where to keep the previous one, the build to install. If
+// the app is ever started with them set (a restart run, a shell that exported them), every agent,
+// terminal and test run it starts would inherit them, and a script run there would act on those
+// real paths (ACH-N8: a test run deleted a kept copy of the previous app that way, 2026-11-12).
+// The app's own settings (PODCODE_HOME, PODCODE_NODE, PODCODE_DISABLE_UPDATES, and the comms
+// MCP's TOKEN, TOOLS_URL, EXECUTIVE, EYES) are not on this list.
+
+/** The overrides restart-desktop.sh and install.sh read, by their name after the prefix. */
+export const SCRIPT_OVERRIDES = ['APP', 'PREV', 'NEW_BUILD', 'PORT', 'LOCK', 'LEGACY_LOCK', 'TICK', 'INSTALL_DIR', 'VERSION', 'NO_OPEN'] as const;
+
+/** Every environment name to drop: each override under both prefixes. */
+export const SCRIPT_OVERRIDE_NAMES: readonly string[] = SCRIPT_OVERRIDES.flatMap(name => [`PODCODE_${name}`, `AGENTSCODE_${name}`]);
+
+/** A copy of `env` without the script overrides. */
+export function withoutScriptOverrides(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env };
+  for (const name of SCRIPT_OVERRIDE_NAMES) delete out[name];
+  return out;
+}
+
+/** Drop the script overrides from this process's own environment, so nothing it starts inherits them. Returns the names removed. */
+export function scrubScriptOverrides(env: NodeJS.ProcessEnv = process.env): string[] {
+  const removed = SCRIPT_OVERRIDE_NAMES.filter(name => name in env);
+  for (const name of removed) delete env[name];
+  return removed;
+}
