@@ -402,7 +402,9 @@ test('issue undo refuses when the issue is gone or would repeat an open one; upd
   const t = await team();
   const { added } = await t.call('add_issue', { text: 'Ship it', why: 'x' }) as { added: { id: string } };
   t.manager.removeIssue(added.id);
-  await assert.rejects(t.manager.undoSuper(t.manager.superView().log[0].id), e => status(e) === 409);
+  // The newest entry is your own removal now (it has its own Undo); undoing the SuperAgent's add is still refused.
+  const addEntry = t.manager.superView().log.find(a => a.tool === 'add_issue')!;
+  await assert.rejects(t.manager.undoSuper(addEntry.id), e => status(e) === 409);
   assert.equal(t.manager.superView().issues.length, 0, 'not brought back');
 
   const { added: two } = await t.call('add_issue', { text: 'Write docs', why: 'x' }) as { added: { id: string } };

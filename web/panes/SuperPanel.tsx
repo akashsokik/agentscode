@@ -147,7 +147,8 @@ function DecisionItem({ action, now, expanded, onToggle }: { action: SuperAction
   const undone = action.undoneAt !== undefined;
   const undoable = Boolean(action.undo) && !undone;
   const summary = cleanSummary(action.summary);
-  const undo = async () => { setBusy(true); await attempt(() => api.undoSuper(action.id)); setBusy(false); };
+  // Undo takes its own button away (an undone action has none): focus goes back to the row.
+  const undo = async () => { if (busy) return; setBusy(true); await attempt(() => api.undoSuper(action.id)); setBusy(false); focusRow(document, action.id); };
   const KindIcon = KIND_ICON[decisionKind(action.tool)];
   return (
     <PanelRow
@@ -157,7 +158,7 @@ function DecisionItem({ action, now, expanded, onToggle }: { action: SuperAction
       label={`${summary}${undone ? ', undone' : ''}, ${fullTime(action.at)}`}
       dim={undone}
       meta={<time dateTime={new Date(action.at).toISOString()}>{undone ? 'Undone · ' : ''}{shortWhen(action.at, now)}</time>}
-      actions={undoable ? <RowAction label={`Undo: ${summary}`} disabled={busy} onClick={() => void undo()}>{busy ? 'Undoing…' : 'Undo'}</RowAction> : undefined}
+      actions={undoable ? <RowAction label={`Undo: ${summary}`} busy={busy} onClick={() => void undo()}>{busy ? 'Undoing…' : 'Undo'}</RowAction> : undefined}
       expanded={expanded}
       onOpen={onToggle}
       menuLabel={`Decision: ${summary}`}
@@ -173,7 +174,7 @@ function DecisionItem({ action, now, expanded, onToggle }: { action: SuperAction
       <p className="whitespace-pre-wrap break-words">{action.summary}</p>
       {action.why ? <p className="mt-1 text-content/50">Why: {action.why}</p> : null}
       <p className="mt-1 text-[11px] text-content/40">{fullTime(action.at)}{undone ? ` · undone ${fullTime(action.undoneAt!)}` : ''}</p>
-      {undoable ? <div className="mt-2 flex gap-1.5"><DetailButton disabled={busy} onClick={() => void undo()}>{busy ? 'Undoing…' : 'Undo'}</DetailButton></div> : null}
+      {undoable ? <div className="mt-2 flex gap-1.5"><DetailButton busy={busy} onClick={() => void undo()}>{busy ? 'Undoing…' : 'Undo'}</DetailButton></div> : null}
     </PanelRow>
   );
 }
@@ -233,7 +234,9 @@ function Composer({ placeholder, label, onAdd, onClose, children }: { placeholde
         aria-label={label}
         value={text}
         maxLength={500}
-        disabled={busy}
+        // Never disabled while adding: Chromium blurs a disabled field, and focus must stay for the next one.
+        aria-busy={busy || undefined}
+        readOnly={busy}
         onChange={e => setText(oneLine(e.target.value))}
         onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void add(); } }}
         placeholder={placeholder}
@@ -273,7 +276,7 @@ export function IssuesView() {
   // The rows on screen, in order: where focus goes when one is removed.
   const shownIds = [...ordered, ...(doneShown ? done : [])].map(g => g.id);
   const item = (issue: SuperIssue) => (
-    <IssueItem key={issue.id} issue={issue} moves={moves.get(issue.id) ?? { up: null, down: null }} expanded={open === issue.id} onToggle={() => toggle(issue.id)} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, issue.id))} />
+    <IssueItem key={issue.id} issue={issue} moves={moves.get(issue.id) ?? { up: null, down: null }} expanded={open === issue.id} onToggle={() => toggle(issue.id)} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, issue.id))} onSettled={() => focusRow(root.current, issue.id)} />
   );
   const closeAdd = () => { setAdding(false); focusAdd(root.current); };
   return (
@@ -317,7 +320,7 @@ export function IssuesView() {
   );
 }
 
-function IssueItem({ issue, moves, expanded, onToggle, onRemoved }: { issue: SuperIssue; moves: { up: number | null; down: number | null }; expanded: boolean; onToggle: () => void; onRemoved: () => void }) {
+function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: { issue: SuperIssue; moves: { up: number | null; down: number | null }; expanded: boolean; onToggle: () => void; onRemoved: () => void; /** After a change that can move the row: focus it again. */ onSettled: () => void }) {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === issue.projectId));
   const agent = useApp(s => (issue.agentId ? s.snapshot?.agents.find(a => a.id === issue.agentId) : undefined));
   const [editing, setEditing] = useState(false);
@@ -347,14 +350,15 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved }: { issue: Sup
   };
   const named = `"${issue.text.length > 60 ? `${issue.text.slice(0, 59)}…` : issue.text}"`;
   const run = async (action: () => Promise<unknown>) => { setBusy(true); const ok = await attempt(action); setBusy(false); return ok; };
-  const save = async () => { if (text.trim() && await run(() => api.updateIssue(issue.id, { text: text.trim() }))) setEditing(false); };
+  const save = async () => { if (!busy && text.trim() && await run(() => api.updateIssue(issue.id, { text: text.trim() }))) { setEditing(false); onSettled(); } };
   const done = issue.status === 'done';
-  const status = (s: IssueStatus) => void run(() => api.updateIssue(issue.id, { status: s }));
+  // A status change moves the row to another section: focus follows it (or goes to + if it folded away).
+  const status = (s: IssueStatus) => { if (!busy) void run(() => api.updateIssue(issue.id, { status: s })).then(onSettled); };
   const edit = () => { setText(issue.text); setEditing(true); if (!expanded) onToggle(); };
   const { icon: StatusIcon, cls } = ISSUE_ICON[issue.status];
-  const moveTo = (to: number | null) => { if (to !== null) void run(() => api.moveIssue(issue.id, to)); };
+  const moveTo = (to: number | null) => { if (to !== null && !busy) void run(() => api.moveIssue(issue.id, to)).then(onSettled); };
   const removeNow = async () => { if (await run(() => api.removeIssue(issue.id))) onRemoved(); };
-  const remove = <RowAction label={`Confirm removing ${named}`} disabled={busy} onClick={() => void removeNow()}><span className="text-danger">Remove?</span></RowAction>;
+  const remove = <RowAction label={`Confirm removing ${named}`} busy={busy} onClick={() => void removeNow()}><span className="text-danger">Remove?</span></RowAction>;
   return (
     <PanelRow
       id={issue.id}
@@ -365,10 +369,10 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved }: { issue: Sup
       meta={<>{agent ? <AgentAvatar agent={agent} animate={false} className="size-3.5" /> : null}{project ? <span className="font-mono text-[10.5px]">{project.code ?? project.name}</span> : null}</>}
       actions={confirming ? remove : (
         <>
-          {!done ? <RowIcon icon={ChevronUp} label={`Move ${named} up`} disabled={busy || moves.up === null} onClick={() => moveTo(moves.up)} /> : null}
-          {!done ? <RowIcon icon={ChevronDown} label={`Move ${named} down`} disabled={busy || moves.down === null} onClick={() => moveTo(moves.down)} /> : null}
-          <RowIcon icon={Pencil} label={`Edit ${named}`} disabled={busy} onClick={edit} />
-          <RowIcon icon={Trash2} label={`Remove ${named}`} disabled={busy} onClick={() => setConfirming(true)} />
+          {!done ? <RowIcon icon={ChevronUp} label={`Move ${named} up`} disabled={moves.up === null} busy={busy} onClick={() => moveTo(moves.up)} /> : null}
+          {!done ? <RowIcon icon={ChevronDown} label={`Move ${named} down`} disabled={moves.down === null} busy={busy} onClick={() => moveTo(moves.down)} /> : null}
+          <RowIcon icon={Pencil} label={`Edit ${named}`} busy={busy} onClick={edit} />
+          <RowIcon icon={Trash2} label={`Remove ${named}`} busy={busy} onClick={() => setConfirming(true)} />
         </>
       )}
       expanded={expanded}
@@ -407,7 +411,7 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved }: { issue: Sup
           />
           <div className="flex justify-end gap-1.5">
             <TextButton onClick={() => setEditing(false)}>Cancel</TextButton>
-            <button type="button" className={PRIMARY} disabled={busy || !text.trim()} onClick={() => void save()}>Save</button>
+            <button type="button" className={PRIMARY} disabled={!text.trim()} aria-busy={busy || undefined} onClick={() => void save()}>Save</button>
           </div>
         </div>
       ) : <p className="whitespace-pre-wrap break-words">{issue.text}</p>}
@@ -417,14 +421,14 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved }: { issue: Sup
         <select
           aria-label={`Status of ${named}`}
           value={issue.status}
-          disabled={busy}
+          aria-busy={busy || undefined}
           onChange={e => status(e.target.value as IssueStatus)}
           className="h-6 rounded-md border border-content/12 bg-transparent px-1 text-[11.5px] text-content/75 outline-none"
         >
           {(Object.keys(ISSUE_STATUS_LABEL) as IssueStatus[]).map(s => <option key={s} value={s}>{ISSUE_STATUS_LABEL[s]}</option>)}
         </select>
         {!editing ? <DetailButton onClick={edit}>Edit</DetailButton> : null}
-        {confirming ? <DetailButton ref={confirmButton} danger label={`Confirm removing ${named}`} disabled={busy} onClick={() => void removeNow()}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
+        {confirming ? <DetailButton ref={confirmButton} danger label={`Confirm removing ${named}`} busy={busy} onClick={() => void removeNow()}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
       </div>
     </PanelRow>
   );
@@ -452,7 +456,7 @@ export function RoutinesView() {
         {groups.map(g => (
           <section key={g.key} aria-label={g.label}>
             <PanelSection label={g.label} count={g.items.length} />
-            {g.items.map(r => <RoutineItem key={r.id} routine={r} expanded={open === r.id} onToggle={() => setOpen(o => (o === r.id ? null : r.id))} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, r.id))} />)}
+            {g.items.map(r => <RoutineItem key={r.id} routine={r} expanded={open === r.id} onToggle={() => setOpen(o => (o === r.id ? null : r.id))} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, r.id))} onSettled={() => focusRow(root.current, r.id)} />)}
           </section>
         ))}
         {!groups.length ? (
@@ -508,15 +512,15 @@ function RoutineForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-function RoutineItem({ routine, expanded, onToggle, onRemoved }: { routine: SuperRoutine; expanded: boolean; onToggle: () => void; onRemoved: () => void }) {
+function RoutineItem({ routine, expanded, onToggle, onRemoved, onSettled }: { routine: SuperRoutine; expanded: boolean; onToggle: () => void; onRemoved: () => void; onSettled: () => void }) {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === routine.projectId));
   const [busy, setBusy] = useState(false);
   const run = async (action: () => Promise<unknown>) => { setBusy(true); const ok = await attempt(action); setBusy(false); return ok; };
   const named = `"${routine.name}"`;
   const paused = !routine.enabled && !routine.proposed;
-  const confirm = () => void run(() => api.updateRoutine(routine.id, { confirm: true }));
-  const reject = () => void run(() => api.removeRoutine(routine.id)).then(ok => { if (ok) onRemoved(); });
-  const pause = () => void run(() => api.updateRoutine(routine.id, { enabled: !routine.enabled }));
+  const confirm = () => { if (!busy) void run(() => api.updateRoutine(routine.id, { confirm: true })).then(onSettled); };
+  const reject = () => busy ? undefined : void run(() => api.removeRoutine(routine.id)).then(ok => { if (ok) onRemoved(); });
+  const pause = () => { if (!busy) void run(() => api.updateRoutine(routine.id, { enabled: !routine.enabled })).then(onSettled); };
   return (
     <PanelRow
       id={routine.id}
@@ -526,8 +530,8 @@ function RoutineItem({ routine, expanded, onToggle, onRemoved }: { routine: Supe
       dim={paused}
       meta={<span>{paused ? 'Paused · ' : ''}{shortSchedule(routine.schedule)}{project ? ` · ${project.code ?? project.name}` : ''}</span>}
       actions={routine.proposed
-        ? <RowAction label={`Confirm ${named}`} disabled={busy} onClick={confirm}>Confirm</RowAction>
-        : <RowAction label={`${routine.enabled ? 'Pause' : 'Resume'} ${named}`} disabled={busy} onClick={pause}>{routine.enabled ? 'Pause' : 'Resume'}</RowAction>}
+        ? <RowAction label={`Confirm ${named}`} busy={busy} onClick={confirm}>Confirm</RowAction>
+        : <RowAction label={`${routine.enabled ? 'Pause' : 'Resume'} ${named}`} busy={busy} onClick={pause}>{routine.enabled ? 'Pause' : 'Resume'}</RowAction>}
       expanded={expanded}
       onOpen={onToggle}
       menuLabel={`Routine ${named}`}
@@ -555,13 +559,13 @@ function RoutineItem({ routine, expanded, onToggle, onRemoved }: { routine: Supe
       <div className="mt-2 flex gap-1.5">
         {routine.proposed ? (
           <>
-            <DetailButton disabled={busy} onClick={confirm}>Confirm</DetailButton>
-            <DetailButton danger disabled={busy} onClick={reject}>Reject</DetailButton>
+            <DetailButton busy={busy} onClick={confirm}>Confirm</DetailButton>
+            <DetailButton danger busy={busy} onClick={reject}>Reject</DetailButton>
           </>
         ) : (
           <>
-            <DetailButton disabled={busy} onClick={pause}>{routine.enabled ? 'Pause' : 'Resume'}</DetailButton>
-            <DetailButton danger disabled={busy} onClick={reject}>Remove</DetailButton>
+            <DetailButton busy={busy} onClick={pause}>{routine.enabled ? 'Pause' : 'Resume'}</DetailButton>
+            <DetailButton danger busy={busy} onClick={reject}>Remove</DetailButton>
           </>
         )}
       </div>

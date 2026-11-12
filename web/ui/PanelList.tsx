@@ -8,7 +8,7 @@
  */
 import { useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { ChevronDown, Plus, Search, X } from '../mono/icons.tsx';
-import { isKeyboardFocus, isMenuKey } from '../panelList.ts';
+import { isKeyboardFocus, isMenuKey, whileBusy } from '../panelList.ts';
 import { ContextMenu, openContextMenu, type MenuAnchor } from './ContextMenu.tsx';
 import { useElementWidth } from './useElementWidth.ts';
 
@@ -164,27 +164,28 @@ export function PanelRow({ id, lead, title, label, meta, actions, dim = false, s
 }
 
 /** A quick action on a row (shown on hover): a quiet text button. */
-export function RowAction({ children, onClick, label, disabled }: { children: ReactNode; onClick: () => void; label: string; disabled?: boolean }) {
+
+export function RowAction({ children, onClick, label, disabled, busy }: { children: ReactNode; onClick: () => void; label: string; disabled?: boolean; busy?: boolean }) {
   return (
-    <button type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick} className="h-[22px] rounded-[5px] bg-content/7 px-1.5 font-sans text-[11.5px] text-content/75 transition-colors hover:bg-content/12 hover:text-content disabled:opacity-40">
+    <button type="button" aria-label={label} title={label} disabled={disabled} {...whileBusy(busy, onClick)} className="h-[22px] rounded-[5px] bg-content/7 px-1.5 font-sans text-[11.5px] text-content/75 transition-colors hover:bg-content/12 hover:text-content disabled:opacity-40 aria-busy:opacity-60">
       {children}
     </button>
   );
 }
 
 /** An icon-only quick action on a row. */
-export function RowIcon({ icon: IconC, label, onClick, disabled }: { icon: Icon; label: string; onClick: () => void; disabled?: boolean }) {
+export function RowIcon({ icon: IconC, label, onClick, disabled, busy }: { icon: Icon; label: string; onClick: () => void; disabled?: boolean; busy?: boolean }) {
   return (
-    <button type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick} className="grid size-[22px] place-items-center rounded-[5px] text-content/45 transition-colors hover:bg-content/7 hover:text-content disabled:pointer-events-none disabled:opacity-30">
+    <button type="button" aria-label={label} title={label} disabled={disabled} {...whileBusy(busy, onClick)} className="grid size-[22px] place-items-center rounded-[5px] text-content/45 transition-colors hover:bg-content/7 hover:text-content disabled:pointer-events-none disabled:opacity-30 aria-busy:opacity-60">
       <IconC className="size-3" strokeWidth={1.75} />
     </button>
   );
 }
 
 /** A button inside an expanded row: a quiet outlined one. */
-export function DetailButton({ children, onClick, disabled, danger = false, label, ref }: { children: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; label?: string; ref?: Ref<HTMLButtonElement> }) {
+export function DetailButton({ children, onClick, disabled, busy, danger = false, label, ref }: { children: ReactNode; onClick: () => void; disabled?: boolean; busy?: boolean; danger?: boolean; label?: string; ref?: Ref<HTMLButtonElement> }) {
   return (
-    <button ref={ref} type="button" aria-label={label} disabled={disabled} onClick={onClick} className={`h-6 rounded-md border border-content/12 px-2 font-sans text-[11.5px] transition-colors hover:bg-content/5 disabled:opacity-40 ${danger ? 'text-danger' : 'text-content/75 hover:text-content'}`}>
+    <button ref={ref} type="button" aria-label={label} disabled={disabled} {...whileBusy(busy, onClick)} className={`h-6 rounded-md border border-content/12 px-2 font-sans text-[11.5px] transition-colors hover:bg-content/5 disabled:opacity-40 aria-busy:opacity-60 ${danger ? 'text-danger' : 'text-content/75 hover:text-content'}`}>
       {children}
     </button>
   );

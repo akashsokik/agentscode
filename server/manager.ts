@@ -1893,9 +1893,11 @@ export class AgentManager {
     return this.project(raw).id;
   }
 
+  /** The user removed an issue: in the decision log too, like the SuperAgent's own changes, so Undo there puts it back. */
   removeIssue(id: string): SuperState {
-    this.superStore.removeIssue(id);
-    return this.publishSuper();
+    const removed = this.superStore.removeIssue(id);
+    this.recordSuper({ tool: 'remove_issue', forUser: true, why: 'You removed it in the Issues tab.', summary: `You removed the issue "${clip(removed.text, 120)}"`, undo: { kind: 'issue', issueId: removed.id, before: removed, removed: true } });
+    return this.superView();
   }
 
   moveIssue(id: string, to: unknown): SuperState {
@@ -1958,7 +1960,7 @@ export class AgentManager {
       if (!this.store.channels.has(undo.channelId)) throw new HttpError(409, 'That channel is gone.');
       this.updateChannel(undo.channelId, { ...undo.before, memberIds: undo.before.memberIds.filter(m => this.store.agents.has(m)) });
     } else if (undo.kind === 'issue') {
-      this.superStore.restoreIssue(undo.issueId, undo.before);
+      this.superStore.restoreIssue(undo.issueId, undo.before, undo.removed === true);
     } else if (undo.kind === 'routine') {
       // Withdraw a proposal; one the user confirmed since is theirs now.
       const routine = this.superStore.routines().find(r => r.id === undo.routineId);

@@ -234,7 +234,8 @@ export type SuperUndo =
   | { kind: 'channel'; channelId: string; before: { name: string; topic: string; memberIds: string[] } }
   | { kind: 'agent'; agentId: string; before: { name: string; role: AgentRole; model: string; effort: string } }
   /** An issue as it was before (null: the SuperAgent added it, so undo removes it). */
-  | { kind: 'issue'; issueId: string; before: SuperIssue | null }
+  /** removed: the user removed it in the Issues tab; undo puts it back as it was. */
+  | { kind: 'issue'; issueId: string; before: SuperIssue | null; removed?: true }
   /** A routine the SuperAgent proposed: undo withdraws it. */
   | { kind: 'routine'; routineId: string };
 

@@ -243,9 +243,19 @@ export class SuperStore {
    * Put an issue back as it was (undo); null removes it. Refused (409) when the issue is gone since, or
    * when putting it back would break the open-issue cap or repeat another open issue.
    */
-  restoreIssue(id: string, before: SuperIssue | null): void {
+  restoreIssue(id: string, before: SuperIssue | null, removed = false): void {
     const stored = this.read();
     const current = stored.issues.find(g => g.id === id);
+    // A removal undone: the issue comes back as it was, once, and only if it fits the backlog now.
+    if (removed && before) {
+      if (current) throw new HttpError(409, 'That issue is back already.');
+      if (before.status !== 'done') {
+        if (stored.issues.filter(g => g.status !== 'done').length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already.`);
+        if (stored.issues.some(g => g.status !== 'done' && g.text === before.text)) throw new HttpError(409, 'Another open issue says the same thing now.');
+      }
+      this.write({ ...stored, issues: [...stored.issues, { ...before, order: before.status === 'done' ? before.order : Math.min(before.order, stored.issues.filter(g => g.status !== 'done').length) }] });
+      return;
+    }
     if (!current) throw new HttpError(409, 'That issue was removed since, so there is nothing to undo.');
     const rest = stored.issues.filter(g => g.id !== id);
     if (before && before.status !== 'done') {

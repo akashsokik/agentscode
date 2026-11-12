@@ -181,3 +181,11 @@ export function armRemove(expanded: boolean, fromMenu: boolean): { open: boolean
 export function keepArmed(confirmHasFocus: boolean): boolean {
   return confirmHasFocus;
 }
+
+/**
+ * A button while its request is in flight: it keeps focus (Chromium blurs a disabled control, so
+ * focus fell to the page), says it is busy, and ignores presses until the request is done.
+ */
+export function whileBusy(busy: boolean | undefined, onClick: () => void): { 'aria-disabled'?: true; 'aria-busy'?: true; onClick: () => void } {
+  return { ...(busy ? { 'aria-disabled': true as const, 'aria-busy': true as const } : {}), onClick: () => { if (!busy) onClick(); } };
+}

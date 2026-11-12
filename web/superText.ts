@@ -78,11 +78,14 @@ interface SuperLists {
  * The count on each tab: decisions made today that can still be undone, open issues, and routines the
  * SuperAgent proposed that wait for you. `now` decides what today is, in local time.
  */
+/** An entry the user made themselves (removing an issue in the tab): it is in the log for Undo, but is nothing new to point them to. */
+export const byYou = (action: Pick<SuperAction, 'tool'>) => action.tool === 'remove_issue';
+
 export function superTabCounts(lists: SuperLists, now: number): Record<SuperTab, number> {
   const day = new Date(now);
   day.setHours(0, 0, 0, 0);
   return {
-    decisions: decisionRows(lists.log).filter(r => r.undoable && r.at >= day.getTime()).length,
+    decisions: decisionRows((lists.log ?? []).filter(a => !byYou(a))).filter(r => r.undoable && r.at >= day.getTime()).length,
     issues: issueSections(lists.issues).open.length,
     routines: (lists.routines ?? []).filter(r => r.proposed).length,
   };
@@ -92,7 +95,7 @@ export function superTabCounts(lists: SuperLists, now: number): Record<SuperTab,
 export function superTabLatest(lists: SuperLists): Record<SuperTab, number> {
   const newest = (times: number[]) => times.reduce((max, t) => Math.max(max, t), 0);
   return {
-    decisions: newest((lists.log ?? []).map(a => a.at)),
+    decisions: newest((lists.log ?? []).filter(a => !byYou(a)).map(a => a.at)),
     issues: newest((lists.issues ?? []).map(g => g.createdAt)),
     routines: newest((lists.routines ?? []).map(r => r.createdAt)),
   };
