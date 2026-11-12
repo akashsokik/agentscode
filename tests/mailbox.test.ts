@@ -168,7 +168,7 @@ test('recover keeps unfinished mail: queued stays queued, mid-delivery goes once
   mailbox.recover();
   assert.deepEqual(store.messages.map(m => [m.status, m.redelivered ?? false]), [['queued', false], ['queued', true], ['delivered', false]]);
   assert.equal(store.conversations[0].stopped, false, 'mail still to go keeps its conversation open');
-  assert.equal(store.conversations[1].stopped, true, 'one with nothing left ends, as before');
+  assert.equal(store.conversations[1].stopped, false, 'a finished one is not marked stopped by a restart');
   assert.match(deliveryPrompt(store.messages[1]), /^Redelivered after PodCode restarted/);
   assert.doesNotMatch(deliveryPrompt(store.messages[0]), /Redelivered/);
   // Interrupted again while being redelivered: it fails rather than loop.
@@ -183,4 +183,70 @@ test('delivery prompts frame peer text as context with the reply instructions', 
   assert.match(prompt, /not a new instruction from the user/);
   assert.match(prompt, /reply tool with message_id m1/);
   assert.match(prompt, /Run the tests$/);
+});
+
+const msg = (id: string, conversationId: string, status: PeerMessage['status'], extra: Partial<PeerMessage> = {}): PeerMessage => ({
+  id, conversationId, fromAgentId: 'a', fromName: 'A', toAgentId: 'b', toName: 'B', text: id, expectsReply: true, ts: 0, status, ...extra,
+});
+
+test('restarts keep a finished conversation finished, and a late reply in it still goes', async () => {
+  const { store, mailbox } = setup([agent('a'), agent('b')]);
+  const sent = mailbox.send('a', 'b', 'please review');
+  await settle();
+  mailbox.finish('b', true);
+  assert.equal(store.messages.find(m => m.id === sent.id)?.status, 'delivered');
+  mailbox.recover();
+  mailbox.recover();
+  const conversation = store.conversations.find(c => c.id === sent.conversationId)!;
+  assert.equal(conversation.stopped, false, 'two restarts later it is still not stopped');
+  assert.equal(conversation.stoppedBy, undefined);
+  // The reviewer answers after the restart: the conversation takes it.
+  assert.equal(mailbox.reply('b', sent.id, 'approved').status, 'queued');
+});
+
+test('a conversation the user stopped stays stopped across restarts', () => {
+  const { store, mailbox } = setup([agent('a'), agent('b'), agent('c')]);
+  store.conversations.push(
+    { id: 'idle', startedBy: 'a', messageLimit: 12, stopped: false, createdAt: 0 },
+    { id: 'busy', startedBy: 'c', messageLimit: 12, stopped: false, createdAt: 0 },
+  );
+  store.messages.push(msg('i1', 'idle', 'delivered'), msg('b1', 'busy', 'delivered', { fromAgentId: 'c', toAgentId: 'b' }));
+  // Stopped from Comms while nothing was queued: no cancelled mail, so only stoppedBy tells.
+  mailbox.stopConversation('idle');
+  // Stopping an agent ends its conversations too.
+  mailbox.stop('c');
+  assert.deepEqual(store.conversations.map(c => [c.id, c.stopped, c.stoppedBy]), [['idle', true, 'user'], ['busy', true, 'user']]);
+  mailbox.recover();
+  mailbox.recover();
+  assert.deepEqual(store.conversations.map(c => [c.id, c.stopped]), [['idle', true], ['busy', true]]);
+  assert.throws(() => mailbox.reply('b', 'i1', 'more'), e => status(e) === 409, 'still closed to new mail');
+});
+
+test('conversations an earlier build stopped at boot open again; ones the user stopped with mail cancelled stay stopped', () => {
+  const { store, mailbox } = setup([agent('a'), agent('b')]);
+  // As an earlier build left them: stopped, with no stoppedBy.
+  store.conversations.push(
+    { id: 'boot', startedBy: 'a', messageLimit: 12, stopped: true, createdAt: 0 },
+    { id: 'user', startedBy: 'a', messageLimit: 12, stopped: true, createdAt: 0 },
+    { id: 'failed', startedBy: 'a', messageLimit: 12, stopped: true, createdAt: 0 },
+  );
+  store.messages.push(
+    msg('m1', 'boot', 'delivered'), msg('m2', 'boot', 'delivered', { fromAgentId: 'b', toAgentId: 'a' }),
+    msg('m3', 'user', 'delivered'), msg('m4', 'user', 'cancelled', { error: 'Conversation stopped by the user.' }),
+    msg('m5', 'failed', 'failed', { error: 'boom' }),
+  );
+  mailbox.recover();
+  assert.deepEqual(store.conversations.map(c => [c.id, c.stopped]), [['boot', false], ['user', true], ['failed', false]]);
+  assert.equal(store.messages.find(m => m.id === 'm5')?.status, 'failed', 'a failed message keeps failing; only the conversation reopens');
+});
+
+test('in-flight mail is handled as before: queued stays, mid-delivery goes once more, and their conversation stays open', () => {
+  const { store, mailbox, delivered } = setup([agent('a'), agent('b')]);
+  store.conversations.push({ id: 'live', startedBy: 'a', messageLimit: 12, stopped: false, createdAt: 0 });
+  store.messages.push(msg('q', 'live', 'queued'), msg('d', 'live', 'delivering'));
+  mailbox.recover();
+  assert.deepEqual(store.messages.map(m => [m.id, m.status, m.redelivered ?? false]), [['q', 'queued', false], ['d', 'queued', true]]);
+  assert.equal(store.conversations[0].stopped, false);
+  mailbox.drainAll();
+  assert.equal(delivered.length, 1, 'the first of them goes to b once it is ready');
 });

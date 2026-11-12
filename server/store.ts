@@ -87,8 +87,11 @@ export class Store {
     }
     if (this.messages.length > MAX_MESSAGES) {
       this.messages = this.messages.slice(-MAX_MESSAGES);
+      // A conversation whose mail is all gone goes too; one newer than the oldest kept message may
+      // be about to get its first.
       const live = new Set(this.messages.map(m => m.conversationId));
-      this.conversations = this.conversations.filter(c => live.has(c.id) || !c.stopped);
+      const oldest = this.messages[0]?.ts ?? 0;
+      this.conversations = this.conversations.filter(c => live.has(c.id) || c.createdAt >= oldest);
     }
     const state: PersistedState = {
       version: 1,
