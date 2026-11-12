@@ -37,6 +37,7 @@ import type {
 import type { ComposerCommand, ProjectFileList } from '../shared/composer.ts';
 import type { MentionHint } from '../shared/mentions.ts';
 import type { RefDetail, RefSearchHit, RefsIndex } from '../shared/refs.ts';
+import type { CleanupRequest, CleanupResult, WorkChanges, WorkDiff, WorkTarget, WorkView } from '../shared/work.ts';
 
 /** Where files and git commands run: an agent's workspace, or a project folder. */
 export type Root = { agent: string } | { project: string };
@@ -104,6 +105,10 @@ function rootQuery(root: Root, extra: Record<string, string> = {}): string {
 export const api = {
   state: () => request<Snapshot>('GET', '/api/state'),
   refs: () => request<RefsIndex>('GET', '/api/refs'),
+  work: (fresh = false) => request<WorkView>('GET', `/api/work${fresh ? '?fresh=1' : ''}`),
+  workCleanup: (body: CleanupRequest) => request<CleanupResult>('POST', '/api/work/cleanup', body),
+  workChanges: (project: string, target: WorkTarget) => request<WorkChanges>('GET', `/api/work/changes?${new URLSearchParams({ project, ...target })}`),
+  workDiff: (project: string, target: WorkTarget, path: string) => request<WorkDiff>('GET', `/api/work/diff?${new URLSearchParams({ project, ...target, path })}`),
   ref: (id: string) => request<RefDetail>('GET', `/api/refs/${encodeURIComponent(id)}`),
   searchRefs: (q: string, code?: string) => request<{ hits: RefSearchHit[] }>('GET', `/api/refs/search?q=${encodeURIComponent(q)}${code ? `&code=${encodeURIComponent(code)}` : ''}`),
 

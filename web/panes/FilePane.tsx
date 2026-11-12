@@ -152,6 +152,16 @@ export function DiffPane({ root, path, chrome }: { root: Root; path: string; chr
         : !data ? <Loading className="grid flex-1 place-items-center" />
         : !lines.length ? <Empty icon={FileDiffIcon} title="No changes">This file matches HEAD.</Empty>
         : (
+          <UnifiedDiff diff={data.diff} />
+        )}
+    </PaneFrame>
+  );
+}
+
+/** The existing unified diff renderer, shared by file panes and Work inspection. */
+export function UnifiedDiff({ diff }: { diff: string }) {
+  const lines = useMemo(() => parseDiff(diff), [diff]);
+  return (
           <div className="min-h-0 flex-1 overflow-auto py-2">
             <table className="min-w-full border-collapse font-mono text-[var(--code-font-size)] leading-[1.6]">
               <tbody>
@@ -175,7 +185,5 @@ export function DiffPane({ root, path, chrome }: { root: Root; path: string; chr
               </tbody>
             </table>
           </div>
-        )}
-    </PaneFrame>
   );
 }
