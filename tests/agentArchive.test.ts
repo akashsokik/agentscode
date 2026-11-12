@@ -5,9 +5,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { archiveAgentHome, archiveDir, ARCHIVE_EXTRAS, ARCHIVE_META, ARCHIVE_TRANSCRIPT, findWorktrees, listArchive, move, slug, stamp } from '../server/agentArchive.ts';
 import { Store } from '../server/store.ts';
-import { harness, tempDir } from './helpers.ts';
+import { gitEnv, harness, tempDir } from './helpers.ts';
 
-const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, env: gitEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
 /** A repository with one commit, and two linked worktrees inside `workspace`: one with changes, one clean. */
 function repoWithWorktrees(workspace: string) {

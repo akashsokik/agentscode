@@ -1,3 +1,5 @@
+// First: no GIT_DIR and the like from a git hook (tests/isolate.ts).
+import { gitEnv } from './isolate.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -12,7 +14,7 @@ function setup() {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'walk-')));
   const repo = path.join(base, 'repo');
   fs.mkdirSync(repo);
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, env: gitEnv(), stdio: 'pipe' });
   git('init', '-q', '-b', 'main');
   git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
   fs.writeFileSync(path.join(repo, 'a.ts'), Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n') + '\n');

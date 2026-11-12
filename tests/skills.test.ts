@@ -1,3 +1,5 @@
+// First: no GIT_DIR and the like from a git hook (tests/isolate.ts).
+import { gitEnv } from './isolate.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -84,7 +86,7 @@ test('the file list follows git in a repository, leaving ignored files out', asy
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const { execFileSync } = await import('node:child_process');
   try {
-    execFileSync('git', ['init', '-q'], { cwd: root });
+    execFileSync('git', ['init', '-q'], { cwd: root, env: gitEnv() });
   } catch {
     t.skip('git is not installed');
     return;

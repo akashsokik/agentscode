@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { CHECK_OUTPUT_CAP, checkArgs, CheckError, runCheck, type CheckExec } from '../server/checks.ts';
 import { HttpError } from '../server/errors.ts';
-import { harness, projectDir, settle, tempDir } from './helpers.ts';
+import { gitEnv, harness, projectDir, settle, tempDir } from './helpers.ts';
 
 test('run_check runs only its fixed read-only commands; everything else is refused before anything runs', async () => {
   for (const bad of ['git push', 'git commit', 'git checkout main', 'git reset --hard', 'git clean -fd', 'npm install', 'npm run build', 'npm publish', 'rm -rf /', 'sh -c ls', 'git', '']) {
@@ -43,7 +43,7 @@ test('npm checks run only scripts the project has; a failing command is a result
 
 test('real git: status and log in a project, and status leaves no index lock behind', async () => {
   const dir = tempDir('chk-git');
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, env: gitEnv(), stdio: 'pipe' });
   git('init', '-q', '-b', 'main');
   fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
   git('add', '.');
@@ -96,7 +96,7 @@ test('run_check follows the eyes scope: a tester with a project checks only its 
 
 test('a repository whose own config names a program git could run is refused, for every git check', async () => {
   const dir = tempDir('chk-evil');
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, env: gitEnv(), stdio: 'pipe' });
   git('init', '-q', '-b', 'main');
   fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
   git('add', '.');

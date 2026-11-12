@@ -1,3 +1,5 @@
+// First, before anything that could start git: drop GIT_DIR and the like (tests/isolate.ts).
+import './isolate.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +8,8 @@ import type { Runner, RunnerContext, RunnerImage } from '../server/agents/runner
 import type { DreamEngine, DreamEngineRequest } from '../server/dream.ts';
 import { AgentManager } from '../server/manager.ts';
 import { Store } from '../server/store.ts';
+
+export { gitEnv, withoutGitRepoEnv, GIT_REPO_ENV } from './isolate.ts';
 
 export function tempDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `podcode-${prefix}-`));
