@@ -5,6 +5,9 @@ import { fitPanelTabs, labelWidth, MORE_WIDTH, stripKeyTarget, TAB_GAP, TAB_ICON
 const SUPER: FitTab<string>[] = ['Overview', 'Decisions', 'Goals', 'Routines', 'Comms', 'Notes', 'Work'].map(label => ({ view: label.toLowerCase(), label }));
 const AGENT: FitTab<string>[] = ['Overview', 'Comms', 'Changes', 'Notes', 'Work'].map(label => ({ view: label.toLowerCase(), label }));
 
+/** n icons and the gaps between them. */
+const width = (n: number) => n * TAB_ICON_WIDTH + Math.max(0, n - 1) * TAB_GAP;
+
 /** The width the strip takes for a fit, with the same gaps the panel uses. */
 function used(tabs: FitTab<string>[], fit: TabsFit<string>, active: string): number {
   const shown = tabs.filter(t => fit.visible.includes(t.view));
@@ -16,7 +19,7 @@ function used(tabs: FitTab<string>[], fit: TabsFit<string>, active: string): num
 test('the strip folds in order: other names, the open tab\'s name, then a "…" menu', () => {
   const wide = fitPanelTabs(SUPER, 'overview', 2000);
   assert.deepEqual([wide.allLabelled, wide.activeLabelled, wide.overflow.length], [true, true, 0]);
-  const middling = fitPanelTabs(SUPER, 'overview', 300);
+  const middling = fitPanelTabs(SUPER, 'overview', 305);
   assert.deepEqual([middling.allLabelled, middling.activeLabelled, middling.overflow.length], [false, true, 0], 'only the open tab keeps its name');
   const tight = fitPanelTabs(SUPER, 'overview', 240);
   assert.deepEqual([tight.allLabelled, tight.activeLabelled, tight.overflow.length], [false, false, 0], 'icons only, all of them');
@@ -48,14 +51,30 @@ test('at every width, for the SuperAgent and an agent, the tabs never take more 
   }
 });
 
-test('a count badge makes the open tab\'s name wider, so it folds sooner', () => {
+test('a count badge widens the room kept for a name, for every tab alike', () => {
   assert.ok(labelWidth('Decisions', 3) > labelWidth('Decisions'));
   const withCount = SUPER.map(t => (t.view === 'decisions' ? { ...t, count: 12 } : t));
   // 7 icons and gaps take 234px; "Decisions" adds 69px, its count 22px more.
-  const plainFit = fitPanelTabs(SUPER, 'decisions', 305);
-  const countFit = fitPanelTabs(withCount, 'decisions', 305);
-  assert.equal(plainFit.activeLabelled, true);
-  assert.equal(countFit.activeLabelled, false);
+  for (const view of SUPER.map(t => t.view)) {
+    assert.equal(fitPanelTabs(SUPER, view, 305).activeLabelled, true, `${view} open, no counts, 305px`);
+    assert.equal(fitPanelTabs(withCount, view, 305).activeLabelled, false, `${view} open, Decisions has a count, 305px`);
+    assert.equal(fitPanelTabs(withCount, view, 325).activeLabelled, true, `${view} open, Decisions has a count, 325px`);
+  }
+});
+
+test('every tab behaves the same (ACH-D35): at any width, either every open tab shows its name or none does', () => {
+  // The bug: Overview showed its name when open, while Decisions, Goals and Routines (with counts) did not.
+  const superWithCounts = SUPER.map(t => (t.view === 'decisions' ? { ...t, count: 14 } : t.view === 'goals' ? { ...t, count: 3 } : t.view === 'routines' ? { ...t, count: 2 } : t));
+  const agentWithCount = AGENT.map(t => (t.view === 'comms' ? { ...t, count: 1 } : t));
+  for (const tabs of [SUPER, superWithCounts, AGENT, agentWithCount]) {
+    for (let available = TAB_ICON_WIDTH + TAB_GAP + MORE_WIDTH; available <= 900; available += 1) {
+      const labelled = tabs.map(t => fitPanelTabs(tabs, t.view, available).activeLabelled);
+      assert.ok(labelled.every(l => l === labelled[0]), `${tabs.length} tabs at ${available}px: ${tabs.map((t, i) => `${t.view}=${labelled[i]}`).join(' ')}`);
+      // And when the names fit, the open one is shown for each of them.
+      const roomy = width(tabs.length) + Math.max(...tabs.map(t => labelWidth(t.label, t.count)));
+      if (available >= roomy) assert.ok(labelled.every(Boolean), `${available}px is enough for every name`);
+    }
+  }
 });
 
 test('arrow keys, Home and End never lose focus: the tab they reach is always in the strip', () => {

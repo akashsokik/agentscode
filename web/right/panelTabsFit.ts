@@ -2,6 +2,12 @@
 // The strip keeps one gap between tabs and before the collapse button; when it runs out of room it
 // gives up, in order: the other tabs' names, the open tab's name, then the last tabs, which move
 // into a "…" menu. The open tab always stays in the strip. Pure, so it is tested directly.
+//
+// Every tab behaves the same (ACH-D35): whether the open tab shows its name is decided for the
+// strip, not for the tab. Room is kept for the widest name (with its count), so at a given width
+// either every tab shows its name when open or none does. Judged per tab, a short name (Overview,
+// Notes) kept its label where a long one with a count (Decisions, Routines) lost it, so opening
+// different tabs looked different.
 
 /** An icon tab without its name (IconTab: 14px icon, 8px each side). */
 export const TAB_ICON_WIDTH = 30;
@@ -40,7 +46,8 @@ function width(n: number): number {
 export function fitPanelTabs<V extends string>(tabs: FitTab<V>[], active: V, available: number): TabsFit<V> {
   const views = tabs.map(t => t.view);
   const open = tabs.find(t => t.view === active) ?? tabs[0];
-  const openLabel = open ? labelWidth(open.label, open.count) : 0;
+  // The same for every tab: the widest name any tab would show when open (ACH-D35).
+  const openLabel = tabs.reduce((widest, t) => Math.max(widest, labelWidth(t.label, t.count)), 0);
   const everyLabel = tabs.reduce((sum, t) => sum + labelWidth(t.label, t.count), 0);
   if (width(tabs.length) + everyLabel <= available) return { allLabelled: true, activeLabelled: true, visible: views, overflow: [] };
   if (width(tabs.length) + openLabel <= available) return { allLabelled: false, activeLabelled: true, visible: views, overflow: [] };
