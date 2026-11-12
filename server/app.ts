@@ -15,6 +15,7 @@ import { listDirs, normalizeDir } from './projects.ts';
 import { Terminals } from './terminals.ts';
 import { UsageTracker } from './usage.ts';
 import { gitDiff, gitStatus, listTree, readFile } from './workspace.ts';
+import { readBuildId } from './buildStamp.ts';
 
 // ---- local-only guard ------------------------------------------------------
 // This server starts coding agents with access to your files, so it only answers
@@ -490,6 +491,7 @@ export function createServer(manager: AgentManager, hub: Hub, options: { distDir
       hub.add(ws);
       hub.send(ws, { type: 'snapshot', data: manager.snapshot() });
       hub.send(ws, { type: 'terminals', terminals: terminals.list() });
+      hub.send(ws, { type: 'build', id: readBuildId(dist) });
     });
   });
   // Keep idle sockets from being dropped by proxies and sleeping laptops.

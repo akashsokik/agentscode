@@ -865,6 +865,8 @@ export type TerminalServerMessage = { type: 'exit'; exitCode: number; signal?: n
 
 export type ServerEvent =
   | { type: 'snapshot'; data: Snapshot }
+  /** The build of the page this server now serves (dist/build.json), or null when it has none (web/staleBuild.ts). */
+  | { type: 'build'; id: string | null }
   | { type: 'agent'; agent: Agent }
   | { type: 'agentRemoved'; id: string }
   /** An agent's memory changed: every entry, oldest first. */

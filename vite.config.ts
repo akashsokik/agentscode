@@ -17,11 +17,25 @@ function buildInfo(): BuildInfo {
   return { version, commit, date: new Date().toISOString() };
 }
 
+const BUILD = buildInfo();
+
+/**
+ * Writes the same stamp beside the page as build.json, so the server can tell a page which build
+ * it now serves, and a page left open from an older build reloads (web/staleBuild.ts).
+ */
+const buildStamp = {
+  name: 'podcode-build-stamp',
+  apply: 'build' as const,
+  generateBundle(this: { emitFile: (file: { type: 'asset'; fileName: string; source: string }) => void }) {
+    this.emitFile({ type: 'asset', fileName: 'build.json', source: `${JSON.stringify(BUILD)}\n` });
+  },
+};
+
 const api = `http://127.0.0.1:${process.env.PORT ?? 4320}`;
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  define: { __PODCODE_BUILD__: JSON.stringify(buildInfo()) },
+  plugins: [react(), tailwindcss(), buildStamp],
+  define: { __PODCODE_BUILD__: JSON.stringify(BUILD) },
   server: {
     host: '127.0.0.1',
     port: 5174,

@@ -46,6 +46,7 @@ import { TerminalSpinner } from './mono/TerminalSpinner.tsx';
 import { useTabCloseMotion } from './mono/useTabCloseMotion.ts';
 import { AgentAvatar } from './ui/Avatar.tsx';
 import { AvatarStack } from './ui/AvatarStack.tsx';
+import { StaleBuildNotice } from './ui/StaleBuildNotice.tsx';
 
 const MAX_PANES = 3;
 
@@ -358,6 +359,8 @@ function StatusFooter() {
       )}
       {working ? <span className="flex shrink-0 items-center gap-1 text-content/45" title={(agents ?? []).filter(a => a.status === 'working').map(a => a.name).join(', ')}><AvatarStack agents={(agents ?? []).filter(a => a.status === 'working')} size="size-3.5" />{working} working</span> : null}
       {waiting ? <span className="flex shrink-0 items-center gap-1 text-warning" title={(agents ?? []).filter(a => a.status === 'waiting').map(a => a.name).join(', ')}><AvatarStack agents={(agents ?? []).filter(a => a.status === 'waiting')} size="size-3.5" />{waiting} {waiting === 1 ? 'needs' : 'need'} you</span> : null}
+      {/* This page is older than the build the server serves now (web/staleBuild.ts). */}
+      <StaleBuildNotice />
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <SuperDock />
         <button

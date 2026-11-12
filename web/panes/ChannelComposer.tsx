@@ -16,9 +16,12 @@ import { TextButton } from '../ui/common.tsx';
 import { ArrowUp, ImagePlus } from '../mono/icons.tsx';
 import { ToolButton } from './Composer.tsx';
 import { ComposerImageTray, useChannelImages } from './ComposerImages.tsx';
+import { registerDraftStore } from '../draftStore.ts';
 
 /** Drafts by key, shared across mounts: a composer that closes and reopens picks up where it was. */
 const drafts = new Map<string, string>();
+// Counted as unsent text, and kept across a reload in this tab (web/draftStore.ts).
+registerDraftStore('channel', drafts);
 /** The composers mounted on each draft key, told when a send that finished changes their draft. */
 const draftListeners = new Map<string, Set<(text: string) => void>>();
 

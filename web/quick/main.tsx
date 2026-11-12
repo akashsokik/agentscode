@@ -15,6 +15,7 @@ import { QuickComposer } from './QuickComposer.tsx';
 import { chipsWithoutNotes } from '../notes/RefChip.tsx';
 import '../theme.ts';
 import '../styles.css';
+import { StaleBuildWatch } from '../ui/StaleBuildNotice.tsx';
 
 const desktop = (window as unknown as { podcodeDesktop?: { quick?: DesktopQuick } }).podcodeDesktop?.quick ?? null;
 
@@ -28,6 +29,7 @@ function QuickWindowApp() {
   return (
     // A click in the clear margin around the card puts the window away, as one outside it does.
     <div style={{ padding: QUICK_MARGIN }} onMouseDown={e => { if (e.target === e.currentTarget) desktop?.hide(); }}>
+      <StaleBuildWatch />
       <QuickComposer
         mode="window"
         onDismiss={() => desktop?.hide()}

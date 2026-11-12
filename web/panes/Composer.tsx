@@ -41,8 +41,11 @@ import { questionsFromUnknown, selectedAnswerLabels, type UserQuestionReply } fr
 import { imageFiles, MAX_IMAGES, pastedImages } from '../attachments.ts';
 import { AttachmentChip } from './ImageViews.tsx';
 import { useComposerImages } from './useComposerImages.ts';
+import { registerDraftStore } from '../draftStore.ts';
 
 const drafts = new Map<string, string>();
+// Counted as unsent text, and kept across a reload in this tab (web/draftStore.ts).
+registerDraftStore('agent', drafts);
 
 function patch(agent: Agent, change: AgentPatch) {
   return attempt(() => api.updateAgent(agent.id, change));

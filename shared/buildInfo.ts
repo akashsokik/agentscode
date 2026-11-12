@@ -13,6 +13,16 @@ export type BuildInfo = {
   date: string;
 };
 
+/**
+ * One string that names a build, for telling a page from an older or newer build apart: the
+ * version, commit and build time. null when the build carries no time (a page loaded some other
+ * way), so it never compares as different.
+ */
+export function buildId(info: Partial<BuildInfo> | null | undefined): string | null {
+  if (!info || typeof info.date !== 'string' || !info.date) return null;
+  return `${info.version ?? ''}+${info.commit ?? ''}@${info.date}`;
+}
+
 /** "Prerelease" for a version with a suffix (0.3.0-beta.1), which updates from prereleases too. */
 export function channelLabel(version: string): 'Release' | 'Prerelease' {
   return version.includes('-') ? 'Prerelease' : 'Release';

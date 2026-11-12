@@ -56,6 +56,8 @@ test('a local socket gets a snapshot, then live events', async () => {
     assert.equal(first.type, 'snapshot');
     // The open terminals follow the snapshot; they have their own feed event.
     assert.deepEqual(await events.next(), { type: 'terminals', terminals: [] });
+    // Then which build the server serves (none here: no build.json), for stale pages (web/staleBuild.ts).
+    assert.deepEqual(await events.next(), { type: 'build', id: null });
     const response = await fetch(`http://127.0.0.1:${port}/api/projects`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: projectDir(dir, 'live') }),
     });

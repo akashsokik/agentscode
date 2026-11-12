@@ -25,6 +25,8 @@ export interface AppState {
   /** Dreaming numbers for every agent and for the agents with dreaming on and off, once asked for. */
   dreamStats: DreamStatsReport | null;
   toasts: Toast[];
+  /** The build of the page the server now serves (the 'build' event); undefined until it says (web/staleBuild.ts). */
+  serverBuild?: string | null;
 }
 
 let state: AppState = { connection: 'connecting', snapshot: null, entries: {}, posts: {}, terminals: [], memory: {}, dreams: {}, dreamStats: null, toasts: [] };
@@ -237,6 +239,10 @@ function apply(snapshot: Snapshot, event: ServerEvent): Snapshot {
 
 function handle(event: ServerEvent): void {
   refsHeard(event);
+  if (event.type === 'build') {
+    setState(s => ({ ...s, serverBuild: event.id }));
+    return;
+  }
   if (event.type === 'snapshot') {
     const known = Object.keys(state.entries);
     const channels = Object.keys(state.posts);
