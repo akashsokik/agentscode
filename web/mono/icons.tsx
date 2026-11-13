@@ -114,6 +114,11 @@ import UngroupItemsIcon from "@hugeicons/core-free-icons/UngroupItemsIcon";
 import ViewIcon from "@hugeicons/core-free-icons/ViewIcon";
 import WholeWordIcon from "@hugeicons/core-free-icons/WholeWordIcon";
 import Wrench01Icon from "@hugeicons/core-free-icons/Wrench01Icon";
+import AlertSquareIcon from "@hugeicons/core-free-icons/AlertSquareIcon";
+import CircleIcon from "@hugeicons/core-free-icons/CircleIcon";
+import FullSignalIcon from "@hugeicons/core-free-icons/FullSignalIcon";
+import MinusSignCircleIcon from "@hugeicons/core-free-icons/MinusSignCircleIcon";
+import NoSignalIcon from "@hugeicons/core-free-icons/NoSignalIcon";
 import { forwardRef, type Ref } from "react";
 
 /** Props shared by every chrome icon. `icon` is filled in by the named wrappers. */
@@ -166,7 +171,32 @@ const UnfoldVerticalIcon: IconSvgElement = [
   ["path", { d: "M7 17L12 22L17 17", ...stroke, key: "5" }],
 ];
 
+// Issue status and priority glyphs (ACH-D46). The two part-filled rings sit on CircleIcon's ring
+// with a filled wedge: half for In progress, three quarters for In review.
+const ring = CircleIcon[0];
+const CircleHalfIcon: IconSvgElement = [ring, ["path", { d: "M12 12 L12 6 A6 6 0 0 1 12 18 Z", fill: "currentColor", key: "w" }]];
+const CircleThreeQuarterIcon: IconSvgElement = [ring, ["path", { d: "M12 12 L12 6 A6 6 0 1 1 6 12 Z", fill: "currentColor", key: "w" }]];
+
+/**
+ * FullSignalIcon's three bars with only the first `lit` (from the shortest) at full ink and the rest
+ * dimmed: hugeicons' own Medium and Low glyphs differ from Full by a hairline, unreadable at 14px.
+ */
+function signalBars(lit: number): IconSvgElement {
+  // FullSignal lists the tallest bar first.
+  const [tall, mid, short] = FullSignalIcon;
+  return [short, mid, tall].map(([tag, attrs], i) => [tag, { ...attrs, opacity: i < lit ? 1 : 0.25, key: String(i) }]) as IconSvgElement;
+}
+
 export const AlertCircle = wrap(AlertCircleIcon, "AlertCircle");
+export const AlertSquare = wrap(AlertSquareIcon, "AlertSquare");
+export const Circle = wrap(CircleIcon, "Circle");
+export const CircleHalf = wrap(CircleHalfIcon, "CircleHalf");
+export const CircleThreeQuarter = wrap(CircleThreeQuarterIcon, "CircleThreeQuarter");
+export const MinusCircle = wrap(MinusSignCircleIcon, "MinusCircle");
+export const NoSignal = wrap(NoSignalIcon, "NoSignal");
+export const SignalHigh = wrap(signalBars(3), "SignalHigh");
+export const SignalMedium = wrap(signalBars(2), "SignalMedium");
+export const SignalLow = wrap(signalBars(1), "SignalLow");
 export const AppWindow = wrap(AppWindowIcon, "AppWindow");
 export const Archive = wrap(Archive02Icon, "Archive");
 export const ArrowDownCircle = wrap(CircleArrowDown01Icon, "ArrowDownCircle");

@@ -180,7 +180,7 @@ export function MenuDivider() {
 /** Rows inside a ContextMenu are menu items; elsewhere (pickers) they are options. */
 export const MenuRowRole = createContext<'option' | 'menuitem'>('option');
 
-export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, highlighted, onSelect, disabled, danger, role: roleProp }: {
+export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, current, highlighted, onSelect, disabled, danger, role: roleProp }: {
   icon?: IconComponent;
   title: ReactNode;
   hint?: ReactNode;
@@ -191,6 +191,8 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
   selected?: boolean;
   /** Multi-select: a check mark without the selected fill, so the keyboard highlight stays readable. */
   checked?: boolean;
+  /** The value in force, in a submenu: the selected fill with no check mark (ACH-D46). */
+  current?: boolean;
   highlighted?: boolean;
   onSelect: () => void;
   disabled?: boolean;
@@ -203,12 +205,13 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
     <button
       type="button"
       role={role}
-      aria-selected={role === 'option' ? selected ?? checked : undefined}
+      aria-selected={role === 'option' ? selected ?? checked ?? current : undefined}
+      aria-current={role === 'menuitem' && current ? 'true' : undefined}
       disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onSelect}
       className={`flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-40 ${
-        danger ? 'text-danger hover:bg-danger/10' : highlighted || selected ? 'bg-selection text-content' : 'text-content hover:bg-content/5'
+        danger ? 'text-danger hover:bg-danger/10' : highlighted || selected || current ? 'bg-selection text-content' : 'text-content hover:bg-content/5'
       }`}
     >
       {Icon ? <Icon className={`mt-0.5 size-3.5 shrink-0 ${danger ? '' : 'text-content/70'}`} strokeWidth={1.75} /> : null}
