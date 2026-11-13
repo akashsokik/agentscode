@@ -3,14 +3,14 @@
 // (normalising checks and reviews, the views) live here so they can be tested and shared.
 
 // ---- issue keys --------------------------------------------------------------------------------
-// Fen's phase 1 adds shared/issueKeys.ts (his file) with the shared matcher. Until it merges, the
-// PR page matches keys here the same way: a project code, a hyphen and digits, so a decision or
-// note id (ACH-D7, ACH-N3) is never a key. Swap these for his issueKeysIn once it is on main.
+// The same matcher as shared/issueKeys.ts on feat/issues-store (findIssueKeys, firstIssueKey), kept
+// here until that branch is on main; then this file imports them and these lines go. Rules: a
+// project code ([A-Z][A-Z0-9]{1,5}, as server/projectRefs.ts), a hyphen and digits, not inside a
+// longer word, so a decision or note id (ACH-D7, ACH-N3) is never a key; ACH-012 is ACH-12; keys
+// start at 1, so ACH-0 is none.
 
 /** A key anywhere in text: not inside a longer word, and never followed by more letters or digits. */
-// Fen's ISSUE_KEY (2-5 letter code, 1-6 digits), with guards so "xACH-4" and "ACH-4b" are not keys.
-// A leading zero is the same issue (ACH-012 is ACH-12), as in Fen's issueKeysIn.
-const KEY = /(?<![A-Za-z0-9])([A-Z]{2,5})-(\d{1,6})(?![A-Za-z0-9])/g;
+const KEY = /(?<![A-Za-z0-9])([A-Z][A-Z0-9]{1,5})-(\d{1,6})(?![A-Za-z0-9])/g;
 
 interface IssueKeyMatch {
   key: string;
@@ -31,6 +31,8 @@ export function findIssueKeys(text: string, codes?: Iterable<string>): IssueKeyM
   for (const m of String(text ?? '').matchAll(KEY)) {
     const code = m[1];
     if (known && !known.has(code)) continue;
+    // Keys start at 1 (nextIssueKey), so ACH-0 or ACH-000 is never an issue.
+    if (Number(m[2]) === 0) continue;
     const key = `${code}-${Number(m[2])}`;
     if (seen.has(key)) continue;
     seen.add(key);
