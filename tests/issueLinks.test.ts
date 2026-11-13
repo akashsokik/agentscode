@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import type { Project } from '../shared/types.ts';
 import { SuperStore } from '../server/superAgent.ts';
-import { IssueLinks, type MergedIssuePr } from '../server/issueLinks.ts';
+import { IssueLinks, type MergedIssuePr, type IssueLinkStore } from '../server/issueLinks.ts';
 import { MergeRecords, WorkService, readGit, type GitRunner, type MergeRecord } from '../server/work.ts';
 import { RefMentions } from '../server/refMentions.ts';
 import { Store } from '../server/store.ts';
@@ -15,6 +15,7 @@ import { harness, tempDir } from './helpers.ts';
 import { createApp } from '../server/app.ts';
 import { AgentManager } from '../server/manager.ts';
 import { OPEN_AUTH } from '../server/userAuth.ts';
+import { HttpError } from '../server/errors.ts';
 
 const env = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 function git(cwd: string, ...args: string[]) {
@@ -32,7 +33,8 @@ function setup(createdAt = 1000) {
   const links = new IssueLinks(store);
   const records = new MergeRecords(path.join(dir, 'work'));
   const work = new WorkService(records, { agents: () => [], messages: () => [], agentsDir: path.join(dir, 'agents'), dataDir: dir, knownRef: () => true, onMerges: (p, r) => { links.localMerges(p, r); } });
-  return { dir, repo, project, store, issue, links, work, records };
+  const issueRecords = new MergeRecords(path.join(dir, 'issue-links'), 'fast-forwards.json');
+  return { dir, repo, project, store, issue, links, work, records, issueRecords };
 }
 function branch(repo: string, name: string, message = 'work', base = 'main') {
   git(repo, 'checkout', '-b', name);
@@ -170,6 +172,8 @@ test('fast-forward merges use the existing reflog entries as merge evidence', as
   git(t.repo, 'merge', '--ff-only', 'feat/ACH-1-ff');
   const view = await t.work.view([t.project], true);
   assert.deepEqual(view.projects[0].merged, [], 'fast-forwards do not become Work merge rows');
+  assert.equal(fs.existsSync(path.join(t.dir, 'work', 'merges.json')), false, 'FF evidence never creates Work merges.json');
+  assert.equal(t.issueRecords.list(fs.realpathSync(t.repo)).length, 1, 'FF evidence persists only for issue links');
   assert.equal(t.store.issue(t.issue.id).status, 'done');
   assert.match(t.store.issue(t.issue.id).activity.at(-1)?.text ?? '', new RegExp(tip));
 });
@@ -269,7 +273,7 @@ test('fast-forward to a merge commit records its actual tip and includes both si
   git(t.repo, 'checkout', 'main');
   git(t.repo, 'merge', '--ff-only', 'feat/ACH-1-stack');
   await t.work.view([t.project], true);
-  assert.equal(t.records.list(fs.realpathSync(t.repo)).find(r => r.branch === 'feat/ACH-1-stack')?.tip, tip);
+  assert.equal(t.issueRecords.list(fs.realpathSync(t.repo)).find(r => r.branch === 'feat/ACH-1-stack')?.tip, tip);
   assert.deepEqual((await t.work.view([t.project])).projects[0].merged, [], 'FF-to-merge also stays out of Work merge rows');
   const state = new Store(path.join(t.dir, 'state')); state.load(); state.projects.set(t.project.id, t.project);
   const mentions = new RefMentions(state);
@@ -440,9 +444,78 @@ test('a later fast-forward to a known merge commit preserves the existing Work m
   const hash = branch(t.repo, 'feat/ACH-1-original');
   const original = (await t.work.view([t.project], true)).projects[0];
   assert.equal(original.merged.length, 1);
+  const before = fs.readFileSync(path.join(t.dir, 'work', 'merges.json'), 'utf8');
   git(t.repo, 'branch', 'restore', hash);
   git(t.repo, 'reset', '--hard', 'HEAD^1');
   git(t.repo, 'merge', '--ff-only', 'restore');
   const restored = (await t.work.view([t.project], true)).projects[0];
   assert.deepEqual(restored.merged.map(m => [m.originalHash, m.branch]), original.merged.map(m => [m.originalHash, m.branch]));
+  assert.equal(fs.readFileSync(path.join(t.dir, 'work', 'merges.json'), 'utf8'), before, 'FF never rewrites Work merge records');
+});
+
+test('Work without issue links never records fast-forward evidence in either store', async () => {
+  const t = setup();
+  git(t.repo, 'checkout', '-b', 'feat/ACH-1-standalone');
+  git(t.repo, 'commit', '--allow-empty', '-m', 'Ship');
+  git(t.repo, 'checkout', 'main');
+  git(t.repo, 'merge', '--ff-only', 'feat/ACH-1-standalone');
+  const dir = path.join(t.dir, 'standalone');
+  const work = new WorkService(new MergeRecords(path.join(dir, 'work')), { agents: () => [], messages: () => [], agentsDir: path.join(dir, 'agents'), dataDir: dir, knownRef: () => true });
+  assert.deepEqual((await work.view([t.project], true)).projects[0].merged, []);
+  assert.equal(fs.existsSync(path.join(dir, 'work', 'merges.json')), false);
+  assert.equal(fs.existsSync(path.join(dir, 'issue-links', 'fast-forwards.json')), false);
+});
+
+test('local and GitHub merge batches read the issue list once and reuse returned updates', () => {
+  for (const source of ['local', 'github']) {
+    const t = setup();
+    let reads = 0;
+    const store: IssueLinkStore = {
+      issues: () => { reads++; return t.store.issues(); },
+      updateIssue: (id, patch, now, by) => t.store.updateIssue(id, patch, now, by),
+    };
+    const links = new IssueLinks(store, () => 4000);
+    if (source === 'local') {
+      const a: MergeRecord = { hash: 'a'.repeat(40), branch: 'feat/ACH-1-batch', at: 2000, tree: '', tip: '', subject: 'Merge', names: [], refs: [] };
+      assert.equal(links.localMerges(t.project, [a, { ...a, hash: 'b'.repeat(40), at: 3000 }, a]), 1);
+    } else {
+      const a: MergedIssuePr = { repo: 'a/b', number: 1, projects: [{ id: 'p1' }], state: 'merged', branch: 'feat/ACH-1-batch', title: 'Ship', mergedAt: new Date(2000).toISOString(), mergeCommit: 'a'.repeat(40) };
+      assert.equal(links.githubMerges([a, { ...a, number: 2, mergeCommit: 'b'.repeat(40) }, a]), 1);
+    }
+    assert.equal(reads, 1, source);
+    assert.equal(t.store.issue(t.issue.id).activity.filter(e => e.ref).length, 2, 'duplicate event skipped within the same batch');
+  }
+});
+
+test('merge batches survive retained-history pruning and still close later live issues', () => {
+  for (const source of ['local', 'github']) {
+    const t = setup();
+    t.store.updateIssue(t.issue.id, { status: 'done' }, 2000);
+    for (let i = 2; i <= 50; i++) t.store.addIssue({ text: `Old done ${i}`, projectId: 'p1', by: 'user', status: 'done' }, 2000 + i);
+    const first = t.store.addIssue({ text: 'First new issue', projectId: 'p1', by: 'user' }, 10000);
+    const last = t.store.addIssue({ text: 'Last new issue', projectId: 'p1', by: 'user' }, 10001);
+    let reads = 0;
+    const store: IssueLinkStore = { issues: () => { reads++; return t.store.issues(); }, updateIssue: (id, patch, now, by) => t.store.updateIssue(id, patch, now, by) };
+    const links = new IssueLinks(store, () => 40000);
+    const keys = [first.key, t.issue.key, last.key];
+    if (source === 'local') {
+      const records = keys.map((key, i): MergeRecord => ({ hash: ['a', 'b', 'c'][i].repeat(40), branch: `feat/${key}-retention`, at: 30000 + i * 1000, tree: '', tip: '', subject: 'Merge the issue', names: [], refs: [] }));
+      assert.equal(links.localMerges(t.project, records), 2);
+    } else {
+      const prs = keys.map((key, i): MergedIssuePr => ({ repo: 'a/b', number: i + 1, projects: [{ id: 'p1' }], state: 'merged', branch: `feat/${key}-retention`, title: 'Ship', mergedAt: new Date(30000 + i * 1000).toISOString(), mergeCommit: ['a', 'b', 'c'][i].repeat(40) }));
+      assert.equal(links.githubMerges(prs), 2);
+    }
+    assert.equal(reads, 1, source);
+    assert.equal(t.store.issue(first.id).status, 'done');
+    assert.equal(t.store.issue(last.id).status, 'done');
+    assert.throws(() => t.store.issue(t.issue.id), (err: unknown) => err instanceof HttpError && err.status === 404);
+  }
+});
+
+test('merge batches propagate store errors other than missing retained issues', () => {
+  const t = setup();
+  const store: IssueLinkStore = { issues: () => t.store.issues(), updateIssue: () => { throw new HttpError(500, 'Store failed'); } };
+  const links = new IssueLinks(store);
+  const record: MergeRecord = { hash: 'a'.repeat(40), branch: 'feat/ACH-1-fail', at: 2000, tree: '', tip: '', subject: 'Merge', names: [], refs: [] };
+  assert.throws(() => links.localMerges(t.project, [record]), /Store failed/);
 });
