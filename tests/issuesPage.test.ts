@@ -187,3 +187,16 @@ test('an Issues tab is a known kind: it survives a layout reload', () => {
   assert.deepEqual(out.tabs.map(t => t.id), ['t1']);
   assert.deepEqual(out.panes, [{ id: 'p1', tabId: 't1' }]);
 });
+
+test('the right panel\'s Edit renames the issue: one line at ISSUE_TITLE_MAX, saving only the title, never the description', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../web/panes/SuperPanel.tsx', import.meta.url), 'utf8');
+  const item = src.slice(src.indexOf('function IssueItem('), src.indexOf('export function RoutinesView'));
+  assert.ok(item.length > 0, 'IssueItem found');
+  // The field: an input bound to the title, capped at the title's limit.
+  assert.match(item, /<input[^>]*?\n?\s*aria-label=\{`Title of \$\{named\}`\}[\s\S]*?value=\{title\}[\s\S]*?maxLength=\{ISSUE_TITLE_MAX\}/);
+  // Saving sends the title alone; the description (issue.text) is never sent from here.
+  assert.match(item, /api\.updateIssue\(issue\.id, \{ title: title\.trim\(\) \}\)/);
+  assert.doesNotMatch(item, /api\.updateIssue\(issue\.id, \{ text:/);
+  assert.doesNotMatch(item, /<textarea/);
+});
