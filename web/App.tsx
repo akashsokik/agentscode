@@ -157,7 +157,8 @@ function TabMenu({ tab, anchor, onClose }: { tab: Tab; anchor: MenuAnchor; onClo
     <ContextMenu anchor={anchor} onClose={onClose} label={`Tab ${headline}`}>
       <MenuRow icon={tab.pinned ? PinOff : Pin} title={tab.pinned ? 'Unpin tab' : 'Pin tab'} onSelect={run(() => pinTab(tab.id, !tab.pinned))} />
       <MenuDivider />
-      <MenuRow icon={X} title="Close" shortcut="Mod+W" onSelect={run(() => closeTab(tab.id))} />
+      {/* A pinned tab stays open until unpinned (ACH-D59): Close is greyed, Unpin is above. */}
+      <MenuRow icon={X} title="Close" hint={tab.pinned ? 'Unpin it first' : undefined} shortcut="Mod+W" disabled={Boolean(tab.pinned)} onSelect={run(() => closeTab(tab.id))} />
       <MenuRow icon={CircleX} title="Close others" shortcut="Alt+Mod+W" disabled={!othersToClose(layout.tabs, tab.id).length} onSelect={run(() => closeOtherTabs(tab.id))} />
       <MenuRow icon={ChevronRight} title="Close to the right" disabled={!rightToClose(layout.tabs, tab.id).length} onSelect={run(() => closeTabsToRight(tab.id))} />
       <MenuDivider />

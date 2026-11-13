@@ -7,7 +7,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { normalizeAddress, type BrowserEvent, type BrowserTabState, type DesktopBrowser } from '../shared/browser.ts';
-import { addTab, closeTab, focusPane, getLayout, open, openToSide, subscribeLayout, updateBrowserTab } from './layout.ts';
+import { addTab, dropBrowserTab, focusPane, getLayout, open, openToSide, subscribeLayout, updateBrowserTab } from './layout.ts';
 import { runShortcut } from './shortcuts.ts';
 
 const native = (window as unknown as { podcodeDesktop?: { browser?: DesktopBrowser } }).podcodeDesktop?.browser;
@@ -87,7 +87,7 @@ function onEvent(event: BrowserEvent): void {
       states.delete(event.id);
       for (const listener of listeners) listener();
       const tab = getLayout().tabs.find(t => t.content.kind === 'browser' && t.content.id === event.id);
-      if (tab) closeTab(tab.id);
+      if (tab) dropBrowserTab(tab.id);
       break;
     }
     case 'open-url':

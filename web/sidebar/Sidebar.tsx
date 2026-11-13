@@ -60,7 +60,7 @@ function AgentMenu({ agent, anchor, actions, onClose }: { agent: Agent; anchor: 
     <SidebarMenu anchor={anchor} onClose={onClose}>
       <MenuLabel>{agent.name}</MenuLabel>
       <MenuRow icon={SplitColumns} title="Open to the side" onSelect={run(() => openToSide({ kind: 'agent', agentId: agent.id }))} />
-      {tab ? <MenuRow icon={X} title="Close tab" hint="The agent and its history stay." onSelect={run(() => closeTab(tab.id))} /> : null}
+      {tab ? <MenuRow icon={X} title="Close tab" hint={tab.pinned ? 'Pinned: unpin it first.' : 'The agent and its history stay.'} disabled={Boolean(tab.pinned)} onSelect={run(() => closeTab(tab.id))} /> : null}
       <MenuDivider />
       {busy ? <MenuRow icon={Square} title="Stop" hint="Interrupt the current turn." onSelect={run(() => void attempt(() => api.stop(agent.id)))} /> : null}
       <MenuRow icon={RotateCcw} title="New session" hint="Clear the conversation context." disabled={busy} onSelect={run(() => void attempt(() => api.newSession(agent.id)))} />
@@ -100,7 +100,7 @@ function ChannelMenu({ channel, anchor, actions, onClose }: { channel: Channel; 
     <SidebarMenu anchor={anchor} onClose={onClose}>
       <MenuLabel>#{channel.name}</MenuLabel>
       <MenuRow icon={SplitColumns} title="Open to the side" onSelect={run(() => openToSide({ kind: 'channel', channelId: channel.id }))} />
-      {tab ? <MenuRow icon={X} title="Close tab" hint="The channel and its posts stay." onSelect={run(() => closeTab(tab.id))} /> : null}
+      {tab ? <MenuRow icon={X} title="Close tab" hint={tab.pinned ? 'Pinned: unpin it first.' : 'The channel and its posts stay.'} disabled={Boolean(tab.pinned)} onSelect={run(() => closeTab(tab.id))} /> : null}
       <MenuDivider />
       <MenuRow icon={Settings} title="Channel settings" hint="Name, topic and members." onSelect={run(() => actions.channelSettings(channel.id))} />
     </SidebarMenu>
