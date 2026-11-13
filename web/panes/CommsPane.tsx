@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Agent, PeerMessage } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import {
@@ -11,8 +11,9 @@ import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { useNow } from '../ui/useNow.ts';
 import { cx, Empty, HeaderButton, StatusLabel, type Tone } from '../ui/common.tsx';
+import { InboxBar, InboxCard, InboxDetail, InboxFilterTabs, InboxHero, InboxLayout, InboxList, InboxSearch, InboxSection, TimelineStop } from '../ui/Inbox.tsx';
 import { PeerBubble } from './PeerMessages.tsx';
-import { ArrowLeft, Bot, CheckCheck, ChevronDown, Clock, MessageMultiple, Search, Square, X, type IconComponent } from '../mono/icons.tsx';
+import { Bot, CheckCheck, ChevronDown, Clock, MessageMultiple, Square, type IconComponent } from '../mono/icons.tsx';
 import { StatusMark, type StatusState } from '../ui/StatusMark.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
@@ -134,7 +135,6 @@ export function CommsPane({ conversationId, chrome }: { conversationId?: string;
   const now = useNow();
   const [filter, setFilter] = useState<CommsFilter>('all');
   const [query, setQuery] = useState('');
-  const listRef = useRef<HTMLUListElement>(null);
 
   const list = useMemo(() => commsThreads(messages ?? [], conversations ?? []).map(thread => ({
     thread,
@@ -156,16 +156,6 @@ export function CommsPane({ conversationId, chrome }: { conversationId?: string;
   const selected = list.find(item => item.thread.id === conversationId) ?? shown[0];
   const unseen = list.filter(item => isUnseen(item.thread, seen));
 
-  const onListKey = (e: KeyboardEvent<HTMLUListElement>) => {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    e.preventDefault();
-    const at = shown.findIndex(item => item.thread.id === selected?.thread.id);
-    const next = shown[Math.max(0, Math.min(shown.length - 1, at + (e.key === 'ArrowDown' ? 1 : -1)))];
-    if (!next) return;
-    open({ kind: 'comms', conversationId: next.thread.id });
-    listRef.current?.querySelector<HTMLElement>(`[data-thread-id="${next.thread.id}"]`)?.focus();
-  };
-
   return (
     <PaneFrame
       chrome={chrome}
@@ -177,78 +167,40 @@ export function CommsPane({ conversationId, chrome }: { conversationId?: string;
           Agents message each other with send_message, reply and delegate_task. Ask one agent to work with another and the exchange shows up here. Mentions inside a channel show in that channel.
         </Empty>
       ) : (
-        <div className="@container/comms flex min-h-0 flex-1">
-          <div className={cx('flex w-full shrink-0 flex-col border-stroke @min-[40rem]/comms:w-[min(19rem,42%)] @min-[40rem]/comms:border-r', conversationId && '@max-[40rem]/comms:hidden')}>
-            <div role="tablist" aria-label="Show" className="flex h-9 shrink-0 items-center gap-px border-b border-stroke px-2">
-              {FILTERS.map(option => (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="tab"
-                  aria-selected={filter === option.value}
-                  onClick={() => setFilter(option.value)}
-                  className={cx(
-                    'flex h-6 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 font-sans text-[12px] leading-none transition-colors duration-150',
-                    filter === option.value ? 'bg-selection text-content' : 'text-content/50 hover:bg-content/5 hover:text-content',
-                  )}
-                >
-                  <span className="truncate">{option.label}</span>
-                  {option.value !== 'all' && totals[option.value] ? (
-                    <span className={cx('rounded-full px-1.5 py-0.5 text-[10px] tabular-nums', option.value === 'attention' ? 'bg-warning/15 text-warning' : 'bg-content/10 text-content/60')}>{totals[option.value]}</span>
-                  ) : null}
-                </button>
+        <InboxLayout
+          detailOpen={Boolean(conversationId)}
+          toolbar={<>
+            <InboxFilterTabs options={FILTERS.map(option => ({ ...option, count: option.value !== 'all' ? totals[option.value] : undefined, attention: option.value === 'attention' }))} value={filter} onChange={setFilter} />
+            <InboxSearch value={query} onChange={setQuery} placeholder="Filter conversations" />
+          </>}
+          list={
+            <InboxList
+              label="Conversations"
+              onMove={step => {
+                const at = shown.findIndex(item => item.thread.id === selected?.thread.id);
+                const next = shown[Math.max(0, Math.min(shown.length - 1, at + step))];
+                if (next) open({ kind: 'comms', conversationId: next.thread.id });
+                return next?.thread.id;
+              }}
+              empty={shown.length ? undefined : query.trim() ? (filter === 'all' ? 'No conversations match.' : `No ${filter === 'active' ? 'active' : 'flagged'} conversations match.`) : EMPTY_FILTER[filter]}
+            >
+              {shown.map(item => (
+                <li key={item.thread.id} className={initial.current?.has(item.thread.id) ? undefined : 'reveal-height-in'}>
+                  <ThreadCard
+                    thread={item.thread}
+                    state={item.state}
+                    title={item.title}
+                    agents={agents}
+                    now={now}
+                    active={selected?.thread.id === item.thread.id}
+                    unseen={isUnseen(item.thread, seen)}
+                  />
+                </li>
               ))}
-            </div>
-            <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke px-2">
-              <div className="relative flex h-7 min-w-0 flex-1 items-center">
-                <Search aria-hidden className="pointer-events-none absolute left-2 size-3 shrink-0 opacity-50" strokeWidth={1.75} />
-                <input
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Escape' && query) { e.stopPropagation(); setQuery(''); } }}
-                  placeholder="Filter conversations"
-                  aria-label="Filter conversations"
-                  spellCheck={false}
-                  autoComplete="off"
-                  className="h-7 w-full rounded-md bg-transparent pl-7 pr-2 font-sans text-[12px] text-content outline-none placeholder:text-content/40"
-                />
-              </div>
-              {query ? (
-                <button type="button" aria-label="Clear filter" title="Clear filter" onClick={() => setQuery('')} className="grid size-6 shrink-0 place-items-center rounded-md text-content/45 transition-colors duration-150 hover:bg-content/10 hover:text-content">
-                  <X className="size-3" strokeWidth={1.75} />
-                </button>
-              ) : null}
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-none">
-              {shown.length ? (
-                <ul ref={listRef} onKeyDown={onListKey} aria-label="Conversations" className="flex flex-col gap-0.5 p-1.5">
-                  {shown.map(item => (
-                    <li key={item.thread.id} className={initial.current?.has(item.thread.id) ? undefined : 'reveal-height-in'}>
-                      <ThreadCard
-                        thread={item.thread}
-                        state={item.state}
-                        title={item.title}
-                        agents={agents}
-                        now={now}
-                        active={selected?.thread.id === item.thread.id}
-                        unseen={isUnseen(item.thread, seen)}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="px-3 py-3 font-sans text-[12px] text-content/50">
-                  {query.trim() ? (filter === 'all' ? 'No conversations match.' : `No ${filter === 'active' ? 'active' : 'flagged'} conversations match.`) : EMPTY_FILTER[filter]}
-                </p>
-              )}
-            </div>
-          </div>
-          {selected ? (
-            <div className={cx('flex min-w-0 flex-1', !conversationId && '@max-[40rem]/comms:hidden')}>
-              <ThreadView key={selected.thread.id} thread={selected.thread} state={selected.state} title={selected.title} agents={agents} now={now} />
-            </div>
-          ) : <div className="flex-1" />}
-        </div>
+            </InboxList>
+          }
+          detail={selected ? <ThreadView key={selected.thread.id} thread={selected.thread} state={selected.state} title={selected.title} agents={agents} now={now} /> : null}
+        />
       )}
     </PaneFrame>
   );
@@ -269,19 +221,14 @@ function ThreadCard({ thread, state, title, agents, now, active, unseen }: {
   const first = thread.messages[0];
   const kind = first.delegation ? `Delegation · ${first.delegation.kind}` : messageKind(first);
   return (
-    <button
-      type="button"
-      data-thread-id={thread.id}
-      onClick={() => open({ kind: 'comms', conversationId: thread.id })}
-      aria-current={active ? 'true' : undefined}
-      aria-label={`${title}. ${people.join(', ')}. ${STATE_LABEL[state]}${unseen ? ', new' : ''}`}
+    <InboxCard
+      id={thread.id}
+      onSelect={() => open({ kind: 'comms', conversationId: thread.id })}
+      active={active}
+      unseen={unseen}
+      label={`${title}. ${people.join(', ')}. ${STATE_LABEL[state]}${unseen ? ', new' : ''}`}
       title={title}
-      className={cx(
-        'flex w-full flex-col rounded-md px-2.5 py-2 text-left font-sans transition-colors duration-100',
-        active ? 'bg-selection text-content' : 'text-content/80 hover:bg-content/5 hover:text-content',
-      )}
-    >
-      <span className="flex items-center gap-2">
+      top={<>
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <AvatarStack agents={thread.participants.map(id => agents.find(a => a.id === id) ?? { id })} max={3} size="size-3.5" />
           <span className="min-w-0 truncate text-[11px] text-content/55">{people.join(', ')}</span>
@@ -294,17 +241,16 @@ function ThreadCard({ thread, state, title, agents, now, active, unseen }: {
           <time dateTime={new Date(thread.lastTs).toISOString()} title={new Date(thread.lastTs).toLocaleString()} className="text-[11px] tabular-nums text-content/45">{relativeTime(thread.lastTs, now)}</time>
           {unseen ? <span aria-hidden className="size-1.5 rounded-full bg-accent" /> : null}
         </span>
-      </span>
-      <span className={cx('mt-1 line-clamp-1 text-[13px] leading-snug text-content', unseen ? 'font-semibold' : 'font-medium')}>{title}</span>
-      <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-content/45">
+      </>}
+      meta={<>
         <StateIcon state={state} />
         <span className={cx('shrink-0', stateWords(state))}>{STATE_LABEL[state]}</span>
         <span aria-hidden>·</span>
         <span className="min-w-0 truncate">
           {thread.messages.length > 1 ? `${last.fromName}: ${messageGist(last)}` : kind}
         </span>
-      </span>
-    </button>
+      </>}
+    />
   );
 }
 
@@ -342,128 +288,94 @@ function ThreadView({ thread, state, title, agents, now }: { thread: CommsThread
   const stops = thread.messages.length + tail.length;
 
   return (
-    <div ref={rootRef} className="@container/thread flex min-w-0 flex-1 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-stroke pl-2 pr-2 font-sans text-[12px] text-content/50 @min-[40rem]/comms:pl-4">
-        {/* Only when the list is hidden beside it: back to every conversation. */}
-        <HeaderButton icon={ArrowLeft} label="All conversations" className="-mr-1 @min-[40rem]/comms:hidden" onClick={() => open({ kind: 'comms' })} />
-        <span className="flex shrink-0 items-center gap-1.5">
-          <StateIcon state={state} className="size-3.5" />
-          <span className={stateWords(state) || 'text-content/70'}>{STATE_LABEL[state]}</span>
-        </span>
-        <span className="min-w-0 truncate">
-          {first.delegation ? `Delegation · ${first.delegation.kind}` : messageKind(first)} · started {ago(thread.conversation?.createdAt ?? first.ts, now)} by {starterName}
-        </span>
-        <span className="ml-auto flex shrink-0 items-center gap-2 tabular-nums text-content/45">
-          {limit ? <BudgetMeter used={thread.messages.length} limit={limit} /> : null}
-          <span className="@max-[28rem]/thread:hidden">{count(thread.messages.length, 'message', limit)}</span>
-        </span>
-        {thread.conversation && !thread.conversation.stopped ? (
-          <button
-            type="button"
-            onClick={() => void attempt(() => api.stopConversation(thread.id))}
-            title="Stop conversation: no more messages are delivered in it"
-            className="inline-flex h-6.5 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-content/70 transition-[color,background-color,transform] duration-150 hover:bg-content/10 hover:text-content active:scale-[0.97] motion-reduce:transition-none"
-          >
-            <Square className="size-2.5 fill-current" strokeWidth={0} />
-            <span className="@max-[28rem]/thread:hidden">Stop</span>
-          </button>
-        ) : null}
-      </div>
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={ref} onScroll={onScroll} className="agent-transcript min-h-0 flex-1 overflow-y-auto">
-          <header className="border-b border-stroke">
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-4 pb-4 pt-5 @min-[40rem]/comms:px-6">
-              <h1 title={title} className="line-clamp-2 font-sans text-[18px] font-semibold leading-tight text-content">{title}</h1>
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                {thread.participants.map((id, i) => {
-                  const agent = agents.find(a => a.id === id);
-                  const pill = <><AgentMark agent={agent} />{people[i]}</>;
-                  return agent ? (
-                    <button key={id} type="button" onClick={() => open({ kind: 'agent', agentId: id })} title={`Open ${agent.name}`} className="inline-flex max-w-64 items-center gap-1.5 rounded-md bg-content/5 px-2 py-1 font-sans text-[11px] text-content/70 transition-colors duration-150 hover:bg-content/10 hover:text-content">
-                      {pill}
-                    </button>
-                  ) : (
-                    <span key={id} className="inline-flex max-w-64 items-center gap-1.5 rounded-md bg-content/5 px-2 py-1 font-sans text-[11px] text-content/45">{pill}</span>
-                  );
-                })}
-              </div>
-            </div>
-          </header>
-          <section className="mx-auto w-full max-w-3xl px-4 pb-8 pt-5 @min-[40rem]/comms:px-6">
-            <div className="mb-3 flex items-center gap-2 font-sans text-[12px] text-content/50">
-              <h2 className="text-content/70">Activity</h2>
-              <span>{count(thread.messages.length, 'message', limit)}</span>
-            </div>
-            <ol data-peer-thread className="flex flex-col">
-              {thread.messages.map((message, i) => (
-                <TimelineStop
-                  key={message.id}
-                  card
-                  fresh={!initial.current?.has(message.id)}
-                  first={i === 0}
-                  last={i === stops - 1}
-                  node={<AgentMark agent={agents.find(a => a.id === message.fromAgentId)} className="size-4" />}
-                >
-                  <MessageCard message={message} answered={message.replyTo ? thread.messages.find(m => m.id === message.replyTo) : undefined} />
-                </TimelineStop>
-              ))}
-              {tail.map((stop, i) => (
-                <TailStop
-                  key={tailKey(stop)}
-                  stop={stop}
-                  agents={agents}
-                  fresh={!initial.current?.has(tailKey(stop))}
-                  first={thread.messages.length + i === 0}
-                  last={thread.messages.length + i === stops - 1}
-                />
-              ))}
-            </ol>
-          </section>
+    <InboxDetail
+      rootRef={rootRef}
+      scrollRef={ref}
+      onScroll={onScroll}
+      bar={
+        <InboxBar backLabel="All conversations" onBack={() => open({ kind: 'comms' })}>
+          <span className="flex shrink-0 items-center gap-1.5">
+            <StateIcon state={state} className="size-3.5" />
+            <span className={stateWords(state) || 'text-content/70'}>{STATE_LABEL[state]}</span>
+          </span>
+          <span className="min-w-0 truncate">
+            {first.delegation ? `Delegation · ${first.delegation.kind}` : messageKind(first)} · started {ago(thread.conversation?.createdAt ?? first.ts, now)} by {starterName}
+          </span>
+          <span className="ml-auto flex shrink-0 items-center gap-2 tabular-nums text-content/45">
+            {limit ? <BudgetMeter used={thread.messages.length} limit={limit} /> : null}
+            <span className="@max-[28rem]/detail:hidden">{count(thread.messages.length, 'message', limit)}</span>
+          </span>
+          {thread.conversation && !thread.conversation.stopped ? (
+            <button
+              type="button"
+              onClick={() => void attempt(() => api.stopConversation(thread.id))}
+              title="Stop conversation: no more messages are delivered in it"
+              className="inline-flex h-6.5 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-content/70 transition-[color,background-color,transform] duration-150 hover:bg-content/10 hover:text-content active:scale-[0.97] motion-reduce:transition-none"
+            >
+              <Square className="size-2.5 fill-current" strokeWidth={0} />
+              <span className="@max-[28rem]/detail:hidden">Stop</span>
+            </button>
+          ) : null}
+        </InboxBar>
+      }
+      overlay={newPosts ? (
+        <button
+          type="button"
+          onClick={jump}
+          className="absolute bottom-3 left-1/2 z-[2] flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-content/10 bg-background-base px-3 py-1 font-sans text-[12px] text-content transition-colors duration-150 hover:bg-selection"
+        >
+          <ChevronDown className="size-3.5" strokeWidth={1.75} />
+          {newPosts === 1 ? '1 new message' : `${newPosts} new messages`}
+        </button>
+      ) : null}
+    >
+      <InboxHero title={title}>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {thread.participants.map((id, i) => {
+            const agent = agents.find(a => a.id === id);
+            const pill = <><AgentMark agent={agent} />{people[i]}</>;
+            return agent ? (
+              <button key={id} type="button" onClick={() => open({ kind: 'agent', agentId: id })} title={`Open ${agent.name}`} className="inline-flex max-w-64 items-center gap-1.5 rounded-md bg-content/5 px-2 py-1 font-sans text-[11px] text-content/70 transition-colors duration-150 hover:bg-content/10 hover:text-content">
+                {pill}
+              </button>
+            ) : (
+              <span key={id} className="inline-flex max-w-64 items-center gap-1.5 rounded-md bg-content/5 px-2 py-1 font-sans text-[11px] text-content/45">{pill}</span>
+            );
+          })}
         </div>
-        {newPosts ? (
-          <button
-            type="button"
-            onClick={jump}
-            className="absolute bottom-3 left-1/2 z-[2] flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-content/10 bg-background-base px-3 py-1 font-sans text-[12px] text-content transition-colors duration-150 hover:bg-selection"
-          >
-            <ChevronDown className="size-3.5" strokeWidth={1.75} />
-            {newPosts === 1 ? '1 new message' : `${newPosts} new messages`}
-          </button>
-        ) : null}
-      </div>
-    </div>
+      </InboxHero>
+      <InboxSection title="Activity" count={count(thread.messages.length, 'message', limit)}>
+        <ol data-peer-thread className="flex flex-col">
+          {thread.messages.map((message, i) => (
+            <TimelineStop
+              key={message.id}
+              card
+              fresh={!initial.current?.has(message.id)}
+              first={i === 0}
+              last={i === stops - 1}
+              node={<AgentMark agent={agents.find(a => a.id === message.fromAgentId)} className="size-4" />}
+            >
+              <MessageCard message={message} answered={message.replyTo ? thread.messages.find(m => m.id === message.replyTo) : undefined} />
+            </TimelineStop>
+          ))}
+          {tail.map((stop, i) => (
+            <TailStop
+              key={tailKey(stop)}
+              stop={stop}
+              agents={agents}
+              fresh={!initial.current?.has(tailKey(stop))}
+              first={thread.messages.length + i === 0}
+              last={thread.messages.length + i === stops - 1}
+            />
+          ))}
+        </ol>
+      </InboxSection>
+    </InboxDetail>
   );
 }
 
 function tailKey(stop: TimelineTail): string {
   return stop.kind === 'working' ? `working:${stop.agentId}` : stop.kind;
-}
-
-/**
- * MonoCode's TimelineStop: a rail column with the stop's node, and its content beside it. The
- * lead segment centres a card's node on the card header, and an event's on its 20px row.
- */
-function TimelineStop({ node, first, last, card = false, fresh = false, children }: {
-  node: ReactNode;
-  first: boolean;
-  last: boolean;
-  card?: boolean;
-  /** Arrived while the conversation was open: grows in. */
-  fresh?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <li className={fresh ? 'reveal-height-in' : undefined}>
-      <div className="flex gap-3">
-        <div aria-hidden className="flex w-5 shrink-0 flex-col items-center">
-          <span className={cx('w-px shrink-0', card ? 'h-2' : 'h-0', !first && 'bg-content/10')} />
-          <div className="flex size-5 shrink-0 items-center justify-center">{node}</div>
-          {last ? null : <span className="w-px flex-1 bg-content/10" />}
-        </div>
-        <div className={cx('min-w-0 flex-1', !last && 'pb-3')}>{children}</div>
-      </div>
-    </li>
-  );
 }
 
 /** What follows the messages: who is working on it now, a spent budget, a stop. */

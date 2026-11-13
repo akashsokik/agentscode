@@ -47,18 +47,32 @@ function componentsFor(fromAnotherAgent: boolean): Components {
 const components = componentsFor(false);
 /** For a teammate's message: its openui-lang blocks stay code, since their buttons would answer as you. */
 const inertComponents = componentsFor(true);
+/**
+ * For text from outside PodCode (a GitHub PR description): inert as a teammate's, links only to
+ * http(s), and images never loaded from someone else's server: an image is its alt text, linked.
+ */
+const remoteComponents: Components = {
+  ...inertComponents,
+  a: ({ node: _node, href, children }) => (/^https?:\/\//i.test(href ?? '') ? <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <span>{children}</span>),
+  img: ({ src, alt }) => {
+    const label = alt?.trim() || 'image';
+    return typeof src === 'string' && /^https?:\/\//i.test(src) ? <a href={src} target="_blank" rel="noreferrer noopener">[{label}]</a> : <span>[{label}]</span>;
+  },
+};
 
 /**
  * Agent prose with MonoCode's `.agent-markdown` typography. Raw HTML is not rendered. `words` sets
  * every word in its own span so a reply can fade in word by word (wordFade.ts); keep it fixed for
  * the life of the component, since switching it rebuilds the text.
  */
-export const Markdown = memo(function Markdown({ text, className = '', words = false, inert = false }: {
+export const Markdown = memo(function Markdown({ text, className = '', words = false, inert = false, remote = false }: {
   text: string;
   className?: string;
   words?: boolean;
   /** Text from another agent: interactive blocks render as plain code. */
   inert?: boolean;
+  /** Text from outside PodCode (GitHub): inert, http(s) links only, no remote images. */
+  remote?: boolean;
 }) {
   // Text is parsed again when an id is added or removed, so new ids become chips in old messages.
   const ids = useNotes(s => s.idsKey);
@@ -68,7 +82,7 @@ export const Markdown = memo(function Markdown({ text, className = '', words = f
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehype}
-        components={inert ? inertComponents : components}
+        components={remote ? remoteComponents : inert ? inertComponents : components}
       >
         {text}
       </ReactMarkdown>

@@ -3,7 +3,8 @@
 // Nothing here writes to GitHub. Results are cached briefly so opening the page or switching views
 // does not run gh again; a refresh asks for fresh data.
 import type { Agent, Project } from '../shared/types.ts';
-import { normalizePr, type PrPageData, type PullRequest } from '../shared/prs.ts';
+import { normalizePr, normalizePrDetail, type PrDetail, type PrPageData, type PullRequest } from '../shared/prs.ts';
+import { HttpError } from './errors.ts';
 import { GhError, ghArgs } from './github.ts';
 
 export const PRS_CACHE_MS = 60_000;
@@ -44,6 +45,34 @@ export class PullRequests {
   constructor(source: PrSource) { this.source = source; }
 
   private now(): number { return this.source.now?.() ?? Date.now(); }
+
+  private details = new Map<string, PrDetail>();
+  private detailReads = new Map<string, Promise<PrDetail>>();
+
+  /**
+   * One PR's changed files and commits (ACH-D52), read only when it is selected; cached like the
+   * list. Only a PR the list holds can be read, so no other repo is ever asked for.
+   */
+  async detail(repo: string, number: number, refresh = false): Promise<PrDetail> {
+    const id = `${repo}#${Math.trunc(number)}`;
+    if (!this.cache?.pullRequests.some(pr => pr.id === id)) throw new HttpError(404, 'No such pull request in your projects.');
+    const cached = this.details.get(id);
+    const age = cached ? this.now() - cached.fetchedAt : Infinity;
+    if (cached && age < (refresh ? PRS_REFRESH_FLOOR_MS : PRS_CACHE_MS)) return cached;
+    const pending = this.detailReads.get(id);
+    if (pending) return pending;
+    const read = this.source.gh(ghArgs.prDetail(repo, number))
+      .then(out => normalizePrDetail(JSON.parse(out || '{}') as Record<string, unknown>, repo, Math.trunc(number), this.now()))
+      .then(detail => {
+        this.details.set(id, detail);
+        // Kept for the PRs on screen only: the list bounds it.
+        if (this.details.size > 100) this.details.delete(this.details.keys().next().value!);
+        return detail;
+      })
+      .finally(() => this.detailReads.delete(id));
+    this.detailReads.set(id, read);
+    return read;
+  }
 
   /** Cached for PRS_CACHE_MS; `refresh` reads GitHub again. Two calls at once share one read. */
   async list(refresh = false): Promise<PrPageData> {
