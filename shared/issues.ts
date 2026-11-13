@@ -98,7 +98,7 @@ export function legacyIssue(issue: SuperIssue): LegacyIssue {
 }
 
 /**
- * The issues to use, from super.json's current list ("issues2") and its old-format copy ("issues").
+ * The issues to use, from issues.json's current list and super.json's old-format copy ("issues").
  * PodCode always writes both together, so where they differ an older build changed the old copy
  * after a downgrade, and that change wins:
  * - in both, the old copy newer: its text, project, links, notes and dates; its status by the new
@@ -120,7 +120,10 @@ export function reconcileIssues(current: SuperIssue[] | null, legacy: LegacyIssu
     if (old.updatedAt <= mine.updatedAt) { out.push(mine); continue; }
     const status = legacyIssueStatus(mine.status) === old.status ? mine.status : FROM_LEGACY[old.status];
     const next: SuperIssue = {
-      ...mine, text: old.text, title: issueTitle(old.text), projectId: old.projectId, status, order: old.order, updatedAt: old.updatedAt,
+      ...mine, text: old.text, projectId: old.projectId, status, order: old.order, updatedAt: old.updatedAt,
+      // The title follows a changed text only while it was the text's own start, as updateIssue does:
+      // an older build never sees a title, so one set by hand stays.
+      title: old.text !== mine.text && mine.title === issueTitle(mine.text) ? issueTitle(old.text) : mine.title,
     };
     for (const k of ['agentId', 'delegationId', 'notes', 'doneAt'] as const) {
       if (old[k] !== undefined) (next as unknown as Record<string, unknown>)[k] = old[k]; else delete next[k];

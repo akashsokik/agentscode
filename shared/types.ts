@@ -263,8 +263,8 @@ export interface SuperAction {
  */
 export type IssueStatus = 'needs_you' | 'in_review' | 'in_progress' | 'waiting' | 'todo' | 'backlog' | 'done' | 'canceled';
 export type IssuePriority = 'none' | 'urgent' | 'high' | 'normal' | 'low';
-/** Who did something to an issue, or is assigned it: the user, the SuperAgent, another agent, or PodCode itself. */
-export type IssueActor = { kind: 'user' } | { kind: 'super' } | { kind: 'agent'; id: string } | { kind: 'podcode' };
+/** Who did something to an issue: the user, the SuperAgent, another agent, PodCode itself, or git (a merge that closed it, server/issueLinks.ts). */
+export type IssueActor = { kind: 'user' } | { kind: 'super' } | { kind: 'agent'; id: string } | { kind: 'podcode' } | { kind: 'git' };
 export type IssueRelationType = 'blocks' | 'related' | 'duplicate_of';
 
 /** One entry in an issue's activity, oldest first. */
@@ -297,6 +297,8 @@ export interface SuperIssue {
   labels: string[];
   /** The issue this is a sub-issue of. */
   parentId?: string;
+  /** The git branch the work is on, when it is not named after the key (feat/ACH-25-...). */
+  branch?: string;
   relations: { type: IssueRelationType; issueId: string }[];
   /** Position in the backlog, 0 first. */
   order: number;
