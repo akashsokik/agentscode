@@ -290,12 +290,46 @@ export function pushGuardEnv(env: NodeJS.ProcessEnv = process.env, dir = install
 const overrides = new Map<string, { branch: string; remotes: string[]; at: number }>();
 const OVERRIDE_TTL = 6 * 60 * 60_000;
 
-/** A project's remote URLs (url and pushurl of each), read with one fixed read-only git config call. */
-export function pushRemotes(cwd: string): Promise<string[]> {
-  return new Promise(resolve => execFile('git', ['config', '--get-regexp', '^remote\\..*\\.(url|pushurl)$'], { cwd, timeout: 10_000 }, (error, stdout) => {
-    if (error) { resolve([]); return; }
-    resolve([...new Set(String(stdout).split('\n').map(line => line.split(' ').slice(1).join(' ').trim()).filter(Boolean))]);
-  }));
+function gitOut(args: string[], cwd: string): Promise<string | null> {
+  return new Promise(resolve => execFile('git', args, { cwd, timeout: 10_000 }, (error, stdout) => resolve(error ? null : String(stdout))));
+}
+
+/**
+ * Where a push from the project goes: each remote's push URLs as git resolves them (pushurl,
+ * insteadOf and pushInsteadOf applied, which is what the pre-push gets as $2), plus the raw
+ * config values. Fixed read-only git calls.
+ */
+export async function pushRemotes(cwd: string): Promise<string[]> {
+  const config = await gitOut(['config', '--get-regexp', '^remote\\..*\\.(url|pushurl)$'], cwd);
+  if (config === null) return [];
+  const lines = config.split('\n').filter(Boolean);
+  const raw = lines.map(line => line.split(' ').slice(1).join(' ').trim()).filter(Boolean);
+  const names = [...new Set(lines.map(line => /^remote\.(.+)\.(url|pushurl) /.exec(line)?.[1]).filter((n): n is string => Boolean(n)))];
+  const resolved: string[] = [];
+  for (const name of names) {
+    const out = await gitOut(['remote', 'get-url', '--push', '--all', name], cwd);
+    if (out) resolved.push(...out.split('\n').map(s => s.trim()).filter(Boolean));
+  }
+  return [...new Set([...resolved, ...raw])];
+}
+
+/**
+ * The project's main lines, which no token is ever for: main, master, develop and trunk, the
+ * remote's HEAD (origin/HEAD) when git has it, the branch the project's own checkout is on, and
+ * init.defaultBranch. A repo pushed without a clone has no origin/HEAD, so the names stand in.
+ */
+export async function mainLines(cwd: string): Promise<Set<string>> {
+  const lines = new Set(['main', 'master', 'develop', 'trunk']);
+  for (const args of [['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], ['symbolic-ref', '--quiet', '--short', 'HEAD'], ['config', '--get', 'init.defaultBranch']]) {
+    const out = (await gitOut(args, cwd))?.trim();
+    if (out) lines.add(args[2] === 'refs/remotes/origin/HEAD' ? out.replace(/^[^/]+\//, '') : out);
+  }
+  return lines;
+}
+
+/** A remote URL fit to show: any user name, password or token in it removed. */
+export function safeRemote(url: string): string {
+  return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1');
 }
 
 /** A remote as git may write it: no trailing slash or .git, so the pre-push's URL and \`git remote -v\`'s compare. */
@@ -331,7 +365,7 @@ export function redeemOverride(token: unknown, refs: unknown, remote?: unknown):
   const named = String(refs ?? '').split(/\s+/).filter(Boolean).map(r => r.replace(/\(.*$/, ''));
   if (named.some(r => r.startsWith('refs/tags/'))) return { ok: false, why: 'tags are never force-pushed; the token is still good for its branch' };
   if (!named.length || !named.every(r => r === `refs/heads/${entry.branch}`)) return { ok: false, why: `the token is for ${entry.branch} only; it is still good for that push` };
-  if (typeof remote !== 'string' || !entry.remotes.includes(sameRemote(remote))) return { ok: false, why: `the token is for ${entry.branch} on ${entry.remotes.join(', ')} only; it is still good for that push` };
+  if (typeof remote !== 'string' || !entry.remotes.includes(sameRemote(remote))) return { ok: false, why: `the token is for ${entry.branch} on ${entry.remotes.map(safeRemote).join(', ')} only; it is still good for that push` };
   overrides.delete(token);
   return { ok: true };
 }

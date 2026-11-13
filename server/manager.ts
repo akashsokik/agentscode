@@ -93,7 +93,7 @@ import { WorkOwners } from './workOwners.ts';
 import { listArchive, type ArchivedAgent } from './agentArchive.ts';
 import { mentionsBranch } from '../shared/work.ts';
 import { forbiddenGit, gatedVerbs } from '../shared/gitGuard.ts';
-import { ensurePushGuard, installPushGuard, issueOverride, pushRemotes } from './pushGuard.ts';
+import { ensurePushGuard, installPushGuard, issueOverride, mainLines, pushRemotes } from './pushGuard.ts';
 import { readGit } from './work.ts';
 import { actionVerdict, ASK_FIRST_KEYS, autonomyInstructions, FULL_ACTIONS, NEEDS_BACKUP, SUPER_AUTONOMY, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
 
@@ -1768,10 +1768,8 @@ export class AgentManager {
       const raw = (input.branch ?? '').trim().replace(/^refs\/heads\//, '');
       if (!raw || !project) throw new HttpError(400, 'A force-push names its project and the branch (never main, a tag or the default branch).');
       if (/^refs\//.test(raw) || /^(tags|refs)\//.test(raw)) throw new HttpError(403, 'Tags are shared history: they are never force-pushed.');
-      const defaults = new Set(['main', 'master']);
-      const head = await readGit(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], project.path);
-      if (head.ok && head.out.trim()) defaults.add(head.out.trim().replace(/^[^/]+\//, ''));
-      if (defaults.has(raw)) throw new HttpError(403, `${raw} is the shared main line: it is never force-pushed, at any level. Push a revert instead.`);
+      const defaults = await mainLines(project.path);
+      if (defaults.has(raw)) throw new HttpError(403, `${raw} is a shared main line of ${project.name}: it is never force-pushed, at any level. Push a revert instead.`);
       const tag = await readGit(['rev-parse', '--verify', '--quiet', `refs/tags/${raw}`], project.path);
       if (tag.ok) throw new HttpError(403, `${raw} is a tag in ${project.name}: tags are never force-pushed.`);
       const urls = await pushRemotes(project.path);

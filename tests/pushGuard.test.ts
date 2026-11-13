@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { disablesPushGuard, ensurePushGuard, installPushGuard, issueOverride, pushGuardEnv, redeemOverride } from '../server/pushGuard.ts';
+import { disablesPushGuard, ensurePushGuard, installPushGuard, issueOverride, mainLines, pushGuardEnv, pushRemotes, redeemOverride, safeRemote } from '../server/pushGuard.ts';
 import { tempDir } from './helpers.ts';
 
 // The force-push rule where git runs (ALL-D9): agents' git is PodCode's shim, which runs a push
@@ -251,4 +251,29 @@ test('the text check (Claude\'s Bash) catches the ways around it, and not everyd
     assert.ok(disablesPushGuard(cmd), cmd);
   }
   for (const cmd of ['git push origin main', 'git commit -m "x"', 'npm test', 'git push -u origin fix/x', 'cat ~/.podcode/git-hooks/pre-push']) assert.equal(disablesPushGuard(cmd), null, cmd);
+});
+
+test('main lines without origin/HEAD: develop, trunk, the checked-out branch and init.defaultBranch are never force-push targets (Rhea round 5, L6)', async () => {
+  const dir = tempDir('main-lines');
+  const git = (args: string) => { const r = spawnSync('sh', ['-c', `git ${args}`], { cwd: dir, env: BASE, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
+  git('-c init.defaultBranch=stable init -q && git commit -q --allow-empty -m a && git config init.defaultBranch release');
+  const lines = await mainLines(dir);
+  for (const name of ['main', 'master', 'develop', 'trunk', 'stable', 'release']) assert.ok(lines.has(name), name);
+  assert.ok(!lines.has('feat/x'));
+});
+
+test('push remotes are what git pushes to (insteadOf applied, Rhea L7); a refusal never shows credentials (L8)', async () => {
+  const dir = tempDir('remotes');
+  const r = spawnSync('sh', ['-c', 'git init -q && git remote add origin fake:web.git && git config url./srv/repos/.insteadOf fake: && git remote add gh https://x-token:secret123@github.com/o/r.git'], { cwd: dir, env: BASE, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const remotes = await pushRemotes(dir);
+  assert.ok(remotes.includes('/srv/repos/web.git'), remotes.join(' '));
+  assert.ok(remotes.includes('fake:web.git'), 'and the raw value');
+  assert.equal(safeRemote('https://x-token:secret123@github.com/o/r.git'), 'https://github.com/o/r.git');
+  assert.equal(safeRemote('git@github.com:o/r.git'), 'git@github.com:o/r.git', 'an scp-style address has a user, not a secret');
+  const token = issueOverride({ branch: 'feat/x', remotes: ['https://x-token:secret123@github.com/o/r.git'] });
+  const miss = redeemOverride(token, 'refs/heads/feat/x(overwrite)', '/elsewhere.git');
+  assert.equal(miss.ok, false);
+  assert.doesNotMatch(miss.why ?? '', /secret123|x-token/);
+  assert.match(miss.why ?? '', /on https:\/\/github\.com\/o\/r only/);
 });
