@@ -233,6 +233,9 @@ test('the Issues page is the shared inbox layout: a card click selects the issue
   assert.match(inbox, /<InboxCard\b[\s\S]*?onSelect=\{select\}/);
   assert.match(inbox, /const select = \(\) => showIssueInList\(issue\.id\);/, 'a click selects the issue in the page');
   assert.match(inbox, /<InboxDetail\b/);
+  // Only CommsPane's own parts (the user, via Cy): stacked sections, no tabs, no MonoCode action buttons.
+  assert.doesNotMatch(inbox, /InboxTabs|ACTION_(FILLED|OUTLINE|GHOST)/, 'nothing Comms does not use');
+  assert.match(inbox, /<InboxSection title="Description">[\s\S]*<InboxSection title="Properties">/, 'Description, then Properties, as stacked sections');
   for (const piece of ['PropertySidebar', 'IssueDescription', 'SubIssues', 'Relations', 'InGit', 'Decisions', 'Activity']) assert.match(inbox, new RegExp(`<${piece}\\b`), `Ada's ${piece}`);
   const panel = read('../web/panes/SuperPanel.tsx');
   const item = panel.slice(panel.indexOf('function IssueItem('), panel.indexOf('export function RoutinesView'));
