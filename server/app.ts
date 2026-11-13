@@ -1,5 +1,5 @@
 import { ensurePushGuard, redeemOverride } from './pushGuard.ts';
-import { isOpenRoute, USER_COOKIE, UserKey, type UserAuth } from './userAuth.ts';
+import { isOpenRoute, LOGIN_MAX_AGE_S, safeNext, USER_COOKIE, UserKey, type UserAuth } from './userAuth.ts';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -56,12 +56,12 @@ export function isLocalOrigin(origin: string | undefined, ports: readonly number
  */
 function userOnly(auth: UserAuth) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const pathname = req.path;
+    const pathname = req.path.toLowerCase();
     if ((pathname !== '/api' && !pathname.startsWith('/api/')) || isOpenRoute(req.method, pathname) || auth.allows(req.headers)) {
       next();
       return;
     }
-    res.status(401).setHeader('WWW-Authenticate', 'PodCode-User').json({ error: 'Only the PodCode window can do that.' });
+    res.status(401).setHeader('WWW-Authenticate', 'PodCode-User').json({ error: 'This window is not signed in to PodCode\'s server. Quit PodCode and open it again.' });
   };
 }
 
@@ -102,6 +102,9 @@ export function createApp(
 ): Express {
   const app = express();
   app.disable('x-powered-by');
+  // Routes match their case exactly, so /API/state is not /api/state (Rhea H1); the key check
+  // below lower-cases the path too, so no casing reaches a route without it.
+  app.set('case sensitive routing', true);
   app.use(localOnly);
   app.use(userOnly(auth));
   app.use(express.json({ limit: '2mb' }));
@@ -109,7 +112,8 @@ export function createApp(
   // For scripts (scripts/restart-desktop.sh): that the server answers, and how many agents are busy; nothing else.
   app.get('/api/health', (_req, res) => {
     const agents = manager.snapshot().agents;
-    res.json({ ok: true, busyAgents: agents.filter(a => a.status === 'working' || a.status === 'waiting').length });
+    // window: a window has used the key this run, so the hand-off worked (scripts/restart-desktop.sh waits for it).
+    res.json({ ok: true, busyAgents: agents.filter(a => a.status === 'working' || a.status === 'waiting').length, window: auth.windowSignedIn?.() ?? false });
   });
   // The one-time sign-in link the server prints when no desktop app holds the key (npm run dev).
   app.get('/login', (req, res) => {
@@ -117,8 +121,8 @@ export function createApp(
       res.status(403).type('text').send('That sign-in link was used already or is not this run\'s. Look in the PodCode server\'s terminal for a new one.');
       return;
     }
-    res.setHeader('Set-Cookie', `${USER_COOKIE}=${auth.token}; HttpOnly; SameSite=Strict; Path=/`);
-    res.redirect(303, typeof req.query.to === 'string' && /^\/(?!\/)/.test(req.query.to) ? req.query.to : '/');
+    res.setHeader('Set-Cookie', `${USER_COOKIE}=${auth.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${LOGIN_MAX_AGE_S}`);
+    res.redirect(303, safeNext(req.query.to));
   });
 
   const param = (req: Request, name: string): string => String(req.params[name]);

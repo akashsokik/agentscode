@@ -41,7 +41,8 @@ function world(quit: 'exits' | 'hangs' | 'holds') {
   const fakes: Record<string, string> = {
     osascript: `case "$*" in *"is running"*) if ${alive}; then echo true; else echo false; fi ;; *quit*) ${quitAction} ;; esac`,
     lsappinfo: `${alive} && echo "\\"pid\\"=$(cat "${pidFile}")"`,
-    curl: `[ -f "${serverUp}" ] || exit 7; case "$*" in *"/dev/null"*) exit 0 ;; *) echo '{"agents":[]}' ;; esac`,
+    // /api/health: the file 'health' when there is one (an old app's page, a window that never signed in), else signed in and idle.
+    curl: `[ -f "${serverUp}" ] || exit 7; case "$*" in *"/dev/null"*) exit 0 ;; *"/api/health"*) if [ -f "${dir}/health" ]; then cat "${dir}/health"; else echo '{"ok":true,"busyAgents":0,"window":true}'; fi ;; *) if [ -f "${dir}/state" ]; then cat "${dir}/state"; else echo '{"agents":[]}'; fi ;; esac`,
     // Opening the app starts a new stand-in.
     // Also records any PODCODE_/AGENTSCODE_ setting the opened app would inherit.
     open: `echo "$1" >> "${opened}"; env | grep -E '^(PODCODE|AGENTSCODE)_' >> "${opened}.env"; sleep 600 >/dev/null 2>&1 & echo $! > "${pidFile}"; touch "${serverUp}"`,
@@ -202,5 +203,37 @@ test('a lock left by a waiter that is gone is taken over; one held by a live wai
     assert.match(stale.out, /Taking over a stale lock \(999999\)/);
     assert.equal(w.installed(), 'new');
     assert.equal(fs.existsSync(w.env.AGENTSCODE_LOCK), false, 'released when done');
+  } finally { w.cleanup(); }
+});
+
+test('a new app whose window never signs in to its server is swapped back for the previous one (Rhea M2)', MAC_ONLY, async () => {
+  const w = world('exits');
+  try {
+    fs.writeFileSync(path.join(w.dir, 'health'), '{"ok":true,"busyAgents":0,"window":false}');
+    const { code, out } = await w.run();
+    assert.equal(code, 1, out);
+    assert.match(out, /never signed in to its server; putting the previous app back/);
+    assert.equal(w.installed(), 'old', 'the previous app is back');
+    assert.deepEqual(fs.readFileSync(w.opened, 'utf8').trim().split('\n'), [w.app, w.app], 'opened, then reopened as it was');
+  } finally { w.cleanup(); }
+});
+
+test('busy agents: the health count when it is JSON; an old app that answers health with its page is asked /api/state (Rhea M1)', MAC_ONLY, async () => {
+  const w = world('exits');
+  const script = fs.readFileSync(SCRIPT, 'utf8');
+  const start = script.indexOf('busy_agents() {');
+  const fn = script.slice(start, script.indexOf('\n}\n', start) + 3);
+  const busy = () => new Promise<string>(resolve => execFile('/bin/sh', ['-c', `PORT=4320; ${fn}\nbusy_agents`], { env: w.env }, (_e, out) => resolve(String(out).trim())));
+  try {
+    fs.writeFileSync(path.join(w.dir, 'health'), '{"ok":true,"busyAgents":3,"window":true}');
+    assert.equal(await busy(), '3');
+    fs.writeFileSync(path.join(w.dir, 'health'), '<!doctype html><html><body>PodCode</body></html>');
+    fs.writeFileSync(path.join(w.dir, 'state'), JSON.stringify({ agents: [{ status: 'working' }, { status: 'idle' }, { status: 'waiting' }] }));
+    assert.equal(await busy(), '2', 'the old app\'s page is not JSON: /api/state counts');
+    fs.writeFileSync(path.join(w.dir, 'state'), '{"error":"Only the window"}');
+    fs.writeFileSync(path.join(w.dir, 'health'), '{"error":"No such API route."}');
+    assert.equal(await busy(), '0', 'state with no agents list');
+    fs.rmSync(path.join(w.dir, 'server.up'));
+    assert.equal(await busy(), '-1', 'no answer at all');
   } finally { w.cleanup(); }
 });

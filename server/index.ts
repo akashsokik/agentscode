@@ -54,10 +54,14 @@ server.listen(PORT, HOST, () => {
   ].join(', ');
   console.log(`PodCode is open at http://localhost:${PORT}  (${engines})`);
   if (!parentPort) {
-    // No desktop app to hold the key: this browser signs in once with a link only this terminal shows.
-    const code = userKey.newLoginCode();
+    // No desktop app to hold the key: a browser signs in with a one-time link only this terminal
+    // shows; each use prints the next, for another browser. The cookie is sent to every 127.0.0.1
+    // port (cookies ignore ports), so another local server the browser visits receives it too:
+    // prefer the desktop app (Rhea L2).
     const page = DIST_DIR && fs.existsSync(path.join(DIST_DIR, 'index.html')) ? PORT : DEV_WEB_PORT;
-    console.log(`Sign in your browser (once per server run): http://127.0.0.1:${page}/login?code=${code}`);
+    const printLink = () => console.log(`Sign in a browser (one use, lasts 12 h; the desktop app needs none): http://127.0.0.1:${page}/login?code=${userKey.newLoginCode()}`);
+    userKey.onLoginUsed = printLink;
+    printLink();
   }
 });
 

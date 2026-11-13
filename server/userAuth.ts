@@ -22,6 +22,8 @@ export const USER_TOKEN_MESSAGE = 'podcode:user-token';
 export interface UserAuth {
   /** Whether these request headers carry the user's key (header or cookie). */
   allows(headers: IncomingHttpHeaders): boolean;
+  /** Whether a window has used the key yet this run: the hand-off reached it (GET /api/health's \`window\`). */
+  windowSignedIn?(): boolean;
 }
 
 function same(expected: string, given: unknown): boolean {
@@ -44,9 +46,18 @@ export function cookieValue(header: string | undefined, name: string): string | 
 export class UserKey implements UserAuth {
   readonly token = randomBytes(32).toString('hex');
   private loginCode: string | null = null;
+  private used = false;
+  /** Called after a sign-in code is used, so the server can print the next one (one browser each). */
+  onLoginUsed: (() => void) | null = null;
 
   allows(headers: IncomingHttpHeaders): boolean {
-    return same(this.token, headers[USER_HEADER]) || same(this.token, cookieValue(headers.cookie, USER_COOKIE));
+    const ok = same(this.token, headers[USER_HEADER]) || same(this.token, cookieValue(headers.cookie, USER_COOKIE));
+    if (ok) this.used = true;
+    return ok;
+  }
+
+  windowSignedIn(): boolean {
+    return this.used;
   }
 
   /** A fresh one-time sign-in code (the last one stops working). */
@@ -59,6 +70,7 @@ export class UserKey implements UserAuth {
   redeemLoginCode(code: unknown): boolean {
     if (!this.loginCode || !same(this.loginCode, code)) return false;
     this.loginCode = null;
+    this.onLoginUsed?.();
     return true;
   }
 }
@@ -75,5 +87,13 @@ export const OPEN_AUTH: UserAuth = { allows: () => true };
 export const OPEN_ROUTES: readonly string[] = ['POST /api/comms', 'POST /api/push-guard/redeem', 'POST /api/push-guard/check', 'GET /api/health', 'GET /login'];
 
 export function isOpenRoute(method: string, pathname: string): boolean {
-  return OPEN_ROUTES.includes(`${method === 'HEAD' ? 'GET' : method} ${pathname.replace(/\/+$/, '') || '/'}`);
+  return OPEN_ROUTES.includes(`${method === 'HEAD' ? 'GET' : method} ${pathname.toLowerCase().replace(/\/+$/, '') || '/'}`);
+}
+
+/** How long a browser's sign-in lasts (no desktop app): half a day, then a new link. */
+export const LOGIN_MAX_AGE_S = 12 * 60 * 60;
+
+/** Where a sign-in may send the browser next: a path on this server only, never //host or /\\host. */
+export function safeNext(to: unknown): string {
+  return typeof to === 'string' && /^\/(?![\/\\])/.test(to) ? to : '/';
 }

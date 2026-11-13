@@ -33,9 +33,12 @@ async function listen(server: { listen(port: number, host: string): unknown; add
 test('every /api route needs the key but the open few; with it, none is refused (a new route cannot skip the check)', async () => {
   const { key, manager } = boot();
   const app = createApp(manager, undefined, undefined, key);
-  const routes = ((app as unknown as { router: { stack: { route?: { path: string; methods: Record<string, boolean> } }[] } }).router.stack)
-    .filter(layer => layer.route && layer.route.path.startsWith('/api'))
-    .flatMap(layer => Object.keys(layer.route!.methods).map(method => ({ method: method.toUpperCase(), path: layer.route!.path })));
+  // A route can be registered under several paths (an array); a pattern that is not a string would escape this walk, so there must be none.
+  const layers = (app as unknown as { router: { stack: { route?: { path: unknown; methods: Record<string, boolean> } }[] } }).router.stack.filter(layer => layer.route);
+  const paths = (p: unknown): unknown[] => (Array.isArray(p) ? p : [p]);
+  assert.deepEqual(layers.flatMap(l => paths(l.route!.path)).filter(p => typeof p !== 'string'), [], 'every route path is a string');
+  const routes = layers.flatMap(layer => paths(layer.route!.path).filter((p): p is string => typeof p === 'string' && p.startsWith('/api'))
+    .flatMap(p => Object.keys(layer.route!.methods).map(method => ({ method: method.toUpperCase(), path: p }))));
   assert.ok(routes.length > 60, `found ${routes.length} routes`);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
@@ -52,6 +55,12 @@ test('every /api route needs the key but the open few; with it, none is refused 
       if (isOpenRoute(method, route)) { open.push(`${method} ${route}`); assert.ok(!keyRefused, `${method} ${route} is open`); }
       else if (!keyRefused) refused.push(`${method} ${route}: ${without.status}`);
       await without.body?.cancel();
+      // Another casing of the path never reaches a route without the key (Rhea H1): /API/state, /Api/state.
+      for (const variant of [route.replace('/api', '/API'), route.replace('/api', '/Api'), route.toUpperCase()]) {
+        const cased = await fetch(base + variant.replace(/:(\w+)/gi, 'x'), init);
+        if (cased.status !== 401 && cased.status !== 404) refused.push(`${method} ${variant}: ${cased.status}`);
+        await cased.body?.cancel();
+      }
       const withKey = await fetch(url, { ...init, headers: { ...init.headers, [USER_HEADER]: key.token } });
       assert.notEqual(withKey.headers.get('www-authenticate'), 'PodCode-User', `${method} ${route} with the key`);
       await withKey.body?.cancel();
@@ -62,8 +71,9 @@ test('every /api route needs the key but the open few; with it, none is refused 
     for (const headers of [{ [USER_HEADER]: 'f'.repeat(64) }, { [USER_HEADER]: key.token.slice(1) }, { authorization: `Bearer ${key.token}` }]) {
       assert.equal((await fetch(`${base}/api/state`, { headers })).status, 401);
     }
-    // Health tells a script only that the server answers and how many agents are busy.
-    assert.deepEqual(await (await fetch(`${base}/api/health`)).json(), { ok: true, busyAgents: 0 });
+    // Health tells a script only that the server answers, how many agents are busy, and whether a
+    // window has signed in this run (the key hand-off worked; Rhea M2). The walk above used the key.
+    assert.deepEqual(await (await fetch(`${base}/api/health`)).json(), { ok: true, busyAgents: 0, window: true });
     // Agents' tool calls keep their own check (a Bearer comms token), never the user's key.
     const comms = await fetch(`${base}/api/comms`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer nope' }, body: JSON.stringify({ tool: 'list_agents', args: {} }) });
     assert.notEqual(comms.headers.get('www-authenticate'), 'PodCode-User', 'judged by its own Bearer check');
@@ -87,8 +97,32 @@ test('without the desktop app: a one-time sign-in link sets an HttpOnly cookie t
     assert.equal(cookieValue(cookie.split(';')[0], USER_COOKIE), key.token);
     assert.equal((await fetch(`${base}/api/state`, { headers: { cookie: `${USER_COOKIE}=${key.token}` } })).status, 200);
     assert.equal((await fetch(`${base}/login?code=${code}`, { redirect: 'manual' })).status, 403, 'used once');
-    const again = key.newLoginCode();
-    assert.equal((await fetch(`${base}/login?code=${again}&to=//evil.example`, { redirect: 'manual' })).headers.get('location'), '/', 'never sends you off-site');
+    assert.match(cookie, /Max-Age=43200/, 'a browser sign-in lasts 12 h (Rhea L2)');
+    // Never off-site: //host, and /\\host, which a browser reads as //host (Rhea L1).
+    for (const to of ['//evil.example', '/\\evil.example', '/\\/evil.example', 'https://evil.example']) {
+      const again = key.newLoginCode();
+      assert.equal((await fetch(`${base}/login?code=${again}&to=${encodeURIComponent(to)}`, { redirect: 'manual' })).headers.get('location'), '/', to);
+    }
+  } finally { server.close(); }
+});
+
+test('a used sign-in code prints the next one, for another browser (Rhea L3); health says no window until one signs in', async () => {
+  const { key, manager } = boot();
+  const printed: string[] = [];
+  key.onLoginUsed = () => printed.push(key.newLoginCode());
+  const server = createApp(manager, undefined, undefined, key).listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    assert.equal(((await (await fetch(`${base}/api/health`)).json()) as { window: boolean }).window, false, 'no window yet');
+    const first = key.newLoginCode();
+    assert.equal((await fetch(`${base}/login?code=${first}`, { redirect: 'manual' })).status, 303);
+    assert.equal(printed.length, 1);
+    assert.equal((await fetch(`${base}/login?code=${printed[0]}`, { redirect: 'manual' })).status, 303, 'the next code works for a second browser');
+    assert.equal((await fetch(`${base}/login?code=${first}`, { redirect: 'manual' })).status, 403, 'the first is still used up');
+    assert.equal(((await (await fetch(`${base}/api/health`)).json()) as { window: boolean }).window, false, 'signing in sets a cookie; the window flag waits for a request with it');
+    await fetch(`${base}/api/state`, { headers: { cookie: `${USER_COOKIE}=${key.token}` } });
+    assert.equal(((await (await fetch(`${base}/api/health`)).json()) as { window: boolean }).window, true);
   } finally { server.close(); }
 });
 

@@ -59,18 +59,29 @@ server_gone() {
 }
 # Agents working or waiting on the user, from the app's own state; -1 when it does not answer.
 # Node, as this repo always has it (python3 can be a shim that asks to install developer tools).
-# /api/health (no key needed) gives busyAgents; a server from before it is asked /api/state.
+# /api/health (no key needed) gives busyAgents. An app from before it answers that path with its
+# page (HTML) or a 404, so only JSON with a numeric busyAgents counts; else ask /api/state, which
+# such an app still answers without a key. Each is read on its own (Rhea M1).
 busy_agents() {
-  { curl -s --max-time 5 "http://127.0.0.1:$PORT/api/health"; printf '\n'; curl -s --max-time 5 "http://127.0.0.1:$PORT/api/state"; } | node -e "
+  health=$(curl -s --max-time 5 "http://127.0.0.1:$PORT/api/health")
+  count=$(printf '%s' "$health" | node -e "
 let raw = '';
 process.stdin.on('data', d => { raw += d; }).on('end', () => {
-  const [health, ...rest] = raw.split('\\n');
-  try { const h = JSON.parse(health); if (typeof h.busyAgents === 'number') { console.log(h.busyAgents); return; } } catch {}
-  try { console.log((JSON.parse(rest.join('\\n')).agents ?? []).filter(a => a.status === 'working' || a.status === 'waiting').length); }
+  try { const h = JSON.parse(raw); if (typeof h.busyAgents === 'number') { console.log(h.busyAgents); return; } } catch {}
+  console.log('');
+});
+" 2>/dev/null)
+  if [ -n "$count" ]; then echo "$count"; return; fi
+  curl -s --max-time 5 "http://127.0.0.1:$PORT/api/state" | node -e "
+let raw = '';
+process.stdin.on('data', d => { raw += d; }).on('end', () => {
+  try { console.log((JSON.parse(raw).agents ?? []).filter(a => a.status === 'working' || a.status === 'waiting').length); }
   catch { console.log(-1); }
 });
 " 2>/dev/null || echo -1
 }
+# The new app's window signed in to its server: /api/health says window:true (server/userAuth.ts).
+window_signed_in() { curl -s --max-time 3 "http://127.0.0.1:$PORT/api/health" | grep -q '"window":true'; }
 building() { pgrep -f "electron-builder|vite build --outDir|tsconfig.desktop.json" >/dev/null; }
 # Waits up to $1 steps for the app to be gone; true when it is.
 gone_within() { i=0; while [ "$i" -lt "$1" ]; do running || return 0; wait_ticks 1; i=$((i + 1)); done; ! running; }
@@ -112,7 +123,17 @@ restart() {
   fi
   open "$APP"
   i=0; while [ "$i" -lt 30 ] && ! running; do wait_ticks 1; i=$((i + 1)); done
-  if running; then say "Restarted onto $NEW."; else say "Opened $APP, but it is not running yet."; fi
+  if ! running; then say "Opened $APP, but it is not running yet."; return 0; fi
+  # Its window must sign in to its server (the key hand-off). Without that it shows nothing, so the
+  # previous app goes back (Rhea M2).
+  i=0; while [ "$i" -lt 60 ] && ! window_signed_in; do wait_ticks 1; i=$((i + 1)); done
+  if window_signed_in; then say "Restarted onto $NEW."; return 0; fi
+  say "The new app's window never signed in to its server; putting the previous app back."
+  osascript -e "tell application id \"$BID\" to quit" >/dev/null 2>&1
+  if ! gone_within 30; then pid=$(app_pid); [ -n "$pid" ] && kill "$pid" 2>/dev/null; gone_within 10; fi
+  rm -rf "$APP" && mv "$PREV" "$APP"
+  open "$APP"
+  return 1
 }
 
 # One waiter at a time. The lock holds its waiter's pid; a lock whose waiter is gone (killed with

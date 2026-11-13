@@ -186,11 +186,9 @@ function onServerExit(code: number): void {
     return;
   }
   void serverAnswers().then(up => {
-    // Another PodCode server took the port first (it came back while ours started): use it.
+    // Another PodCode server took the port first (it came back while ours started).
     if (up) {
-      markReady();
-      bridge.useSocket();
-      watchAttachedServer();
+      void useRunningServer();
       return;
     }
     const tail = recentOutput.join('').trim().split('\n').slice(-8).join('\n');
@@ -200,6 +198,37 @@ function onServerExit(code: number): void {
     );
     app.exit(1);
   });
+}
+
+/**
+ * A server this app did not start answers on the port. It never hands its key to this window
+ * (server/userAuth.ts), so the window would show nothing. One left from before a restart is
+ * usually stopping: give it ten seconds to free the port, then start ours. Still there: say so,
+ * and let the user quit (the default) or open anyway, say for \`npm run dev\` (Rhea M2).
+ */
+async function useRunningServer(): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    if (!(await serverAnswers())) {
+      startServer();
+      return;
+    }
+  }
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    message: 'Another PodCode server is running',
+    detail: `Something else answers on port ${PORT} (npm run dev, say). This window cannot sign in to it, so it would show nothing. Quit that server and open PodCode again.`,
+    buttons: ['Quit PodCode', 'Open anyway'],
+    defaultId: 0,
+    cancelId: 0,
+  });
+  if (response === 0) {
+    app.exit(0);
+    return;
+  }
+  markReady();
+  bridge.useSocket();
+  watchAttachedServer();
 }
 
 /** About PodCode: Settings > About in the window (version, build, updates), else the native panel. */
@@ -449,11 +478,8 @@ if (!app.requestSingleInstanceLock()) {
     startSuperBridge({ window: () => window, show: showWindow, fromApp, quick });
     // app_screenshot: the window as the user sees it, never focused or raised for it.
     bridge.onAppShot(args => captureApp({ main: () => window, quick: () => quick?.visible() ?? null }, args));
-    if (await serverAnswers()) {
-      markReady();
-      bridge.useSocket();
-      watchAttachedServer();
-    } else startServer();
+    if (await serverAnswers()) void useRunningServer();
+    else startServer();
     void startUpdater({ window: () => window, stopServer });
   });
 }
