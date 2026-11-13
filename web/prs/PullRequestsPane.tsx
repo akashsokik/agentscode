@@ -121,7 +121,8 @@ export function PullRequestsPane({ prId, chrome }: { prId?: string; chrome: Pane
   return (
     <PaneFrame chrome={chrome} title={title} actions={actions}>
       <InboxLayout
-        detailOpen={Boolean(prId)}
+        // Narrow: show the detail only for the PR picked; one that is gone since (refresh, search) shows the list.
+        detailOpen={Boolean(prId) && selected?.id === prId}
         onRailKeyDown={onRailKey}
         toolbar={<>
           <InboxFilterTabs options={PR_VIEWS.map(v => ({ value: v.view, label: TAB_LABEL[v.view], count: v.view === 'needsReview' || v.view === 'checksFailing' ? counts[v.view] : undefined, attention: v.view === 'checksFailing' }))} value={view} onChange={setView} fit />

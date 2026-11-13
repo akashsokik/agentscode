@@ -73,3 +73,7 @@ test('InboxHero can draw an editor in its heading, for the issue title (ACH-23)'
   const inbox = read('web/ui/Inbox.tsx');
   assert.match(inbox, /<h1 title=\{title\} className=\{cx\('font-sans text-\[18px\] font-semibold leading-tight text-content', heading === undefined && 'line-clamp-2'\)\}>\{heading \?\? title\}<\/h1>/);
 });
+
+test('a picked PR that is gone shows the list in a narrow pane, not another PR (ACH-23)', () => {
+  assert.match(read('web/prs/PullRequestsPane.tsx'), /detailOpen=\{Boolean\(prId\) && selected\?\.id === prId\}/);
+});
