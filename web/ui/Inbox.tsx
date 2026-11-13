@@ -52,7 +52,11 @@ export interface InboxFilterOption<T extends string> {
 }
 
 /** The rail's filter tabs (MonoCode's InboxSourceTab row), each with its count. */
-export function InboxFilterTabs<T extends string>({ label = 'Show', options, value, onChange }: { label?: string; options: InboxFilterOption<T>[]; value: T; onChange: (value: T) => void }) {
+export function InboxFilterTabs<T extends string>({ label = 'Show', options, value, onChange, fit = false }: {
+  label?: string; options: InboxFilterOption<T>[]; value: T; onChange: (value: T) => void;
+  /** Each tab as wide as its label and count, for four or more tabs; otherwise equal widths. */
+  fit?: boolean;
+}) {
   return (
     <div role="tablist" aria-label={label} className="flex h-9 shrink-0 items-center gap-px border-b border-stroke px-2">
       {options.map(option => (
@@ -63,7 +67,8 @@ export function InboxFilterTabs<T extends string>({ label = 'Show', options, val
           aria-selected={value === option.value}
           onClick={() => onChange(option.value)}
           className={cx(
-            'flex h-6 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 font-sans text-[12px] leading-none transition-colors duration-150',
+            'flex h-6 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 font-sans text-[12px] leading-none transition-colors duration-150',
+            fit ? 'flex-auto' : 'flex-1',
             value === option.value ? 'bg-selection text-content' : 'text-content/50 hover:bg-content/5 hover:text-content',
           )}
         >

@@ -91,7 +91,7 @@ export function PullRequestsPane({ prId, chrome }: { prId?: string; chrome: Pane
       <InboxLayout
         detailOpen={Boolean(prId)}
         toolbar={<>
-          <InboxFilterTabs options={PR_VIEWS.map(v => ({ value: v.view, label: TAB_LABEL[v.view], count: v.view === 'open' ? undefined : counts[v.view], attention: v.view === 'checksFailing' }))} value={view} onChange={setView} />
+          <InboxFilterTabs options={PR_VIEWS.map(v => ({ value: v.view, label: TAB_LABEL[v.view], count: v.view === 'needsReview' || v.view === 'checksFailing' ? counts[v.view] : undefined, attention: v.view === 'checksFailing' }))} value={view} onChange={setView} fit />
           <InboxSearch value={query} onChange={setQuery} placeholder="Filter pull requests" />
         </>}
         list={
