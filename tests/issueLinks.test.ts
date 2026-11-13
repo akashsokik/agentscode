@@ -14,6 +14,7 @@ import { Store } from '../server/store.ts';
 import { harness, tempDir } from './helpers.ts';
 import { createApp } from '../server/app.ts';
 import { AgentManager } from '../server/manager.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 import { HttpError } from '../server/errors.ts';
 
 const env = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
@@ -148,7 +149,7 @@ test('issue decisions and reverse decision issues are exposed through validated 
   h.manager.addIssue({ text: 'Issue for the API' });
   const issue = h.manager.superView().issues[0];
   h.store.messages.push({ id: 'msg-api', fromAgentId: 'lead', fromName: 'Lead', toAgentId: 'dev', toName: 'Dev', conversationId: 'c', ts: 1000, text: `${issue.key} uses ALL-D1.`, status: 'delivered' } as typeof h.store.messages[number]);
-  const server = createApp(h.manager).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const url = (route: string) => `http://127.0.0.1:${(server.address() as AddressInfo).port}${route}`;
   try {

@@ -13,6 +13,7 @@ import { buildDigest } from '../server/dream.ts';
 import { HttpError } from '../server/errors.ts';
 import { inQuietHours, MAX_OPEN_ASKS, SuperStore, SuperWatcher, updatePrompt, type WatcherHost } from '../server/superAgent.ts';
 import { harness, projectDir, settle, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 function status(error: unknown): number {
   assert.ok(error instanceof HttpError, `expected HttpError, got ${String(error)}`);
@@ -311,7 +312,7 @@ test('settings for wake-ups and quiet hours are checked', () => {
 
 test('the app sets it up, answers it and undoes its decisions over HTTP', async () => {
   const h = harness();
-  const server = createApp(h.manager).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/super`;
   const post = (url: string, body: unknown = {}) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

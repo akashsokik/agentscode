@@ -7,6 +7,7 @@ import type { Channel, ChannelPost } from '../shared/types.ts';
 import { createApp } from '../server/app.ts';
 import { HttpError } from '../server/errors.ts';
 import { harness, projectDir, settle } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 function status(error: unknown): number {
   assert.ok(error instanceof HttpError, `expected HttpError, got ${String(error)}`);
@@ -279,7 +280,7 @@ test('a restart fails deliveries that were in flight, and keeps the history', as
 
 test('the channel API creates, posts, lists and deletes', async () => {
   const h = await crossProject();
-  const server = createApp(h.manager).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = (method: string, path: string, body?: unknown) => fetch(base + path, {

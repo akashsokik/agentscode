@@ -13,6 +13,7 @@ import {
 } from '../server/dream.ts';
 import { HttpError } from '../server/errors.ts';
 import { FakeDreamEngine, harness, projectDir, settle, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 function status(error: unknown): number {
   assert.ok(error instanceof HttpError, `expected HttpError, got ${String(error)}`);
@@ -947,7 +948,7 @@ test('the dream routes: list, Dream now, undo, soul proposal and the stats repor
   const bo = await h.manager.create({ name: 'Bo', engine: 'codex', projectId: project.id });
   await h.manager.update(bo.id, { dreaming: false });
   await workedSession(h, ada.id, [{ ask: 'Fix the bug', answer: 'Fixed it.' }, { ask: 'No, never touch the config.', answer: 'Reverted the config.' }]);
-  const server = createApp(h.manager).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const url = (p: string) => `http://127.0.0.1:${(server.address() as AddressInfo).port}${p}`;
   const post = (p: string, body?: unknown) => fetch(url(p), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });

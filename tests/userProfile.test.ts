@@ -12,6 +12,7 @@ import { HttpError } from '../server/errors.ts';
 import { capProfile, PROFILE_LIMIT, parseProfile, ProfileStore, renderProfile, sameFact } from '../server/userProfile.ts';
 import { profileCountsText, undoState } from '../web/dreams.ts';
 import { FakeDreamEngine, harness, projectDir, settle, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 function status(error: unknown): number {
   assert.ok(error instanceof HttpError, `expected HttpError, got ${String(error)}`);
@@ -344,7 +345,7 @@ test('a rejected promotion is not offered again, and agents with dreaming off ta
 
 test('the app reads, adds, edits and deletes the profile and decides proposals over HTTP', async () => {
   const t = await team();
-  const server = createApp(t.manager).listen(0, '127.0.0.1');
+  const server = createApp(t.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/profile`;
   const json = { 'Content-Type': 'application/json' };

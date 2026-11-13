@@ -10,6 +10,7 @@ import { Hub } from '../server/hub.ts';
 import { AgentManager } from '../server/manager.ts';
 import { Store } from '../server/store.ts';
 import { projectDir, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 async function boot(distDir?: string) {
   const dir = tempDir('ws');
@@ -19,7 +20,7 @@ async function boot(distDir?: string) {
   const engine = { available: false, path: null, version: null };
   const manager = new AgentManager(store, hub, { claude: engine, codex: engine, orcacode: engine });
   manager.init();
-  const server = createServer(manager, hub, { distDir });
+  const server = createServer(manager, hub, { distDir, auth: OPEN_AUTH });
   server.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const port = (server.address() as AddressInfo).port;

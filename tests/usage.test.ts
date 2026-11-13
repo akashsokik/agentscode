@@ -7,6 +7,7 @@ import type { UsageWindow } from '../shared/types.ts';
 import { createApp } from '../server/app.ts';
 import { credentialBlob, expiredError, fetchCodexUsage, parseClaudeUsage, parseCodexLimits, timestampMs, UsageError, UsageTracker } from '../server/usage.ts';
 import { harness, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 // ---- parsing (ported from monocode-core/src/usage.rs) -------------------------------
 
@@ -136,7 +137,7 @@ test('the usage route returns windows only, refreshes on POST, and 404s an engin
   const h = harness({ codex: { available: false, path: null, version: null } });
   let reads = 0;
   const tracker = new UsageTracker(() => h.manager.engineInfo(), { claude: async () => { reads++; return [{ usedPercent: 12, minutes: 300, resetsAt: 1_800_000_000_000 }]; } });
-  const server = createApp(h.manager, undefined, tracker).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, tracker, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const url = (p: string) => `http://127.0.0.1:${(server.address() as AddressInfo).port}${p}`;
   try {

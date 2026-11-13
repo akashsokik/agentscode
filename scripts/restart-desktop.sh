@@ -46,7 +46,8 @@ say() { echo "$(date '+%H:%M:%S') $*"; }
 wait_ticks() { sleep "$(awk "BEGIN { print $1 * $TICK }")"; }
 running() { [ "$(osascript -e "application id \"$BID\" is running" 2>/dev/null)" = "true" ]; }
 app_pid() { lsappinfo info -only pid -app "$BID" 2>/dev/null | sed -n 's/.*"pid"=\([0-9][0-9]*\).*/\1/p'; }
-server_answers() { curl -s --max-time 3 -o /dev/null "http://127.0.0.1:$PORT/api/state"; }
+# Any answer counts (the health route needs no key; an older server answers it with 404).
+server_answers() { curl -s --max-time 3 -o /dev/null "http://127.0.0.1:$PORT/api/health"; }
 # The server is gone only when three probes, two steps apart, all go unanswered: one slow answer
 # is not enough to end the app.
 server_gone() {
@@ -58,15 +59,30 @@ server_gone() {
 }
 # Agents working or waiting on the user, from the app's own state; -1 when it does not answer.
 # Node, as this repo always has it (python3 can be a shim that asks to install developer tools).
+# /api/health (no key needed) gives busyAgents. An app from before it answers that path with its
+# page (HTML) or a 404, so only JSON with a numeric busyAgents counts; else ask /api/state, which
+# such an app still answers without a key. Each is read on its own (Rhea M1).
 busy_agents() {
+  health=$(curl -s --max-time 5 "http://127.0.0.1:$PORT/api/health")
+  count=$(printf '%s' "$health" | node -e "
+let raw = '';
+process.stdin.on('data', d => { raw += d; }).on('end', () => {
+  try { const h = JSON.parse(raw); if (typeof h.busyAgents === 'number') { console.log(h.busyAgents); return; } } catch {}
+  console.log('');
+});
+" 2>/dev/null)
+  if [ -n "$count" ]; then echo "$count"; return; fi
   curl -s --max-time 5 "http://127.0.0.1:$PORT/api/state" | node -e "
 let raw = '';
 process.stdin.on('data', d => { raw += d; }).on('end', () => {
-  try { console.log((JSON.parse(raw).agents ?? []).filter(a => a.status === 'working' || a.status === 'waiting').length); }
+  // Only a real state counts: an agents list. A refusal (a newer app's 401) is not \"0 busy\" (Rhea L2).
+  try { const s = JSON.parse(raw); console.log(Array.isArray(s.agents) ? s.agents.filter(a => a.status === 'working' || a.status === 'waiting').length : -1); }
   catch { console.log(-1); }
 });
 " 2>/dev/null || echo -1
 }
+# The new app's window signed in to its server: /api/health says window:true (server/userAuth.ts).
+window_signed_in() { curl -s --max-time 3 "http://127.0.0.1:$PORT/api/health" | grep -q '"window":true'; }
 building() { pgrep -f "electron-builder|vite build --outDir|tsconfig.desktop.json" >/dev/null; }
 # Waits up to $1 steps for the app to be gone; true when it is.
 gone_within() { i=0; while [ "$i" -lt "$1" ]; do running || return 0; wait_ticks 1; i=$((i + 1)); done; ! running; }
@@ -108,7 +124,19 @@ restart() {
   fi
   open "$APP"
   i=0; while [ "$i" -lt 30 ] && ! running; do wait_ticks 1; i=$((i + 1)); done
-  if running; then say "Restarted onto $NEW."; else say "Opened $APP, but it is not running yet."; fi
+  if ! running; then say "Opened $APP, but it is not running yet."; return 0; fi
+  # Its window must sign in to its server (the key hand-off). Without that it shows nothing, so the
+  # previous app goes back (Rhea M2).
+  i=0; while [ "$i" -lt 60 ] && ! window_signed_in; do wait_ticks 1; i=$((i + 1)); done
+  if window_signed_in; then say "Restarted onto $NEW."; return 0; fi
+  say "The new app's window never signed in to its server; putting the previous app back."
+  osascript -e "tell application id \"$BID\" to quit" >/dev/null 2>&1
+  if ! gone_within 30; then pid=$(app_pid); [ -n "$pid" ] && kill "$pid" 2>/dev/null; gone_within 10; fi
+  # Never swap the bundle under a running app (Rhea L1): left as is, with both apps where they are.
+  if running; then say "The new app would not exit; left as is. The previous app is in $PREV."; return 1; fi
+  rm -rf "$APP" && mv "$PREV" "$APP"
+  open "$APP"
+  return 1
 }
 
 # One waiter at a time. The lock holds its waiter's pid; a lock whose waiter is gone (killed with

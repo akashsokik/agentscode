@@ -7,6 +7,7 @@ import { agentForBranch, PRS_CACHE_MS, PRS_REFRESH_FLOOR_MS, PullRequests } from
 import { createApp } from '../server/app.ts';
 import { checksLabel, findIssueKeys, firstIssueKey, inView, isHttpUrl, latestReviews, normalizeCheck, normalizePr, prsInView, viewCounts, type PullRequest } from '../shared/prs.ts';
 import { harness, projectDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 // ---- issue keys -------------------------------------------------------------------------------
 
@@ -245,7 +246,7 @@ test('GET /api/github/prs serves the page data; ?refresh=1 is honoured, past the
   const manager = h.manager as unknown as { ghExec: Exec; gitRemote: (dir: string) => Promise<string | null> };
   manager.ghExec = async (_bin, args) => { calls.push(args); return { stdout: JSON.stringify(args.includes('merged') ? [] : [raw()]), stderr: '' }; };
   manager.gitRemote = async () => 'git@github.com:me/web.git';
-  const server = createApp(h.manager).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   try {
     const { port } = server.address() as { port: number };
