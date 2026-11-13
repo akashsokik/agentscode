@@ -118,11 +118,18 @@ export function migrateSuperView(view: string | undefined): SuperView | undefine
  * build, such as a tab kind that was later renamed); such a tab would crash the tab strip, so it is
  * dropped on load, and a pane that showed it shows nothing.
  */
-export const TAB_KINDS = ['agent', 'file', 'diff', 'comms', 'issues', 'pullRequests', 'work', 'channel', 'walkthrough', 'browser'] as const satisfies readonly TabContent['kind'][];
+/**
+ * Every tab kind, as a record so the typecheck fails when a kind is added to TabContent but not
+ * here: a kind missing from this list would make knownTabs drop those tabs on every reload.
+ */
+const TAB_KIND_SET: Record<TabContent['kind'], true> = {
+  agent: true, file: true, diff: true, comms: true, issues: true, pullRequests: true, work: true, channel: true, walkthrough: true, browser: true,
+};
+export const TAB_KINDS = Object.keys(TAB_KIND_SET) as TabContent['kind'][];
 
 /** The saved tabs this build knows, and the panes with any unknown tab cleared. */
 export function knownTabs(tabs: Tab[], panes: Pane[]): { tabs: Tab[]; panes: Pane[] } {
-  const known = tabs.filter(t => (TAB_KINDS as readonly string[]).includes(t?.content?.kind));
+  const known = tabs.filter(t => Object.hasOwn(TAB_KIND_SET, String(t?.content?.kind)));
   const ids = new Set(known.map(t => t.id));
   return { tabs: known, panes: panes.map(p => (p.tabId && !ids.has(p.tabId) ? { ...p, tabId: null } : p)) };
 }

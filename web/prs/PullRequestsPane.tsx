@@ -161,8 +161,8 @@ function PrRow({ pr, now, selected }: { pr: PullRequest; now: number; selected: 
 
 /** A check's state as the shared mark (MonoCode: neutral and skipped are both "skipping"). */
 const CHECK_STATE: Record<PrCheck['state'], StatusState> = { failure: 'fail', pending: 'pending', success: 'pass', skipped: 'skip', neutral: 'skip' };
-/** MonoCode's order (CHECK_STATES): failures first, then running, then passed, then skipped. */
-const CHECK_ORDER: StatusState[] = ['fail', 'pending', 'cancel', 'unknown', 'pass', 'skip'];
+/** MonoCode's order (CHECK_STATES): failures first, then running, then passed, then skipped. Only states CHECK_STATE gives. */
+const CHECK_ORDER: StatusState[] = ['fail', 'pending', 'pass', 'skip'];
 const REVIEW: Record<PrReview['state'], { word: string; state: StatusState }> = {
   approved: { word: 'Approved', state: 'pass' },
   changes_requested: { word: 'Changes requested', state: 'warn' },
@@ -221,18 +221,20 @@ function PrDetail({ pr, now }: { pr: PullRequest; now: number }) {
             </h4>
             <ul className="flex flex-col text-[12px]">
               {group.map((c, i) => {
+                const linked = isHttpUrl(c.url);
+                // A link carries the whole name; without one, the mark names its state itself.
                 const body = (
                   <>
-                    <span className="grid h-7 w-5 shrink-0 place-items-center"><StatusMark state={state} /></span>
+                    <span className="grid h-7 w-5 shrink-0 place-items-center"><StatusMark state={state} {...(linked ? {} : { label: statusWord(state) })} /></span>
                     <span className="min-w-0 flex-1 truncate text-content/85">{c.name}</span>
                     {c.workflow ? <span className="shrink-0 text-[11px] text-content/40">{c.workflow}</span> : null}
                   </>
                 );
                 return (
                   <li key={`${c.name}-${i}`}>
-                    {isHttpUrl(c.url)
+                    {linked
                       ? <a href={c.url} target="_blank" rel="noreferrer" aria-label={`${c.name}: ${statusWord(state)}`} className="flex h-7 items-center gap-2 rounded-md px-1 hover:bg-content/5">{body}</a>
-                      : <span aria-label={`${c.name}: ${statusWord(state)}`} className="flex h-7 items-center gap-2 px-1">{body}</span>}
+                      : <span className="flex h-7 items-center gap-2 px-1">{body}</span>}
                   </li>
                 );
               })}

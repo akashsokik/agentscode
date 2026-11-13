@@ -14,7 +14,9 @@ test('issue keys: code-hyphen-number, never a decision or note id, and only know
   assert.deepEqual(findIssueKeys('feat/ACH-12-short-title').map(k => k.key), ['ACH-12']);
   assert.deepEqual(findIssueKeys('Fixes ACH-12 and OSI-3; see ACH-12 again').map(k => k.key), ['ACH-12', 'OSI-3']);
   assert.deepEqual(findIssueKeys('Per ACH-D7 and ACH-N3, no key here').map(k => k.key), [], 'decision and note ids are not keys');
-  assert.deepEqual(findIssueKeys('xACH-4, ACH-4b, ach-4, ACHIEV-3').map(k => k.key), [], 'not inside a word, upper case, a 2-5 letter code (Fen\'s ISSUE_KEY)');
+  assert.deepEqual(findIssueKeys('xACH-4, ACH-4b, ach-4, ACHIEVE-3, 2AB-1').map(k => k.key), [], 'not inside a word, upper case, a code of 2-6 starting with a letter');
+  assert.deepEqual(findIssueKeys('OB2-5 and ACHIEV-3', ['OB2', 'ACHIEV']).map(k => k.key), ['OB2-5', 'ACHIEV-3'], 'the project-code grammar, as shared/issueKeys.ts');
+  assert.deepEqual(findIssueKeys('ACH-0, ACH-000 and ACH-1').map(k => k.key), ['ACH-1'], 'keys start at 1');
   assert.deepEqual(findIssueKeys('ACH-012 and ACH-12').map(k => k.key), ['ACH-12'], 'a leading zero is the same issue');
   assert.deepEqual(findIssueKeys('feat/ALL-12-x', ['ACH', 'ALL']).map(k => k.key), ['ALL-12'], 'ALL keys link when ALL is known');
   assert.deepEqual(findIssueKeys('UTF-8 and ISO-9001 and ACH-9', ['ACH']).map(k => k.key), ['ACH-9'], 'unknown codes are ignored when codes are given');
@@ -297,4 +299,7 @@ test('a saved tab of a kind this build does not know is dropped on load, and its
   const out = knownTabs(tabs, panes);
   assert.deepEqual(out.tabs.map(t => t.id), ['t1', 't3']);
   assert.deepEqual(out.panes, [{ id: 'p1', tabId: null }, { id: 'p2', tabId: 't3' }]);
+  // Every kind must be listed, or its tabs vanish on reload: the list is a Record over TabContent['kind'], so a missing kind fails the typecheck.
+  const fs = await import('node:fs');
+  assert.match(fs.readFileSync(new URL('../web/layout.ts', import.meta.url), 'utf8'), /const TAB_KIND_SET: Record<TabContent\['kind'\], true> = \{/);
 });
