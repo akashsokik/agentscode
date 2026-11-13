@@ -159,8 +159,13 @@ test('relations: removing one writes the issue that holds it; adding one is the 
   const rows = relationsOf(all, a);
   const blocks = rows.find(r => r.label === 'Blocks')!;
   const blockedBy = rows.find(r => r.label === 'Blocked by')!;
-  assert.deepEqual(relationRemoval(all, blocks, a.id), { id: a.id, relations: [] }, 'its own: this issue\'s list');
-  assert.deepEqual(relationRemoval(all, blockedBy, a.id), { id: c.id, relations: [{ type: 'related', issueId: b.id }] }, 'from the other side: that issue\'s list, the rest kept');
+  assert.deepEqual(relationRemoval(all, blocks, a.id), [{ id: a.id, relations: [] }], 'its own: this issue\'s list');
+  assert.deepEqual(relationRemoval(all, blockedBy, a.id), [{ id: c.id, relations: [{ type: 'related', issueId: b.id }] }], 'from the other side: that issue\'s list, the rest kept');
+  // "related" stored on both sides: one removal drops both copies (Ivy's nit).
+  const x = issue(); const y = issue();
+  x.relations = [{ type: 'related', issueId: y.id }]; y.relations = [{ type: 'related', issueId: x.id }, { type: 'blocks', issueId: x.id }];
+  const related = relationsOf([x, y], x).find(r => r.label === 'Related to')!;
+  assert.deepEqual(relationRemoval([x, y], related, x.id), [{ id: x.id, relations: [] }, { id: y.id, relations: [{ type: 'blocks', issueId: x.id }] }]);
   assert.deepEqual(withRelation(a, 'related', c.id), [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: c.id }]);
   assert.equal(withRelation(a, 'blocks', b.id), null, 'already there');
   assert.equal(withRelation(a, 'blocks', a.id), null, 'itself');
@@ -189,4 +194,13 @@ test('activity reads parent and relation changes with the issues\' keys (Fen\'s 
   assert.equal(activityLine(e({ kind: 'relation', to: 'blocks:o7' }), agent, keys), 'added: blocks ACH-7');
   assert.equal(activityLine(e({ kind: 'relation', from: 'related:o2' }), agent, keys), 'removed: related to ACH-2');
   assert.equal(activityLine(e({ kind: 'relation', to: 'duplicate_of:gone' }), agent, keys), 'added: duplicate of a removed issue');
+});
+
+test('issue text renders inert: an openui-lang block in a description or comment never draws live UI (Ivy L1)', () => {
+  for (const file of ['../web/issues/view/EditableText.tsx', '../web/issues/view/Activity.tsx']) {
+    const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    const renders = source.match(/<Markdown\b[^>]*>/g) ?? [];
+    assert.ok(renders.length > 0, file);
+    for (const r of renders) assert.match(r, /\binert\b/, `${file}: ${r}`);
+  }
 });

@@ -71,8 +71,7 @@ export function Relations({ issue, issues }: { issue: SuperIssue; issues: SuperI
   const [adding, setAdding] = useState<HTMLElement | null>(null);
   const [type, setType] = useState<IssueRelationType>('blocks');
   const remove = (row: (typeof rows)[number]) => {
-    const write = relationRemoval(issues, row, issue.id);
-    if (write) void writeIssue(write.id, { relations: write.relations });
+    for (const write of relationRemoval(issues, row, issue.id)) void writeIssue(write.id, { relations: write.relations });
   };
   const add = (otherId: string) => {
     const relations = withRelation(issue, type, otherId);

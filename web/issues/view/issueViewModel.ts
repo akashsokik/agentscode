@@ -170,15 +170,21 @@ export async function commitEdit<T>(next: T | undefined, write: (value: T) => Pr
 }
 
 /**
- * Removing a relation row: the write that drops it from the issue that stores it (this one for
- * Blocks, Related to, Duplicate of; the other for Blocked by and Duplicated by).
+ * Removing a relation row: the writes that drop it from every issue that stores it. Blocks and
+ * Duplicate of live on one side; "related" can be stored on both, and both copies go in one action.
  */
-export function relationRemoval<T extends Pick<SuperIssue, 'id' | 'relations'>>(issues: readonly T[], row: { holderId: string; type: IssueRelationType; issue: { id: string } }, selfId: string): { id: string; relations: SuperIssue['relations'] } | null {
-  const holder = issues.find(i => i.id === row.holderId);
-  if (!holder) return null;
+export function relationRemoval<T extends Pick<SuperIssue, 'id' | 'relations'>>(issues: readonly T[], row: { holderId: string; type: IssueRelationType; issue: { id: string } }, selfId: string): { id: string; relations: SuperIssue['relations'] }[] {
   const otherId = row.holderId === selfId ? row.issue.id : selfId;
-  const relations = holder.relations.filter(r => !(r.type === row.type && r.issueId === otherId));
-  return relations.length === holder.relations.length ? null : { id: holder.id, relations };
+  const pairs: [string, string][] = [[row.holderId, otherId]];
+  if (row.type === 'related') pairs.push([otherId, row.holderId]);
+  const writes: { id: string; relations: SuperIssue['relations'] }[] = [];
+  for (const [holderId, targetId] of pairs) {
+    const holder = issues.find(i => i.id === holderId);
+    if (!holder) continue;
+    const relations = holder.relations.filter(r => !(r.type === row.type && r.issueId === targetId));
+    if (relations.length !== holder.relations.length) writes.push({ id: holder.id, relations });
+  }
+  return writes;
 }
 
 /** Adding a relation: the issue's own list with it, or null when it is already there or is itself. */

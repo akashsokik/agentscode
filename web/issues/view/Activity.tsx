@@ -46,7 +46,7 @@ function EventRow({ event }: { event: IssueEvent }) {
       </div>
       {event.kind === 'comment' && event.text ? (
         <div className="mb-1 ml-6 rounded-lg bg-content/4 px-3 py-2">
-          <Markdown text={event.text} className="text-[12.5px] leading-relaxed text-content/80" />
+          <Markdown inert text={event.text} className="text-[12.5px] leading-relaxed text-content/80" />
         </div>
       ) : null}
     </li>

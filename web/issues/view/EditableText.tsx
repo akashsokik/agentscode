@@ -95,7 +95,7 @@ export function IssueDescription({ id, text }: { id: string; text: string }) {
       onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); setEditing(true); } }}
       className="-mx-1 cursor-text rounded-md px-1 py-0.5 outline-none hover:bg-content/4 focus-visible:bg-content/5"
     >
-      {text.trim() ? <Markdown text={text} className="text-[13px] leading-[1.6] text-content/80" /> : <p className="font-sans text-[13px] text-content/40">Add a description…</p>}
+      {text.trim() ? <Markdown inert text={text} className="text-[13px] leading-[1.6] text-content/80" /> : <p className="font-sans text-[13px] text-content/40">Add a description…</p>}
     </div>
   );
 }
