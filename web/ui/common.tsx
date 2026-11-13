@@ -4,6 +4,7 @@
  */
 import type { KeySpec } from '../keys.ts';
 import { Kbd } from './Kbd.tsx';
+import { menuRowTone } from './menuRowTone.ts';
 import { createContext, useContext, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import { Check, type IconComponent } from '../mono/icons.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
@@ -180,7 +181,7 @@ export function MenuDivider() {
 /** Rows inside a ContextMenu are menu items; elsewhere (pickers) they are options. */
 export const MenuRowRole = createContext<'option' | 'menuitem'>('option');
 
-export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, current, highlighted, onSelect, disabled, danger, role: roleProp }: {
+export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, current, highlighted, active, onSelect, disabled, danger, role: roleProp }: {
   icon?: IconComponent;
   title: ReactNode;
   hint?: ReactNode;
@@ -188,12 +189,16 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
   shortcut?: KeySpec;
   /** Defaults to MenuRowRole: 'menuitem' inside a ContextMenu, 'option' in pickers. */
   role?: 'option' | 'menuitem';
+  /** The chosen value, with a check mark and the quiet fill. */
   selected?: boolean;
-  /** Multi-select: a check mark without the selected fill, so the keyboard highlight stays readable. */
+  /** Multi-select: a check mark without a fill, so the keyboard row stays readable. */
   checked?: boolean;
-  /** The value in force, in a submenu: the selected fill with no check mark (ACH-D46). */
+  /** The value in force, in a submenu: the quiet fill with no check mark (ACH-D46 3, ACH-D49). */
   current?: boolean;
+  /** The row the keyboard is on while focus stays elsewhere (a picker's search field): the strong fill. */
   highlighted?: boolean;
+  /** The same as highlighted, by the name the issue view uses. */
+  active?: boolean;
   onSelect: () => void;
   disabled?: boolean;
   /** Destructive actions read red, like SecondaryButton's danger variant. */
@@ -210,9 +215,7 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
       disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onSelect}
-      className={`flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-40 ${
-        danger ? 'text-danger hover:bg-danger/10' : highlighted || selected || current ? 'bg-selection text-content' : 'text-content hover:bg-content/5'
-      }`}
+      className={`flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-40 ${menuRowTone({ danger, keyboard: highlighted || active, quiet: current || selected })}`}
     >
       {Icon ? <Icon className={`mt-0.5 size-3.5 shrink-0 ${danger ? '' : 'text-content/70'}`} strokeWidth={1.75} /> : null}
       <span className="min-w-0 flex-1">

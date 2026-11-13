@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { findRefIds } from '../../shared/refs.ts';
 import { showNotesPanel } from '../layout.ts';
 import { LAYER } from '../mono/layers.ts';
-import { chipClass, DecisionGlyph, kindWord, NoteGlyph, shortDate, StatusPill, WhoAvatar } from './parts.tsx';
+import { chipClass, DecisionGlyph, KindGlyph, kindWord, NoteGlyph, shortDate, StatusPill, WhoAvatar } from './parts.tsx';
 import { getNotes, openNote, useNotes } from './refsState.ts';
 
 /** How long the pointer rests on a chip before its card shows, and how long it may leave it. */
@@ -33,9 +33,11 @@ export function openInNotes(id: string): void {
  * with the kind, id, status, title, the gist, who and when, and how often it is cited; clicking it,
  * or Enter, opens the entry in the Notes tab. Escape closes the card.
  */
-export function RefChip({ id, fade, inert = false }: {
+export function RefChip({ id, fade, inert = false, glyph = true }: {
   id: string;
   fade?: boolean;
+  /** false inside a section that already names the kind, such as a "Decisions" list (ACH-D37, ACH-D48). */
+  glyph?: boolean;
   /** Inside another control (a row that is itself a button): a span that still shows its card on hover and opens on click, without being a second tab stop. */
   inert?: boolean;
 }) {
@@ -60,7 +62,7 @@ export function RefChip({ id, fade, inert = false }: {
           onMouseLeave={() => later(false, CLOSE_DELAY)}
           onClick={(event) => { event.stopPropagation(); event.preventDefault(); close(); openInNotes(id); }}
         >
-          {summary.kind === 'D' ? <DecisionGlyph /> : <NoteGlyph />}
+          <KindGlyph kind={summary.kind} show={glyph} />
           {id}
         </span>
       ) : (
@@ -79,7 +81,7 @@ export function RefChip({ id, fade, inert = false }: {
           onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.stopPropagation(); close(); } }}
           onClick={(event) => { event.stopPropagation(); close(); openInNotes(id); }}
         >
-          {summary.kind === 'D' ? <DecisionGlyph /> : <NoteGlyph />}
+          <KindGlyph kind={summary.kind} show={glyph} />
           {id}
         </button>
       )}
