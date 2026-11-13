@@ -177,15 +177,15 @@ test('without the server, a changed pre-push stops the push rather than letting 
   assert.match(r.stderr, /push check was changed/);
 });
 
-test('PodCode\'s git stays first in login shells (bash -l, zsh -l) and Claude Code\'s shell; your own BASH_ENV and ZDOTDIR still run', () => {
+test('PodCode\'s git stays first in login shells (bash -l, zsh -l, which Claude Code and Codex use); your own BASH_ENV and ZDOTDIR still run', () => {
   const s = setup();
   const shim = path.join(s.hooks, 'bin', 'git');
   for (const shell of [['bash', '-c'], ['bash', '-lc'], ['zsh', '-c'], ['zsh', '-lc'], ['zsh', '-ic'], ['sh', '-c']]) {
     const r = spawnSync(shell[0], [shell[1], 'command -v git'], { cwd: s.app, env: { ...s.agentEnv, HOME: s.dir }, encoding: 'utf8' });
     assert.equal(r.stdout.trim().split('\n').pop(), shim, shell.join(' '));
   }
-  // Claude Code sources CLAUDE_ENV_FILE before each command; it puts the shim back first.
-  const r = spawnSync('sh', ['-c', `PATH=/usr/bin:/bin; . "$CLAUDE_ENV_FILE"; command -v git`], { env: s.agentEnv, encoding: 'utf8' });
+  // The BASH_ENV file puts the shim back first after anything reset PATH.
+  const r = spawnSync('sh', ['-c', `PATH=/usr/bin:/bin; . "$BASH_ENV"; command -v git`], { env: s.agentEnv, encoding: 'utf8' });
   assert.equal(r.stdout.trim(), shim);
   const user = path.join(s.dir, 'userz'); fs.mkdirSync(user);
   fs.writeFileSync(path.join(user, '.zshenv'), 'export MINE=zshenv\n');

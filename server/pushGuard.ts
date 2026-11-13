@@ -163,7 +163,7 @@ fi
 exec "$real" -c "core.hooksPath=$hooks" "$@"
 `;
 
-/** For bash -l and Claude Code's shell: the shim first on PATH again, after the profile ran. */
+/** For bash (BASH_ENV): the shim first on PATH again, after a login profile ran. */
 const ENV_SH = (bin: string) => `${PUSH_GUARD_MARK}: keeps PodCode's git first on PATH.
 if [ -n "\${PODCODE_USER_BASH_ENV:-}" ] && [ -f "$PODCODE_USER_BASH_ENV" ]; then . "$PODCODE_USER_BASH_ENV"; fi
 case "$PATH" in '${bin}:'*) ;; *) PATH='${bin}':"$PATH"; export PATH;; esac
@@ -255,8 +255,9 @@ export function pushGuardDir(): string | null {
 
 /**
  * The environment an agent process runs with: PodCode's git first on PATH, and kept first by
- * bash (BASH_ENV, which runs after a login profile), zsh (ZDOTDIR) and Claude Code's shell
- * (CLAUDE_ENV_FILE), whose startup files would otherwise put another git ahead of it.
+ * bash (BASH_ENV, which runs after a login profile) and zsh (ZDOTDIR, which Claude Code's and
+ * Codex's shells start through), whose startup files would otherwise put another git ahead of it.
+ * Not CLAUDE_ENV_FILE: Claude Code's SessionStart hooks write their own exports there.
  */
 export function pushGuardEnv(env: NodeJS.ProcessEnv = process.env, dir = installed?.dir ?? null): NodeJS.ProcessEnv {
   if (!dir) return { ...env };
@@ -264,7 +265,7 @@ export function pushGuardEnv(env: NodeJS.ProcessEnv = process.env, dir = install
   const zdot = path.join(dir, 'zsh');
   const envSh = path.join(dir, 'env.sh');
   const rest = (env.PATH ?? '').split(path.delimiter).filter(p => p && p !== bin);
-  const out: NodeJS.ProcessEnv = { ...env, PATH: [bin, ...rest].join(path.delimiter), BASH_ENV: envSh, CLAUDE_ENV_FILE: envSh, ZDOTDIR: zdot };
+  const out: NodeJS.ProcessEnv = { ...env, PATH: [bin, ...rest].join(path.delimiter), BASH_ENV: envSh, ZDOTDIR: zdot };
   if (env.BASH_ENV && env.BASH_ENV !== envSh) out.PODCODE_USER_BASH_ENV = env.BASH_ENV;
   if (env.ZDOTDIR && env.ZDOTDIR !== zdot) out.PODCODE_USER_ZDOTDIR = env.ZDOTDIR;
   return out;
@@ -307,7 +308,7 @@ export function disablesPushGuard(command: string): string | null {
   if (/core\.hooksPath/i.test(text)) return 'changing core.hooksPath turns the push check off';
   if (/\bsend-pack\b|\bhttp-push\b/.test(text)) return 'git send-pack writes to a remote without the push check';
   if (/(^|[\s;|&(])\/[\w./-]*\/git\s+([^\n;|&]*\s)?push\b/.test(text)) return 'running another git by its full path skips the push check';
-  if (/\b(BASH_ENV|ZDOTDIR|CLAUDE_ENV_FILE)=/.test(text)) return 'changing the shell startup that keeps PodCode\'s git first';
+  if (/\b(BASH_ENV|ZDOTDIR)=/.test(text)) return 'changing the shell startup that keeps PodCode\'s git first';
   if (/git-hooks\/(bin|zsh|env\.sh|pre-push|[a-z-]+\b)/.test(text) && /(>|\b(cp|mv|rm|ln|tee|sed\s+-i|chmod|truncate|install)\b)/.test(text)) return 'changing PodCode\'s push check files';
   if (/\benv\s+(-[a-zA-Z]*i\b|--ignore-environment\b)/.test(text)) return 'env -i drops the push check';
   if (/PODCODE_PUSH_OVERRIDE=/.test(text) && !/PODCODE_PUSH_OVERRIDE=[a-f0-9]{24}\b/.test(text)) return 'a made-up push override';
