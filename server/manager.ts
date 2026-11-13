@@ -1740,10 +1740,10 @@ export class AgentManager {
     }
     if (tool === 'update_issue' || tool === 'complete_issue') {
       const parsed = tool === 'update_issue' ? updateIssueInput.safeParse(args) : completeIssueInput.safeParse(args);
-      if (!parsed.success) return fail('Give the issue id, what to change (status, text, agent_id, delegation_id or notes), and a why.');
-      const input = parsed.data as { issue_id: string; status?: SuperIssue['status']; text?: string; agent_id?: string; delegation_id?: string; notes?: string; why: string };
-      if (tool === 'update_issue' && [input.status, input.text, input.agent_id, input.delegation_id, input.notes].every(v => v === undefined)) {
-        return fail('Say what to change: status, text, agent_id, delegation_id or notes.');
+      if (!parsed.success) return fail('Give the issue id, what to change (status, text, title, agent_id, delegation_id or notes), and a why.');
+      const input = parsed.data as { issue_id: string; status?: SuperIssue['status']; text?: string; title?: string; agent_id?: string; delegation_id?: string; notes?: string; why: string };
+      if (tool === 'update_issue' && [input.status, input.text, input.title, input.agent_id, input.delegation_id, input.notes].every(v => v === undefined)) {
+        return fail('Say what to change: status, text, title, agent_id, delegation_id or notes.');
       }
       // Issues are handed out only in update turns. Mail about work you asked for skips the wake limits,
       // so an issue started from it would skip them too: starting one (in progress, or given to an agent) there is refused.
@@ -1755,13 +1755,15 @@ export class AgentManager {
       const issue = this.superStore.updateIssue(before.id, {
         ...(tool === 'complete_issue' ? { status: 'done' as const } : input.status ? { status: input.status } : {}),
         ...(input.text !== undefined ? { text: input.text } : {}),
+        ...(input.title !== undefined ? { title: input.title } : {}),
         ...(agentId !== undefined ? { agentId } : {}),
         ...(input.delegation_id !== undefined ? { delegationId: input.delegation_id } : {}),
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
       });
       const who = issue.agentId ? this.store.agents.get(issue.agentId)?.name : undefined;
-      const summary = tool === 'complete_issue' ? `Completed the issue "${clip(issue.text, 120)}"`
-        : `Issue "${clip(issue.text, 100)}": ${[issue.status !== before.status && issue.status.replace('_', ' '), who && issue.agentId !== before.agentId && `given to ${who}`, input.text !== undefined && 'reworded', input.notes !== undefined && 'notes'].filter(Boolean).join(', ') || 'updated'}`;
+      // The title, one line, names it in the Decisions log (the text may run to several lines).
+      const summary = tool === 'complete_issue' ? `Completed the issue "${clip(issue.title, 120)}"`
+        : `Issue "${clip(issue.title, 100)}": ${[issue.status !== before.status && issue.status.replace('_', ' '), who && issue.agentId !== before.agentId && `given to ${who}`, input.text !== undefined && 'reworded', input.title !== undefined && 'retitled', input.notes !== undefined && 'notes'].filter(Boolean).join(', ') || 'updated'}`;
       this.recordSuper({ tool, why: input.why, undo: { kind: 'issue', issueId: issue.id, before }, summary });
       return { updated: issue };
     }
