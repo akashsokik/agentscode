@@ -289,7 +289,7 @@ test('a saved tab of a kind this build does not know is dropped on load, and its
   assert.ok(TAB_KINDS.includes('pullRequests'));
   const tabs = [
     { id: 't1', content: { kind: 'pullRequests' } },
-    { id: 't2', content: { kind: 'retiredKind' } },
+    { id: 't2', content: { kind: 'retired' } },
     { id: 't3', content: { kind: 'comms' } },
     { id: 't4' },
   ] as never;
