@@ -284,6 +284,10 @@ export function createApp(
   app.get('/api/refs/:id', (req, res) => {
     res.json(manager.notes.get(param(req, 'id')));
   });
+  // The Pull requests page, read only: open and recently merged PRs across the projects (ACH-D43).
+  app.get('/api/github/prs', async (req, res) => {
+    res.json(await manager.prs.list(query(req, 'refresh') === '1'));
+  });
   app.get('/api/dream-stats', (_req, res) => {
     res.json(manager.dreamStats());
   });

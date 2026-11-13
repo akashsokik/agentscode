@@ -12,10 +12,8 @@ import { attempt, useApp } from '../store.ts';
 import { useNow } from '../ui/useNow.ts';
 import { cx, Empty, HeaderButton, StatusLabel, type Tone } from '../ui/common.tsx';
 import { PeerBubble } from './PeerMessages.tsx';
-import {
-  AlertCircle, ArrowLeft, Bot, CheckCheck, CheckCircle, ChevronDown, CircleX, Clock, MessageMultiple, Search, Square, X,
-  type IconComponent,
-} from '../mono/icons.tsx';
+import { ArrowLeft, Bot, CheckCheck, ChevronDown, Clock, MessageMultiple, Search, Square, X, type IconComponent } from '../mono/icons.tsx';
+import { StatusMark, type StatusState } from '../ui/StatusMark.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useFollowLatest } from './ChannelPosts.tsx';
@@ -58,21 +56,26 @@ export function MessageStatus({ message }: { message: PeerMessage }) {
   );
 }
 
-/** inboxStatusMark for conversations: an icon in the state's colour. Working spins instead. */
-const STATE_MARK: Record<Exclude<ThreadState, 'working'>, { icon: IconComponent; className: string }> = {
-  stopped: { icon: Square, className: 'text-content/40' },
+/** inboxStatusMark for conversations. Results and stopped use the shared status mark (ACH-D45, ACH-D48); queued
+ * keeps its clock; working spins. */
+const STATE_MARK: Record<Exclude<ThreadState, 'working'>, { icon: IconComponent; className: string } | { status: StatusState; quiet?: boolean }> = {
+  // A stopped conversation was cancelled: the shared cancel mark (ACH-D48), not a box that reads as a checkbox.
+  stopped: { status: 'cancel' },
   queued: { icon: Clock, className: 'text-content/50' },
-  failed: { icon: CircleX, className: 'text-danger' },
-  changes: { icon: AlertCircle, className: 'text-warning' },
-  blocked: { icon: AlertCircle, className: 'text-warning' },
-  approved: { icon: CheckCircle, className: 'text-success' },
-  done: { icon: CheckCircle, className: 'text-success' },
-  handled: { icon: CheckCheck, className: 'text-content/40' },
+  failed: { status: 'fail' },
+  changes: { status: 'warn' },
+  blocked: { status: 'warn' },
+  approved: { status: 'pass' },
+  done: { status: 'pass' },
+  // Handled needs nothing from you: the pass mark without its colour (was a double tick).
+  handled: { status: 'pass', quiet: true },
 };
 
 function StateIcon({ state, className = 'size-3' }: { state: ThreadState; className?: string }) {
   if (state === 'working') return <TerminalSpinner className="text-content/60" />;
-  const { icon: Icon, className: tone } = STATE_MARK[state];
+  const mark = STATE_MARK[state];
+  if ('status' in mark) return <StatusMark state={mark.status} quiet={mark.quiet} className={className} />;
+  const { icon: Icon, className: tone } = mark;
   return <Icon aria-hidden className={cx('shrink-0', className, tone)} strokeWidth={1.75} />;
 }
 
@@ -484,7 +487,7 @@ function TailStop({ stop, agents, fresh, first, last }: { stop: TimelineTail; ag
   }
   if (stop.kind === 'budget') {
     return (
-      <TimelineStop first={first} last={last} fresh={fresh} node={<AlertCircle className="size-4 text-warning" strokeWidth={1.75} />}>
+      <TimelineStop first={first} last={last} fresh={fresh} node={<StatusMark state="warn" />}>
         <p className="flex h-5 min-w-0 items-center gap-1.5 font-sans text-[12px] text-content/50">
           <span className="shrink-0 font-medium text-content">Message budget used up</span>
           <span aria-hidden>·</span>
@@ -494,7 +497,7 @@ function TailStop({ stop, agents, fresh, first, last }: { stop: TimelineTail; ag
     );
   }
   return (
-    <TimelineStop first={first} last={last} fresh={fresh} node={<Square className="size-2.5 fill-current text-content/45" strokeWidth={0} />}>
+    <TimelineStop first={first} last={last} fresh={fresh} node={<StatusMark state="cancel" />}>
       <p className="flex h-5 min-w-0 items-center gap-1.5 font-sans text-[12px] text-content/50">
         <span className="shrink-0 font-medium text-content">Conversation stopped</span>
         <span aria-hidden>·</span>
