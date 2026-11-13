@@ -5,7 +5,7 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import type { IssueRelationType, SuperIssue } from '../../../shared/types.ts';
-import { open } from '../../layout.ts';
+import { showIssueInList } from '../openIssue.ts';
 import { CornerDownRight, GitBranch, Plus, Route, StickyNote, X } from '../../mono/icons.tsx';
 import { useNotes } from '../../notes/refsState.ts';
 import { RefChip } from '../../notes/RefChip.tsx';
@@ -41,7 +41,8 @@ export function IssueLine({ issue, lead }: { issue: SuperIssue; lead?: ReactNode
     <button
       type="button"
       data-issue-line={issue.id}
-      onClick={() => open({ kind: 'issue', issueId: issue.id })}
+      // Shown on the Issues page, selected in its list, as everywhere else (ACH-D54): no tab of its own.
+      onClick={() => showIssueInList(issue.id)}
       title={`${issue.key} ${issue.title}`}
       className="flex h-[30px] w-full min-w-0 items-center gap-2 rounded-[7px] px-1.5 text-left font-sans text-[12.5px] outline-none transition-colors hover:bg-content/5 focus-visible:bg-content/7"
     >

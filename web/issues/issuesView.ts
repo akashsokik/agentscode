@@ -333,3 +333,27 @@ export function revealIssue(issue: SuperIssue, choice: { view: IssuesViewName; f
   if (!matchesQuery(issue, choice.query)) out.query = '';
   return Object.keys(out).length ? out : null;
 }
+
+/**
+ * Which issue the detail shows (ACH-23): the one asked for (the tab's issueId) while it exists;
+ * else the one shown last while it is still listed, so a live update that reorders the list never
+ * swaps the detail by itself; else the first listed, as Comms does.
+ */
+export function shownIssueId(listed: readonly string[], asked: string | undefined, askedExists: boolean, last: string | undefined): string | undefined {
+  if (asked && askedExists) return asked;
+  if (last && listed.includes(last)) return last;
+  return listed[0];
+}
+
+/**
+ * Where the selection goes when the shown issue leaves the list on its own (removed, canceled out of
+ * the view, moved to a status the view leaves out): its neighbour as the list stood, the next one,
+ * else the one before. null when it is still listed, or was not listed before.
+ */
+export function neighbourAfterLeaving(before: readonly string[], after: readonly string[], id: string): string | null {
+  if (after.includes(id)) return null;
+  const at = before.indexOf(id);
+  if (at < 0) return null;
+  for (const candidate of [...before.slice(at + 1), ...before.slice(0, at).reverse()]) if (after.includes(candidate)) return candidate;
+  return null;
+}

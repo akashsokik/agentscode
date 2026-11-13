@@ -52,6 +52,15 @@ export function IssueDescription({ id, text }: { id: string; text: string }) {
   const shown = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!editing) setDraft(text); }, [text, editing]);
   const close = () => { setEditing(false); requestAnimationFrame(() => shown.current?.focus()); };
+  // Leaving with the editor open (another issue picked, the tab closed) saves the draft rather than
+  // dropping what was typed (ACH-23); an unchanged or empty draft saves nothing.
+  const pending = useRef({ editing, draft, text });
+  pending.current = { editing, draft, text };
+  useEffect(() => () => {
+    const { editing: open, draft: typed, text: saved } = pending.current;
+    const next = open ? descriptionToSave(typed, saved) : null;
+    if (next) void writeIssue(id, { text: next });
+  }, [id]);
   const save = async () => {
     if (busy) return;
     setBusy(true);
