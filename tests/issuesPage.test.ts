@@ -218,14 +218,14 @@ test('opening an issue shows its issue view in a tab; the same issue focuses the
   assert.deepEqual(shown(), { kind: 'issue', issueId: 'i1' }, 'its tab is shown again');
 });
 
-test('a page row selects its issue; a panel row shows the issue on the Issues page; neither unfolds a row to show details', async () => {
+test('a page row opens the issue view; a panel row shows the issue on the Issues page; neither unfolds a row to show details', async () => {
   const { readFileSync } = await import('node:fs');
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
   const parts = read('../web/issues/issueParts.tsx');
   const row = parts.slice(parts.indexOf('export function IssueRow('), parts.indexOf('export function MenuPage'));
-  assert.match(row, /onOpen = \(\) => showIssueInList\(issue\.id\)/, 'a page row selects its issue (ACH-D54)');
+  assert.match(row, /onOpen = \(\) => openIssue\(issue\.id\)/, 'the page row opens the issue view by default');
   assert.doesNotMatch(row, /expanded=/, 'the page row has no expand');
-  assert.match(read('../web/issues/IssuesPage.tsx'), /<IssueRow key=\{issue\.id\} issue=\{issue\} properties=\{display\.properties\} today=\{today\} now=\{now\} selected=\{issue\.id === issueId\} \/>/, 'no onOpen override: the default selects; the selected issue is marked');
+  assert.match(read('../web/issues/IssuesPage.tsx'), /<IssueRow key=\{issue\.id\} issue=\{issue\} properties=\{display\.properties\} today=\{today\} now=\{now\} selected=\{issue\.id === issueId\} \/>/, 'no onOpen override: the default opens the view; the selected issue is marked');
   const panel = read('../web/panes/SuperPanel.tsx');
   const item = panel.slice(panel.indexOf('function IssueItem('), panel.indexOf('export function RoutinesView'));
   assert.match(item, /onOpen=\{\(\) => showIssueInList\(issue\.id\)\}/, 'a panel row shows the issue on the Issues page (ACH-D52)');

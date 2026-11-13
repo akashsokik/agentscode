@@ -23,7 +23,7 @@ import {
 // Active, Backlog and Mine, with Filter (F) and its chips, Display (⇧V) for grouping, order and row
 // properties, and wide one-line rows. Built from the panel list's pieces (ACH-D23): PaneFrame,
 // PanelToolbar, PanelSection, PanelRow, ContextMenu rows and mono's Popover, Segmented and Toggle.
-// A row click selects its issue (showIssueInList), as Comms selects a conversation (ACH-D54).
+// An issue opens the issue view in a tab, with its properties sidebar (openIssue, ACH-D43 section C).
 
 const EMPTY_VIEW: Record<IssuesViewName, string> = {
   all: 'No issues yet.',
