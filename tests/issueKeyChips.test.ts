@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Element, Root } from 'hast';
 import { findIssueKeyChips, rehypeRefChips } from '../web/ui/rehypeRefChips.ts';
+import { issueGist, updated } from '../web/ui/issueCard.ts';
 
 // Issue keys in rendered text become chips that show the issue on the Issues page (Phase 6, ACH-23):
 // only keys of issues that exist, never in code, a link, a path or a longer word.
@@ -47,4 +48,12 @@ test('rehypeRefChips marks issue keys beside note and decision ids, never in cod
   const plain: Root = { type: 'root', children: [el('p', [txt('ACH-23')])] };
   rehypeRefChips({ known: () => false })(plain);
   assert.deepEqual((plain.children[0] as Element).children, [txt('ACH-23')]);
+});
+
+test('the issue card: the gist of a description in plain words, and when it changed (ACH-33)', () => {
+  assert.equal(issueGist('## Steps\n\n- open **the** view\n- press `S`\n\n```\ncode\n```\nSee [the doc](https://x).'), 'Steps open the view press S See the doc.');
+  assert.equal(issueGist('x'.repeat(400)).length, 280);
+  assert.equal(updated('now'), 'Updated just now');
+  assert.equal(updated('5m'), 'Updated 5m ago');
+  assert.equal(updated('4h 36m'), 'Updated 4h 36m ago');
 });
