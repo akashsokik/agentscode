@@ -14,7 +14,7 @@ import { attempt, useApp } from '../store.ts';
 import { cx, MenuDivider, MenuLabel, MenuRow, MenuRowRole } from '../ui/common.tsx';
 import { PanelRow } from '../ui/PanelList.tsx';
 import { dueBucket, type RowProperty } from './issuesView.ts';
-import { openIssue } from './openIssue.ts';
+import { showIssueInList } from './openIssue.ts';
 
 // The pieces an issue is drawn with, shared by the Issues page and (phase 4) the right panel's list.
 
@@ -101,17 +101,17 @@ export function assigneeName(issue: SuperIssue, agentName: string | undefined): 
 /**
  * One issue on one wide line: status, title, then (as the Display chooses) key, priority, labels,
  * project, due date, assignee and when it last changed. The narrower the page, the fewer of these
- * show (container `issues`); the full text is in the row's tooltip. A click, Enter or Open opens
- * the issue view in a tab (openIssue): the row never unfolds to show details.
+ * show (container `issues`); the full text is in the row's tooltip. A click, Enter or Open selects
+ * the issue (showIssueInList), as Comms selects a conversation (ACH-D54); the row never unfolds.
  */
-export function IssueRow({ issue, properties, today, now, selected = false, onOpen = () => openIssue(issue.id) }: {
+export function IssueRow({ issue, properties, today, now, selected = false, onOpen = () => showIssueInList(issue.id) }: {
   issue: SuperIssue;
   properties: readonly RowProperty[];
   today: string;
   now: number;
   /** The issue the page has selected (ACH-D52). */
   selected?: boolean;
-  /** Defaults to opening the issue view. */
+  /** Defaults to selecting the issue on the Issues page (ACH-D54: its detail shows beside the list). */
   onOpen?: () => void;
 }) {
   const project = useApp(s => (issue.projectId ? s.snapshot?.projects.find(p => p.id === issue.projectId) : undefined));
