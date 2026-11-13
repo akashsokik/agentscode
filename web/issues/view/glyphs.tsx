@@ -37,7 +37,7 @@ export function StatusGlyph({ status, className, title }: GlyphProps & { status:
     case 'waiting': return <svg {...props}><path d="M6 4.5v7M10 4.5v7" /></svg>; // Pause, as Fen's approved set (ACH-D46 A)
     case 'needs_you': return <svg {...props}><circle cx="8" cy="8" r="5.6" /><path d="M8 5.2v3.3M8 10.7v.1" /></svg>;
     case 'done': return <svg {...props}><circle cx="8" cy="8" r="5.6" /><path d="m5.6 8.2 1.7 1.7 3.2-3.4" /></svg>;
-    case 'canceled': return <svg {...props}><circle cx="8" cy="8" r="5.6" /><path d="M5.6 8h4.8" /></svg>;
+    case 'canceled': return <svg {...props}><path d="M4 8h8" /></svg>; // a bare minus, as StatusMark's cancel (ACH-D45)
   }
 }
 
