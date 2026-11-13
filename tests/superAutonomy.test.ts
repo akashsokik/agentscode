@@ -8,6 +8,7 @@ import { Store } from '../server/store.ts';
 import { ACTION_KINDS, actionVerdict, ALL_ASK_FIRST, autonomyInstructions, cleanAutonomy, createCapText, SOUL_LINE_FROM, SOUL_LINE_TO, suggestedSoul, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
 import { DEFAULT_SETTINGS } from '../shared/types.ts';
 import { harness, projectDir, settle, tempDir } from './helpers.ts';
+import { redeemOverride } from '../server/pushGuard.ts';
 import { forbiddenGit, gatedVerbs } from '../shared/gitGuard.ts';
 import { execFileSync } from 'node:child_process';
 
@@ -383,7 +384,10 @@ test('M1: one approval cannot be used by two concurrent take_action calls; an ap
   const sent = t.store.messages.filter(m => m.toAgentId === t.ada.id && m.delegation?.task === force.task).at(-1)!;
   const token = /PODCODE_PUSH_OVERRIDE=([a-f0-9]{24})/.exec(sent.delegation!.acceptanceCriteria)?.[1];
   assert.ok(token, 'the token is in the task');
-  assert.ok(fs.existsSync(path.join(t.store.dataDir, 'git-hooks', 'overrides', token!)), 'and on disk, for the push check');
+  // Kept in PodCode's memory, for that branch, once: nothing on disk an agent could write (Rhea round 3).
+  assert.ok(!fs.existsSync(path.join(t.store.dataDir, 'git-hooks', 'overrides', token!)), 'not a file');
+  assert.equal(redeemOverride(token, 'refs/heads/fix/x(overwrite)'), true, 'good for fix/x');
+  assert.equal(redeemOverride(token, 'refs/heads/fix/x(overwrite)'), false, 'once');
   // With the switch off and no approval, a force_push gets no token: the push check still refuses overwriting.
   t.manager.updateSettings({ superAskFirst: { ...ALL_ASK_FIRST, forcePush: false } });
   await t.call('take_action', { ...force, target: 'fix/new', task: 'git push -u origin fix/new', summary: 'Push fix/new' });
@@ -403,4 +407,10 @@ test('M4: paused, its own turns cannot start agents through a channel mention, a
   await assert.rejects(ownCall('post_to_channel', { channel: 'ops', text: 'Ada, take this', mention_agent_ids: [t.ada.id] }), paused, 'Rhea P3');
   await assert.rejects(ownCall('reply', { message_id: 'm-x', text: 'Go ahead', expects_reply: true }), paused);
   await assert.rejects(ownCall('update_agent', { agent_id: 'Ada', model: 'opus', why: 'x' }), paused, 'Rhea P4');
+  await assert.rejects(ownCall('new_session', { agent_id: 'Ada', why: 'fresh start' }), paused, 'Rhea P5: a fresh session waits too');
+});
+
+test('the text warning: dots inside commands do not split a sentence; "without" and "never mind" still ask for it (Rhea round 3)', () => {
+  for (const bad of ['git -c core.x=1 push -f origin main', 'Force-push main without waiting for CI.', 'Please force-push main, never mind the warning.', 'Run v1.2.3 checks. Then git push --force origin main.']) assert.ok(forbiddenGit(bad), bad);
+  for (const ok of ['Do not run git push --force.', 'Push the fix, but never force-push main.', 'Merge fix/a into main. Do not force-push.', 'Avoid git push -f; push a revert instead.', 'Run npm test. Then git push origin fix/a.']) assert.equal(forbiddenGit(ok), null, ok);
 });

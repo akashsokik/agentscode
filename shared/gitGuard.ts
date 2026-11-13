@@ -10,9 +10,21 @@ function normalise(text: string): string {
   return text.replace(/\\\r?\n/g, ' ').replace(/["'`\\]/g, '').replace(/[ \t]+/g, ' ');
 }
 
-/** Sentences and clauses that forbid something ("do not …", "never …", "don't …") are left out. */
+const NEGATION = /\b(do not|don'?t|dont|never(?!\s+mind\b)|must not|mustn'?t|no need to|avoid|should not|shouldn'?t)\b/i;
+const ACTION = /\b(force|push|overwrite|rewrite|reset|rebase|delete|filter-branch|filter-repo)/i;
+
+/**
+ * Sentences and clauses that forbid something ("do not force-push", "never rewrite main") are left
+ * out: those whose negation comes before the action. Sentences end at . ! ? followed by a space or
+ * the end (so "core.x=1" is not split), at ; and new lines, and before "but".
+ * "Force-push main without waiting" and "never mind the warning" still ask for it.
+ */
 function withoutNegations(text: string): string {
-  return text.split(/(?<=[.!?;\n])\s*|\s+(?=but\b)/i).filter(part => !/\b(do not|don'?t|dont|never|must not|mustn'?t|no need to|avoid|without)\b/i.test(part)).join('\n');
+  return text.split(/[.!?](?=\s|$)|[;\n]|\s+(?=but\b)/i).filter(part => {
+    const negation = NEGATION.exec(part);
+    const action = ACTION.exec(part);
+    return !(negation && action && negation.index < action.index);
+  }).join('\n');
 }
 
 const RULES: { pattern: RegExp; why: string }[] = [

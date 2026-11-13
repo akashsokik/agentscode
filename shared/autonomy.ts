@@ -108,7 +108,7 @@ export function suggestedSoul(soul: string): string {
 
 /** What holds at every level, worded as the server enforces it (ALL-D9). */
 export const ALWAYS_SAFE: readonly string[] = [
-  'Agents\' pushes that overwrite or delete pushed history are refused when they push (one you approved goes, once)',
+  'Agents\' ordinary force-pushes and deletes of pushed history are refused on this Mac (one you approved goes, once). The hard lock is GitHub\'s branch protection on main, where your plan has it',
   'Cleanup and deletion name a backup that exists',
   'Merges only the commit a reviewer you made passed',
   'Your Stop on an agent is final',

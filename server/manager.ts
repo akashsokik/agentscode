@@ -93,7 +93,7 @@ import { WorkOwners } from './workOwners.ts';
 import { listArchive, type ArchivedAgent } from './agentArchive.ts';
 import { mentionsBranch } from '../shared/work.ts';
 import { forbiddenGit, gatedVerbs } from '../shared/gitGuard.ts';
-import { installPushGuard, issueOverride } from './pushGuard.ts';
+import { ensurePushGuard, installPushGuard, issueOverride } from './pushGuard.ts';
 import { readGit } from './work.ts';
 import { actionVerdict, ASK_FIRST_KEYS, autonomyInstructions, FULL_ACTIONS, NEEDS_BACKUP, SUPER_AUTONOMY, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
 
@@ -254,7 +254,7 @@ export class AgentManager {
     this.refs = new ProjectRefs(path.join(store.dataDir, 'projects'));
     this.notes = new NotesApi({ refs: this.refs, mentions: new RefMentions(store), projects: () => this.store.projects.values() });
     // The force-push check every agent's git runs (ALL-D9); rewritten if a file was changed.
-    try { installPushGuard(path.join(store.dataDir, 'git-hooks')); } catch (err) { console.error('[push-guard] could not install:', (err as Error).message); }
+    try { installPushGuard(path.join(store.dataDir, 'git-hooks'), { url: `http://127.0.0.1:${PORT}` }); } catch (err) { console.error('[push-guard] could not install:', (err as Error).message); }
     this.work = new WorkService(new MergeRecords(path.join(store.dataDir, 'work')), {
       owners: new WorkOwners(path.join(store.dataDir, 'work')),
       agents: () => [...this.store.agents.values()],
@@ -966,6 +966,7 @@ export class AgentManager {
     agent.unread = false;
     agent.lastActiveAt = Date.now();
     const files: RunnerImage[] = images.map(i => ({ path: i.path, mediaType: i.attachment.mediaType }));
+    ensurePushGuard(); // a guard file an agent changed is put back before any turn (and logged)
     runner.send(prompt, { ...task, entryId }, files.length ? files : undefined);
     agent.queued = runner.queuedUserTasks + this.mailbox.pending(id);
     this.emitAgent(agent);
@@ -1790,10 +1791,10 @@ export class AgentManager {
       // A force-push the user approved: one token, good for one push, which PodCode's push check accepts.
       // Only from your yes to this exact push: with the switch off it acts without a token, so the
       // push check still refuses overwriting anything already pushed (a new branch needs none).
-      const override = kind === 'force_push' && verdict === 'ask' && approval ? issueOverride() : null;
+      const override = kind === 'force_push' && verdict === 'ask' && approval ? issueOverride({ branch: input.branch ?? input.target ?? null }) : null;
       const criteria = override
         ? `Do exactly this push, once, with PODCODE_PUSH_OVERRIDE=${override} in its environment (it works for one push only), and report_result with evidence (commands and their output).`
-        : `Do exactly this ${kind.replace('_', ' ')} step and report_result with evidence (commands and their output).${input.backup ? ` Backup: ${input.backup}.` : ''} Pushes that overwrite or delete pushed history are refused by PodCode's push check.`;
+        : `Do exactly this ${kind.replace('_', ' ')} step and report_result with evidence (commands and their output).${input.backup ? ` Backup: ${input.backup}.` : ''} Ordinary pushes that overwrite or delete pushed history are refused by PodCode's push check.`;
       receipt = this.mailbox.delegate(caller.id, target.id, { kind: 'implementation', task: input.task, acceptanceCriteria: criteria, context: input.why });
     }
     const entry = this.recordSuper({
@@ -1816,7 +1817,7 @@ export class AgentManager {
     const forUser = caller.currentTask?.source === 'user' || this.inUserWorkMail(caller.id);
     if (startsWork && !forUser && this.store.settings.superPaused) throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
     const rewrite = forbiddenGit(text);
-    if (rewrite) throw new HttpError(403, `That asks for ${rewrite}. Rewriting or force-pushing shared history is never allowed, at any Autonomy level; agents' pushes that would do it are refused by PodCode's push check too.`);
+    if (rewrite) throw new HttpError(403, `That asks for ${rewrite}. Rewriting or force-pushing shared history is never allowed, at any Autonomy level; agents' ordinary pushes that would do it are refused by PodCode's push check too.`);
     return { gated: gatedVerbs(text), forUser };
   }
 
@@ -1987,6 +1988,10 @@ export class AgentManager {
       if (!parsed.success) return fail('Give the agent id or name, and a why.');
       const agent = this.teammate(parsed.data.agent_id);
       // A fresh session would lift a Stop the user pressed: only the user restarts a stopped agent.
+      // Paused: a fresh session starts an agent working again, so it waits for the user too.
+      if (tool === 'new_session' && this.store.settings.superPaused && caller.currentTask?.source !== 'user' && !this.inUserWorkMail(caller.id)) {
+        throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
+      }
       if (tool === 'new_session' && this.mailbox.stopped(agent.id)) {
         throw new HttpError(409, `The user stopped ${agent.name}. Only the user restarts it: ask them with ask_user instead.`);
       }
@@ -2049,6 +2054,7 @@ export class AgentManager {
     this.addEntry(id, { id: randomUUID(), kind: 'system', text: clip(line, 300) });
     const runner = this.runnerFor(agent);
     agent.lastActiveAt = Date.now();
+    ensurePushGuard();
     runner.send(prompt, { summary: 'Update from PodCode', source: 'system' });
     this.emitAgent(agent);
   }

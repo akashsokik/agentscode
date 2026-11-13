@@ -105,6 +105,10 @@ export function ownFileProblem(home: string | undefined, cwd: string, toolName: 
   if (!own && homes.some(h => PROFILE_FILE.test(path.relative(path.dirname(path.dirname(h)), file)))) {
     return 'That is the user profile, which every agent shares: change it with remember and forget (scope "user"), or ask the user to edit it in PodCode.';
   }
+  // PodCode's push check (data dir git-hooks/, ALL-D9): only PodCode writes it.
+  if (homes.some(h => inside(path.join(path.dirname(path.dirname(h)), 'git-hooks'), file))) {
+    return 'That is PodCode\'s push check, which only PodCode writes. Pushes that overwrite or delete pushed history need the user\'s approval; push a new commit instead.';
+  }
   return own
     ? 'That file is in your PodCode home, which only PodCode and the user edit: soul.md is the user\'s standing instructions, and memory changes go through the remember and forget tools. Ask the user if soul.md should change.'
     : null;

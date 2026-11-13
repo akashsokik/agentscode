@@ -1,22 +1,25 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { disablesPushGuard, installPushGuard, issueOverride, pushGuardEnv } from '../server/pushGuard.ts';
+import { disablesPushGuard, ensurePushGuard, installPushGuard, issueOverride, pushGuardEnv, redeemOverride } from '../server/pushGuard.ts';
 import { tempDir } from './helpers.ts';
 
-// The force-push rule where git runs (ALL-D9): every agent's git uses PodCode's hooks folder, whose
-// pre-push refuses overwriting or deleting what the remote has, unless a force-push the user
-// approved gave the agent a one-time token. Real repositories, real git.
+// The force-push rule where git runs (ALL-D9): agents' git is PodCode's shim, which runs a push
+// with PodCode's hooks folder, whose pre-push refuses overwriting or deleting what the remote has
+// unless a force-push the user approved gave the agent a one-time token PodCode answers for once.
+// Real repositories, real git, real shells. The probes Rhea listed (round 3) are named T3-T12.
 
 const BASE = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 for (const k of Object.keys(BASE)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|CONFIG_COUNT|CONFIG_KEY_\d+|CONFIG_VALUE_\d+)$/.test(k)) delete (BASE as Record<string, string | undefined>)[k];
 
 /** A clone with a bare origin; `agent` runs commands as an agent would (the guard's env). */
-function setup() {
+function setup(options: { url?: string } = {}) {
   const dir = tempDir('push-guard');
-  const hooks = installPushGuard(path.join(dir, 'git-hooks'));
+  const hooks = installPushGuard(path.join(dir, 'git-hooks'), options);
   const agentEnv = pushGuardEnv(BASE, hooks);
   const sh = (cwd: string, cmd: string, env: NodeJS.ProcessEnv = agentEnv) => spawnSync('sh', ['-c', cmd], { cwd, env, encoding: 'utf8' });
   const ok = (cwd: string, cmd: string) => { const r = sh(cwd, cmd, BASE); assert.equal(r.status, 0, `${cmd}\n${r.stderr}`); return r.stdout.trim(); };
@@ -71,23 +74,150 @@ test('force-pushes in every form are refused: --force, +ref, --mirror deleting, 
   assert.equal(s.ok(s.dir, 'git --git-dir=origin.git rev-parse --verify -q refs/heads/old >/dev/null && echo yes'), 'yes');
 });
 
-test('a force-push you approved: its one-time token lets one push through, then never again; a made-up token does nothing', () => {
-  const s = setup();
-  s.ok(s.app, 'git reset -q --hard HEAD~1 && echo x > x && git add x && git commit -qm rewritten');
-  assert.equal(s.sh(s.app, 'PODCODE_PUSH_OVERRIDE=deadbeefdeadbeefdeadbeef git push --force origin main').status, 1, 'a made-up token');
-  const token = issueOverride(s.hooks);
-  const r = s.sh(s.app, `PODCODE_PUSH_OVERRIDE=${token} git push -q --force origin main`);
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /the force-push you approved, once/);
-  s.ok(s.app, 'git commit -q --amend -m again');
-  assert.equal(s.sh(s.app, `PODCODE_PUSH_OVERRIDE=${token} git push --force origin main`).status, 1, 'used once');
+/** Run a shell command without blocking, so the pre-push can reach a server in this process. */
+function run(cwd: string, cmd: string, env: NodeJS.ProcessEnv): Promise<{ status: number | null; stderr: string; stdout: string }> {
+  return new Promise(resolve => {
+    const child = spawn('sh', ['-c', cmd], { cwd, env });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('close', status => resolve({ status, stdout, stderr }));
+  });
+}
+
+/** The route PodCode serves (server/app.ts), on a throwaway port. */
+async function redeemServer(): Promise<{ url: string; close: () => void }> {
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', d => { body += d; });
+    req.on('end', () => {
+      const parsed = body ? JSON.parse(body) as { token?: unknown; refs?: unknown } : {};
+      const ok = req.url === '/api/push-guard/redeem' && redeemOverride(parsed.token, parsed.refs);
+      if (req.url === '/api/push-guard/check') ensurePushGuard();
+      res.writeHead(ok || req.url === '/api/push-guard/check' ? 200 : 403).end();
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return { url: `http://127.0.0.1:${port}`, close: () => server.close() };
+}
+
+test('a force-push you approved: PodCode answers for its token once, for that branch only; a token file or made-up token does nothing (T7)', async () => {
+  const server = await redeemServer();
+  try {
+    const s = setup({ url: server.url });
+    s.ok(s.app, 'git reset -q --hard HEAD~1 && echo x > x && git add x && git commit -qm rewritten');
+    assert.equal((await run(s.app, 'PODCODE_PUSH_OVERRIDE=deadbeefdeadbeefdeadbeef git push --force origin main', s.agentEnv)).status, 1, 'a made-up token');
+    // T7: a token file the agent writes itself, where tokens used to live.
+    fs.mkdirSync(path.join(s.hooks, 'overrides'), { recursive: true });
+    fs.writeFileSync(path.join(s.hooks, 'overrides', 'a'.repeat(24)), 'x');
+    assert.equal((await run(s.app, `PODCODE_PUSH_OVERRIDE=${'a'.repeat(24)} git push --force origin main`, s.agentEnv)).status, 1, 'a forged token file');
+    // Bound to the approved branch: a token for main does not overwrite old.
+    const forMain = issueOverride({ branch: 'main' });
+    assert.equal((await run(s.app, `PODCODE_PUSH_OVERRIDE=${forMain} git push --force origin HEAD:old`, s.agentEnv)).status, 1, 'another branch');
+    const token = issueOverride({ branch: 'main' });
+    const r = await run(s.app, `PODCODE_PUSH_OVERRIDE=${token} git push -q --force origin main`, s.agentEnv);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /the force-push you approved, once/);
+    s.ok(s.app, 'git commit -q --amend -m again');
+    assert.equal((await run(s.app, `PODCODE_PUSH_OVERRIDE=${token} git push --force origin main`, s.agentEnv)).status, 1, 'used once');
+  } finally { server.close(); }
+  assert.equal(redeemOverride('not-a-token', ''), false);
 });
 
-test('the guard only sits in agents\' env (added to any GIT_CONFIG_COUNT); turning it off is caught', () => {
-  const env = pushGuardEnv({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'user.name', GIT_CONFIG_VALUE_0: 'X' }, '/hooks');
-  assert.deepEqual([env.GIT_CONFIG_COUNT, env.GIT_CONFIG_KEY_0, env.GIT_CONFIG_KEY_1, env.GIT_CONFIG_VALUE_1], ['2', 'user.name', 'core.hooksPath', '/hooks']);
-  for (const cmd of ['git push --no-verify origin main', 'git -c core.hooksPath=/dev/null push -f', 'GIT_CONFIG_COUNT=0 git push -f', 'env -i git push -f', 'unset GIT_CONFIG_COUNT; git push', 'PODCODE_PUSH_OVERRIDE=abc git push -f']) {
+test('the ways around the check are refused: --no-verify (T3), -c core.hooksPath (T4), unset GIT_CONFIG_COUNT (T5), send-pack (T6), aliases, abbreviations', () => {
+  const s = setup();
+  s.ok(s.app, 'git reset -q --hard HEAD~1 && echo x > x && git add x && git commit -qm rewritten');
+  const remote = path.join(s.dir, 'origin.git');
+  for (const cmd of [
+    'git push --no-verify -f origin main',
+    'git push -f --no-veri origin main',
+    'git -c core.hooksPath=/dev/null push -f origin main',
+    'git -c CORE.HOOKSPATH=/dev/null push -f origin main',
+    'X=/dev/null git --config-env=core.hooksPath=X push -f origin main',
+    'git -C . -c core.hooksPath=/dev/null push -f origin main',
+    'unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; git push -f origin main',
+    'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git push -f origin main',
+    `GIT_CONFIG_PARAMETERS="'core.hookspath'='/dev/null'" git push -f origin main`,
+    `git send-pack --force ${remote} main`,
+    'git config alias.nv "push --no-verify" && git nv -f origin main',
+    'git -c alias.nv="push --no-verify" nv -f origin main',
+    'git config alias.sp send-pack && git sp --force origin.git main',
+    'git config alias.fp "push -f" && git fp origin main',
+    'git config alias.m "push --mirror" && git m origin',
+    'git push --mirr origin',
+  ]) {
+    const r = s.sh(s.app, cmd);
+    assert.notEqual(r.status, 0, cmd);
+    assert.match(r.stderr, /PodCode refused/, cmd);
+  }
+  assert.equal(s.ok(s.dir, 'git --git-dir=origin.git rev-parse main'), s.ok(s.dir, 'git --git-dir=origin.git rev-parse old'), 'main never moved');
+});
+
+test('a changed pre-push is put back before the push (T12) and before each turn, and said', async () => {
+  const server = await redeemServer();
+  try {
+    const s = setup({ url: server.url });
+    s.ok(s.app, 'git reset -q --hard HEAD~1 && echo x > x && git add x && git commit -qm rewritten');
+    fs.writeFileSync(path.join(s.hooks, 'pre-push'), '#!/bin/sh\nexit 0\n');
+    const r = await run(s.app, 'git push -f origin main', s.agentEnv);
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, /PodCode refused this push/);
+    fs.writeFileSync(path.join(s.hooks, 'bin', 'git'), '#!/bin/sh\nexec /usr/bin/git "$@"\n');
+    assert.deepEqual(ensurePushGuard(), ['bin/git']);
+    assert.deepEqual(ensurePushGuard(), []);
+  } finally { server.close(); }
+});
+
+test('without the server, a changed pre-push stops the push rather than letting it through', () => {
+  const s = setup();
+  fs.writeFileSync(path.join(s.hooks, 'pre-push'), '#!/bin/sh\nexit 0\n');
+  const r = s.sh(s.app, 'git checkout -q -b fresh && git push -q origin fresh');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /push check was changed/);
+});
+
+test('PodCode\'s git stays first in login shells (bash -l, zsh -l) and Claude Code\'s shell; your own BASH_ENV and ZDOTDIR still run', () => {
+  const s = setup();
+  const shim = path.join(s.hooks, 'bin', 'git');
+  for (const shell of [['bash', '-c'], ['bash', '-lc'], ['zsh', '-c'], ['zsh', '-lc'], ['zsh', '-ic'], ['sh', '-c']]) {
+    const r = spawnSync(shell[0], [shell[1], 'command -v git'], { cwd: s.app, env: { ...s.agentEnv, HOME: s.dir }, encoding: 'utf8' });
+    assert.equal(r.stdout.trim().split('\n').pop(), shim, shell.join(' '));
+  }
+  // Claude Code sources CLAUDE_ENV_FILE before each command; it puts the shim back first.
+  const r = spawnSync('sh', ['-c', `PATH=/usr/bin:/bin; . "$CLAUDE_ENV_FILE"; command -v git`], { env: s.agentEnv, encoding: 'utf8' });
+  assert.equal(r.stdout.trim(), shim);
+  const user = path.join(s.dir, 'userz'); fs.mkdirSync(user);
+  fs.writeFileSync(path.join(user, '.zshenv'), 'export MINE=zshenv\n');
+  fs.writeFileSync(path.join(s.dir, 'mybashenv'), 'export MINE=bashenv\n');
+  const env = pushGuardEnv({ ...BASE, ZDOTDIR: user, BASH_ENV: path.join(s.dir, 'mybashenv') }, s.hooks);
+  assert.equal(spawnSync('zsh', ['-c', 'echo $MINE'], { env, encoding: 'utf8' }).stdout.trim(), 'zshenv');
+  assert.equal(spawnSync('bash', ['-c', 'echo $MINE'], { env, encoding: 'utf8' }).stdout.trim(), 'bashenv');
+  assert.deepEqual(pushGuardEnv({ PATH: '/usr/bin' }, '/h').PATH, '/h/bin:/usr/bin');
+  assert.equal(pushGuardEnv(pushGuardEnv({ PATH: '/usr/bin' }, '/h'), '/h').PATH, '/h/bin:/usr/bin', 'not added twice');
+});
+
+test('commits cost under twice a plain commit: only a push runs PodCode\'s hooks', () => {
+  const s = setup();
+  const median = (env: NodeJS.ProcessEnv) => {
+    const times: number[] = [];
+    for (let i = 0; i < 15; i++) {
+      const t0 = performance.now();
+      const r = spawnSync('sh', ['-c', `echo ${i} >> a && git commit -qam c${i}`], { cwd: s.app, env, encoding: 'utf8' });
+      times.push(performance.now() - t0);
+      assert.equal(r.status, 0, r.stderr);
+    }
+    return times.sort((a, b) => a - b)[7];
+  };
+  median(BASE); median(s.agentEnv); // warm up
+  const plain = median(BASE);
+  const guarded = median(s.agentEnv);
+  assert.ok(guarded < plain * 2, `guarded ${guarded.toFixed(1)} ms vs plain ${plain.toFixed(1)} ms`);
+});
+
+test('the text check (Claude\'s Bash) catches the ways around it, and not everyday commands', () => {
+  for (const cmd of ['git push --no-verify origin main', 'git push --no-veri -f', 'git -c core.hooksPath=/dev/null push -f', 'env -i git push -f', 'PODCODE_PUSH_OVERRIDE=abc git push -f', 'git send-pack --force origin main', '/usr/bin/git push -f origin main', 'BASH_ENV= bash -lc "git push -f"', "printf '#!/bin/sh' > ~/.podcode/git-hooks/pre-push"]) {
     assert.ok(disablesPushGuard(cmd), cmd);
   }
-  for (const cmd of ['git push origin main', 'git commit -m "x"', 'npm test', 'git push -u origin fix/x']) assert.equal(disablesPushGuard(cmd), null, cmd);
+  for (const cmd of ['git push origin main', 'git commit -m "x"', 'npm test', 'git push -u origin fix/x', 'cat ~/.podcode/git-hooks/pre-push']) assert.equal(disablesPushGuard(cmd), null, cmd);
 });
