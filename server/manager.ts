@@ -2067,7 +2067,7 @@ export class AgentManager {
 
   /** Every minute: send what waits if it may go now, and report agents stuck in a turn or on the user. */
   private superTick(): void {
-    // Uses Work/PR's existing caches; independent of whether a SuperAgent exists.
+    // Uses Work's existing cache; independent of whether a SuperAgent exists. No GitHub polling.
     void this.issueLinks.refresh().catch(() => { /* A failed read is retried next tick; no closure is inferred. */ });
     const superId = this.superId();
     if (!superId) return;

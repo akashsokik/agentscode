@@ -46,7 +46,6 @@ export class IssueLinks {
   private readonly store: IssueLinkStore;
   private readonly now: () => number;
   private readonly changed: () => void;
-  private prSource?: () => Promise<{ pullRequests: MergedIssuePr[] }>;
   private readonly source?: IssueLinkSource;
   private refreshing: Promise<void> | null = null;
   private readonly commitCache = new Map<string, Pick<RefCommit, 'hash' | 'text' | 'author' | 'at'>[]>();
@@ -56,14 +55,8 @@ export class IssueLinks {
     this.store = store; this.now = now; this.changed = changed; this.source = source;
   }
 
-  /** Wire the shared PR service once its stack lands; no separate GitHub implementation. */
-  setPrSource(source: () => Promise<{ pullRequests: MergedIssuePr[] }>): void { this.prSource = source; }
-
-  async refreshGithub(): Promise<void> {
-    if (this.prSource) this.githubMerges((await this.prSource()).pullRequests);
-  }
-
-  /** Run through the shared Work/PR caches, including when their pages are closed. */
+  /** Local merge detection uses Work's existing cache, independently of its view being open.
+   * GitHub closures are delivered by PullRequests.onRead; this timer never polls gh. */
   async refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
     this.refreshing = (async () => {
@@ -71,7 +64,6 @@ export class IssueLinks {
         const projects = this.source.projects().filter(p => this.store.issues().some(i => i.projectId === p.id && isOpenIssue(i)));
         if (projects.length) await this.source.work.view(projects);
       }
-      await this.refreshGithub();
     })().finally(() => { this.refreshing = null; });
     return this.refreshing;
   }
