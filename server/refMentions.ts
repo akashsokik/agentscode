@@ -101,6 +101,10 @@ export class RefMentions {
     this.dir = transcriptsDir;
   }
 
+  private issueKeys(text: string): string[] {
+    return issueKeysIn(text, ['ALL', ...[...this.store.projects.values()].flatMap(p => p.code ? [p.code] : [])]);
+  }
+
   private agentName(agentId: string): string {
     return this.store.agents.get(agentId)?.name ?? 'A removed agent';
   }
@@ -177,7 +181,7 @@ export class RefMentions {
       if (ids.length) cited = { ids, ts: message.ts, author: message.fromAgentId, hash: hashText(text), messageId: message.id, citation: { source: 'message', agentId: message.fromAgentId, who: message.fromName, where: messageWhere(message), open: { kind: 'comms', conversationId: message.conversationId } } };
     }
     if (cited) {
-      cited.issueKeys = issueKeysIn(entry.peer ? messageText(entry.peer) : entry.text ?? '');
+      cited.issueKeys = this.issueKeys(entry.peer ? messageText(entry.peer) : entry.text ?? '');
       if (entry.peer?.replyTo) cited.replyTo = entry.peer.replyTo;
       state.cited.set(id, cited);
     }
@@ -207,7 +211,7 @@ export class RefMentions {
       const text = messageText(message);
       const ids = this.ids(text);
       if (!ids.length) continue;
-      add(`message:${message.id}`, { ids, issueKeys: issueKeysIn(text), messageId: message.id, replyTo: message.replyTo, ts: message.ts, author: message.fromAgentId, hash: hashText(text), citation: { source: 'message', agentId: message.fromAgentId, who: message.fromName, where: messageWhere(message), open: { kind: 'comms', conversationId: message.conversationId } } });
+      add(`message:${message.id}`, { ids, issueKeys: this.issueKeys(text), messageId: message.id, replyTo: message.replyTo, ts: message.ts, author: message.fromAgentId, hash: hashText(text), citation: { source: 'message', agentId: message.fromAgentId, who: message.fromName, where: messageWhere(message), open: { kind: 'comms', conversationId: message.conversationId } } });
     }
     for (const [channelId, posts] of this.store.posts) {
       const channel = this.store.channels.get(channelId);
@@ -230,7 +234,7 @@ export class RefMentions {
     const author = post.from === 'user' ? 'user' : post.agentId ?? post.fromName;
     add(`post:${post.channelId}:${post.id}`, {
       ids,
-      issueKeys: issueKeysIn(post.text),
+      issueKeys: this.issueKeys(post.text),
       ts: post.ts,
       author,
       hash: hashText(post.text),

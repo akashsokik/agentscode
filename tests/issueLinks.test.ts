@@ -105,6 +105,7 @@ test('decision links find full branch commit messages and handoff/report citatio
   await t.work.view([t.project], true);
   const state = new Store(path.join(t.dir, 'state'));
   state.load();
+  state.projects.set(t.project.id, t.project);
   const mentions = new RefMentions(state);
   state.messages.push({ id: 'handoff', fromAgentId: 'lead', fromName: 'Lead', toAgentId: 'dev', toName: 'Dev', conversationId: 'c1', ts: 2000, text: 'Implement ACH-1 under ACH-D43.', status: 'delivered' } as typeof state.messages[number]);
   state.messages.push({ id: 'report', replyTo: 'handoff', fromAgentId: 'dev', fromName: 'Dev', toAgentId: 'lead', toName: 'Lead', conversationId: 'c1', ts: 3000, text: 'Done under ALL-D7.', status: 'delivered', report: { outcome: 'passed', summary: 'Kept ACH-D14.', evidence: 'Checked ACH-D7.' } } as typeof state.messages[number]);
@@ -148,7 +149,7 @@ test('decisions are indexed for an unmerged keyed branch even when no worktree i
   git(t.repo, 'checkout', '-b', 'feat/ACH-1-unmerged');
   git(t.repo, 'commit', '--allow-empty', '-m', 'Use ACH-D43 for ACH-1');
   git(t.repo, 'checkout', 'main');
-  const state = new Store(path.join(t.dir, 'state')); state.load();
+  const state = new Store(path.join(t.dir, 'state')); state.load(); state.projects.set(t.project.id, t.project);
   const mentions = new RefMentions(state);
   await t.links.indexCommits(t.project, 'main', [], mentions);
   assert.deepEqual(mentions.issueDecisions(t.issue).map(d => d.id), ['ACH-D43']);
@@ -171,7 +172,7 @@ test('commit scans cache immutable branch ranges and invalidate when either end 
   git(t.repo, 'checkout', '-b', 'feat/ACH-1-cache');
   git(t.repo, 'commit', '--allow-empty', '-m', 'Use ACH-D41');
   git(t.repo, 'checkout', 'main');
-  const state = new Store(path.join(t.dir, 'state')); state.load();
+  const state = new Store(path.join(t.dir, 'state')); state.load(); state.projects.set(t.project.id, t.project);
   const mentions = new RefMentions(state);
   let logs = 0;
   let failOnce = true;

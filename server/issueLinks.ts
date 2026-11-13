@@ -55,6 +55,11 @@ export class IssueLinks {
     this.store = store; this.now = now; this.changed = changed; this.source = source;
   }
 
+  private keys(text: string): string[] {
+    const codes = new Set(['ALL', ...(this.source?.projects() ?? []).flatMap(p => p.code ? [p.code] : []), ...this.store.issues().map(i => i.key.slice(0, i.key.lastIndexOf('-')))]);
+    return issueKeysIn(text, codes);
+  }
+
   /** Local merge detection uses Work's existing cache, independently of its view being open.
    * GitHub closures are delivered by PullRequests.onRead; this timer never polls gh. */
   async refresh(): Promise<void> {
@@ -102,7 +107,7 @@ export class IssueLinks {
     for (const record of [...records].sort((a, b) => a.at - b.at)) {
       // A revert must never act like a merge, even if someone names a merge branch that way.
       if (/^revert\b/i.test(record.subject) || !/^[a-f0-9]{40}$/.test(record.hash)) continue;
-      const keys = issueKeysIn(record.branch);
+      const keys = this.keys(record.branch);
       for (const issue of this.store.issues()) {
         if (issue.projectId !== project.id || !isOpenIssue(issue)) continue;
         if (!keys.includes(issue.key) && issue.branch !== record.branch) continue;
@@ -121,7 +126,7 @@ export class IssueLinks {
       const at = pr.mergedAt ? Date.parse(pr.mergedAt) : NaN;
       if (pr.state.toLowerCase() !== 'merged' || !Number.isFinite(at) || !pr.mergeCommit || !/^[a-f0-9]{40}$/.test(pr.mergeCommit)) continue;
       if (/^revert\b/i.test(pr.title)) continue;
-      const keys = issueKeysIn([pr.branch, pr.title, pr.body].join('\n'));
+      const keys = this.keys([pr.branch, pr.title, pr.body].join('\n'));
       for (const issue of this.store.issues()) {
         if (!pr.projects.some(p => p.id === issue.projectId) || !isOpenIssue(issue)) continue;
         if (!keys.includes(issue.key) && issue.branch !== pr.branch) continue;
@@ -157,7 +162,7 @@ export class IssueLinks {
       }
       for (const row of rows) {
         const old = commits.get(row.hash);
-        commits.set(row.hash, { ...row, projectId: project.id, branch, issueKeys: [...new Set([...(old?.issueKeys ?? []), ...keys, ...issueKeysIn(row.text)])] });
+        commits.set(row.hash, { ...row, projectId: project.id, branch, issueKeys: [...new Set([...(old?.issueKeys ?? []), ...keys, ...this.keys(row.text)])] });
       }
     };
     // A keyed branch need not be checked out in a worktree (so it may be absent from Work's active list).
@@ -169,12 +174,12 @@ export class IssueLinks {
     }));
     const selected = [...new Set([...branches, ...tips.keys(), ...issues.flatMap(i => i.branch ? [i.branch] : [])])];
     for (const branch of selected) {
-      const keys = issues.filter(i => i.branch === branch || issueKeysIn(branch).includes(i.key)).map(i => i.key);
+      const keys = issues.filter(i => i.branch === branch || this.keys(branch).includes(i.key)).map(i => i.key);
       const tip = tips.get(branch), base = tips.get(defaultBranch);
       if (keys.length && tip && base) await read(branch, [tip, '--not', base], keys);
     }
     for (const record of this.records.get(project.id) ?? []) {
-      const keys = issues.filter(i => i.branch === record.branch || issueKeysIn(record.branch).includes(i.key)).map(i => i.key);
+      const keys = issues.filter(i => i.branch === record.branch || this.keys(record.branch).includes(i.key)).map(i => i.key);
       if (keys.length && /^[a-f0-9]{40}$/.test(record.tip) && /^[a-f0-9]{40}$/.test(record.parent ?? '')) {
         await read(record.branch, [record.tip, '--not', record.parent!], keys);
       }
