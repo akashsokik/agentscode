@@ -562,3 +562,61 @@ test('git links: a merge closes an issue once, its hash kept as the status entry
   assert.equal(again.activity.length, closed.activity.length + 1);
   assert.equal(store.updateIssue(issue.id, { status: 'done', activityRef: 'def456' }, 5, { kind: 'git' }).status, 'done');
 });
+
+test('a relation to a removed issue stays, and the issue\'s other relations can still be added and removed', async () => {
+  const t = await team();
+  for (const text of ['A', 'B', 'C', 'D']) t.manager.addIssue({ text });
+  const by = (text: string) => t.manager.superView().issues.find(g => g.text === text)!;
+  const [a, b, c, d] = [by('A'), by('B'), by('C'), by('D')];
+  t.manager.updateIssue(a.id, { relations: [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: c.id }] });
+  t.manager.removeIssue(b.id);
+  // Add D: B is gone, but A already had it, so the list is still accepted.
+  t.manager.updateIssue(a.id, { relations: [...by('A').relations, { type: 'related', issueId: d.id }] });
+  assert.deepEqual(by('A').relations, [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: c.id }, { type: 'related', issueId: d.id }]);
+  // Remove C.
+  t.manager.updateIssue(a.id, { relations: by('A').relations.filter(r => r.issueId !== c.id) });
+  assert.deepEqual(by('A').relations, [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: d.id }]);
+  // A gone id A never had is still refused, and so is the kept one under another type.
+  assert.throws(() => t.manager.updateIssue(a.id, { relations: [{ type: 'related', issueId: 'never-was' }] }), e => status(e) === 400);
+  assert.throws(() => t.manager.updateIssue(a.id, { relations: [{ type: 'duplicate_of', issueId: b.id }] }), e => status(e) === 400);
+  // Undo of the removal brings B back, and A's relation reconnects.
+  const removal = t.manager.superView().log.find(x => x.tool === 'remove_issue')!;
+  await t.manager.undoSuper(removal.id);
+  assert.ok(t.manager.superView().issues.some(g => g.id === b.id));
+  assert.deepEqual(by('A').relations[0], { type: 'blocks', issueId: b.id });
+});
+
+test('parent and relation changes are logged; a new assignee ends the old handoff; a bare ref or a non-text comment writes nothing', async () => {
+  const t = await team();
+  for (const text of ['P', 'Q', 'X', 'Y']) t.manager.addIssue({ text });
+  const by = (text: string) => t.manager.superView().issues.find(g => g.text === text)!;
+  const [p, q, x, y] = [by('P'), by('Q'), by('X'), by('Y')];
+  const tail = (n: number) => by('X').activity.slice(-n).map(e => [e.kind, e.from ?? null, e.to ?? null, e.by.kind]);
+
+  t.manager.updateIssue(x.id, { parentId: p.id });
+  t.manager.updateIssue(x.id, { parentId: q.id });
+  t.manager.updateIssue(x.id, { parentId: null });
+  assert.deepEqual(tail(3), [['parent', null, p.id, 'user'], ['parent', p.id, q.id, 'user'], ['parent', q.id, null, 'user']]);
+
+  t.manager.updateIssue(x.id, { relations: [{ type: 'blocks', issueId: y.id }] });
+  t.manager.updateIssue(x.id, { relations: [{ type: 'related', issueId: y.id }] });
+  assert.deepEqual(tail(3), [['relation', null, `blocks:${y.id}`, 'user'], ['relation', null, `related:${y.id}`, 'user'], ['relation', `blocks:${y.id}`, null, 'user']]);
+  const quiet = by('X').activity.length;
+  t.manager.updateIssue(x.id, { relations: [{ type: 'related', issueId: y.id }] });
+  assert.equal(by('X').activity.length, quiet, 'an unchanged list logs nothing');
+
+  // The SuperAgent hands X to Ada with a delegation; you then move it to Bo, or to nobody: the handoff ends.
+  const store = (t.manager as unknown as { superStore: SuperStore }).superStore;
+  store.updateIssue(x.id, { agentId: t.ada.id, delegationId: 'del-1' }, Date.now());
+  assert.equal(by('X').delegationId, 'del-1');
+  t.manager.updateIssue(x.id, { assignee: t.bo.id });
+  assert.equal(by('X').delegationId, undefined);
+  store.updateIssue(x.id, { agentId: t.ada.id, delegationId: 'del-2' }, Date.now());
+  t.manager.updateIssue(x.id, { assignee: null });
+  assert.equal(by('X').delegationId, undefined);
+
+  const before = by('X');
+  assert.deepEqual(store.updateIssue(x.id, { activityRef: 'abc' }, Date.now() + 5, { kind: 'git' }), before, 'a ref with nothing to log is not written');
+  assert.equal(by('X').updatedAt, before.updatedAt);
+  assert.throws(() => store.updateIssue(x.id, { comment: { text: 'x' } }, Date.now()), e => status(e) === 400);
+});

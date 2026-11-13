@@ -271,8 +271,11 @@ export type IssueRelationType = 'blocks' | 'related' | 'duplicate_of';
 export interface IssueEvent {
   at: number;
   by: IssueActor;
-  kind: 'created' | 'status' | 'assignee' | 'priority' | 'comment' | 'migrated';
-  /** The value before and after a change (a status, a priority, an agent id). */
+  kind: 'created' | 'status' | 'assignee' | 'priority' | 'comment' | 'migrated' | 'parent' | 'relation';
+  /**
+   * The value before and after a change: a status, a priority, an agent id ("user" for you), a
+   * parent's issue id, or a relation as "type:issueId" (in `to` when added, `from` when removed).
+   */
   from?: string;
   to?: string;
   /** A comment's text, or a note on the change. */
