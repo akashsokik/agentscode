@@ -82,6 +82,7 @@ import { openuiGuide } from './openuiGuide.ts';
 import { ALL_CODE, ALL_INDEXES_LIMIT, decisionHint, deriveCode, isActive, isCode, isCurrent, matchDecisions, ProjectRefs, type RefEntry } from './projectRefs.ts';
 import { NotesApi } from './notesApi.ts';
 import { MergeRecords, WorkService } from './work.ts';
+import { PullRequests } from './githubPrs.ts';
 import { RefMentions } from './refMentions.ts';
 import { BrowserBridge, BROWSER_WRITE_OPS, compactConsole, type BrowserOp } from './browserBridge.ts';
 import { blockedReason, normalizeAddress } from '../shared/browser.ts';
@@ -202,6 +203,8 @@ export class AgentManager {
   readonly notes: NotesApi;
   /** The Work view: branches in progress, merges into main, the graph and cleanup (server/work.ts). */
   readonly work: WorkService;
+  /** The Pull requests page: read-only PRs across the projects (ACH-D43). */
+  readonly prs: PullRequests;
   /** The memory each agent's app view was last sent, to notice memory.md changing on disk. */
   private memoryVersions = new Map<string, string>();
   /** Dreaming: the gate, triggers, records, undo, soul proposals and the numbers. */
@@ -250,6 +253,12 @@ export class AgentManager {
       agentsDir: path.join(store.dataDir, 'agents'),
       dataDir: store.dataDir,
       knownRef: id => this.refs.get(id) !== null,
+    });
+    this.prs = new PullRequests({
+      projects: () => this.store.projects.values(),
+      agents: () => this.store.agents.values(),
+      repoOf: project => this.projectRepo(project),
+      gh: args => runGh(args, this.ghExec),
     });
     this.profile = new ProfileStore(store.dataDir);
     this.superStore = new SuperStore(store.dataDir);

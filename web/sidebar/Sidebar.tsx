@@ -16,8 +16,9 @@ import { SHORTCUTS, SHORTCUT_KEYS, MOD_CLICK } from '../shortcuts.ts';
 import type { KeySpec } from '../keys.ts';
 import { Kbd } from '../ui/Kbd.tsx';
 import { showTerminal } from '../terminal/actions.ts';
+import { openCount, usePrs, usePrsData } from '../prs/prsData.ts';
 import { cx, Empty, HeaderButton, Loading, MenuDivider, MenuLabel, MenuRow, StatusLabel } from '../ui/common.tsx';
-import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, Sparkles, SplitColumns, Square, StickyNote, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
+import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, GitPullRequest, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, Sparkles, SplitColumns, Square, StickyNote, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
@@ -310,6 +311,20 @@ function FileTree({ projectId }: { projectId?: string }) {
 }
 
 // ---- MonoCode's Classic shell: a navigation column, then the workspace column ----------------
+
+/** "Pull requests" (ACH-D42): opens the page; its count is the open PRs across the projects. */
+function PullRequestsAction() {
+  usePrsData();
+  const count = usePrs(s => openCount(s.data));
+  const layout = useLayout();
+  const pane = layout.panes.find(p => p.id === layout.focused);
+  const active = layout.tabs.find(t => t.id === pane?.tabId)?.content.kind === 'pullRequests';
+  return (
+    <RailAction icon={GitPullRequest} label="Pull requests" active={active} onClick={() => open({ kind: 'pullRequests' })}>
+      {count ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${count} open`}>{count}</span> : null}
+    </RailAction>
+  );
+}
 
 /** A row at the top or foot of the navigation column: MonoCode's RailAction. */
 function RailAction({ icon: Icon, mark, label, hint, active = false, onClick, children }: { icon: IconComponent; mark?: ReactNode; label: string; hint?: KeySpec; active?: boolean; onClick: () => void; children?: ReactNode }) {
@@ -604,6 +619,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
         <RailAction icon={MessageMultiple} label="Comms" active={commsOpen} onClick={() => open({ kind: 'comms' })}>
           {inFlight ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${inFlight} in flight`}>{inFlight}</span> : null}
         </RailAction>
+        <PullRequestsAction />
         <RailAction icon={Sparkles} mark={<SuperMark superId={superId} />} label="SuperAgent" hint={SHORTCUT_KEYS.superQuick} active={Boolean(superId) && agentId === superId} onClick={() => void openSuper()}>
           {superWaiting ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${superWaiting} waiting for you`}>{superWaiting}</span> : null}
         </RailAction>
