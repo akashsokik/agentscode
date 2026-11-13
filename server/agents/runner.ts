@@ -129,6 +129,8 @@ export interface PromptContext {
   profileOmitted?: number;
   /** The index of project notes and decisions this agent is given, already capped; '' when there are none. */
   refs?: string;
+  /** The SuperAgent's Autonomy setting as instructions (ALL-D9); none for other agents. */
+  autonomy?: string;
 }
 
 const MEMORY_GUIDANCE = [
@@ -152,8 +154,8 @@ export const REFS_GUIDANCE = [
 ].join(' ');
 
 /** The parts of an agent's instructions that can change during a session. */
-export type ContextSection = 'projects' | 'soul' | 'memory' | 'user' | 'refs';
-export const CONTEXT_SECTIONS: ContextSection[] = ['projects', 'soul', 'memory', 'user', 'refs'];
+export type ContextSection = 'projects' | 'soul' | 'autonomy' | 'memory' | 'user' | 'refs';
+export const CONTEXT_SECTIONS: ContextSection[] = ['projects', 'soul', 'autonomy', 'memory', 'user', 'refs'];
 
 /** The memory section: the entries with their ids, or a note that there are none. */
 export function memorySection(memory: MemoryEntry[], omitted = 0): string {
@@ -186,6 +188,7 @@ export function contextSections(agent: Agent, project: Project | null, context: 
       ? `You are not tied to one project. The user's projects are:\n${projects.map(p => `- ${p.name}: ${p.path}`).join('\n')}\nWork in the project the task is about, and ask if it is not clear which. Your own folder is ${noProjectFolder(agent.home)}; keep notes there, not in the projects.`
       : `You are not tied to one project, and the user has not added any projects yet. Your own folder is ${noProjectFolder(agent.home)}.`,
     soul: soul ? `Your standing instructions: ${soul}` : '',
+    autonomy: context.autonomy ?? '',
     memory: memorySection(context.memory ?? [], context.memoryOmitted),
     user: profileSection(context.profile ?? [], context.profileOmitted),
     refs: context.refs ?? '',
@@ -234,6 +237,7 @@ export function systemInstructions(agent: Agent, project: Project | null, contex
 const EMPTY_SECTION: Record<ContextSection, string> = {
   projects: 'You now work on one project.',
   soul: 'You no longer have standing instructions.',
+  autonomy: 'You no longer have an Autonomy setting: follow your role instructions.',
   memory: 'Your memory (memory.md) is empty.',
   user: 'The user profile (user.md) is now empty.',
   refs: 'There are no project notes or decisions now.',
