@@ -277,6 +277,7 @@ export class AgentManager {
       agents: () => this.store.agents.values(),
       repoOf: project => this.projectRepo(project),
       gh: args => runGh(args, this.ghExec),
+      onRead: data => { this.issueLinks.githubMerges(data.pullRequests); },
     });
     this.profile = new ProfileStore(store.dataDir);
     // Issue keys use the project's code (ACH-25; ACH-D41).

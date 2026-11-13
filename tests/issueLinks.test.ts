@@ -13,6 +13,7 @@ import { RefMentions } from '../server/refMentions.ts';
 import { Store } from '../server/store.ts';
 import { harness, tempDir } from './helpers.ts';
 import { createApp } from '../server/app.ts';
+import { AgentManager } from '../server/manager.ts';
 
 const env = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 function git(cwd: string, ...args: string[]) {
@@ -32,12 +33,12 @@ function setup(createdAt = 1000) {
   const work = new WorkService(records, { agents: () => [], messages: () => [], agentsDir: path.join(dir, 'agents'), dataDir: dir, knownRef: () => true, onMerges: (p, r) => { links.localMerges(p, r); } });
   return { dir, repo, project, store, issue, links, work, records };
 }
-function branch(repo: string, name: string, message = 'work') {
+function branch(repo: string, name: string, message = 'work', base = 'main') {
   git(repo, 'checkout', '-b', name);
   fs.writeFileSync(path.join(repo, 'work.txt'), message);
   git(repo, 'add', 'work.txt');
   git(repo, 'commit', '-m', message);
-  git(repo, 'checkout', 'main');
+  git(repo, 'checkout', base);
   git(repo, 'merge', '--no-ff', name, '-m', `Merge ${name}`);
   return git(repo, 'rev-parse', 'HEAD');
 }
@@ -89,7 +90,7 @@ test('explicit branch links work without a key, but canceled and other-project i
 test('GitHub merged PRs match branch, title or body and require merge evidence; old PRs do not reclose', () => {
   for (const field of ['branch', 'title', 'body'] as const) {
     const t = setup();
-    const pr: MergedIssuePr = { repo: 'a/b', number: 12, projects: [{ id: 'p1' }], state: 'merged', branch: 'fix/x', title: 'ship', body: '', mergedAt: new Date(5000).toISOString(), mergeCommit: 'a'.repeat(40), [field]: `feat/${t.issue.key}-ship` };
+    const pr: MergedIssuePr = { repo: 'a/b', number: 12, projects: [{ id: 'p1' }], state: 'merged', branch: 'fix/x', title: 'ship', body: '', mergedAt: new Date(5000).toISOString(), mergeCommit: 'a'.repeat(40), [field]: field === 'branch' ? `feat/${t.issue.key}-ship` : `Fixes ${t.issue.key}` };
     assert.equal(t.links.githubMerges([{ ...pr, state: 'closed' }, { ...pr, mergeCommit: null }]), 0);
     assert.equal(t.links.githubMerges([pr]), 1);
     assert.equal(t.store.issue(t.issue.id).status, 'done');
@@ -166,7 +167,8 @@ test('fast-forward merges use the existing reflog entries as merge evidence', as
   const tip = git(t.repo, 'rev-parse', 'HEAD');
   git(t.repo, 'checkout', 'main');
   git(t.repo, 'merge', '--ff-only', 'feat/ACH-1-ff');
-  await t.work.view([t.project], true);
+  const view = await t.work.view([t.project], true);
+  assert.deepEqual(view.projects[0].merged, [], 'fast-forwards do not become Work merge rows');
   assert.equal(t.store.issue(t.issue.id).status, 'done');
   assert.match(t.store.issue(t.issue.id).activity.at(-1)?.text ?? '', new RegExp(tip));
 });
@@ -267,6 +269,7 @@ test('fast-forward to a merge commit records its actual tip and includes both si
   git(t.repo, 'merge', '--ff-only', 'feat/ACH-1-stack');
   await t.work.view([t.project], true);
   assert.equal(t.records.list(fs.realpathSync(t.repo)).find(r => r.branch === 'feat/ACH-1-stack')?.tip, tip);
+  assert.deepEqual((await t.work.view([t.project])).projects[0].merged, [], 'FF-to-merge also stays out of Work merge rows');
   const state = new Store(path.join(t.dir, 'state')); state.load(); state.projects.set(t.project.id, t.project);
   const mentions = new RefMentions(state);
   await t.links.indexCommits(t.project, 'main', [], mentions);
@@ -334,4 +337,111 @@ test('merge identity comes from activityRef, never a hash mentioned in human-rea
   assert.equal(restarted.localMerges(t.project, [record]), 0);
   assert.equal(t.store.issue(t.issue.id).activity.length, count);
   assert.equal(t.store.issue(t.issue.id).status, 'todo');
+});
+
+test('GitHub plain mentions only link; branch keys or explicit closing phrases close', () => {
+  const cases = [
+    { title: 'Follow-up to ACH-1', body: 'See ACH-1', closes: false },
+    { title: 'Ship follow-up', body: 'Follow-up to ACH-1', closes: false },
+    { title: 'ACH-1 follow-up', body: '', closes: false },
+    { title: 'Ship', body: 'Fixes ISO-9001; see ACH-1', closes: false },
+    { title: 'Ship', body: 'Refixes ACH-1', closes: false },
+    { title: 'Fixes ACH-D43', body: 'See ACH-1', closes: false },
+    { title: 'fIxEs ach-1', body: '', closes: true },
+    { title: 'Ship', body: 'cLoSeS AcH-1', closes: true },
+    { title: 'Ship', body: 'Resolves ACH-001.', closes: true },
+    { title: 'Ship', body: 'Follow-up to ACH-1. Fixes ACH-1.', closes: true },
+    { title: 'ACH-1 follow-up. FIXES ach-001.', body: '', closes: true },
+    { title: 'Follow-up', body: 'See ACH-1', branch: 'feat/ach-1-work', closes: true },
+  ];
+  for (const c of cases) {
+    const t = setup();
+    const pr: MergedIssuePr = { repo: 'a/b', number: 1, projects: [{ id: 'p1' }], state: 'merged', mergedAt: new Date(5000).toISOString(), mergeCommit: 'a'.repeat(40), branch: c.branch ?? 'fix/x', title: c.title, body: c.body };
+    assert.equal(t.links.githubMerges([pr]), c.closes ? 1 : 0, JSON.stringify(c));
+    assert.equal(t.store.issue(t.issue.id).status, c.closes ? 'done' : 'todo', JSON.stringify(c));
+  }
+});
+
+test('manager wires fresh PR reads to issue closure without extra GitHub polling', async () => {
+  const t = setup();
+  const state = new Store(path.join(t.dir, 'app-state')); state.load();
+  const unavailable = { available: false, path: '', version: '' };
+  let reads = 0;
+  let issueKey = '';
+  const manager = new AgentManager(state, { broadcast: () => {} }, { claude: unavailable, codex: unavailable, orcacode: unavailable }, {
+    gitRemote: async () => 'https://github.com/a/b.git',
+    ghExec: async (_bin, args) => {
+      reads++;
+      return { stdout: JSON.stringify(args.includes('merged') ? [{ number: 7, title: 'Ship', body: `Closes ${issueKey}`, state: 'MERGED', headRefName: 'fix/x', mergedAt: new Date().toISOString(), mergeCommit: { oid: 'a'.repeat(40) } }] : []), stderr: '' };
+    },
+  });
+  try {
+    const project = manager.addProject({ path: t.repo });
+    manager.addIssue({ text: 'PR listener integration', projectId: project.id });
+    issueKey = manager.superView().issues[0].key;
+    await manager.prs.list();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(manager.superView().issues[0].status, 'done');
+    assert.equal(manager.superView().issues[0].activity.at(-1)?.ref, `a/b#7:${'a'.repeat(40)}`);
+    assert.equal(reads, 2);
+    await manager.prs.list();
+    await manager.issueLinks.refresh();
+    assert.equal(reads, 2, 'cache/local issue tick does not add GitHub reads');
+  } finally { await manager.shutdown(); }
+});
+
+test('idle local issue checks reuse Work evidence without Git reads; main changes refresh, including linked worktrees', async () => {
+  for (const kind of ['root', 'linked', 'nested', 'linked-nested', 'symlink-nested', 'custom-default']) {
+    const linked = kind.includes('linked');
+    const t = setup();
+    let project = t.project;
+    if (kind === 'custom-default') {
+      git(t.repo, 'branch', '-m', 'main', 'trunk');
+      git(t.repo, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
+      git(t.repo, 'checkout', '-b', 'agent');
+    }
+    if (linked) {
+      const folder = path.join(t.dir, 'linked');
+      git(t.repo, 'worktree', 'add', '-b', 'agent', folder, 'main');
+      project = { ...project, path: folder };
+    }
+    if (kind.includes('nested')) {
+      const folder = path.join(project.path, 'packages', 'app');
+      fs.mkdirSync(folder, { recursive: true });
+      project = { ...project, path: folder };
+    }
+    if (kind === 'symlink-nested') {
+      const alias = path.join(t.dir, 'alias');
+      fs.symlinkSync(project.path, alias);
+      project = { ...project, path: alias };
+    }
+    let calls = 0;
+    const work = new WorkService(t.records, { agents: () => [], messages: () => [], agentsDir: path.join(t.dir, 'agents'), dataDir: t.dir, knownRef: () => true, onMerges: (p, r) => { t.links.localMerges(p, r); } }, async (args, cwd) => { calls++; return readGit(args, cwd); });
+    work.ttlMs = 0; // Even after the normal view cache expires, an idle issue tick is read-free.
+    await work.refreshMerges([project]);
+    const baseline = calls;
+    assert.ok(baseline > 0);
+    await work.refreshMerges([project]);
+    await work.refreshMerges([project]);
+    assert.equal(calls, baseline, `no idle Git reads, kind=${kind}`);
+    branch(t.repo, 'feat/ACH-1-detect', 'work', kind === 'custom-default' ? 'trunk' : 'main');
+    await work.refreshMerges([project]);
+    assert.ok(calls > baseline);
+    assert.equal(t.store.issue(t.issue.id).status, 'done');
+    const afterMerge = calls;
+    await work.refreshMerges([project]);
+    assert.equal(calls, afterMerge, 'new evidence is reused');
+  }
+});
+
+test('a later fast-forward to a known merge commit preserves the existing Work merge row', async () => {
+  const t = setup();
+  const hash = branch(t.repo, 'feat/ACH-1-original');
+  const original = (await t.work.view([t.project], true)).projects[0];
+  assert.equal(original.merged.length, 1);
+  git(t.repo, 'branch', 'restore', hash);
+  git(t.repo, 'reset', '--hard', 'HEAD^1');
+  git(t.repo, 'merge', '--ff-only', 'restore');
+  const restored = (await t.work.view([t.project], true)).projects[0];
+  assert.deepEqual(restored.merged.map(m => [m.originalHash, m.branch]), original.merged.map(m => [m.originalHash, m.branch]));
 });

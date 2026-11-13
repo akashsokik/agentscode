@@ -1,6 +1,6 @@
 import type { Project, SuperIssue } from '../shared/types.ts';
 import { isOpenIssue } from '../shared/issues.ts';
-import { issueKeysIn } from '../shared/issueKeys.ts';
+import { findIssueKeys, issueKeysIn } from '../shared/issueKeys.ts';
 import type { MergeRecord, GitRunner, WorkService } from './work.ts';
 import { readGit } from './work.ts';
 import type { RefCommit, RefMentions } from './refMentions.ts';
@@ -43,7 +43,7 @@ function alreadyLogged(issue: SuperIssue, identity: string): boolean {
 
 export interface IssueLinkSource {
   projects: () => Project[];
-  work: Pick<WorkService, 'view'>;
+  work: Pick<WorkService, 'view' | 'refreshMerges'>;
   mentions: RefMentions;
   refs: Pick<ProjectRefs, 'get'>;
 }
@@ -61,9 +61,25 @@ export class IssueLinks {
     this.store = store; this.now = now; this.changed = changed; this.source = source;
   }
 
+  private codes(): Set<string> {
+    return new Set(['ALL', ...(this.source?.projects() ?? []).flatMap(p => p.code ? [p.code] : []), ...this.store.issues().map(i => i.key.slice(0, i.key.lastIndexOf('-')))]);
+  }
+
   private keys(text: string): string[] {
-    const codes = new Set(['ALL', ...(this.source?.projects() ?? []).flatMap(p => p.code ? [p.code] : []), ...this.store.issues().map(i => i.key.slice(0, i.key.lastIndexOf('-')))]);
-    return issueKeysIn(text, codes);
+    return issueKeysIn(text, this.codes());
+  }
+
+  /** A mention links a PR; only an explicit closing phrase completes its issue. */
+  private closingKeys(text: string): string[] {
+    const upper = text.toUpperCase();
+    const keys = new Set<string>();
+    const codes = this.codes();
+    for (const phrase of upper.matchAll(/\b(?:FIX(?:ES|ED)?|CLOS(?:E|ES|ED)|RESOLV(?:E|ES|ED))\s+/g)) {
+      // Match the phrase first: the shared key matcher deduplicates repeated mentions.
+      const match = findIssueKeys(upper.slice(phrase.index + phrase[0].length), codes)[0];
+      if (match?.index === 0) keys.add(match.key);
+    }
+    return [...keys];
   }
 
   /** Local merge detection uses Work's existing cache, independently of its view being open.
@@ -73,7 +89,7 @@ export class IssueLinks {
     this.refreshing = (async () => {
       if (this.source) {
         const projects = this.source.projects().filter(p => this.store.issues().some(i => i.projectId === p.id && isOpenIssue(i)));
-        if (projects.length) await this.source.work.view(projects);
+        if (projects.length) await this.source.work.refreshMerges(projects);
       }
     })().finally(() => { this.refreshing = null; });
     return this.refreshing;
@@ -135,10 +151,10 @@ export class IssueLinks {
       const at = pr.mergedAt ? Date.parse(pr.mergedAt) : NaN;
       if (pr.state.toLowerCase() !== 'merged' || !Number.isFinite(at) || !pr.mergeCommit || !/^[a-f0-9]{40}$/.test(pr.mergeCommit)) continue;
       if (/^revert\b/i.test(pr.title)) continue;
-      const keys = this.keys([pr.branch, pr.title, pr.body].join('\n'));
+      const keys = [...new Set([...this.keys(pr.branch.toUpperCase()), ...this.closingKeys(pr.title), ...this.closingKeys(pr.body ?? '')])];
       for (const issue of this.store.issues()) {
         if (!pr.projects.some(p => p.id === issue.projectId)) continue;
-        if (!keys.includes(issue.key) && issue.branch !== pr.branch) continue;
+        if (!keys.includes(issue.key)) continue;
         const identity = `${pr.repo}#${pr.number}:${pr.mergeCommit}`;
         if (at < Math.floor(issue.createdAt / 1000) * 1000 || alreadyLogged(issue, identity)) continue;
         const closes = isOpenIssue(issue) && at >= openSince(issue);

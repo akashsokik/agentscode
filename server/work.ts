@@ -157,6 +157,8 @@ export interface MergeEvidence {
 }
 
 export interface MergeRecord {
+  /** Fast-forwards are issue-link evidence, not rows in the Work view. */
+  fastForward?: true;
   /** The merge commit as made. */
   hash: string;
   tree: string;
@@ -203,6 +205,7 @@ export class MergeRecords {
     for (const record of found) {
       const known = list.find(r => r.hash === record.hash);
       if (!known) { list.push(record); changed = true; continue; }
+      if (record.fastForward && !known.fastForward && known.tip === known.hash) { known.fastForward = true; changed = true; }
       for (const key of ['reviewer', 'conversationId'] as const) {
         if (!known[key] && record[key]) { known[key] = record[key]; changed = true; }
       }
@@ -342,6 +345,7 @@ async function neverUsed(git: GitRunner, branch: string, cwd: string): Promise<b
 
 export class WorkService {
   private cache = new Map<string, { at: number; view: WorkProject }>();
+  private mergeVersions = new Map<string, string>();
   /** A build already running for a project, so polls arriving together share it. */
   private building = new Map<string, Promise<WorkProject>>();
   private records: MergeRecords;
@@ -392,6 +396,46 @@ export class WorkService {
       done.push(m.entry);
     }
     this.owners.markSeen(project.id, done);
+  }
+
+  /** A local filesystem change detector; idle issue checks run no Git commands. */
+  private mergeVersion(project: Project): string {
+    // Projects may be registered at a Git subfolder; Git itself walks parents too.
+    let root = realOrSelf(project.path);
+    for (let folder = root; ; folder = path.dirname(folder)) {
+      if (fs.existsSync(path.join(folder, '.git'))) { root = folder; break; }
+      if (path.dirname(folder) === folder) break;
+    }
+    let gitDir = path.join(root, '.git');
+    try {
+      if (!fs.statSync(gitDir).isDirectory()) {
+        const pointer = /^gitdir: (.+)$/m.exec(fs.readFileSync(gitDir, 'utf8'));
+        if (pointer) gitDir = path.resolve(root, pointer[1].trim());
+      }
+      gitDir = fs.realpathSync(gitDir);
+    } catch { /* Missing repositories are noticed when HEAD appears. */ }
+    let common = gitDir;
+    try { common = path.resolve(gitDir, fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim()); } catch { /* normal checkout */ }
+    let headBranch = '';
+    try { headBranch = /^ref: refs\/heads\/(.+)$/.exec(fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim())?.[1] ?? ''; } catch { /* no HEAD yet */ }
+    const originHead = path.join(common, 'refs', 'remotes', 'origin', 'HEAD');
+    let remoteBranch = '';
+    try { remoteBranch = /^ref: refs\/remotes\/origin\/(.+)$/.exec(fs.readFileSync(originHead, 'utf8').trim())?.[1] ?? ''; } catch { /* no remote HEAD */ }
+    const branches = [...new Set(['main', 'master', this.cache.get(project.id)?.view.defaultBranch ?? '', headBranch, remoteBranch].filter(Boolean))].sort();
+    const files = [path.join(gitDir, 'HEAD'), path.join(common, 'HEAD'), originHead, path.join(common, 'packed-refs'), ...branches.flatMap(branch => [path.join(common, 'refs', 'heads', branch), path.join(common, 'logs', 'refs', 'heads', branch)])];
+    return JSON.stringify(files.map(file => {
+      try { const s = fs.statSync(file); return [file, s.ino, s.size, s.mtimeMs, s.ctimeMs]; } catch { return [file, null]; }
+    }));
+  }
+
+  /** Reuse verified merge evidence until local HEAD, its branch ref or reflog changes. */
+  async refreshMerges(projects: Project[]): Promise<void> {
+    await Promise.all(projects.map(async project => {
+      if (this.mergeVersions.get(project.id) === this.mergeVersion(project)) return;
+      const running = this.building.get(project.id);
+      if (running) { await running; return; }
+      await this.project(project, true);
+    }));
   }
 
   async view(projects: Project[], fresh = false): Promise<WorkView> {
@@ -483,6 +527,7 @@ export class WorkService {
     if (!fresh && hit && Date.now() - hit.at < this.ttlMs) return hit.view;
     const running = this.building.get(project.id);
     if (running && !fresh) return running;
+    const mergeVersion = this.mergeVersion(project);
     const job = (async () => {
       let view: WorkProject;
       try {
@@ -491,6 +536,8 @@ export class WorkService {
         view = { ...this.empty(project, null), error: (err as Error).message.slice(0, 300) };
       }
       this.cache.set(project.id, { at: Date.now(), view });
+      // Capture before the build: a concurrent merge must remain detectable on the next tick.
+      if (!view.error) this.mergeVersions.set(project.id, mergeVersion);
       return view;
     })();
     this.building.set(project.id, job);
@@ -541,21 +588,21 @@ export class WorkService {
       const at = Number(/@\{(\d+)\}/.exec(selector ?? '')?.[1] ?? 0) * 1000;
       const branch = merge[1];
       const info = fromMessages(branch, messages, agents);
+      const fastForward = /Fast-forward/i.test(what ?? '');
       if (known.has(hash)) {
         // Fill in what messages say now (a review that landed after the first look).
-        found.push({ hash, tree: '', tip: '', branch, at, subject: '', names: [], refs: info.refs.filter(this.ctx.knownRef), ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
+        found.push({ hash, tree: '', tip: '', branch, at, subject: '', names: [], ...(fastForward ? { fastForward: true } : {}), refs: info.refs.filter(this.ctx.knownRef), ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
         continue;
       }
       const parts = await this.git(['log', '-1', '--format=%T%x1f%P%x1f%s', hash], root);
       if (!parts.ok) continue; // the commit is gone: nothing to record
       const [tree, parents, subject] = parts.out.trim().split('\x1f');
-      const fastForward = /Fast-forward/i.test(what ?? '');
       const tip = fastForward ? hash : parents?.split(' ')[1];
       if (!tree || !tip) continue;
       const refs = [...new Set([...info.refs, ...findRefIds(subject ?? '', this.ctx.knownRef).map(r => r.id)])].filter(this.ctx.knownRef);
       // A fast-forward's previous main is already in the next reflog entry.
       const parent = fastForward ? entries[index + 1]?.split('\x1f')[0] : parents?.split(' ')[0];
-      found.push({ hash, tree, tip, ...(parent ? { parent } : {}), branch, at, subject: subject ?? '', names: namesInMergeSubject(subject ?? ''), refs, ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
+      found.push({ hash, tree, tip, ...(fastForward ? { fastForward: true } : {}), ...(parent ? { parent } : {}), branch, at, subject: subject ?? '', names: namesInMergeSubject(subject ?? ''), refs, ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
     }
     this.records.merge(root, found.filter(r => r.tree || known.has(r.hash)));
     return this.records.list(root);
@@ -689,8 +736,10 @@ export class WorkService {
     }
     // A record counts only with evidence that its work is on main now (a merge undone by a reset has none).
     const evidence = await this.evidence(allRecords, mapped, defaultBranch, root);
-    const records = allRecords.filter(r => evidence.has(r.hash));
-    this.ctx.onMerges?.(project, records);
+    const verified = allRecords.filter(r => evidence.has(r.hash));
+    this.ctx.onMerges?.(project, verified);
+    // Preserve Work's existing merge list/graph: fast-forwards feed only issue auto-close.
+    const records = verified.filter(r => !r.fastForward);
     const byRecord = await this.mergedBranches(records, root);
     /**
      * On origin's main: the merge's commit as it is on main now is not among the local-only ones. A
