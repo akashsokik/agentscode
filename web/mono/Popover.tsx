@@ -54,6 +54,8 @@ type Props = Omit<ComponentPropsWithoutRef<"div">, "style"> & {
   rounded?: string;
   style?: CSSProperties;
   autoFocus?: boolean;
+  /** Focus this field after placement, instead of the surface (which first measures hidden). */
+  initialFocus?: { readonly current: HTMLElement | null };
   /** Wiring this in hands Popover the outside-click and Escape handling. */
   onDismiss?: (reason: PopoverDismissReason) => void;
   dismissOnEscape?: boolean;
@@ -141,6 +143,21 @@ function samePosition(a: PopoverPosition | null, b: PopoverPosition): boolean {
   );
 }
 
+/** Return keyboard focus after a picker closes, without stealing an outside click or caller focus. */
+function useFocusReturn(enabled: boolean) {
+  useLayoutEffect(() => {
+    if (!enabled) return;
+    const previous = document.activeElement;
+    return () => {
+      requestAnimationFrame(() => {
+        if (document.activeElement === document.body && previous instanceof HTMLElement && previous.isConnected) {
+          previous.focus({ preventScroll: true });
+        }
+      });
+    };
+  }, [enabled]);
+}
+
 /**
  * A menu, dropdown, or flyout that escapes its pane: portalled to the body so
  * no local stacking context can paint over it, placed against its anchor with
@@ -165,13 +182,16 @@ function NativePopover({
   ref,
   style,
   autoFocus,
+  initialFocus,
   dismissOnEscape = true,
   ...props
 }: Props & { host: HTMLElement }) {
   const surface = useRef<HTMLDivElement | null>(null);
+  useFocusReturn(Boolean(autoFocus || initialFocus));
   useEffect(() => {
-    if (autoFocus) surface.current?.focus({ preventScroll: true });
-  }, [autoFocus]);
+    const target = initialFocus?.current ?? (autoFocus ? surface.current : null);
+    target?.focus({ preventScroll: true });
+  }, [autoFocus, initialFocus]);
   useEffect(() => {
     if (!onDismiss) return;
     const key = (event: KeyboardEvent) => {
@@ -245,6 +265,7 @@ function WebPopover({
   className,
   style,
   autoFocus = false,
+  initialFocus,
   onDismiss,
   dismissOnEscape = true,
   ignore,
@@ -294,9 +315,15 @@ function WebPopover({
     };
   }, [place]);
 
+  useFocusReturn(Boolean(autoFocus || initialFocus));
+  const placedForFocus = position !== null;
   useEffect(() => {
-    if (autoFocus) surface.current?.focus();
-  }, [autoFocus]);
+    // The first commit is visibility:hidden: focus only once it is placed (ACH-32).
+    // Depend on readiness, not coordinates, so resize/reposition cannot steal typed focus.
+    if (!placedForFocus) return;
+    const target = initialFocus?.current ?? (autoFocus ? surface.current : null);
+    if (target && !target.contains(document.activeElement)) target.focus({ preventScroll: true });
+  }, [autoFocus, initialFocus, placedForFocus]);
 
   useEffect(() => {
     if (!onDismiss) return;

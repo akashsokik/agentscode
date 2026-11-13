@@ -33,6 +33,7 @@ const openThreads = new Map<string, string>();
 function Members({ channel, members, onEdit }: { channel: Channel; members: Agent[]; onEdit: () => void }) {
   const [shown, setShown] = useState(false);
   const [filter, setFilter] = useState('');
+  const memberSearch = useRef<HTMLInputElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const projects = useApp(s => s.snapshot?.projects);
   const projectName = (ids: string[] | null) => projectLabel(ids, projects);
@@ -54,11 +55,11 @@ function Members({ channel, members, onEdit }: { channel: Channel; members: Agen
         <ChevronDown className={`size-3 text-content/50 ${shown ? 'rotate-180' : ''}`} strokeWidth={1.75} />
       </button>
       {shown ? (
-        <Popover anchor={root} side="bottom" align="end" width={290} maxHeight={420} onDismiss={() => { setShown(false); setFilter(''); }} className="overflow-y-auto overscroll-contain p-1">
+        <Popover anchor={root} initialFocus={members.length > 8 ? memberSearch : undefined} side="bottom" align="end" width={290} maxHeight={420} onDismiss={() => { setShown(false); setFilter(''); }} className="overflow-y-auto overscroll-contain p-1">
           {members.length > 8 ? (
             <div className="flex items-center gap-2 px-2 pb-1.5 pt-1">
               <Search className="size-3.5 shrink-0 text-content/45" strokeWidth={1.75} />
-              <input autoFocus value={filter} onChange={e => setFilter(e.target.value)} placeholder="Find a member" aria-label="Find a member" className="min-w-0 flex-1 bg-transparent font-sans text-[12px] text-content outline-none placeholder:text-content/35" />
+              <input ref={memberSearch} value={filter} onChange={e => setFilter(e.target.value)} placeholder="Find a member" aria-label="Find a member" className="min-w-0 flex-1 bg-transparent font-sans text-[12px] text-content outline-none placeholder:text-content/35" />
             </div>
           ) : null}
           <MenuLabel>You and {members.length} {members.length === 1 ? 'agent' : 'agents'}</MenuLabel>
