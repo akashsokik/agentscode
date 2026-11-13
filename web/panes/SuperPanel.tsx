@@ -8,11 +8,11 @@ import type { IssueStatus, RoutineSchedule, SuperAction, SuperAsk, SuperIssue, S
 import { api } from '../api.ts';
 import { openAsks } from '../super.ts';
 import { ISSUE_STATUS_LABEL, heldText, migrateSeen, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type SuperTab } from '../superText.ts';
-import { isOpenIssue } from '../../shared/issues.ts';
+import { ISSUE_TITLE_MAX, isOpenIssue } from '../../shared/issues.ts';
 import { armRemove, cleanSummary, decisionGroups, keepArmed, decisionKind, focusAfterRemoval, issueGroups, issueMoves, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
-import { MenuDivider, MenuRow, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
+import { INPUT, MenuDivider, MenuRow, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
 import { Kbd } from '../ui/Kbd.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
@@ -320,7 +320,8 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === issue.projectId));
   const agent = useApp(s => (issue.agentId ? s.snapshot?.agents.find(a => a.id === issue.agentId) : undefined));
   const [editing, setEditing] = useState(false);
-  const [text, setText] = useState(issue.text);
+  // Edit renames: the title, one line. The description (Markdown, many lines) is edited in the issue view.
+  const [title, setTitle] = useState(issue.title);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const confirmButton = useRef<HTMLButtonElement>(null);
@@ -344,13 +345,13 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: {
     setConfirming(true);
     setFocusConfirm(next.focusConfirm);
   };
-  const named = `"${issue.text.length > 60 ? `${issue.text.slice(0, 59)}…` : issue.text}"`;
+  const named = `"${issue.title.length > 60 ? `${issue.title.slice(0, 59)}…` : issue.title}"`;
   const run = async (action: () => Promise<unknown>) => { setBusy(true); const ok = await attempt(action); setBusy(false); return ok; };
-  const save = async () => { if (!busy && text.trim() && await run(() => api.updateIssue(issue.id, { text: text.trim() }))) { setEditing(false); onSettled(); } };
+  const save = async () => { if (!busy && title.trim() && await run(() => api.updateIssue(issue.id, { title: title.trim() }))) { setEditing(false); onSettled(); } };
   const done = !isOpenIssue(issue);
   // A status change moves the row to another section: focus follows it (or goes to + if it folded away).
   const status = (s: IssueStatus) => { if (!busy) void run(() => api.updateIssue(issue.id, { status: s })).then(onSettled); };
-  const edit = () => { setText(issue.text); setEditing(true); if (!expanded) onToggle(); };
+  const edit = () => { setTitle(issue.title); setEditing(true); if (!expanded) onToggle(); };
   const moveTo = (to: number | null) => { if (to !== null && !busy) void run(() => api.moveIssue(issue.id, to)).then(onSettled); };
   const removeNow = async () => { if (await run(() => api.removeIssue(issue.id))) onRemoved(); };
   const remove = <RowAction label={`Confirm removing ${named}`} busy={busy} onClick={() => void removeNow()}><span className="text-danger">Remove?</span></RowAction>;
@@ -366,7 +367,7 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: {
         <>
           {!done ? <RowIcon icon={ChevronUp} label={`Move ${named} up`} disabled={moves.up === null} busy={busy} onClick={() => moveTo(moves.up)} /> : null}
           {!done ? <RowIcon icon={ChevronDown} label={`Move ${named} down`} disabled={moves.down === null} busy={busy} onClick={() => moveTo(moves.down)} /> : null}
-          <RowIcon icon={Pencil} label={`Edit ${named}`} busy={busy} onClick={edit} />
+          <RowIcon icon={Pencil} label={`Edit the title of ${named}`} busy={busy} onClick={edit} />
           <RowIcon icon={Trash2} label={`Remove ${named}`} busy={busy} onClick={() => setConfirming(true)} />
         </>
       )}
@@ -376,7 +377,7 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: {
       menu={close => (
         <>
           <MenuRow icon={expanded ? ChevronUp : ChevronDown} title={expanded ? 'Close' : 'Open'} shortcut="Enter" onSelect={() => { close(); onToggle(); }} />
-          <MenuRow icon={Pencil} title="Edit" onSelect={() => { close(); edit(); }} />
+          <MenuRow icon={Pencil} title="Edit title" onSelect={() => { close(); edit(); }} />
           {!done ? (
             <>
               <MenuRow icon={ChevronUp} title="Move up" disabled={busy || moves.up === null} onSelect={() => { close(); moveTo(moves.up); }} />
@@ -394,19 +395,18 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: {
     >
       {editing ? (
         <div className="flex flex-col gap-1.5" onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(false); } }}>
-          <textarea
+          <input
             autoFocus
-            aria-label={`Edit ${named}`}
-            value={text}
-            rows={2}
-            maxLength={500}
-            onChange={e => setText(oneLine(e.target.value))}
+            aria-label={`Title of ${named}`}
+            value={title}
+            maxLength={ISSUE_TITLE_MAX}
+            onChange={e => setTitle(oneLine(e.target.value))}
             onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void save(); } }}
-            className={`${TEXTAREA} text-[12.5px]`}
+            className={`${INPUT} text-[12.5px]`}
           />
           <div className="flex justify-end gap-1.5">
             <TextButton onClick={() => setEditing(false)}>Cancel</TextButton>
-            <button type="button" className={PRIMARY} disabled={!text.trim()} aria-busy={busy || undefined} onClick={() => void save()}>Save</button>
+            <button type="button" className={PRIMARY} disabled={!title.trim()} aria-busy={busy || undefined} onClick={() => void save()}>Save</button>
           </div>
         </div>
       ) : <p className="whitespace-pre-wrap break-words">{issue.text}</p>}
@@ -422,7 +422,7 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: {
         >
           {(Object.keys(ISSUE_STATUS_LABEL) as IssueStatus[]).map(s => <option key={s} value={s}>{ISSUE_STATUS_LABEL[s]}</option>)}
         </select>
-        {!editing ? <DetailButton onClick={edit}>Edit</DetailButton> : null}
+        {!editing ? <DetailButton onClick={edit}>Edit title</DetailButton> : null}
         {confirming ? <DetailButton ref={confirmButton} danger label={`Confirm removing ${named}`} busy={busy} onClick={() => void removeNow()}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
       </div>
     </PanelRow>
