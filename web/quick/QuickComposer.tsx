@@ -19,10 +19,11 @@ import { IS_MAC } from '../platform.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
 import { projectLabel } from '../projects.ts';
 import { heldText, openAsks } from '../superText.ts';
-import { cx } from '../ui/common.tsx';
+import { filterOptions } from '../mono/filter.ts';
+import { cx, MenuRow, MenuRowRole } from '../ui/common.tsx';
 import { EngineIcon, ENGINE_NAMES } from '../ui/EngineIcon.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
-import { ArrowUp, Check, ChevronDown, Folder, Plus, Search, Sparkles, X } from '../mono/icons.tsx';
+import { ArrowUp, ChevronDown, Folder, Plus, Search, Sparkles, X } from '../mono/icons.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { answerQuick, sendQuick, targetAgentId, teamStatus, type QuickTarget, type TeamMember, type TeamState } from './route.ts';
 import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
@@ -617,14 +618,11 @@ function PickerList({ items, placeholder, onClose }: {
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? items.filter(i => `${i.label} ${i.hint ?? ''}`.toLowerCase().includes(q)) : items;
-  }, [items, query]);
+  const shown = useMemo(() => filterOptions(items.map(item => ({ ...item, value: item.hint ?? '' })), query, 'phrase'), [items, query]);
   const [index, setIndex] = useState(() => Math.max(0, items.findIndex(i => i.checked)));
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => { setIndex(i => Math.min(i, Math.max(0, shown.length - 1))); }, [shown.length]);
-  useEffect(() => { list.current?.querySelector<HTMLElement>(`[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' }); }, [index]);
+  useEffect(() => { list.current?.querySelectorAll<HTMLElement>('[role=option]')[index]?.scrollIntoView({ block: 'nearest' }); }, [index]);
   const onKey = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setIndex(i => Math.min(shown.length - 1, i + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setIndex(i => Math.max(0, i - 1)); }
@@ -638,23 +636,13 @@ function PickerList({ items, placeholder, onClose }: {
         <input autoFocus value={query} onChange={e => { setQuery(e.target.value); setIndex(0); }} onKeyDown={onKey} placeholder={placeholder} className="min-w-0 flex-1 bg-transparent text-[13px] text-content outline-none placeholder:text-content/35" />
       </label>
       <div ref={list} role="listbox" aria-label={placeholder} className="min-h-0 max-h-64 overflow-y-auto overscroll-contain px-2 pb-2">
-        {shown.length ? shown.map((item, i) => (
-          <button
-            key={item.key}
-            type="button"
-            role="option"
-            aria-selected={i === index}
-            data-index={i}
-            onMouseMove={() => setIndex(i)}
-            onClick={item.onPick}
-            className={cx('flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] transition-colors duration-100', i === index ? 'bg-selection-hover text-content' : 'text-content/75')}
-          >
-            <span className="grid size-4 shrink-0 place-items-center text-content/60">{item.icon}</span>
-            <span className="min-w-0 shrink-0 truncate">{item.label}</span>
-            {item.hint ? <span className="min-w-0 flex-1 truncate text-[11px] text-content/40">{item.hint}</span> : <span className="flex-1" />}
-            {item.checked ? <Check className="size-3.5 shrink-0 text-content/70" strokeWidth={2.25} /> : null}
-          </button>
-        )) : <p className="px-2 py-2 text-[12px] text-content/45">Nothing matches.</p>}
+        <MenuRowRole.Provider value="option">
+          {shown.length ? shown.map((item, i) => (
+            <MenuRow key={item.key} density="inline" leading={item.icon ?? <span />} title={item.label} hint={item.hint}
+              checked={item.checked} highlighted={i === index} aria-selected={i === index}
+              onMouseMove={() => setIndex(i)} onMouseDown={() => {}} onSelect={item.onPick} />
+          )) : <p className="px-2 py-2 text-[12px] text-content/45">Nothing matches.</p>}
+        </MenuRowRole.Provider>
       </div>
     </>
   );

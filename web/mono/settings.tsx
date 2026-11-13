@@ -11,7 +11,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { Check, ChevronDown } from "./icons.tsx";
+import { ChevronDown } from "./icons.tsx";
+import { MenuRow, MenuRowRole } from "../ui/common.tsx";
 import { Popover } from "./Popover.tsx";
 import { filterOptions } from "./filter.ts";
 
@@ -225,6 +226,7 @@ export function Select({
           {searchable && !shown.length ? (
             <p className="px-2 py-1.5 text-[12px] text-content/50">No match</p>
           ) : null}
+          <MenuRowRole.Provider value="option">
           {shown.map((option, index) => {
             const isSelected = option.value === value;
             const highlighted = index === active;
@@ -234,37 +236,24 @@ export function Select({
                 {heading ? (
                   <p className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-content/40">{heading}</p>
                 ) : null}
-                <button
+                <MenuRow
                   ref={highlighted ? activeOption : undefined}
-                  type="button"
                   id={`${listId}-opt-${index}`}
-                  role="option"
                   tabIndex={-1}
-                  aria-selected={isSelected}
+                  selected={isSelected}
+                  highlighted={highlighted}
                   aria-disabled={option.disabled || undefined}
                   disabled={option.disabled}
-                  onMouseDown={(e) => e.preventDefault()}
                   onMouseEnter={() => setActive(index)}
-                  onClick={() => pick(option.value)}
-                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] disabled:cursor-not-allowed disabled:opacity-40 ${
-                    highlighted || isSelected
-                      ? "bg-selection text-content"
-                      : "text-content hover:bg-content/5"
-                  }`}
-                >
-                  {option.icon ? (
-                    <span className="grid size-4 shrink-0 place-items-center">
-                      {option.icon}
-                    </span>
-                  ) : null}
-                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                  {isSelected ? (
-                    <Check className="size-3.5 shrink-0" strokeWidth={2.25} />
-                  ) : null}
-                </button>
+                  onSelect={() => pick(option.value)}
+                  density="compact"
+                  leading={option.icon}
+                  title={option.label}
+                />
               </div>
             );
           })}
+          </MenuRowRole.Provider>
         </Popover>
       ) : null}
     </div>
