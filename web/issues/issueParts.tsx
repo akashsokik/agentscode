@@ -3,7 +3,7 @@ import { ISSUE_PRIORITIES, ISSUE_PRIORITY_LABEL, ISSUE_STATUSES, ISSUE_STATUS_LA
 import type { IssuePriority, IssueStatus, SuperIssue } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { relativeTime } from '../format.ts';
-import { CheckCircle, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleDashed, CircleDot, CircleX, Copy, Eye, Gauge, Pause, Trash2 } from '../mono/icons.tsx';
+import { CheckCircle, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleDashed, CircleDot, Copy, Eye, Gauge, Minus, Pause, Trash2 } from '../mono/icons.tsx';
 import { WhoAvatar } from '../notes/parts.tsx';
 import { attempt, useApp } from '../store.ts';
 import { cx, MenuDivider, MenuLabel, MenuRow } from '../ui/common.tsx';
@@ -14,7 +14,8 @@ import { dueBucket, type RowProperty } from './issuesView.ts';
 
 /**
  * Status marks from the existing mono icons, until the glyphs from the gaps demo are approved
- * (ACH-D43 gap 1). Done is MonoCode's circled check in the success colour (ACH-D45).
+ * (ACH-D43 gap 1). Done is MonoCode's circled check in the success colour and Canceled its minus
+ * (ACH-D45); both move to the shared StatusMark once it lands.
  */
 export const ISSUE_ICON: Record<IssueStatus, { icon: typeof CircleDot; cls: string }> = {
   needs_you: { icon: CircleAlert, cls: 'text-warning' },
@@ -24,7 +25,7 @@ export const ISSUE_ICON: Record<IssueStatus, { icon: typeof CircleDot; cls: stri
   todo: { icon: CircleDashed, cls: '' },
   backlog: { icon: CircleDashed, cls: 'text-content/40' },
   done: { icon: CheckCircle, cls: 'text-success' },
-  canceled: { icon: CircleX, cls: 'text-content/40' },
+  canceled: { icon: Minus, cls: 'text-content/40' },
 };
 
 export function StatusIcon({ status, className = 'size-3.5' }: { status: IssueStatus; className?: string }) {
@@ -135,16 +136,18 @@ export function IssueRow({ issue, properties, today, now, expanded, onOpen }: {
 }
 
 /**
- * The page of a menu shown: its first row takes focus whenever the page changes, as the menu's
- * first page does when it opens (web/ui/menuFocus.ts).
+ * The page of a menu shown. Whenever the page changes (and when it first shows), focus goes to its
+ * search field if it has one, so typing filters at once, or else to its first row.
  */
 export function MenuPage({ page, children }: { page: string; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
-  const first = useRef(true);
   useEffect(() => {
-    // The opening page is focused by ContextMenu itself.
-    if (first.current) { first.current = false; return; }
-    box.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled), [role="option"]:not(:disabled), input')?.focus();
+    // A tick later: a popover's first render cannot take focus yet (ContextMenu waits a frame too).
+    const timer = setTimeout(() => {
+      const el = box.current;
+      (el?.querySelector<HTMLElement>('input') ?? el?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled), [role="option"]:not(:disabled)'))?.focus({ preventScroll: true });
+    });
+    return () => clearTimeout(timer);
   }, [page]);
   return <div ref={box}>{children}</div>;
 }
@@ -168,7 +171,7 @@ export function IssueMenu({ issue, close, onOpen }: { issue: SuperIssue; close: 
           <MenuRow icon={Gauge} title={<span className="flex items-center justify-between gap-2">Priority<span className="flex items-center gap-1 text-[11px] font-normal text-content/45">{ISSUE_PRIORITY_LABEL[issue.priority]}<ChevronRight aria-hidden className="size-3" strokeWidth={1.75} /></span></span>} onSelect={() => setPage('priority')} />
           <MenuDivider />
           <MenuRow icon={Copy} title={`Copy ${issue.key}`} onSelect={() => { close(); void navigator.clipboard?.writeText(issue.key); }} />
-          {isOpenIssue(issue) ? <MenuRow icon={CircleX} title="Cancel issue" onSelect={() => update({ status: 'canceled' })} /> : null}
+          {isOpenIssue(issue) ? <MenuRow icon={Minus} title="Cancel issue" onSelect={() => update({ status: 'canceled' })} /> : null}
           <MenuRow icon={Trash2} title="Remove…" danger onSelect={() => setPage('remove')} />
         </>
       ) : page === 'status' ? (

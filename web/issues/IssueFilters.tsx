@@ -11,12 +11,14 @@ import {
   type IssueFilters, type IssueNames, type IssueProperty, type IssuesDisplay, type IssuesGrouping, type IssuesOrdering,
 } from './issuesView.ts';
 
-/** Arrow keys, Home and End move between a popover's rows; from its search field, down goes to the first. */
+/** Arrow keys, Home and End move between a popover's rows; from its search field, down goes to the first value. */
 function moveFocus(e: KeyboardEvent<HTMLDivElement>) {
   const rows = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]:not(:disabled), [role="menuitem"]:not(:disabled)')];
   const fromField = (e.target as HTMLElement).tagName === 'INPUT';
   if (fromField && e.key !== 'ArrowDown') return;
-  const target = menuKeyTarget(rows.length, fromField ? -1 : rows.indexOf(document.activeElement as HTMLElement), e.key);
+  // Down from the search field goes to the first value, not back up to the Back row above the field.
+  const firstValue = rows.findIndex(r => r.getAttribute('role') === 'option');
+  const target = fromField ? (firstValue < 0 ? null : firstValue) : menuKeyTarget(rows.length, rows.indexOf(document.activeElement as HTMLElement), e.key);
   if (target === null) return;
   e.preventDefault();
   e.stopPropagation();
