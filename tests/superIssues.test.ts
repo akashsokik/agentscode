@@ -562,3 +562,26 @@ test('git links: a merge closes an issue once, its hash kept as the status entry
   assert.equal(again.activity.length, closed.activity.length + 1);
   assert.equal(store.updateIssue(issue.id, { status: 'done', activityRef: 'def456' }, 5, { kind: 'git' }).status, 'done');
 });
+
+test('a relation to a removed issue stays, and the issue\'s other relations can still be added and removed', async () => {
+  const t = await team();
+  for (const text of ['A', 'B', 'C', 'D']) t.manager.addIssue({ text });
+  const by = (text: string) => t.manager.superView().issues.find(g => g.text === text)!;
+  const [a, b, c, d] = [by('A'), by('B'), by('C'), by('D')];
+  t.manager.updateIssue(a.id, { relations: [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: c.id }] });
+  t.manager.removeIssue(b.id);
+  // Add D: B is gone, but A already had it, so the list is still accepted.
+  t.manager.updateIssue(a.id, { relations: [...by('A').relations, { type: 'related', issueId: d.id }] });
+  assert.deepEqual(by('A').relations, [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: c.id }, { type: 'related', issueId: d.id }]);
+  // Remove C.
+  t.manager.updateIssue(a.id, { relations: by('A').relations.filter(r => r.issueId !== c.id) });
+  assert.deepEqual(by('A').relations, [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: d.id }]);
+  // A gone id A never had is still refused, and so is the kept one under another type.
+  assert.throws(() => t.manager.updateIssue(a.id, { relations: [{ type: 'related', issueId: 'never-was' }] }), e => status(e) === 400);
+  assert.throws(() => t.manager.updateIssue(a.id, { relations: [{ type: 'duplicate_of', issueId: b.id }] }), e => status(e) === 400);
+  // Undo of the removal brings B back, and A's relation reconnects.
+  const removal = t.manager.superView().log.find(x => x.tool === 'remove_issue')!;
+  await t.manager.undoSuper(removal.id);
+  assert.ok(t.manager.superView().issues.some(g => g.id === b.id));
+  assert.deepEqual(by('A').relations[0], { type: 'blocks', issueId: b.id });
+});
