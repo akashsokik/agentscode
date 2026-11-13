@@ -56,10 +56,11 @@ export function MessageStatus({ message }: { message: PeerMessage }) {
   );
 }
 
-/** inboxStatusMark for conversations. Results use the shared status mark (ACH-D45); stopped and
- * queued are not results and keep their own icons; working spins. */
+/** inboxStatusMark for conversations. Results and stopped use the shared status mark (ACH-D45, ACH-D48); queued
+ * keeps its clock; working spins. */
 const STATE_MARK: Record<Exclude<ThreadState, 'working'>, { icon: IconComponent; className: string } | { status: StatusState; quiet?: boolean }> = {
-  stopped: { icon: Square, className: 'text-content/40' },
+  // A stopped conversation was cancelled: the shared cancel mark (ACH-D48), not a box that reads as a checkbox.
+  stopped: { status: 'cancel' },
   queued: { icon: Clock, className: 'text-content/50' },
   failed: { status: 'fail' },
   changes: { status: 'warn' },
@@ -496,7 +497,7 @@ function TailStop({ stop, agents, fresh, first, last }: { stop: TimelineTail; ag
     );
   }
   return (
-    <TimelineStop first={first} last={last} fresh={fresh} node={<Square className="size-2.5 fill-current text-content/45" strokeWidth={0} />}>
+    <TimelineStop first={first} last={last} fresh={fresh} node={<StatusMark state="cancel" />}>
       <p className="flex h-5 min-w-0 items-center gap-1.5 font-sans text-[12px] text-content/50">
         <span className="shrink-0 font-medium text-content">Conversation stopped</span>
         <span aria-hidden>·</span>

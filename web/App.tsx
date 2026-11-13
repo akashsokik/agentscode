@@ -39,7 +39,7 @@ import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
 import { UsageFooter } from './ui/UsageFooter.tsx';
 import { HeaderButton, MenuDivider, MenuRow, StatusLabel } from './ui/common.tsx';
-import { ChevronRight, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X, GitPullRequest } from './mono/icons.tsx';
+import { ChevronRight, CircleDashed, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X, GitPullRequest } from './mono/icons.tsx';
 import { StatusMark } from './ui/StatusMark.tsx';
 import { LAYER } from './mono/layers.ts';
 import { Shimmer } from './mono/Shimmer.tsx';
@@ -57,6 +57,9 @@ function baseName(path: string): string {
   return path.split('/').pop() || path;
 }
 
+/** The tab of a removed agent or a deleted channel: a dashed circle, "not here any more", never the close X (ACH-D48). */
+const GONE_ICON = <CircleDashed className="size-3.5 shrink-0 text-content/40" strokeWidth={1.75} />;
+
 /**
  * Icon, headline and meta line for a title tab, from live state. `busy` shows a spinner;
  * `attention` (an agent waiting on you) shows a dot instead, so it reads from across the bar.
@@ -65,7 +68,7 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
   const c = tab.content;
   if (c.kind === 'agent') {
     const agent = snapshot?.agents.find(a => a.id === c.agentId);
-    if (!agent) return { icon: <X className="size-3.5 shrink-0 text-content/40" strokeWidth={1.75} />, headline: 'Removed', meta: '' };
+    if (!agent) return { icon: GONE_ICON, headline: 'Removed', meta: '' };
     const pending = Boolean(snapshot?.approvals.some(a => a.agentId === agent.id));
     return {
       icon: <AgentAvatar agent={agent} className="size-3.5" />,
@@ -77,7 +80,7 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
   }
   if (c.kind === 'channel') {
     const channel = snapshot?.channels.find(ch => ch.id === c.channelId);
-    if (!channel) return { icon: <X className="size-3.5 shrink-0 text-content/40" strokeWidth={1.75} />, headline: 'Deleted', meta: '' };
+    if (!channel) return { icon: GONE_ICON, headline: 'Deleted', meta: '' };
     const members = channel.memberIds.length;
     const onIt = snapshot?.agents.filter(a => a.currentTask?.channelId === channel.id) ?? [];
     return {

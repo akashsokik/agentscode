@@ -6,8 +6,15 @@ import { AgentAvatar } from '../ui/Avatar.tsx';
 // Small pieces the Notes tab and the id chips share: the kind glyphs, who with their avatar, the
 // date as the app writes it, the status pill and highlighted search words.
 
+/** A decision's kind mark: an outlined "D", drawn like the note glyph, so it is never read as a pass tick (ACH-D48). */
 export function DecisionGlyph({ className }: { className?: string }) {
-  return <svg aria-hidden viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} className={className}><path d="m3.5 8.5 3 3 6-7" /></svg>;
+  return <svg aria-hidden viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinejoin="round" className={className}><path d="M4.5 3h3.2a4.8 5 0 0 1 0 10H4.5Z" /></svg>;
+}
+
+/** The kind glyph a chip shows, or none where the section already names the kind (ACH-D37, ACH-D48). */
+export function KindGlyph({ kind, show = true }: { kind: 'D' | 'N'; show?: boolean }) {
+  if (!show) return null;
+  return kind === 'D' ? <DecisionGlyph /> : <NoteGlyph />;
 }
 
 export function NoteGlyph({ className }: { className?: string }) {
@@ -28,7 +35,7 @@ export function chipClass(summary: Pick<RefSummary, 'kind' | 'state'> | undefine
 export function StaticChip({ summary, small = true, glyph = true }: { summary: RefSummary; small?: boolean; /** List rows drop the glyph: the section already says the kind (ACH-D37 amends ACH-D13). */ glyph?: boolean }) {
   return (
     <span className={chipClass(summary, summary.id, small)}>
-      {glyph ? summary.kind === 'D' ? <DecisionGlyph /> : <NoteGlyph /> : null}
+      <KindGlyph kind={summary.kind} show={glyph} />
       {summary.id}
     </span>
   );
