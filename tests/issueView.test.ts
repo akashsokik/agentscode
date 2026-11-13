@@ -57,7 +57,8 @@ test('activity lines in plain words, with who did it; a removed agent reads "An 
   assert.equal(activityLine(e({ kind: 'assignee', to: 'fen' }), name), 'assigned it to Fen');
   assert.equal(activityLine(e({ kind: 'assignee' }), name), 'unassigned it');
   assert.equal(activityLine(e({ kind: 'comment', text: 'x' }), name), 'commented');
-  assert.deepEqual([{ kind: 'user' }, { kind: 'super' }, { kind: 'podcode' }, { kind: 'agent', id: 'fen' }, { kind: 'agent', id: 'gone' }].map(a => actorName(a as never, name)), ['You', 'SuperAgent', 'PodCode', 'Fen', 'An agent']);
+  assert.deepEqual([{ kind: 'user' }, { kind: 'super' }, { kind: 'podcode' }, { kind: 'agent', id: 'fen' }, { kind: 'agent', id: 'gone' }, { kind: 'git' }].map(a => actorName(a as never, name)), ['You', 'SuperAgent', 'PodCode', 'Fen', 'An agent', 'git']);
+  assert.equal(activityLine(e({ by: { kind: 'git' }, kind: 'status', from: 'in_review', to: 'done', text: 'feat/ACH-1-x merged into main' }), name), 'moved it from In review to Done (feat/ACH-1-x merged into main)');
 });
 
 test('pickers: every status (open first, then Done and Canceled) and priority; search by every word; labels parsed', () => {

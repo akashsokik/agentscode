@@ -4,7 +4,7 @@
  * takes comments (issueWrites.ts); until then it says so instead of pretending.
  */
 import type { IssueActor, IssueEvent, SuperIssue } from '../../../shared/types.ts';
-import { Clock } from '../../mono/icons.tsx';
+import { Clock, GitBranch } from '../../mono/icons.tsx';
 import { useApp } from '../../store.ts';
 import { AgentAvatar } from '../../ui/Avatar.tsx';
 import { Markdown } from '../../ui/Markdown.tsx';
@@ -25,6 +25,7 @@ function Who({ actor }: { actor: IssueActor }) {
   const superAgent = agents.find(a => a.role === 'super');
   const agent = actor.kind === 'agent' ? agents.find(a => a.id === actor.id) : actor.kind === 'super' ? superAgent : undefined;
   if (agent) return <AgentAvatar agent={agent} animate={false} className="size-4" />;
+  if (actor.kind === 'git') return <GitBranch aria-hidden className="size-4 shrink-0 p-[1px] text-content/55" strokeWidth={1.75} />;
   return <span aria-hidden className="grid size-4 shrink-0 place-items-center rounded-full bg-content/10 text-[9px] font-semibold text-content/60">{actor.kind === 'user' ? 'Y' : 'P'}</span>;
 }
 

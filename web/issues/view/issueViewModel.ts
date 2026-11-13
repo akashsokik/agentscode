@@ -56,11 +56,12 @@ export function dueTone(dueDate: string | undefined, status: IssueStatus, now: D
   return { tone: 'quiet', text: days === 1 ? `Tomorrow, ${day}` : day };
 }
 
-/** Who did something, in words: You, the SuperAgent, an agent by name (or "An agent" once removed), PodCode. */
+/** Who did something, in words: You, the SuperAgent, an agent by name (or "An agent" once removed), PodCode, git (a merge that closed it). */
 export function actorName(actor: IssueActor, agentName: (id: string) => string | undefined): string {
   if (actor.kind === 'user') return 'You';
   if (actor.kind === 'super') return 'SuperAgent';
   if (actor.kind === 'podcode') return 'PodCode';
+  if (actor.kind === 'git') return 'git';
   return agentName(actor.id) ?? 'An agent';
 }
 

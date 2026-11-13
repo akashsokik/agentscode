@@ -92,7 +92,8 @@ export function useIssueLinks(issue: SuperIssue): IssueLinks | null {
 }
 
 export function InGit({ issue, links }: { issue: SuperIssue; links: IssueLinks | null }) {
-  const git = links?.git;
+  // The branch the issue records (an agent that started it), when the links name none.
+  const git = links?.git && !links.git.branch && issue.branch ? { ...links.git, branch: { name: issue.branch } } : links?.git ?? (issue.branch ? { commits: [], branch: { name: issue.branch } } : undefined);
   const quiet = 'font-sans text-[12.5px] text-content/45';
   return (
     <Section icon={GitBranch} title="In git">
