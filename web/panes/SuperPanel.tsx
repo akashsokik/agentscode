@@ -17,8 +17,9 @@ import { Kbd } from '../ui/Kbd.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar, RowAction, RowIcon } from '../ui/PanelList.tsx';
-import { Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleAlert, CircleDashed, CircleDot, CircleX, Clock, Copy, CornerDownRight, Eye, ListBullet, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
+import { Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleDot, Clock, Copy, CornerDownRight, ListBullet, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
+import { ISSUE_ICON } from '../issues/issueParts.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
 export function SuperInbox() {
@@ -210,20 +211,9 @@ function AnswerItem({ ask, now, expanded, onToggle }: { ask: SuperAsk; now: numb
 /** Issues are one line; line breaks typed or pasted become spaces. */
 const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ');
 
-/** Existing mono icons until the status glyphs from the approved demo land (ACH-D41, phase 3). */
-const ISSUE_ICON: Record<IssueStatus, { icon: typeof ListBullet; cls: string }> = {
-  needs_you: { icon: CircleAlert, cls: 'text-warning' },
-  in_review: { icon: Eye, cls: 'text-content/75' },
-  in_progress: { icon: CircleDot, cls: 'text-content/75' },
-  waiting: { icon: Pause, cls: '' },
-  todo: { icon: CircleDashed, cls: '' },
-  backlog: { icon: CircleDashed, cls: 'text-content/40' },
-  done: { icon: CheckCircle, cls: '' },
-  canceled: { icon: CircleX, cls: 'text-content/40' },
-};
 
 /** A one-line composer: Enter adds, Escape closes. Opened by +. */
-function Composer({ placeholder, label, onAdd, onClose, children }: { placeholder: string; label: string; onAdd: (text: string) => Promise<boolean>; onClose: () => void; children?: ReactNode }) {
+export function Composer({ placeholder, label, onAdd, onClose, children }: { placeholder: string; label: string; onAdd: (text: string) => Promise<boolean>; onClose: () => void; children?: ReactNode }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const add = async () => {
