@@ -73,7 +73,7 @@ export class IssueLinks {
   private closingKeys(text: string, codes = this.codes()): string[] {
     const upper = text.toUpperCase();
     const keys = new Set<string>();
-    for (const phrase of upper.matchAll(/\b(?:FIX(?:ES|ED)?|CLOS(?:E|ES|ED)|RESOLV(?:E|ES|ED))\s+/g)) {
+    for (const phrase of upper.matchAll(/\b(?:FIX(?:ES|ED)?|CLOS(?:E|ES|ED)|RESOLV(?:E|ES|ED))(?:\s*:\s*|\s+)/g)) {
       // Match the phrase first: the shared key matcher deduplicates repeated mentions.
       const match = findIssueKeys(upper.slice(phrase.index + phrase[0].length), codes)[0];
       if (match?.index === 0) keys.add(match.key);
@@ -169,7 +169,7 @@ export class IssueLinks {
       const keys = [...new Set([...this.keys(pr.branch.toUpperCase(), codes), ...this.closingKeys(pr.title, codes), ...this.closingKeys(pr.body ?? '', codes)])];
       for (const issue of issues.values()) {
         if (!pr.projects.some(p => p.id === issue.projectId)) continue;
-        if (!keys.includes(issue.key)) continue;
+        if (!keys.includes(issue.key) && issue.branch !== pr.branch) continue;
         const identity = `${pr.repo}#${pr.number}:${pr.mergeCommit}`;
         if (at < Math.floor(issue.createdAt / 1000) * 1000 || alreadyLogged(issue, identity)) continue;
         const closes = isOpenIssue(issue) && at >= openSince(issue);
