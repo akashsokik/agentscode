@@ -116,6 +116,8 @@ export const api = {
   workChanges: (project: string, target: WorkTarget) => request<WorkChanges>('GET', `/api/work/changes?${new URLSearchParams({ project, ...target })}`),
   workDiff: (project: string, target: WorkTarget, path: string) => request<WorkDiff>('GET', `/api/work/diff?${new URLSearchParams({ project, ...target, path })}`),
   ref: (id: string) => request<RefDetail>('GET', `/api/refs/${encodeURIComponent(id)}`),
+  /** The issues a decision is cited for (server/issueLinks.ts): key and title, newest link first. */
+  decisionIssues: (id: string) => request<{ id: string; issues: { issueId: string; key: string; title: string }[] }>('GET', `/api/refs/${encodeURIComponent(id)}/issues`),
   searchRefs: (q: string, code?: string) => request<{ hits: RefSearchHit[] }>('GET', `/api/refs/search?q=${encodeURIComponent(q)}${code ? `&code=${encodeURIComponent(code)}` : ''}`),
 
   createAgent: (input: CreateAgentRequest) => request<Agent>('POST', '/api/agents', input),

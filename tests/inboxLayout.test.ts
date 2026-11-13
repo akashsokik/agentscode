@@ -39,3 +39,37 @@ test('remote Markdown never loads an image from someone else\'s server and links
   assert.doesNotMatch(remote, /<img/, 'an image is its alt text, linked');
   assert.match(remote, /\^https\?:/);
 });
+
+test('polish (ACH-23): keyboard, focus, copy and refresh feedback, errors with a retry', () => {
+  const inbox = read('web/ui/Inbox.tsx');
+  assert.equal(inbox.match(/onKeyDown=\{e => onTablistKey\(/g)?.length, 2, 'both tab rows move with Left/Right/Home/End');
+  assert.equal(inbox.match(/tabIndex=\{value === (option|tab)\.value \? 0 : -1\}/g)?.length, 2, 'roving tabindex: only the selected tab is a Tab stop');
+  assert.match(inbox, /focus-visible:bg-content\/5 focus-visible:text-content'/, 'a keyboard-focused card has its own fill, never the selected card\'s');
+  assert.match(inbox, /scrollIntoView\(\{ block: 'nearest' \}\)/, 'the selected card is kept in view');
+  const prs = read('web/prs/PullRequestsPane.tsx');
+  assert.match(prs, /e\.key !== 'j' && e\.key !== 'k'/, 'J/K walk the list');
+  assert.match(prs, /closest\('input, textarea, \[contenteditable="true"\]'\)/, 'never while typing');
+  assert.match(prs, /e\.key !== 'Escape'/, 'Escape in the detail returns to the card');
+  assert.match(prs, /'Copy failed'/, 'a refused clipboard says so');
+  assert.match(prs, /aria-live="polite"/);
+  assert.match(prs, /\[&_svg\]:animate-spin motion-reduce:\[&_svg\]:animate-none/, 'Refresh spins while it reads');
+  assert.equal(prs.match(/action=\{retry\}/g)?.length, 2, 'both error states offer Try again');
+  assert.match(prs, /Could not refresh \(\{error\}\)/, 'a failed refresh keeps the old list and says so, above it');
+  assert.match(prs, /setState\(prev => \(\{ detail: prev\.detail, error/, 'a failed re-read keeps the detail shown');
+  assert.match(prs, /t === 'now' \? 'just now'/);
+  assert.match(prs, /const \[tab, setTab\] = useState<PrTab>\('summary'\)/, 'the detail tab is kept across PRs (held by the page)');
+  assert.match(prs, /api\.prDetail\(pr\.repo, pr\.number, fresh !== first\.current\)/, 'Refresh reads the shown PR again too');
+});
+
+test('Hal\'s audit (ACH-23): no blank narrow pane, a picked PR survives search, Back hands focus back', () => {
+  const inbox = read('web/ui/Inbox.tsx');
+  assert.match(inbox, /detailOpen && Boolean\(detail\) && .@max-\[40rem\]\/inbox:hidden'/, 'the rail hides only while a detail shows');
+  const prs = read('web/prs/PullRequestsPane.tsx');
+  assert.match(prs, /const selected = \(data\?\.pullRequests \?\? \[\]\)\.find\(pr => pr\.id === prId\)/, 'selection from the full list, as Comms');
+  assert.match(prs, /onBack=\{\(\) => \{ open\(\{ kind: 'pullRequests' \}\); focusCard\(pr\.id\); \}\}/);
+});
+
+test('InboxHero can draw an editor in its heading, for the issue title (ACH-23)', () => {
+  const inbox = read('web/ui/Inbox.tsx');
+  assert.match(inbox, /<h1 title=\{title\} className=\{cx\('font-sans text-\[18px\] font-semibold leading-tight text-content', heading === undefined && 'line-clamp-2'\)\}>\{heading \?\? title\}<\/h1>/);
+});
