@@ -374,6 +374,8 @@ export class SuperStore {
       if (patch[key] === undefined) continue;
       if (patch[key]) next[key] = patch[key]; else delete next[key];
     }
+    // A new agent (or none) ends the old handoff, unless this same update names the new one.
+    if (next.agentId !== old.agentId && patch.delegationId === undefined) delete next.delegationId;
     if (next.agentId) delete next.forUser;
     if (patch.forUser === true) { next.forUser = true; delete next.agentId; delete next.delegationId; }
     if (patch.forUser === false) delete next.forUser;
@@ -386,9 +388,18 @@ export class SuperStore {
     if (patch.parentId !== undefined) {
       if (patch.parentId === null || patch.parentId === '') delete next.parentId;
       else next.parentId = parentFrom(stored.issues, id, patch.parentId);
+      if (next.parentId !== old.parentId) events.push({ at: now, by, kind: 'parent', ...(old.parentId ? { from: old.parentId } : {}), ...(next.parentId ? { to: next.parentId } : {}) });
     }
-    if (patch.relations !== undefined) next.relations = relationsFrom(stored.issues, id, patch.relations, old.relations);
+    if (patch.relations !== undefined) {
+      next.relations = relationsFrom(stored.issues, id, patch.relations, old.relations);
+      // One entry per relation added or removed, as "type:issueId".
+      const keyOf = (r: SuperIssue['relations'][number]) => `${r.type}:${r.issueId}`;
+      const before = new Set(old.relations.map(keyOf)), after = new Set(next.relations.map(keyOf));
+      for (const k of after) if (!before.has(k)) events.push({ at: now, by, kind: 'relation', to: k });
+      for (const k of before) if (!after.has(k)) events.push({ at: now, by, kind: 'relation', from: k });
+    }
     if (patch.comment !== undefined) {
+      if (typeof patch.comment !== 'string') throw new HttpError(400, 'A comment is text.');
       const comment = issueDescription(patch.comment);
       if (!comment) throw new HttpError(400, 'A comment needs some text.');
       if (comment.length > ISSUE_TEXT_MAX) throw new HttpError(400, `Keep a comment under ${ISSUE_TEXT_MAX} characters.`);
@@ -413,6 +424,9 @@ export class SuperStore {
       const status = events.find(e => e.kind === 'status');
       if (status) status.text = why; else events.push({ at: now, by, kind: 'comment', text: why });
     }
+    // A ref with nothing to log changes nothing: there would be no entry to keep it on, so the same
+    // update could be applied again.
+    if (ref && !events.length) return old;
     // The ref goes on the change it explains: the status change, else the note, else the last entry made.
     if (ref) {
       const entry = events.find(e => e.kind === 'status') ?? events.at(-1);
