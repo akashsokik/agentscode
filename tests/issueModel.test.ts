@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { issueStatusFrom, issueTitle, legacyIssue, legacyIssueStatus, migrateIssue, reconcileIssues, type LegacyIssue } from '../shared/issues.ts';
+import { ISSUE_TEXT_MAX, ISSUE_TITLE_MAX, issueDescription, issueStatusFrom, issueTitle, legacyIssue, legacyIssueStatus, migrateIssue, reconcileIssues, type LegacyIssue } from '../shared/issues.ts';
 import { findIssueKeys, firstIssueKey, issueBranchName, issueKeysIn, nextIssueKey } from '../shared/issueKeys.ts';
 import { SuperStore } from '../server/superAgent.ts';
 import { tempDir } from './helpers.ts';
@@ -70,7 +70,7 @@ test('reconcile after a downgrade: what an older build changed wins, added ones 
   ];
   const result = reconcileIssues(current, old, keyFor, 3000);
   const byId = new Map(result.map(i => [i.id, i]));
-  assert.deepEqual([byId.get('a')!.text, byId.get('a')!.title, byId.get('a')!.status, byId.get('a')!.priority, byId.get('a')!.key], ['A reworded.', 'A reworded.', 'in_review', 'high', 'ACH-1'], 'in_review still reads as in_progress, so it stays; new fields are kept');
+  assert.deepEqual([byId.get('a')!.text, byId.get('a')!.title, byId.get('a')!.status, byId.get('a')!.priority, byId.get('a')!.key], ['A reworded.', 'Issue a.', 'in_review', 'high', 'ACH-1'], 'in_review still reads as in_progress, so it stays; new fields and the title are kept');
   assert.equal(byId.get('b')!.status, 'needs_you');
   assert.equal(byId.get('b')!.activity.at(-1)!.text, 'Changed by an older PodCode build.');
   assert.equal(byId.has('c'), false, 'removed by the older build');
@@ -134,9 +134,9 @@ test('new issues get the next key, never a removed one; status, priority, due da
     ['priority', 'agent', 'none', 'urgent'], ['assignee', 'agent', '', 'fen'], ['status', 'agent', 'todo', 'in_review'], ['status', 'user', 'in_review', 'canceled'],
   ]);
   assert.equal(store.issues().at(-1)!.id, a.id, 'canceled is closed: after the open ones');
-  // The title follows the text unless it was set on its own.
+  // The title is set once, from the text's start unless given, and an edit to the text never changes it.
   const c = store.issues().find(i => i.text === 'Three')!;
-  assert.equal(store.updateIssue(c.id, { text: 'Three, reworded. More.' }).title, 'Three, reworded.');
+  assert.equal(store.updateIssue(c.id, { text: 'Three, reworded. More.' }).title, 'Three');
   store.updateIssue(c.id, { title: 'My own title' });
   assert.equal(store.updateIssue(c.id, { text: 'Changed again.' }).title, 'My own title');
 });
@@ -246,4 +246,24 @@ test('git closes an issue: its own actor, the reason on the status change, the b
   const again = store.updateIssue(a.id, { status: 'done', activityText: 'Merged def456 in o/r#3.' }, 1300, { kind: 'git' });
   assert.deepEqual(again.activity.at(-1), { at: 1300, by: { kind: 'git' }, kind: 'comment', text: 'Merged def456 in o/r#3.' }, 'no status change: the reason is its own entry');
   assert.equal(store.updateIssue(a.id, { branch: '' }).branch, undefined);
+});
+
+test('a description is Markdown: line breaks survive a round trip through the store, and editing it never re-titles the issue', () => {
+  const dir = tempDir('issue-markdown');
+  const text = 'Steps to reproduce:\r\n\n- open the view   \n- press S\n\n\n\n```\n  indented  code\n```';
+  const store = new SuperStore(dir, () => 'ACH');
+  const a = store.addIssue({ text, projectId: 'p', by: 'user' });
+  const kept = 'Steps to reproduce:\n\n- open the view\n- press S\n\n```\n  indented  code\n```';
+  assert.equal(a.text, kept, 'line breaks, indentation and inner spacing kept; trailing spaces and extra blank lines go');
+  assert.equal(a.title, 'Steps to reproduce:', 'the first line titles it');
+  assert.equal(new SuperStore(dir, () => 'ACH').issue(a.id).text, kept, 'read back from issues.json as written');
+  const edited = store.updateIssue(a.id, { text: 'Something else entirely.\n\nMore.' });
+  assert.equal(edited.title, 'Steps to reproduce:');
+  assert.equal(edited.text, 'Something else entirely.\n\nMore.');
+  assert.equal(store.addIssue({ text: 'x'.repeat(ISSUE_TEXT_MAX), projectId: 'p', by: 'user' }).text.length, ISSUE_TEXT_MAX);
+  assert.throws(() => store.addIssue({ text: 'y'.repeat(ISSUE_TEXT_MAX + 1), projectId: 'p', by: 'user' }), /under 4000/);
+  assert.throws(() => store.updateIssue(a.id, { title: 't'.repeat(ISSUE_TITLE_MAX + 1) }), /under 120/);
+  assert.equal(issueDescription('  \n  '), '');
+  // An older build still reads it: the old-format copy carries the text as it is.
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'super.json'), 'utf8')).issues.find((g: LegacyIssue) => g.id === a.id).text, 'Something else entirely.\n\nMore.');
 });

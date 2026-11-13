@@ -18,7 +18,7 @@ function status(error: unknown): number {
 test('the issue store: add in order, update with links and done times, reorder, remove, restore; written to super.json', () => {
   const dir = tempDir('issues');
   const store = new SuperStore(dir);
-  const a = store.addIssue({ text: '  Ship   dark mode ', projectId: 'web', by: 'user' });
+  const a = store.addIssue({ text: '  Ship dark mode ', projectId: 'web', by: 'user' });
   const b = store.addIssue({ text: 'Write release notes', projectId: null, by: 'super' });
   const c = store.addIssue({ text: 'Fix the flaky test', projectId: null, by: 'user' });
   assert.equal(a.text, 'Ship dark mode');
@@ -435,7 +435,8 @@ test('issues read from super.json are checked; the app must send text as text', 
   assert.throws(() => t.manager.addIssue({ text: 42 as unknown as string }), e => status(e) === 400);
   assert.throws(() => t.manager.addIssue({ text: 'X', projectId: 7 as unknown as string }), e => status(e) === 400);
   t.manager.addIssue({ text: 'Two\nlines' });
-  assert.equal(t.manager.superView().issues[0].text, 'Two lines', 'an issue is one line');
+  assert.equal(t.manager.superView().issues[0].text, 'Two\nlines', 'a description keeps its line breaks (Markdown)');
+  assert.equal(t.manager.superView().issues[0].title, 'Two', 'its first line is the title');
   assert.throws(() => t.manager.updateIssue(t.manager.superView().issues[0].id, { text: ['x'] }), e => status(e) === 400);
 });
 
