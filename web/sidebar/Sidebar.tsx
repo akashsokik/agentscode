@@ -17,8 +17,9 @@ import type { KeySpec } from '../keys.ts';
 import { Kbd } from '../ui/Kbd.tsx';
 import { showTerminal } from '../terminal/actions.ts';
 import { openCount, usePrs, usePrsData } from '../prs/prsData.ts';
+import { openIssueCount } from './navCounts.ts';
 import { cx, Empty, HeaderButton, Loading, MenuDivider, MenuLabel, MenuRow, StatusLabel } from '../ui/common.tsx';
-import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, GitPullRequest, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, Sparkles, SplitColumns, Square, StickyNote, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
+import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, GitPullRequest, CircleDashed, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, Sparkles, SplitColumns, Square, StickyNote, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
@@ -311,6 +312,17 @@ function FileTree({ projectId }: { projectId?: string }) {
 }
 
 // ---- MonoCode's Classic shell: a navigation column, then the workspace column ----------------
+
+/** "Issues" (ACH-D42): opens the Issues page; its count is the issues not done or canceled. */
+function IssuesAction() {
+  const count = useApp(s => openIssueCount(s.snapshot?.super.issues));
+  const active = focusedKind(useLayout()) === 'issues';
+  return (
+    <RailAction icon={CircleDashed} label="Issues" active={active} onClick={() => open({ kind: 'issues' })}>
+      {count ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${count} open`}>{count}</span> : null}
+    </RailAction>
+  );
+}
 
 /** "Pull requests" (ACH-D42): opens the page; its count is the open PRs across the projects. */
 function PullRequestsAction() {
@@ -617,6 +629,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
         <RailAction icon={MessageMultiple} label="Comms" active={commsOpen} onClick={() => open({ kind: 'comms' })}>
           {inFlight ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${inFlight} in flight`}>{inFlight}</span> : null}
         </RailAction>
+        <IssuesAction />
         <PullRequestsAction />
         <RailAction icon={Sparkles} mark={<SuperMark superId={superId} />} label="SuperAgent" hint={SHORTCUT_KEYS.superQuick} active={Boolean(superId) && agentId === superId} onClick={() => void openSuper()}>
           {superWaiting ? <span className="shrink-0 text-[11px] tabular-nums text-content/40" title={`${superWaiting} waiting for you`}>{superWaiting}</span> : null}
@@ -806,7 +819,17 @@ function WorkspaceColumn({ actions, project, titleBarAbove }: { actions: Sidebar
 }
 
 /** A button in the folded navigation rail: an icon, its name as the tooltip, and a status dot in the corner. */
-/** The collapsed rail's Pull requests, with the open count in its label (ACH-D42). */
+/** The collapsed rail's Issues and Pull requests, with their counts in the label (ACH-D42). */
+function IssuesIcon() {
+  const count = useApp(s => openIssueCount(s.snapshot?.super.issues));
+  const active = focusedKind(useLayout()) === 'issues';
+  return (
+    <RailIconButton label={count ? `Issues, ${count} open` : 'Issues'} active={active} onClick={() => open({ kind: 'issues' })}>
+      <CircleDashed className="size-4" strokeWidth={1.75} />
+    </RailIconButton>
+  );
+}
+
 function PullRequestsIcon() {
   usePrsData();
   const count = usePrs(s => openCount(s.data)) ?? 0;
@@ -951,6 +974,7 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
         <RailIconButton label={inFlight ? `Comms, ${inFlight} in flight` : 'Comms'} active={commsOpen} dot={inFlight ? <span className="size-1.5 rounded-full bg-accent" /> : null} onClick={() => open({ kind: 'comms' })}>
           <MessageMultiple className="size-4" strokeWidth={1.75} />
         </RailIconButton>
+        <IssuesIcon />
         <PullRequestsIcon />
         <RailIconButton label={superWaiting ? `SuperAgent, ${superWaiting} waiting for you` : 'SuperAgent'} badge={superWaiting} onClick={() => void openSuper()}>
           <SuperMark superId={superId} />

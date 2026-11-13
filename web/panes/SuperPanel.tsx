@@ -19,7 +19,7 @@ import { AgentAvatar } from '../ui/Avatar.tsx';
 import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar, RowAction, RowIcon } from '../ui/PanelList.tsx';
 import { Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleDot, Clock, Copy, CornerDownRight, ListBullet, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
-import { ISSUE_ICON } from '../issues/issueParts.tsx';
+import { StatusIcon } from '../issues/issueParts.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
 export function SuperInbox() {
@@ -351,14 +351,13 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: {
   // A status change moves the row to another section: focus follows it (or goes to + if it folded away).
   const status = (s: IssueStatus) => { if (!busy) void run(() => api.updateIssue(issue.id, { status: s })).then(onSettled); };
   const edit = () => { setText(issue.text); setEditing(true); if (!expanded) onToggle(); };
-  const { icon: StatusIcon, cls } = ISSUE_ICON[issue.status];
   const moveTo = (to: number | null) => { if (to !== null && !busy) void run(() => api.moveIssue(issue.id, to)).then(onSettled); };
   const removeNow = async () => { if (await run(() => api.removeIssue(issue.id))) onRemoved(); };
   const remove = <RowAction label={`Confirm removing ${named}`} busy={busy} onClick={() => void removeNow()}><span className="text-danger">Remove?</span></RowAction>;
   return (
     <PanelRow
       id={issue.id}
-      lead={<StatusIcon className={`size-3.5 ${cls}`} strokeWidth={1.6} />}
+      lead={<StatusIcon status={issue.status} />}
       title={issue.text}
       label={`${ISSUE_STATUS_LABEL[issue.status]}: ${issue.text}${agent ? `, with ${agent.name}` : ''}${project ? `, ${project.name}` : ''}`}
       dim={done}

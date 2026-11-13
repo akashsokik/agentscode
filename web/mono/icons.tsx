@@ -117,7 +117,6 @@ import Wrench01Icon from "@hugeicons/core-free-icons/Wrench01Icon";
 import AlertSquareIcon from "@hugeicons/core-free-icons/AlertSquareIcon";
 import CircleIcon from "@hugeicons/core-free-icons/CircleIcon";
 import FullSignalIcon from "@hugeicons/core-free-icons/FullSignalIcon";
-import MinusSignCircleIcon from "@hugeicons/core-free-icons/MinusSignCircleIcon";
 import NoSignalIcon from "@hugeicons/core-free-icons/NoSignalIcon";
 import { forwardRef, type Ref } from "react";
 
@@ -192,7 +191,6 @@ export const AlertSquare = wrap(AlertSquareIcon, "AlertSquare");
 export const Circle = wrap(CircleIcon, "Circle");
 export const CircleHalf = wrap(CircleHalfIcon, "CircleHalf");
 export const CircleThreeQuarter = wrap(CircleThreeQuarterIcon, "CircleThreeQuarter");
-export const MinusCircle = wrap(MinusSignCircleIcon, "MinusCircle");
 export const NoSignal = wrap(NoSignalIcon, "NoSignal");
 export const SignalHigh = wrap(signalBars(3), "SignalHigh");
 export const SignalMedium = wrap(signalBars(2), "SignalMedium");

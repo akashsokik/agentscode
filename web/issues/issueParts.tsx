@@ -3,8 +3,10 @@ import { ISSUE_PRIORITIES, ISSUE_PRIORITY_LABEL, ISSUE_STATUSES, ISSUE_STATUS_LA
 import type { IssuePriority, IssueStatus, SuperIssue } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { relativeTime } from '../format.ts';
-import { AlertSquare, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleAlert, CircleDashed, CircleHalf, CircleThreeQuarter, Copy, MinusCircle, NoSignal, Pause, SignalHigh, SignalLow, SignalMedium, Trash2 } from '../mono/icons.tsx';
+import { AlertSquare, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleAlert, CircleDashed, CircleHalf, CircleThreeQuarter, Copy, Minus, NoSignal, Pause, SignalHigh, SignalLow, SignalMedium, Trash2 } from '../mono/icons.tsx';
 import { LAYER } from '../mono/layers.ts';
+import { StatusMark } from '../ui/StatusMark.tsx';
+import { STATUS_MARKS, type StatusState } from '../ui/statusMarks.ts';
 import { Popover } from '../mono/Popover.tsx';
 import { menuKeyTarget } from '../ui/menuFocus.ts';
 import { WhoAvatar } from '../notes/parts.tsx';
@@ -17,7 +19,7 @@ import { dueBucket, type RowProperty } from './issuesView.ts';
 
 /**
  * Status glyphs (ACH-D46): the part-filled rings for In progress and In review, MonoCode's circled
- * check for Done and minus for Canceled (ACH-D45; they move to the shared StatusMark when it lands).
+ * check for Done and minus for Canceled, through the shared StatusMark (ACH-D45).
  * Theme colours only (ACH-D14): Needs you warning, In progress accent, In review info, Done success.
  */
 // `tint` is the same colour as `cls`, important, for menu rows (which grey their icons); written out
@@ -29,11 +31,17 @@ export const ISSUE_ICON: Record<IssueStatus, { icon: typeof Circle; cls: string;
   waiting: { icon: Pause, cls: 'text-content/55', tint: 'text-content/55!' },
   todo: { icon: Circle, cls: 'text-content/55', tint: 'text-content/55!' },
   backlog: { icon: CircleDashed, cls: 'text-content/40', tint: 'text-content/40!' },
-  done: { icon: CheckCircle, cls: 'text-success', tint: 'text-success!' },
-  canceled: { icon: MinusCircle, cls: 'text-content/40', tint: 'text-content/40!' },
+  // The shared StatusMark's pass and cancel marks (web/ui/statusMarks.ts): same glyph, same colour.
+  done: { icon: CheckCircle, cls: STATUS_MARKS.pass.tone, tint: 'text-success!' },
+  canceled: { icon: Minus, cls: STATUS_MARKS.cancel.tone, tint: 'text-content/45!' },
 };
 
+/** Done and Canceled are drawn by the shared StatusMark itself (ACH-D45). */
+const MARK_STATE: Partial<Record<IssueStatus, StatusState>> = { done: 'pass', canceled: 'cancel' };
+
 export function StatusIcon({ status, className = 'size-3.5' }: { status: IssueStatus; className?: string }) {
+  const mark = MARK_STATE[status];
+  if (mark) return <StatusMark state={mark} className={className} />;
   const { icon: Icon, cls } = ISSUE_ICON[status];
   return <Icon aria-hidden className={cx(className, 'shrink-0', cls)} strokeWidth={1.75} />;
 }
@@ -275,7 +283,7 @@ export function IssueMenu({ issue, close, onOpen }: { issue: SuperIssue; close: 
       <div onMouseEnter={() => setSub(null)}>
         <MenuDivider />
         <MenuRow icon={Copy} title={`Copy ${issue.key}`} onSelect={() => { close(); void navigator.clipboard?.writeText(issue.key); }} />
-        {isOpenIssue(issue) ? <MenuRow icon={MinusCircle} title="Cancel issue" onSelect={() => update({ status: 'canceled' })} /> : null}
+        {isOpenIssue(issue) ? <MenuRow icon={Minus} title="Cancel issue" onSelect={() => update({ status: 'canceled' })} /> : null}
         <MenuRow icon={Trash2} title="Remove…" danger onSelect={() => setConfirming(true)} />
       </div>
       {sub?.which === 'status' ? (
