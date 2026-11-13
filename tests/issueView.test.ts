@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { IssueEvent, SuperIssue } from '../shared/types.ts';
 import { tabKey } from '../web/layout.ts';
-import { citedDecisions, issueLinksSource, localIssueLinks, setIssueLinksSource } from '../web/issues/view/issueLinks.ts';
+import { citedDecisions, fromServerDecisions, issueLinksSource, localIssueLinks, setIssueLinksSource } from '../web/issues/view/issueLinks.ts';
 import { activityLine, actorName, dueTone, matchesQuery, parentOf, parseLabels, PRIORITY_OPTIONS, propertyKey, relationsOf, STATUS_OPTIONS, subIssues } from '../web/issues/view/issueViewModel.ts';
 import { WRITABLE } from '../web/issues/view/issueWritable.ts';
 
@@ -89,6 +89,19 @@ test('Decisions: ids cited in the text, notes and comments, once each, decisions
   setIssueLinksSource(server);
   assert.equal((await issueLinksSource()(i)).git.branch?.name, 'feat/ACH-1-x');
   setIssueLinksSource(localIssueLinks);
+});
+
+test('Hal\'s decisions route: its decisions first, then ones only the text cites; commits once, newest first; the branch most are on', () => {
+  const i = issue({ text: 'Per ACH-D41.' });
+  const links = fromServerDecisions(i, { issueId: i.id, key: i.key, decisions: [
+    { id: 'ACH-D43', citations: [{ source: 'commit', hash: 'aaa1111', subject: 'old', branch: 'feat/x', projectId: 'p', ts: 1 }, { source: 'message', messageId: 'm' }] },
+    { id: 'ALL-D9', citations: [{ source: 'commit', hash: 'bbb2222', subject: 'new', branch: 'feat/x', projectId: 'p', ts: 2 }, { source: 'commit', hash: 'aaa1111', branch: 'feat/x', ts: 1 }, { source: 'commit', hash: 'ccc3333', branch: 'main', ts: 0 }] },
+  ] });
+  assert.deepEqual(links.decisions, ['ACH-D43', 'ALL-D9', 'ACH-D41']);
+  assert.deepEqual(links.git.commits.map(c => c.sha), ['bbb2222', 'aaa1111', 'ccc3333']);
+  assert.deepEqual(links.git.branch, { name: 'feat/x', project: 'p' });
+  assert.equal(links.source, 'server');
+  assert.deepEqual(fromServerDecisions(i, { issueId: i.id, key: i.key, decisions: [] }).git, { commits: [] });
 });
 
 test('writes: only what the issue route takes is editable; an issue opens as its own tab', () => {

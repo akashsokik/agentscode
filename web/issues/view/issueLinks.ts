@@ -38,7 +38,56 @@ export function citedDecisions(issue: Pick<SuperIssue, 'text' | 'notes' | 'activ
 /** What the app knows today, without the server's git links. */
 export const localIssueLinks: IssueLinksSource = async issue => ({ git: { commits: [] }, decisions: citedDecisions(issue), source: 'local' });
 
-let source: IssueLinksSource = localIssueLinks;
+/** Hal's GET /api/issues/:issueId/decisions (feat/issue-links), as planned. */
+export interface IssueDecisionsResponse {
+  issueId: string;
+  key: string;
+  decisions: {
+    id: string;
+    citations: ({ source: 'commit'; hash: string; subject?: string; projectId?: string; branch?: string; who?: string; ts?: number } | { source: 'message' | 'chat' | 'channel'; [k: string]: unknown })[];
+  }[];
+}
+
+/**
+ * The view's links from the server's answer: its decisions first (then any only the issue's own
+ * text cites), the commits that cite them newest first, each once, and the branch most of them
+ * are on. Git links that cite no decision come with Hal's next route; none are made up here.
+ */
+export function fromServerDecisions(issue: Parameters<IssueLinksSource>[0], response: IssueDecisionsResponse): IssueLinks {
+  const decisions = response.decisions.map(d => d.id);
+  for (const id of citedDecisions(issue)) if (!decisions.includes(id)) decisions.push(id);
+  const commits = new Map<string, { sha: string; subject: string; branch?: string; projectId?: string; ts: number }>();
+  for (const d of response.decisions) {
+    for (const c of d.citations) {
+      if (c.source !== 'commit' || typeof c.hash !== 'string' || commits.has(c.hash)) continue;
+      const commit = c as Extract<IssueDecisionsResponse['decisions'][number]['citations'][number], { source: 'commit' }>;
+      commits.set(commit.hash, { sha: commit.hash, subject: commit.subject ?? '', branch: commit.branch, projectId: commit.projectId, ts: commit.ts ?? 0 });
+    }
+  }
+  const list = [...commits.values()].sort((a, b) => b.ts - a.ts);
+  const counts = new Map<string, number>();
+  for (const c of list) if (c.branch) counts.set(c.branch, (counts.get(c.branch) ?? 0) + 1);
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  const project = top ? list.find(c => c.branch === top[0])?.projectId : undefined;
+  return {
+    git: { ...(top ? { branch: { name: top[0], ...(project ? { project } : {}) } } : {}), commits: list.map(c => ({ sha: c.sha, subject: c.subject })) },
+    decisions,
+    source: 'server',
+  };
+}
+
+/** The server's links when its route answers; the local ones when it does not (not landed, offline). */
+export const serverIssueLinks: IssueLinksSource = async issue => {
+  try {
+    const response = await fetch(`/api/issues/${encodeURIComponent(issue.id)}/decisions`);
+    if (!response.ok) return localIssueLinks(issue);
+    return fromServerDecisions(issue, await response.json() as IssueDecisionsResponse);
+  } catch {
+    return localIssueLinks(issue);
+  }
+};
+
+let source: IssueLinksSource = typeof (globalThis as { document?: unknown }).document === 'undefined' ? localIssueLinks : serverIssueLinks;
 
 /** The source the view uses; Hal's API is wired here when it lands. */
 export function issueLinksSource(): IssueLinksSource {
