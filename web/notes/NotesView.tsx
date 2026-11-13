@@ -11,6 +11,7 @@ import { Loading, MenuLabel, MenuRow } from '../ui/common.tsx';
 import { DetailButton, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar } from '../ui/PanelList.tsx';
 import { authorLabel, notesSections } from '../panelList.ts';
 import { Markdown } from '../ui/Markdown.tsx';
+import { IssueKeyChip } from '../ui/IssueKeyChip.tsx';
 import { citeTime, Highlight, kindWord, NoteGlyph, shortDate, StaticChip, StatusPill, WhoAvatar } from './parts.tsx';
 import { RefChip } from './RefChip.tsx';
 import { loadRefs, openNote, setNotesCode, setNotesEverywhere, setNotesFilter, setNotesQuery, setNotesShowReplaced, useNotes, type NotesFilter } from './refsState.ts';
@@ -272,13 +273,27 @@ function RefWithTitle({ id }: { id: string }) {
   );
 }
 
+/** A decision's issues (the issues it is cited for), each a chip that shows it on the Issues page. */
+function useDecisionIssues(detail: RefDetail): { issueId: string; key: string; title: string }[] {
+  const [issues, setIssues] = useState<{ issueId: string; key: string; title: string }[]>([]);
+  useEffect(() => {
+    if (detail.kind !== 'D') { setIssues([]); return; }
+    let live = true;
+    api.decisionIssues(detail.id).then(r => { if (live) setIssues(r.issues); }, () => { if (live) setIssues([]); });
+    return () => { live = false; };
+  }, [detail]);
+  return issues;
+}
+
 function DetailBody({ detail }: { detail: RefDetail }) {
   const isDecision = detail.kind === 'D';
+  const issues = useDecisionIssues(detail);
   const rows: [string, ReactNode][] = [
     [isDecision ? 'Decided by' : 'Written by', <><WhoAvatar name={detail.by} /><span className="truncate">{detail.by || 'Unknown'}{detail.date ? `, ${shortDate(detail.date)}` : ''}</span></>],
   ];
   if (detail.addedBy) rows.push(['Recorded by', <><WhoAvatar name={detail.addedBy} /><span className="truncate">{detail.addedBy}</span></>]);
   if (detail.commits.length) rows.push([detail.commits.length === 1 ? 'Commit' : 'Commits', <span className="flex flex-wrap gap-x-2 font-mono text-[var(--link-color)]">{detail.commits.map(c => <span key={c} title={c}>{c.slice(0, 7)}</span>)}</span>]);
+  if (issues.length) rows.push([issues.length === 1 ? 'Issue' : 'Issues', <span className="flex min-w-0 flex-col gap-1 py-1">{issues.map(i => <span key={i.issueId} className="flex min-w-0 items-center gap-1.5"><IssueKeyChip issueKey={i.key} /><span className="min-w-0 truncate">{i.title}</span></span>)}</span>]);
   if (detail.related.length) rows.push(['Related', <span className="flex min-w-0 flex-col gap-1 py-1">{detail.related.map(r => <RefWithTitle key={r} id={r} />)}</span>]);
   if (detail.otherLinks.length) {
     rows.push(['Links', <span className="flex min-w-0 flex-col py-1">{detail.otherLinks.map(link => (

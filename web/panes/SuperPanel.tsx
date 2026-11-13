@@ -11,7 +11,8 @@ import { openAsks } from '../super.ts';
 import { ISSUE_STATUS_LABEL, heldText, migrateSeen, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type SuperTab } from '../superText.ts';
 import { ISSUE_PRIORITY_LABEL, ISSUE_TITLE_MAX, isOpenIssue } from '../../shared/issues.ts';
 import { cleanSummary, decisionGroups, keepArmed, decisionKind, focusAfterRemoval, issueGroups, issueMoves, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
-import { attempt, useApp } from '../store.ts';
+import { attempt, toast, useApp } from '../store.ts';
+import { useLayout } from '../layout.ts';
 import { INPUT, MenuDivider, MenuRow, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
 import { Kbd } from '../ui/Kbd.tsx';
 import { useNow } from '../ui/useNow.ts';
@@ -20,7 +21,7 @@ import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelRow, Pane
 import { Zap, Maximize2, Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleDot, Clock, Copy, CornerDownRight, ListBullet, ListFilter, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { DueDate, PriorityMark, restoreFocus, StatusIcon, StatusPriorityRows } from '../issues/issueParts.tsx';
-import { showIssueInList } from '../issues/openIssue.ts';
+import { showIssueInList, shownIssueId } from '../issues/openIssue.ts';
 import { isPageKey } from '../issues/pageKeys.ts';
 import { FilterChips, FilterMenu } from '../issues/IssueFilters.tsx';
 import { activeFilters, localDay, matchesFilters, type IssueFilters, type IssueNames, type IssueProperty } from '../issues/issuesView.ts';
@@ -308,8 +309,10 @@ export function IssuesView() {
   const doneShown = filter === 'done' || showDone || Boolean(query.trim());
   // The rows on screen, in order: where focus goes when one is removed.
   const shownIds = [...ordered, ...(doneShown ? done : [])].map(g => g.id);
+  // The issue on the Issues page (or in its own tab), in front: its row shows as selected.
+  const shown = shownIssueId(useLayout());
   const item = (issue: SuperIssue) => (
-    <IssueItem key={issue.id} issue={issue} today={today} moves={moves.get(issue.id) ?? { up: null, down: null }} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, issue.id))} onSettled={() => focusRow(root.current, issue.id)} />
+    <IssueItem key={issue.id} issue={issue} today={today} selected={issue.id === shown} moves={moves.get(issue.id) ?? { up: null, down: null }} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, issue.id))} onSettled={() => focusRow(root.current, issue.id)} />
   );
   const closeAdd = () => { setAdding(false); focusAdd(root.current); };
   const filterButton = () => root.current?.querySelector<HTMLElement>('[data-issues-filter]') ?? null;
@@ -367,7 +370,7 @@ export function IssuesView() {
   );
 }
 
-function IssueItem({ issue, today, moves, onRemoved, onSettled }: { issue: SuperIssue; today: string; moves: { up: number | null; down: number | null }; onRemoved: () => void; /** After a change that can move the row: focus it again. */ onSettled: () => void }) {
+function IssueItem({ issue, today, selected, moves, onRemoved, onSettled }: { issue: SuperIssue; today: string; /** On the Issues page, in front. */ selected: boolean; moves: { up: number | null; down: number | null }; onRemoved: () => void; /** After a change that can move the row: focus it again. */ onSettled: () => void }) {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === issue.projectId));
   const agent = useApp(s => (issue.agentId ? s.snapshot?.agents.find(a => a.id === issue.agentId) : undefined));
   const [editing, setEditing] = useState(false);
@@ -406,11 +409,13 @@ function IssueItem({ issue, today, moves, onRemoved, onSettled }: { issue: Super
   // a click, Enter or Open shows the issue on the Issues page, selected (showIssueInList, ACH-D52).
   const inline = editing || (confirming && confirmInline);
   const moveTo = (to: number | null) => { if (to !== null && !busy) void run(() => api.moveIssue(issue.id, to)).then(onSettled); };
-  const removeNow = async () => { if (await run(() => api.removeIssue(issue.id))) onRemoved(); };
+  // Removed: say so, and where the undo is (the removal is in Decisions with Undo, ACH-D50).
+  const removeNow = async () => { if (await run(() => api.removeIssue(issue.id))) { onRemoved(); toast(`Removed ${issue.key}. Undo it in Decisions.`, 'info'); } };
   const remove = <RowAction label={`Confirm removing ${named}`} busy={busy} onClick={() => void removeNow()}><span className="text-danger">Remove?</span></RowAction>;
   return (
     <PanelRow
       id={issue.id}
+      selected={selected}
       lead={<StatusIcon status={issue.status} />}
       title={issue.title}
       label={`${issue.key} ${ISSUE_STATUS_LABEL[issue.status]}: ${issue.title}${issue.priority !== 'none' ? `, ${ISSUE_PRIORITY_LABEL[issue.priority]} priority` : ''}${issue.dueDate ? `, due ${issue.dueDate}` : ''}${agent ? `, with ${agent.name}` : issue.forUser ? ', with you' : ''}${project ? `, ${project.name}` : ''}`}
