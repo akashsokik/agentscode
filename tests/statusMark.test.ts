@@ -18,6 +18,8 @@ test('each state uses MonoCode\'s circled glyph and the theme colour', () => {
 test('quiet drops the colour but keeps the glyph; words colour only failures and warnings', () => {
   assert.equal(statusTone('pass', true), 'text-content/40');
   assert.match(statusTone('pending', true), /animate-spin/);
+  assert.match(statusTone('pending', true), /motion-reduce:animate-none/, 'no spin under prefers-reduced-motion');
+  assert.match(statusTone('pending'), /motion-reduce:animate-none/);
   assert.equal(statusWordsTone('fail'), 'text-danger');
   assert.equal(statusWordsTone('warn'), 'text-warning');
   assert.equal(statusWordsTone('pass'), 'text-content/55');

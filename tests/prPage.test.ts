@@ -25,6 +25,12 @@ test('issue keys: code-hyphen-number, never a decision or note id, and only know
   assert.equal(firstIssueKey(['main', '', undefined]), null);
 });
 
+test('the matcher agrees with shared/issueKeys.ts: ACH-0 is none, project codes may hold digits (Ivy M1)', () => {
+  assert.equal(firstIssueKey(['feat/ACH-0-x', 'Fix ACH-12', ''], ['ACH']), 'ACH-12', 'an ACH-0 branch falls through to the title\'s key');
+  assert.deepEqual(findIssueKeys('ACH-000 then ACH-5', ['ACH']).map(k => k.key), ['ACH-5']);
+  assert.deepEqual(findIssueKeys('feat/K8S-12-rollout', ['K8S']).map(k => k.key), ['K8S-12'], 'K8S is a valid project code');
+});
+
 // ---- normalising gh's JSON --------------------------------------------------------------------
 
 test('checks: check runs and status contexts become success, failure, pending or skipped', () => {
@@ -213,6 +219,12 @@ test('a merged PR carries its merge commit and body; the service tells onRead ab
   await out.prs.list();
   await new Promise(r => setImmediate(r));
   assert.deepEqual(loggedOut, [], 'nothing to tell when GitHub could not be read');
+});
+
+test('only a merged PR carries a merge commit, whatever GitHub sends (Ivy L1)', () => {
+  assert.equal(normalizePr(raw({ state: 'OPEN', mergeCommit: { oid: 'abc123' } }), 'o/r').mergeCommit, undefined);
+  assert.equal(normalizePr(raw({ state: 'CLOSED', mergeCommit: { oid: 'abc123' } }), 'o/r').mergeCommit, undefined);
+  assert.equal(normalizePr(raw({ state: 'MERGED', mergedAt: '2026-11-12T00:00:00Z', mergeCommit: { oid: 'abc123' } }), 'o/r').mergeCommit, 'abc123');
 });
 
 test('ghArgs.prsPage asks only for what the page shows, through a read-only command', () => {

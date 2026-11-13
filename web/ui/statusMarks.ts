@@ -8,7 +8,7 @@ export type StatusGlyph = 'CheckCircle' | 'CircleX' | 'LoaderCircle' | 'Minus' |
 export const STATUS_MARKS: Record<StatusState, { glyph: StatusGlyph; tone: string; word: string }> = {
   pass: { glyph: 'CheckCircle', tone: 'text-success', word: 'Passed' },
   fail: { glyph: 'CircleX', tone: 'text-danger', word: 'Failed' },
-  pending: { glyph: 'LoaderCircle', tone: 'animate-spin text-content/55', word: 'In progress' },
+  pending: { glyph: 'LoaderCircle', tone: 'animate-spin motion-reduce:animate-none text-content/55', word: 'In progress' },
   cancel: { glyph: 'Minus', tone: 'text-content/45', word: 'Cancelled' },
   skip: { glyph: 'CircleDashed', tone: 'text-content/40', word: 'Skipped' },
   unknown: { glyph: 'CircleHelp', tone: 'text-content/45', word: 'Unknown' },
@@ -18,7 +18,7 @@ export const STATUS_MARKS: Record<StatusState, { glyph: StatusGlyph; tone: strin
 /** The colour a mark takes: its own, or (quiet) none, for a result that needs nothing from you. */
 export function statusTone(state: StatusState, quiet = false): string {
   if (!quiet) return STATUS_MARKS[state].tone;
-  return state === 'pending' ? 'animate-spin text-content/40' : 'text-content/40';
+  return state === 'pending' ? 'animate-spin motion-reduce:animate-none text-content/40' : 'text-content/40';
 }
 
 /** Words only take the state's colour when it needs you, as StatusLabel does. */

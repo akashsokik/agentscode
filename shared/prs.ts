@@ -3,8 +3,8 @@
 // (normalising checks and reviews, the views) live here so they can be tested and shared.
 
 // ---- issue keys --------------------------------------------------------------------------------
-// The same matcher as shared/issueKeys.ts on feat/issues-store (findIssueKeys, firstIssueKey), kept
-// here until that branch is on main; then this file imports them and these lines go. Rules: a
+// The same rules as findIssueKeys and firstIssueKey in shared/issueKeys.ts (feat/issues-store at
+// 6ad2db0 and later), checked against it on a shared corpus. Kept here until that branch is on main; then this file imports them and these lines go. Rules: a
 // project code ([A-Z][A-Z0-9]{1,5}, as server/projectRefs.ts), a hyphen and digits, not inside a
 // longer word, so a decision or note id (ACH-D7, ACH-N3) is never a key; ACH-012 is ACH-12; keys
 // start at 1, so ACH-0 is none.
@@ -210,7 +210,8 @@ export function normalizePr(raw: Raw, repo: string, opts: { codes?: Iterable<str
   const title = str(raw.title);
   const body = str(raw.body);
   const issueKey = firstIssueKey([branch, title, body], opts.codes) ?? undefined;
-  const mergeCommit = str((raw.mergeCommit as Raw | null | undefined)?.oid);
+  // Only a merged PR has a merge commit: anything else GitHub sends there is not one.
+  const mergeCommit = state === 'merged' ? str((raw.mergeCommit as Raw | null | undefined)?.oid) : '';
   const agentId = branch ? opts.agentFor?.(branch) : undefined;
   return {
     id: `${repo}#${number}`, repo, number, title, url: str(raw.url), state,
