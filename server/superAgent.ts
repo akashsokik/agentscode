@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { IssueActor, IssueEvent, IssuePriority, IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
+import type { IssueActor, IssueEvent, IssuePriority, IssueRelationType, IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
 import { ISSUE_PRIORITIES, ISSUE_STATUSES, ISSUE_TEXT_MAX, ISSUE_TITLE_MAX, issueDescription, isLegacyIssue, isOpenIssue, issueStatusFrom, issueTitle, legacyIssue, migrateIssue, reconcileIssues, type LegacyIssue } from '../shared/issues.ts';
 import { CODE_PATTERN, nextIssueKey, NO_PROJECT_CODE } from '../shared/issueKeys.ts';
 import { HttpError } from './errors.ts';
@@ -327,10 +327,25 @@ export class SuperStore {
     branch?: string | null;
     /** Why, in the activity: on the status change it makes, or as its own entry when nothing else changes. Server code only. */
     activityText?: string;
+    /**
+     * A stable id for what made this change (a merge commit's hash), stored on its activity entry.
+     * Seen before in this issue's activity, the whole update is skipped: a merge is applied once. Server code only.
+     */
+    activityRef?: string;
+    /** Assigned to the user (true), which takes it off any agent; false clears it. */
+    forUser?: boolean;
+    /** The issue this is a sub-issue of; null makes it top level. Never itself or one of its own sub-issues. */
+    parentId?: string | null;
+    /** The whole list of relations, replacing the old one. */
+    relations?: unknown;
+    /** A comment, kept in the activity with its line breaks. */
+    comment?: unknown;
   }, now = Date.now(), by: IssueActor = { kind: 'super' }): SuperIssue {
     const stored = this.read();
     const old = stored.issues.find(g => g.id === id);
     if (!old) throw new HttpError(404, 'No issue with that id.');
+    const ref = patch.activityRef === undefined ? '' : String(patch.activityRef).trim().slice(0, 200);
+    if (ref && old.activity.some(e => e.ref === ref)) return old;
     const status = patch.status === undefined ? undefined : issueStatusFrom(patch.status);
     if (status === null) throw new HttpError(400, `An issue's status is one of: ${ISSUE_STATUSES.join(', ')}.`);
     const next: SuperIssue = { ...old, updatedAt: now };
@@ -359,9 +374,36 @@ export class SuperStore {
       if (patch[key] === undefined) continue;
       if (patch[key]) next[key] = patch[key]; else delete next[key];
     }
-    if (next.agentId !== old.agentId) {
-      if (next.agentId) delete next.forUser;
-      events.push({ at: now, by, kind: 'assignee', ...(old.agentId ? { from: old.agentId } : {}), ...(next.agentId ? { to: next.agentId } : {}) });
+    // A new agent (or none) ends the old handoff, unless this same update names the new one.
+    if (next.agentId !== old.agentId && patch.delegationId === undefined) delete next.delegationId;
+    if (next.agentId) delete next.forUser;
+    if (patch.forUser === true) { next.forUser = true; delete next.agentId; delete next.delegationId; }
+    if (patch.forUser === false) delete next.forUser;
+    // The assignee in the activity: an agent's id, or "user" for you.
+    const assignee = (g: SuperIssue) => g.agentId ?? (g.forUser ? 'user' : undefined);
+    if (assignee(next) !== assignee(old)) {
+      const from = assignee(old), to = assignee(next);
+      events.push({ at: now, by, kind: 'assignee', ...(from ? { from } : {}), ...(to ? { to } : {}) });
+    }
+    if (patch.parentId !== undefined) {
+      if (patch.parentId === null || patch.parentId === '') delete next.parentId;
+      else next.parentId = parentFrom(stored.issues, id, patch.parentId);
+      if (next.parentId !== old.parentId) events.push({ at: now, by, kind: 'parent', ...(old.parentId ? { from: old.parentId } : {}), ...(next.parentId ? { to: next.parentId } : {}) });
+    }
+    if (patch.relations !== undefined) {
+      next.relations = relationsFrom(stored.issues, id, patch.relations, old.relations);
+      // One entry per relation added or removed, as "type:issueId".
+      const keyOf = (r: SuperIssue['relations'][number]) => `${r.type}:${r.issueId}`;
+      const before = new Set(old.relations.map(keyOf)), after = new Set(next.relations.map(keyOf));
+      for (const k of after) if (!before.has(k)) events.push({ at: now, by, kind: 'relation', to: k });
+      for (const k of before) if (!after.has(k)) events.push({ at: now, by, kind: 'relation', from: k });
+    }
+    if (patch.comment !== undefined) {
+      if (typeof patch.comment !== 'string') throw new HttpError(400, 'A comment is text.');
+      const comment = issueDescription(patch.comment);
+      if (!comment) throw new HttpError(400, 'A comment needs some text.');
+      if (comment.length > ISSUE_TEXT_MAX) throw new HttpError(400, `Keep a comment under ${ISSUE_TEXT_MAX} characters.`);
+      events.push({ at: now, by, kind: 'comment', text: comment });
     }
     if (status !== undefined && status !== old.status) {
       next.status = status;
@@ -381,6 +423,14 @@ export class SuperStore {
     if (why) {
       const status = events.find(e => e.kind === 'status');
       if (status) status.text = why; else events.push({ at: now, by, kind: 'comment', text: why });
+    }
+    // A ref with nothing to log changes nothing: there would be no entry to keep it on, so the same
+    // update could be applied again.
+    if (ref && !events.length) return old;
+    // The ref goes on the change it explains: the status change, else the note, else the last entry made.
+    if (ref) {
+      const entry = events.find(e => e.kind === 'status') ?? events.at(-1);
+      if (entry) entry.ref = ref;
     }
     next.activity = [...old.activity, ...events];
     this.write({ ...stored, issues: stored.issues.map(g => (g.id === id ? next : g)) });
@@ -652,6 +702,43 @@ function labelsFrom(raw: unknown): string[] {
   const labels = [...new Set(raw.map(l => String(l ?? '').trim().toLowerCase()).filter(Boolean))];
   if (labels.length > 10 || labels.some(l => l.length > 30)) throw new HttpError(400, 'Up to 10 labels, each under 30 characters.');
   return labels;
+}
+
+/** A parent for issue `id`: an issue that exists, not `id` itself, and not one of `id`'s own sub-issues (no loops). */
+function parentFrom(issues: readonly SuperIssue[], id: string, raw: unknown): string {
+  const parentId = String(raw);
+  const byId = new Map(issues.map(g => [g.id, g]));
+  if (!byId.has(parentId)) throw new HttpError(400, 'No issue with that parent id.');
+  for (let at: string | undefined = parentId, steps = 0; at && steps <= issues.length; at = byId.get(at)?.parentId, steps++) {
+    if (at === id) throw new HttpError(400, 'An issue cannot be under itself or one of its own sub-issues.');
+  }
+  return parentId;
+}
+
+const RELATION_TYPES: readonly IssueRelationType[] = ['blocks', 'related', 'duplicate_of'];
+
+/**
+ * Relations for issue `id`: each a known type and another issue, once each, at most 50. A newly added
+ * one must point at an issue that exists; one the issue already had (`kept`) stays as it is even if
+ * its target was removed since, so the others can still be edited and an undone removal reconnects.
+ */
+function relationsFrom(issues: readonly SuperIssue[], id: string, raw: unknown, kept: SuperIssue['relations'] = []): SuperIssue['relations'] {
+  if (!Array.isArray(raw)) throw new HttpError(400, 'Relations are a list of { type, issueId }.');
+  const ids = new Set(issues.map(g => g.id));
+  const seen = new Set<string>();
+  const out: SuperIssue['relations'] = [];
+  for (const r of raw as { type?: unknown; issueId?: unknown }[]) {
+    const type = r?.type as IssueRelationType;
+    const issueId = String(r?.issueId ?? '');
+    if (!RELATION_TYPES.includes(type)) throw new HttpError(400, `A relation's type is one of: ${RELATION_TYPES.join(', ')}.`);
+    if (issueId === id) throw new HttpError(400, 'An issue cannot relate to itself.');
+    const had = kept.some(k => k.type === type && k.issueId === issueId);
+    if (!ids.has(issueId) && !had) throw new HttpError(400, 'No issue with that id to relate to.');
+    const key = `${type}:${issueId}`;
+    if (!seen.has(key)) { seen.add(key); out.push({ type, issueId }); }
+  }
+  if (out.length > 50) throw new HttpError(400, 'Up to 50 relations.');
+  return out;
 }
 
 function issueText(raw: unknown): string {

@@ -507,3 +507,116 @@ test('the creation cap stops only agents it makes on its own: never in your turn
   await t.call('create_agent', { name: 'Auto', why: 'More hands.' });
   await assert.rejects(t.call('create_agent', { name: 'Auto2', why: 'More hands.' }), e => status(e) === 429);
 });
+
+test('the issue view edits through the app: assignee (an agent, you or nobody), parent, relations and comments, each checked and logged as yours', async () => {
+  const t = await team();
+  t.manager.addIssue({ text: 'Parent' });
+  t.manager.addIssue({ text: 'Child' });
+  t.manager.addIssue({ text: 'Other' });
+  const byText = (text: string) => t.manager.superView().issues.find(g => g.text === text)!;
+  const [parent, child, other] = [byText('Parent'), byText('Child'), byText('Other')];
+  const last = (id: string) => byText(t.manager.superView().issues.find(g => g.id === id)!.text).activity.at(-1)!;
+
+  t.manager.updateIssue(child.id, { assignee: t.ada.id });
+  assert.equal(byText('Child').agentId, t.ada.id);
+  assert.deepEqual([last(child.id).kind, last(child.id).to, last(child.id).by], ['assignee', t.ada.id, { kind: 'user' }]);
+  t.manager.updateIssue(child.id, { assignee: 'user' });
+  assert.equal(byText('Child').forUser, true);
+  assert.equal(byText('Child').agentId, undefined, 'yours takes it off the agent');
+  assert.deepEqual([last(child.id).from, last(child.id).to], [t.ada.id, 'user']);
+  t.manager.updateIssue(child.id, { assignee: null });
+  assert.equal(byText('Child').forUser, undefined);
+  assert.deepEqual([last(child.id).from, last(child.id).to], ['user', undefined]);
+  assert.throws(() => t.manager.updateIssue(child.id, { assignee: 'nobody-by-that-id' }), e => status(e) === 400);
+
+  t.manager.updateIssue(child.id, { parentId: parent.id });
+  assert.equal(byText('Child').parentId, parent.id);
+  assert.throws(() => t.manager.updateIssue(parent.id, { parentId: child.id }), e => status(e) === 400, 'no loops');
+  assert.throws(() => t.manager.updateIssue(child.id, { parentId: child.id }), e => status(e) === 400, 'not itself');
+  assert.throws(() => t.manager.updateIssue(child.id, { parentId: 'gone' }), e => status(e) === 400);
+  t.manager.updateIssue(child.id, { parentId: null });
+  assert.equal(byText('Child').parentId, undefined);
+
+  t.manager.updateIssue(child.id, { relations: [{ type: 'blocks', issueId: other.id }, { type: 'blocks', issueId: other.id }, { type: 'related', issueId: parent.id }] });
+  assert.deepEqual(byText('Child').relations, [{ type: 'blocks', issueId: other.id }, { type: 'related', issueId: parent.id }], 'repeats kept once');
+  assert.throws(() => t.manager.updateIssue(child.id, { relations: [{ type: 'likes', issueId: other.id }] }), e => status(e) === 400);
+  assert.throws(() => t.manager.updateIssue(child.id, { relations: [{ type: 'related', issueId: child.id }] }), e => status(e) === 400);
+  assert.throws(() => t.manager.updateIssue(child.id, { relations: 'blocks' }), e => status(e) === 400);
+
+  t.manager.updateIssue(child.id, { comment: 'First line\nsecond line' });
+  assert.deepEqual([last(child.id).kind, last(child.id).text, last(child.id).by], ['comment', 'First line\nsecond line', { kind: 'user' }]);
+  assert.throws(() => t.manager.updateIssue(child.id, { comment: '   ' }), e => status(e) === 400);
+  assert.throws(() => t.manager.updateIssue(child.id, { comment: 7 }), e => status(e) === 400);
+});
+
+test('git links: a merge closes an issue once, its hash kept as the status entry\'s ref, by git', () => {
+  const store = new SuperStore(tempDir('issue-ref'));
+  const issue = store.addIssue({ text: 'Ship the page', projectId: null, by: 'user' }, 1);
+  const closed = store.updateIssue(issue.id, { status: 'done', activityText: 'Merged abc123 from feat/ACH-1-ship.', activityRef: 'abc123' }, 2, { kind: 'git' });
+  const entry = closed.activity.at(-1)!;
+  assert.deepEqual([entry.kind, entry.to, entry.ref, entry.text, entry.by], ['status', 'done', 'abc123', 'Merged abc123 from feat/ACH-1-ship.', { kind: 'git' }]);
+  // Reopened by you, the same merge seen again changes nothing; a new merge closes it again.
+  store.updateIssue(issue.id, { status: 'todo' }, 3, { kind: 'user' });
+  const again = store.updateIssue(issue.id, { status: 'done', activityRef: 'abc123' }, 4, { kind: 'git' });
+  assert.equal(again.status, 'todo', 'the same merge is applied once');
+  assert.equal(again.activity.length, closed.activity.length + 1);
+  assert.equal(store.updateIssue(issue.id, { status: 'done', activityRef: 'def456' }, 5, { kind: 'git' }).status, 'done');
+});
+
+test('a relation to a removed issue stays, and the issue\'s other relations can still be added and removed', async () => {
+  const t = await team();
+  for (const text of ['A', 'B', 'C', 'D']) t.manager.addIssue({ text });
+  const by = (text: string) => t.manager.superView().issues.find(g => g.text === text)!;
+  const [a, b, c, d] = [by('A'), by('B'), by('C'), by('D')];
+  t.manager.updateIssue(a.id, { relations: [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: c.id }] });
+  t.manager.removeIssue(b.id);
+  // Add D: B is gone, but A already had it, so the list is still accepted.
+  t.manager.updateIssue(a.id, { relations: [...by('A').relations, { type: 'related', issueId: d.id }] });
+  assert.deepEqual(by('A').relations, [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: c.id }, { type: 'related', issueId: d.id }]);
+  // Remove C.
+  t.manager.updateIssue(a.id, { relations: by('A').relations.filter(r => r.issueId !== c.id) });
+  assert.deepEqual(by('A').relations, [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: d.id }]);
+  // A gone id A never had is still refused, and so is the kept one under another type.
+  assert.throws(() => t.manager.updateIssue(a.id, { relations: [{ type: 'related', issueId: 'never-was' }] }), e => status(e) === 400);
+  assert.throws(() => t.manager.updateIssue(a.id, { relations: [{ type: 'duplicate_of', issueId: b.id }] }), e => status(e) === 400);
+  // Undo of the removal brings B back, and A's relation reconnects.
+  const removal = t.manager.superView().log.find(x => x.tool === 'remove_issue')!;
+  await t.manager.undoSuper(removal.id);
+  assert.ok(t.manager.superView().issues.some(g => g.id === b.id));
+  assert.deepEqual(by('A').relations[0], { type: 'blocks', issueId: b.id });
+});
+
+test('parent and relation changes are logged; a new assignee ends the old handoff; a bare ref or a non-text comment writes nothing', async () => {
+  const t = await team();
+  for (const text of ['P', 'Q', 'X', 'Y']) t.manager.addIssue({ text });
+  const by = (text: string) => t.manager.superView().issues.find(g => g.text === text)!;
+  const [p, q, x, y] = [by('P'), by('Q'), by('X'), by('Y')];
+  const tail = (n: number) => by('X').activity.slice(-n).map(e => [e.kind, e.from ?? null, e.to ?? null, e.by.kind]);
+
+  t.manager.updateIssue(x.id, { parentId: p.id });
+  t.manager.updateIssue(x.id, { parentId: q.id });
+  t.manager.updateIssue(x.id, { parentId: null });
+  assert.deepEqual(tail(3), [['parent', null, p.id, 'user'], ['parent', p.id, q.id, 'user'], ['parent', q.id, null, 'user']]);
+
+  t.manager.updateIssue(x.id, { relations: [{ type: 'blocks', issueId: y.id }] });
+  t.manager.updateIssue(x.id, { relations: [{ type: 'related', issueId: y.id }] });
+  assert.deepEqual(tail(3), [['relation', null, `blocks:${y.id}`, 'user'], ['relation', null, `related:${y.id}`, 'user'], ['relation', `blocks:${y.id}`, null, 'user']]);
+  const quiet = by('X').activity.length;
+  t.manager.updateIssue(x.id, { relations: [{ type: 'related', issueId: y.id }] });
+  assert.equal(by('X').activity.length, quiet, 'an unchanged list logs nothing');
+
+  // The SuperAgent hands X to Ada with a delegation; you then move it to Bo, or to nobody: the handoff ends.
+  const store = (t.manager as unknown as { superStore: SuperStore }).superStore;
+  store.updateIssue(x.id, { agentId: t.ada.id, delegationId: 'del-1' }, Date.now());
+  assert.equal(by('X').delegationId, 'del-1');
+  t.manager.updateIssue(x.id, { assignee: t.bo.id });
+  assert.equal(by('X').delegationId, undefined);
+  store.updateIssue(x.id, { agentId: t.ada.id, delegationId: 'del-2' }, Date.now());
+  t.manager.updateIssue(x.id, { assignee: null });
+  assert.equal(by('X').delegationId, undefined);
+
+  const before = by('X');
+  assert.deepEqual(store.updateIssue(x.id, { activityRef: 'abc' }, Date.now() + 5, { kind: 'git' }), before, 'a ref with nothing to log is not written');
+  assert.equal(by('X').updatedAt, before.updatedAt);
+  assert.throws(() => store.updateIssue(x.id, { comment: { text: 'x' } }, Date.now()), e => status(e) === 400);
+});

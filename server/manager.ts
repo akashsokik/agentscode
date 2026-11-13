@@ -2098,10 +2098,20 @@ export class AgentManager {
   }
 
   /** The user's change to an issue from the app; the store checks each field, and its activity says you did it. */
-  updateIssue(id: string, body: { text?: unknown; title?: unknown; projectId?: unknown; status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown }): SuperState {
+  updateIssue(id: string, body: {
+    text?: unknown; title?: unknown; projectId?: unknown; status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown;
+    /** An agent's id, "user" for you, or null for nobody. */
+    assignee?: unknown; parentId?: unknown; relations?: unknown; comment?: unknown;
+  }): SuperState {
     if (body?.text !== undefined && typeof body.text !== 'string') throw new HttpError(400, 'An issue is text.');
     if (body?.title !== undefined && typeof body.title !== 'string') throw new HttpError(400, 'A title is text.');
+    if (body?.parentId !== undefined && body.parentId !== null && typeof body.parentId !== 'string') throw new HttpError(400, 'A parent is given by its issue id.');
+    if (body?.comment !== undefined && typeof body.comment !== 'string') throw new HttpError(400, 'A comment is text.');
     this.superStore.updateIssue(id, {
+      ...this.issueAssignee(body?.assignee),
+      ...(body?.parentId !== undefined ? { parentId: body.parentId as string | null } : {}),
+      ...(body?.relations !== undefined ? { relations: body.relations } : {}),
+      ...(typeof body?.comment === 'string' ? { comment: body.comment } : {}),
       ...(typeof body?.text === 'string' ? { text: body.text } : {}),
       ...(typeof body?.title === 'string' ? { title: body.title } : {}),
       ...(body?.projectId !== undefined ? { projectId: this.issueProject(body.projectId) } : {}),
@@ -2111,6 +2121,15 @@ export class AgentManager {
       ...(body?.labels !== undefined ? { labels: body.labels } : {}),
     }, Date.now(), { kind: 'user' });
     return this.publishSuper();
+  }
+
+  /** Who the app assigns an issue to: an agent (its id), you ("user"), or nobody (null or ""). */
+  private issueAssignee(raw: unknown): { agentId?: string; forUser?: boolean } {
+    if (raw === undefined) return {};
+    if (raw === null || raw === '') return { agentId: '', forUser: false };
+    if (raw === 'user') return { forUser: true };
+    if (typeof raw !== 'string' || !this.store.agents.get(raw)) throw new HttpError(400, 'Assign an issue to an agent (its id), "user" or null.');
+    return { agentId: raw, forUser: false };
   }
 
   /** An issue's project from the app: a project id, or null (or nothing) for none. */
