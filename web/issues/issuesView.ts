@@ -320,18 +320,16 @@ export function issuesPage(issues: readonly SuperIssue[] | undefined, choice: { 
 }
 
 /**
- * What to change so an issue opened from elsewhere (the right panel, ACH-D52) shows in the list:
- * the All view when the current one leaves it out, no filters or search when they hide it, and its
- * closed status group unfolded. Display options are the user's and stay; returns null when the issue
- * shows already.
+ * What to change so an issue opened from elsewhere (the right panel, ACH-D54) shows in the list:
+ * the All view when the current one leaves it out, and no filters or search when they hide it.
+ * Display options are the user's and stay; returns null when the issue shows already.
  */
 export function revealIssue(issue: SuperIssue, choice: { view: IssuesViewName; filters: IssueFilters; query: string; display: IssuesDisplay }, today: string): {
-  view?: IssuesViewName; filters?: IssueFilters; query?: string; unfold?: string;
+  view?: IssuesViewName; filters?: IssueFilters; query?: string;
 } | null {
-  const out: { view?: IssuesViewName; filters?: IssueFilters; query?: string; unfold?: string } = {};
+  const out: { view?: IssuesViewName; filters?: IssueFilters; query?: string } = {};
   if (!inView(issue, choice.view)) out.view = 'all';
   if (!matchesFilters(issue, choice.filters, today)) out.filters = {};
   if (!matchesQuery(issue, choice.query)) out.query = '';
-  if (choice.display.groupBy === 'status' && !isOpenIssue(issue)) out.unfold = issue.status;
   return Object.keys(out).length ? out : null;
 }
