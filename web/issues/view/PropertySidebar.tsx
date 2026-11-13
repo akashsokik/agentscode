@@ -16,7 +16,7 @@ import { Kbd } from '../../ui/Kbd.tsx';
 import { MenuRow, MenuRowRole } from '../../ui/common.tsx';
 import { CalendarGlyph } from './CalendarGlyph.tsx';
 import { PriorityGlyph, StatusGlyph } from './glyphs.tsx';
-import { actorName, dueTone, matchesQuery, parseLabels, PRIORITY_OPTIONS, STATUS_OPTIONS } from './issueViewModel.ts';
+import { actorName, commitEdit, dueToSave, dueTone, matchesQuery, parseLabels, PRIORITY_OPTIONS, STATUS_OPTIONS } from './issueViewModel.ts';
 import { WRITABLE, writeIssue } from './issueWrites.ts';
 
 export interface PropertySidebarHandle { open(property: 'status' | 'priority' | 'due' | 'labels'): void }
@@ -48,13 +48,15 @@ function Picker({ anchor, label, options, current, onPick, onClose }: { anchor: 
       <div role="listbox" aria-label={label}>
         <MenuRowRole.Provider value="option">
           {shown.map((o, i) => (
+            <div key={o.value} data-keyboard={i === at || undefined} className={i === at && o.value !== current ? '[&>button]:bg-content/5' : undefined}>
             <MenuRow
-              key={o.value}
               title={<span className="flex items-center gap-2">{o.icon}<span className="truncate">{o.label}</span></span>}
-              // The current value by its fill only (ACH-D46 B); the keyboard row is filled too.
-              highlighted={o.value === current || i === at}
+              // The current value by its fill only (ACH-D46 B, no check). The keyboard row gets the
+              // hover fill (from the wrapper below), so the two never look alike (Rhea L3).
+              highlighted={o.value === current}
               onSelect={() => onPick(o.value)}
             />
+            </div>
           ))}
           {!shown.length ? <p className="px-2 py-2 font-sans text-[12px] text-content/45">No matches</p> : null}
         </MenuRowRole.Provider>
@@ -96,7 +98,14 @@ export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperI
   const parent = issue.parentId ? issues.find(i => i.id === issue.parentId) : undefined;
   const created = issue.activity?.find(e => e.kind === 'created');
   const creator = created ? actorName(created.by, id => agents.find(a => a.id === id)?.name) : issue.by === 'user' ? 'You' : 'SuperAgent';
-  const due = dueTone(issue.dueDate, issue.status, new Date());
+  const [dueDraft, setDueDraft] = useState(issue.dueDate ?? '');
+  useEffect(() => setDueDraft(issue.dueDate ?? ''), [issue.dueDate]);
+  const saveDue = () => {
+    void commitEdit(dueToSave(dueDraft, issue.dueDate), dueDate => writeIssue(issue.id, { dueDate })).then(r => { if (r === 'reverted') setDueDraft(issue.dueDate ?? ''); });
+  };
+  // What the row reads: the day being picked while the field is open, else the stored one.
+  const shownDue = dueDraft === '' ? undefined : /^2\d{3}-\d{2}-\d{2}$/.test(dueDraft) ? dueDraft : issue.dueDate;
+  const due = dueTone(shownDue, issue.status, new Date());
   const save = (patch: Parameters<typeof writeIssue>[1]) => { setMenu(null); void writeIssue(issue.id, patch); };
   const notYet = 'Changed from here once the issue API takes it; agents and the SuperAgent set it today.';
   return (
@@ -120,13 +129,20 @@ export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperI
       <Row label="Due date" shortcut="D">
         <label className={`${VALUE} relative cursor-pointer`}>
           <CalendarGlyph className={due?.tone === 'danger' ? 'text-danger' : due?.tone === 'warning' ? 'text-warning' : 'text-content/50'} />
-          <span className={`min-w-0 flex-1 truncate text-[12.5px] ${due?.tone === 'danger' ? 'text-danger' : due?.tone === 'warning' ? 'text-warning' : issue.dueDate ? 'text-content/85' : 'text-content/45'}`}>{due?.text ?? 'Set due date'}</span>
+          <span className={`min-w-0 flex-1 truncate text-[12.5px] ${due?.tone === 'danger' ? 'text-danger' : due?.tone === 'warning' ? 'text-warning' : shownDue ? 'text-content/85' : 'text-content/45'}`}>{due?.text ?? 'Set due date'}</span>
           <input
             ref={dueRef}
             type="date"
             aria-label="Due date"
-            value={issue.dueDate ?? ''}
-            onChange={e => save({ dueDate: e.target.value || null })}
+            value={dueDraft}
+            // Saved when the field is left (or Enter), never per keystroke: a year typed by hand
+            // passes through days like 0002-11-13, which would each be refused with a toast.
+            onChange={e => setDueDraft(e.target.value)}
+            onBlur={() => saveDue()}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+              if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setDueDraft(issue.dueDate ?? ''); const el = e.currentTarget; requestAnimationFrame(() => el.blur()); }
+            }}
             // ACH-D46 date A: the native picker, dark, opened from our row; the field itself stays
             // invisible over the row so the date reads in words ("Today, 13 Nov") rather than 13/11/2026.
             onClick={e => { try { e.currentTarget.showPicker?.(); } catch { /* not allowed here */ } }}

@@ -1,7 +1,7 @@
 // What the full-pane issue view shows (ACH-D41, ACH-D43 phase 4), kept pure so it is tested
 // without a DOM: sub-issues and their quiet "3/5" count (ACH-D46 progress A), relations both ways,
 // activity lines, the due date's tone, and the property menus' options.
-import { CLOSED_STATUSES, ISSUE_PRIORITIES, ISSUE_PRIORITY_LABEL, ISSUE_STATUS_LABEL, ISSUE_STATUSES } from '../../../shared/issues.ts';
+import { CLOSED_STATUSES, ISSUE_PRIORITIES, ISSUE_TEXT_MAX, ISSUE_TITLE_MAX, issueDescription, ISSUE_PRIORITY_LABEL, ISSUE_STATUS_LABEL, ISSUE_STATUSES } from '../../../shared/issues.ts';
 import type { IssueActor, IssueEvent, IssuePriority, IssueRelationType, IssueStatus, SuperIssue } from '../../../shared/types.ts';
 
 type Issue = Pick<SuperIssue, 'id' | 'key' | 'title' | 'status' | 'priority' | 'parentId' | 'relations' | 'order' | 'dueDate' | 'agentId' | 'createdAt'>;
@@ -115,3 +115,39 @@ export function propertyKey(e: { key: string; metaKey: boolean; ctrlKey: boolean
   return KEYS[e.key.toLowerCase()] ?? null;
 }
 
+
+/** The editors' limits: the issue model's own (shared/issues.ts), so the view never offers more than it saves. */
+export const TITLE_MAX = ISSUE_TITLE_MAX;
+export const TEXT_MAX = ISSUE_TEXT_MAX;
+
+/** A title edit to save: one line, spaces collapsed, within the limit; null when empty or unchanged (it reverts). */
+export function titleToSave(draft: string, title: string): string | null {
+  const next = draft.replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX);
+  return next && next !== title ? next : null;
+}
+
+/** A description edit to save, as the model stores it (line breaks kept); null when empty or unchanged. */
+export function descriptionToSave(draft: string, text: string): string | null {
+  const next = issueDescription(draft.slice(0, TEXT_MAX));
+  return next && next !== issueDescription(text) ? next : null;
+}
+
+/**
+ * A due date to save when the field is left: a whole day (YYYY-MM-DD, years 2000 to 2999) or
+ * cleared (null); undefined when unchanged or half typed, like the 0002-11-13 a year passes
+ * through while it is typed, which is never sent.
+ */
+export function dueToSave(draft: string, current: string | undefined): string | null | undefined {
+  if (!draft) return current ? null : undefined;
+  if (!/^2\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(draft)) return undefined;
+  return draft === current ? undefined : draft;
+}
+
+/**
+ * One edit's save: nothing when there is nothing to save (undefined); otherwise the write, and on
+ * a refusal the field goes back to what is stored ('reverted'), the error having shown as a toast.
+ */
+export async function commitEdit<T>(next: T | undefined, write: (value: T) => Promise<boolean>): Promise<'unchanged' | 'saved' | 'reverted'> {
+  if (next === undefined) return 'unchanged';
+  return (await write(next)) ? 'saved' : 'reverted';
+}

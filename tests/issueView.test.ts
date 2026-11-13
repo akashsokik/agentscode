@@ -3,7 +3,9 @@ import test from 'node:test';
 import type { IssueEvent, SuperIssue } from '../shared/types.ts';
 import { tabKey } from '../web/layout.ts';
 import { citedDecisions, fromServerDecisions, issueLinksSource, localIssueLinks, setIssueLinksSource } from '../web/issues/view/issueLinks.ts';
-import { activityLine, actorName, dueTone, matchesQuery, parentOf, parseLabels, PRIORITY_OPTIONS, propertyKey, relationsOf, STATUS_OPTIONS, subIssues } from '../web/issues/view/issueViewModel.ts';
+import { activityLine, actorName, commitEdit, descriptionToSave, dueToSave, dueTone, TEXT_MAX, TITLE_MAX, titleToSave, matchesQuery, parentOf, parseLabels, PRIORITY_OPTIONS, propertyKey, relationsOf, STATUS_OPTIONS, subIssues } from '../web/issues/view/issueViewModel.ts';
+import fs from 'node:fs';
+import { ISSUE_TEXT_MAX, ISSUE_TITLE_MAX } from '../shared/issues.ts';
 import { WRITABLE } from '../web/issues/view/issueWritable.ts';
 
 // The full-pane issue view (ACH-D41, ACH-D43 phase 4): what it shows, as pure rules.
@@ -109,4 +111,43 @@ test('writes: only what the issue route takes is editable; an issue opens as its
   assert.deepEqual(Object.entries(WRITABLE).filter(([, v]) => v).map(([k]) => k).sort(), ['dueDate', 'labels', 'priority', 'projectId', 'status', 'text', 'title']);
   assert.deepEqual(Object.entries(WRITABLE).filter(([, v]) => !v).map(([k]) => k).sort(), ['assignee', 'comment', 'parent', 'relations']);
   assert.equal(tabKey({ kind: 'issue', issueId: 'abc' }), 'issue:abc');
+});
+
+test('the editors use the model\'s limits (Rhea L1): 120 for a title, 4000 for a description', () => {
+  assert.equal(TITLE_MAX, ISSUE_TITLE_MAX);
+  assert.equal(TEXT_MAX, ISSUE_TEXT_MAX);
+  const source = fs.readFileSync(new URL('../web/issues/view/EditableText.tsx', import.meta.url), 'utf8');
+  assert.match(source, /maxLength=\{TITLE_MAX\}/);
+  assert.match(source, /maxLength=\{TEXT_MAX\}/);
+  assert.doesNotMatch(source, /maxLength=\{\d/, 'no number of its own');
+});
+
+test('title and description edits: what is saved, what reverts; line breaks in a description are kept (Rhea M1)', () => {
+  assert.equal(titleToSave('  New   title \n', 'Old'), 'New title');
+  assert.equal(titleToSave('Old', 'Old'), null, 'unchanged');
+  assert.equal(titleToSave('   ', 'Old'), null, 'empty reverts');
+  assert.equal(titleToSave('x'.repeat(200), 'Old')?.length, 120);
+  const md = 'Steps:\n\n- open the view\n- press S\n\n```\ncode\n```';
+  assert.equal(descriptionToSave(md, 'old'), md, 'kept as Markdown');
+  assert.equal(descriptionToSave(md + '  \n\n\n', md), null, 'only trailing space and blank lines: unchanged');
+  assert.equal(descriptionToSave('  ', 'old'), null);
+});
+
+test('the due date saves a whole day once the field is left, never a half-typed year (Rhea L5); clearing saves null', () => {
+  assert.equal(dueToSave('2026-11-20', '2026-11-13'), '2026-11-20');
+  assert.equal(dueToSave('0002-11-13', '2026-11-13'), undefined, 'a year being typed');
+  assert.equal(dueToSave('2026-13-01', undefined), undefined);
+  assert.equal(dueToSave('2026-11-13', '2026-11-13'), undefined, 'unchanged');
+  assert.equal(dueToSave('', '2026-11-13'), null, 'cleared');
+  assert.equal(dueToSave('', undefined), undefined);
+});
+
+test('an edit saves through one write; a refusal reverts; nothing to save writes nothing', async () => {
+  const writes: unknown[] = [];
+  const write = (ok: boolean) => async (v: unknown) => { writes.push(v); return ok; };
+  assert.equal(await commitEdit('New', write(true)), 'saved');
+  assert.equal(await commitEdit('Bad', write(false)), 'reverted');
+  assert.equal(await commitEdit(null, write(true)), 'saved', 'null is a value (a cleared due date)');
+  assert.equal(await commitEdit(undefined, write(true)), 'unchanged');
+  assert.deepEqual(writes, ['New', 'Bad', null]);
 });

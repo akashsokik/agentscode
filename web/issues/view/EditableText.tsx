@@ -1,12 +1,13 @@
 /**
- * The issue's title and description, edited in place. The title is one line: ⏎ saves, ⎋ puts it
- * back. The description reads as Markdown; a click (or ⏎ on it) opens a plain editor where ⌘⏎
+ * The issue's title and description, edited in place, within the model's limits (120 and 4000).
+ * The title wraps but is one line of text: ⏎ saves, ⎋ puts it back. The description reads as Markdown; a click (or ⏎ on it) opens a plain editor where ⌘⏎
  * saves and ⎋ cancels. Both save through the issue API (issueWrites.ts).
  */
 import { useEffect, useRef, useState } from 'react';
 import { Markdown } from '../../ui/Markdown.tsx';
 import { Kbd } from '../../ui/Kbd.tsx';
 import { TEXTAREA, TextButton } from '../../ui/common.tsx';
+import { commitEdit, descriptionToSave, TEXT_MAX, TITLE_MAX, titleToSave } from './issueViewModel.ts';
 import { writeIssue } from './issueWrites.ts';
 
 export function IssueTitle({ id, title }: { id: string; title: string }) {
@@ -14,25 +15,32 @@ export function IssueTitle({ id, title }: { id: string; title: string }) {
   const [busy, setBusy] = useState(false);
   useEffect(() => setDraft(title), [title]);
   const save = async () => {
-    const next = draft.replace(/\s+/g, ' ').trim();
-    if (!next || next === title || busy) { setDraft(title); return; }
+    if (busy) return;
     setBusy(true);
-    if (!(await writeIssue(id, { title: next }))) setDraft(title);
+    const result = await commitEdit(titleToSave(draft, title) ?? undefined, next => writeIssue(id, { title: next }));
+    if (result !== 'saved') setDraft(title);
     setBusy(false);
   };
+  // A textarea that grows with the title, so a long one wraps instead of being cut (one line of
+  // text all the same: Enter saves, line breaks typed or pasted become spaces).
   return (
-    <input
+    <textarea
       aria-label="Title"
+      rows={1}
       value={draft}
-      maxLength={200}
+      maxLength={TITLE_MAX}
       aria-busy={busy || undefined}
       onChange={e => setDraft(e.target.value.replace(/[\r\n]+/g, ' '))}
       onBlur={() => void save()}
       onKeyDown={e => {
         if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.blur(); }
-        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setDraft(title); requestAnimationFrame(() => e.currentTarget?.blur()); }
+        if (e.key === 'Escape') {
+          e.preventDefault(); e.stopPropagation(); setDraft(title);
+          const el = e.currentTarget; // React clears currentTarget once the handler returns
+          requestAnimationFrame(() => el.blur());
+        }
       }}
-      className="w-full rounded-md bg-transparent px-1 -mx-1 font-sans text-[20px] font-semibold leading-tight text-content outline-none hover:bg-content/4 focus:bg-content/5"
+      className="-mx-1 w-full resize-none overflow-hidden rounded-md bg-transparent px-1 font-sans text-[20px] font-semibold leading-tight text-content outline-none [field-sizing:content] hover:bg-content/4 focus:bg-content/5"
     />
   );
 }
@@ -46,11 +54,11 @@ export function IssueDescription({ id, text }: { id: string; text: string }) {
   const close = () => { setEditing(false); requestAnimationFrame(() => shown.current?.focus()); };
   const save = async () => {
     if (busy) return;
-    if (!draft.trim() || draft === text) { close(); return; }
     setBusy(true);
-    const ok = await writeIssue(id, { text: draft });
+    const result = await commitEdit(descriptionToSave(draft, text) ?? undefined, next => writeIssue(id, { text: next }));
     setBusy(false);
-    if (ok) close();
+    // Refused: the editor stays open with the draft, so nothing typed is lost (the toast says why).
+    if (result !== 'reverted') close();
   };
   if (editing) {
     return (
@@ -60,7 +68,7 @@ export function IssueDescription({ id, text }: { id: string; text: string }) {
           aria-label="Description"
           value={draft}
           rows={Math.min(18, Math.max(4, draft.split('\n').length + 1))}
-          maxLength={4000}
+          maxLength={TEXT_MAX}
           aria-busy={busy || undefined}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => {
