@@ -60,3 +60,11 @@ test('polish (ACH-23): keyboard, focus, copy and refresh feedback, errors with a
   assert.match(prs, /const \[tab, setTab\] = useState<PrTab>\('summary'\)/, 'the detail tab is kept across PRs (held by the page)');
   assert.match(prs, /api\.prDetail\(pr\.repo, pr\.number, fresh !== first\.current\)/, 'Refresh reads the shown PR again too');
 });
+
+test('Hal\'s audit (ACH-23): no blank narrow pane, a picked PR survives search, Back hands focus back', () => {
+  const inbox = read('web/ui/Inbox.tsx');
+  assert.match(inbox, /detailOpen && Boolean\(detail\) && .@max-\[40rem\]\/inbox:hidden'/, 'the rail hides only while a detail shows');
+  const prs = read('web/prs/PullRequestsPane.tsx');
+  assert.match(prs, /const selected = \(data\?\.pullRequests \?\? \[\]\)\.find\(pr => pr\.id === prId\)/, 'selection from the full list, as Comms');
+  assert.match(prs, /onBack=\{\(\) => \{ open\(\{ kind: 'pullRequests' \}\); focusCard\(pr\.id\); \}\}/);
+});

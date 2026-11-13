@@ -51,7 +51,8 @@ export function InboxLayout({ toolbar, list, detail, detailOpen, onRailKeyDown }
   return (
     <div className="@container/inbox flex min-h-0 flex-1">
       {/* The rail is its own container (rail), so its rows can drop detail as it narrows. */}
-      <div onKeyDown={onRailKeyDown} className={cx('@container/rail flex w-full shrink-0 flex-col border-stroke @min-[40rem]/inbox:w-[min(19rem,42%)] @min-[40rem]/inbox:border-r', detailOpen && '@max-[40rem]/inbox:hidden')}>
+      {/* The rail hides in a narrow pane only while a detail shows: a picked item that is gone never leaves a blank pane. */}
+      <div onKeyDown={onRailKeyDown} className={cx('@container/rail flex w-full shrink-0 flex-col border-stroke @min-[40rem]/inbox:w-[min(19rem,42%)] @min-[40rem]/inbox:border-r', detailOpen && Boolean(detail) && '@max-[40rem]/inbox:hidden')}>
         {toolbar}
         {list}
       </div>
