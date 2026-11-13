@@ -12,9 +12,10 @@ import { Kbd } from '../ui/Kbd.tsx';
 import { DetailButton, focusAdd, PanelEmpty, PanelList, PanelSection, PanelToolbar } from '../ui/PanelList.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { DisplayMenu, FilterChips, FilterMenu } from './IssueFilters.tsx';
-import { IssueRow } from './issueParts.tsx';
+import { IssueRow, restoreFocus } from './issueParts.tsx';
+import { isPageKey } from './pageKeys.ts';
 import {
-  activeFilters, inView, ISSUE_VIEWS, issuesPage, localDay, readDisplay, saveDisplay,
+  activeFilters, displayedIssues, inView, ISSUE_VIEWS, issuesPage, localDay, readDisplay, saveDisplay,
   type IssueFilters, type IssueNames, type IssueProperty, type IssuesDisplay, type IssuesViewName,
 } from './issuesView.ts';
 
@@ -31,15 +32,6 @@ const EMPTY_VIEW: Record<IssuesViewName, string> = {
   mine: 'Nothing is waiting on you. Issues assigned to you or needing you show here.',
 };
 
-/** A key pressed on the page itself, not typed into a field: the page's own shortcuts may take it. */
-function isPageKey(e: KeyboardEvent<HTMLElement>): boolean {
-  const target = e.target as HTMLElement;
-  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return false;
-  if (target.isContentEditable || target.closest('input, textarea, select, [role="dialog"], [role="menu"]')) return false;
-  // React passes key presses up from portals (menus, popovers); only the page's own DOM counts.
-  return e.currentTarget.contains(target);
-}
-
 export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
   const issues = useApp(s => s.snapshot?.super.issues);
   const agents = useApp(s => s.snapshot?.agents);
@@ -54,8 +46,9 @@ export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [projectId, setProjectId] = useState('');
-  const [filterMenu, setFilterMenu] = useState<{ anchor: PopoverAnchor; start?: IssueProperty } | null>(null);
-  const [displayMenu, setDisplayMenu] = useState<PopoverAnchor | null>(null);
+  // Each menu remembers what had focus when it opened, to give it back on close.
+  const [filterMenu, setFilterMenu] = useState<{ anchor: PopoverAnchor; start?: IssueProperty; opener: Element | null } | null>(null);
+  const [displayMenu, setDisplayMenu] = useState<{ anchor: PopoverAnchor; opener: Element | null } | null>(null);
   const root = useRef<HTMLDivElement>(null);
   // The trigger buttons, found in the pane when a key opens their menu (the buttons take no ref).
   const trigger = (name: 'filter' | 'display') => root.current?.closest('section')?.querySelector<HTMLElement>(`[data-issues-${name}]`) ?? null;
@@ -69,13 +62,16 @@ export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
   const filtering = Boolean(query.trim() || activeFilters(filters).length);
 
   const setDisplay = (next: IssuesDisplay) => { setDisplayState(next); saveDisplay(next); };
-  const openFilter = (start?: IssueProperty, anchor: PopoverAnchor = trigger('filter')) => setFilterMenu({ anchor, start });
+  const openFilter = (start?: IssueProperty, anchor: PopoverAnchor = trigger('filter')) => setFilterMenu({ anchor, start, opener: document.activeElement });
+  const openDisplay = (anchor: PopoverAnchor) => setDisplayMenu({ anchor, opener: document.activeElement });
+  const closeFilter = () => { restoreFocus(filterMenu?.opener ?? null, trigger('filter')); setFilterMenu(null); };
+  const closeDisplay = () => { restoreFocus(displayMenu?.opener ?? null, trigger('display')); setDisplayMenu(null); };
   const closeAdd = () => { setAdding(false); focusAdd(root.current); };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!isPageKey(e)) return;
     if (e.key === 'f' && !e.shiftKey) { e.preventDefault(); openFilter(); return; }
-    if (e.key === 'V' && e.shiftKey) { e.preventDefault(); setDisplayMenu(trigger('display')); return; }
+    if (e.key === 'V' && e.shiftKey) { e.preventDefault(); openDisplay(trigger('display')); return; }
     // J and K move between rows, as the arrow keys do.
     if ((e.key === 'j' || e.key === 'k') && !e.shiftKey) {
       const rows = [...(root.current?.querySelectorAll<HTMLElement>('[data-panel-row-main]') ?? [])];
@@ -93,7 +89,7 @@ export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
     </span>
   );
   const actions = (
-    <HeaderButton data-issues-display icon={SlidersHorizontal} label="Display options" title="Display options (⇧V)" active={Boolean(displayMenu)} onClick={e => setDisplayMenu(m => (m ? null : e.currentTarget))} />
+    <HeaderButton data-issues-display icon={SlidersHorizontal} label="Display options" title="Display options (⇧V)" active={Boolean(displayMenu)} onClick={e => (displayMenu ? closeDisplay() : openDisplay(e.currentTarget))} />
   );
 
   const row = (issue: SuperIssue) => (
@@ -111,7 +107,7 @@ export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
           onAdd={() => setAdding(a => !a)}
           addLabel="Add an issue"
         >
-          <ChipButton data-issues-filter aria-haspopup="dialog" aria-expanded={Boolean(filterMenu)} title="Filter (F)" onClick={e => (filterMenu ? setFilterMenu(null) : openFilter(undefined, e.currentTarget))}>
+          <ChipButton data-issues-filter aria-haspopup="dialog" aria-expanded={Boolean(filterMenu)} title="Filter (F)" onClick={e => (filterMenu ? closeFilter() : openFilter(undefined, e.currentTarget))}>
             <ListFilter aria-hidden className="size-3" strokeWidth={1.75} />
             Filter
             <Kbd spec="F" quiet className="hidden @min-[36rem]/issues:inline-flex" />
@@ -156,15 +152,15 @@ export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
           key={filterMenu.start ?? 'all'}
           anchor={filterMenu.anchor}
           start={filterMenu.start}
-          issues={(issues ?? []).filter(g => inView(g, view) && (display.showSubIssues || !g.parentId) && (display.showClosed || isOpenIssue(g)))}
+          issues={displayedIssues(issues, display).filter(g => inView(g, view))}
           filters={filters}
           onChange={setFilters}
           names={names}
           today={today}
-          onClose={() => setFilterMenu(null)}
+          onClose={closeFilter}
         />
       ) : null}
-      {displayMenu ? <DisplayMenu anchor={displayMenu} display={display} onChange={setDisplay} onClose={() => setDisplayMenu(null)} /> : null}
+      {displayMenu ? <DisplayMenu anchor={displayMenu.anchor} display={display} onChange={setDisplay} onClose={closeDisplay} /> : null}
     </PaneFrame>
   );
 }

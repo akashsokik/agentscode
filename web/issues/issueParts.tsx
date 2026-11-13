@@ -169,7 +169,12 @@ export function MenuPage({ page, focus = true, children }: { page: string; /** O
     // A tick later: a popover's first render cannot take focus yet (ContextMenu waits a frame too).
     const timer = setTimeout(() => {
       const el = box.current;
-      (el?.querySelector<HTMLElement>('input') ?? el?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled), [role="option"]:not(:disabled)'))?.focus({ preventScroll: true });
+      const rows = '[role="menuitem"]:not(:disabled), [role="option"]:not(:disabled)';
+      // A search field first; else the row holding the current value (so Enter keeps it, as in
+      // Linear); else the first row.
+      (el?.querySelector<HTMLElement>('input')
+        ?? el?.querySelector<HTMLElement>(`:is(${rows}):is([aria-current="true"], [aria-selected="true"])`)
+        ?? el?.querySelector<HTMLElement>(rows))?.focus({ preventScroll: true });
     });
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -185,6 +190,14 @@ export function moveMenuFocus(e: KeyboardEvent<HTMLElement>) {
   const rows = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]:not(:disabled), [role="menuitem"]:not(:disabled)')];
   const fromField = (e.target as HTMLElement).tagName === 'INPUT';
   if (fromField && e.key !== 'ArrowDown') return;
+  // Up from the first value goes back to the search field above it, rather than wrapping to the last.
+  const field = e.currentTarget.querySelector<HTMLInputElement>('input');
+  if (field && e.key === 'ArrowUp' && rows.indexOf(document.activeElement as HTMLElement) === 0) {
+    e.preventDefault();
+    e.stopPropagation();
+    field.focus();
+    return;
+  }
   const target = fromField ? (rows.length ? 0 : null) : menuKeyTarget(rows.length, rows.indexOf(document.activeElement as HTMLElement), e.key);
   if (target === null) return;
   e.preventDefault();
@@ -323,4 +336,18 @@ export function tinted(icon: typeof Circle, cls: string): typeof Circle {
     TINTED.set(key, made);
   }
   return made;
+}
+
+/**
+ * Focus back where it was when a popover opened: a closed popover takes its focused row with it and
+ * leaves focus on the page body, where F, J and K no longer reach the list. Runs a tick later, once
+ * the popover has gone, and leaves focus alone if something else took it on purpose.
+ */
+export function restoreFocus(opener: Element | null, fallback: HTMLElement | null) {
+  setTimeout(() => {
+    const now = document.activeElement;
+    if (now && now !== document.body) return;
+    const target = opener instanceof HTMLElement && opener.isConnected && opener !== document.body ? opener : fallback;
+    target?.focus({ preventScroll: true });
+  });
 }

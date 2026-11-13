@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SuperIssue } from '../shared/types.ts';
 import {
-  activeFilters, chipText, clearFilter, DEFAULT_DISPLAY, displayFrom, dueBucket, filterOptions, groupIssues, inView, issuesPage, localDay,
+  activeFilters, chipText, clearFilter, DEFAULT_DISPLAY, displayedIssues, displayFrom, dueBucket, filterOptions, groupIssues, inView, issuesPage, localDay,
   matchesFilters, matchesQuery, NONE, readDisplay, saveDisplay, sortIssues, toggleFilter, YOU, type IssuesDisplay,
 } from '../web/issues/issuesView.ts';
+import { isPageKey } from '../web/issues/pageKeys.ts';
+import { knownTabs, tabKey, TAB_KINDS } from '../web/layout.ts';
 
 const names = { agent: (id: string) => ({ ada: 'Ada', bo: 'Bo' } as Record<string, string>)[id], project: (id: string) => ({ p1: 'PodCode', p2: 'Orca' } as Record<string, string>)[id] };
 const TODAY = '2026-11-13';
@@ -150,4 +152,38 @@ test('display options are read back field by field, defaults for anything wrong,
   assert.deepEqual(readDisplay({ getItem: () => '{broken' }), DEFAULT_DISPLAY);
   assert.deepEqual(readDisplay(undefined), DEFAULT_DISPLAY);
   assert.doesNotThrow(() => saveDisplay(DEFAULT_DISPLAY, { setItem: () => { throw new Error('full'); } }));
+});
+
+test('without Sub-issues, an issue whose parent is gone still shows, as top-level', () => {
+  const list = [issue('i1'), issue('i2', { parentId: 'i1' }), issue('i3', { parentId: 'removed' })];
+  assert.deepEqual(displayedIssues(list, { showSubIssues: false, showClosed: true }).map(g => g.id), ['i1', 'i3']);
+  assert.deepEqual(displayedIssues(list, { showSubIssues: true, showClosed: true }).map(g => g.id), ['i1', 'i2', 'i3']);
+  assert.equal(issuesPage(list, { view: 'all', filters: {}, query: '', display: { ...DEFAULT_DISPLAY, showSubIssues: false } }, names, TODAY).shown, 2);
+});
+
+test('the page\'s own keys (F, J, K) skip modifiers, fields, menus and anything outside the list', () => {
+  const root = { inside: true };
+  const el = (over: { closest?: string | null; editable?: boolean; outside?: boolean } = {}) => ({
+    isContentEditable: Boolean(over.editable),
+    closest: (sel: string) => (over.closest && sel.includes(over.closest) ? {} : null),
+    outside: Boolean(over.outside),
+  });
+  const ev = (target: ReturnType<typeof el>, keys: Partial<Record<'metaKey' | 'ctrlKey' | 'altKey' | 'defaultPrevented', boolean>> = {}) => ({
+    target, currentTarget: { contains: (t: { outside: boolean }) => !t.outside && Boolean(root.inside) }, ...keys,
+  }) as unknown as Parameters<typeof isPageKey>[0];
+  assert.equal(isPageKey(ev(el())), true, 'a row');
+  assert.equal(isPageKey(ev(el(), { metaKey: true })), false);
+  assert.equal(isPageKey(ev(el(), { defaultPrevented: true })), false);
+  assert.equal(isPageKey(ev(el({ closest: 'input' }))), false, 'typing in the search');
+  assert.equal(isPageKey(ev(el({ closest: '[role="menu"]' }))), false, 'in a menu');
+  assert.equal(isPageKey(ev(el({ editable: true }))), false);
+  assert.equal(isPageKey(ev(el({ outside: true }))), false, 'from a portal (a popover) outside the list');
+});
+
+test('an Issues tab is a known kind: it survives a layout reload', () => {
+  assert.ok((TAB_KINDS as readonly string[]).includes('issues'));
+  assert.equal(tabKey({ kind: 'issues' }), 'issues');
+  const out = knownTabs([{ id: 't1', content: { kind: 'issues' } }] as never, [{ id: 'p1', tabId: 't1' }]);
+  assert.deepEqual(out.tabs.map(t => t.id), ['t1']);
+  assert.deepEqual(out.panes, [{ id: 'p1', tabId: 't1' }]);
 });
