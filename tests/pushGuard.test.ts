@@ -283,3 +283,28 @@ test('push remotes are what git pushes to (insteadOf applied, Rhea L7); a refusa
   assert.doesNotMatch(miss.why ?? '', /secret123|x-token/);
   assert.match(miss.why ?? '', /on https:\/\/github\.com\/o\/r only/);
 });
+
+test('a hooks-path override on init, commit or config runs under the shim; a push drops it, so the check still runs (test fixtures, ac7b814 regression)', () => {
+  const s = setup();
+  const dir = path.join(s.dir, 'fixture');
+  // What the test fixtures do in an agent's shell: their own repo, hooks off for speed.
+  const fixture = s.sh(s.dir, 'git -c core.hooksPath=/dev/null init -q fixture && cd fixture && echo a > a && git add a && git -c core.hooksPath=/dev/null -c user.name=t -c user.email=t@t commit -qm a && git -c core.hooksPath=/dev/null config user.name T');
+  assert.equal(fixture.status, 0, fixture.stderr);
+  assert.ok(fs.existsSync(path.join(dir, '.git')));
+  // An alias or include defined with -c on an ordinary command is harmless too.
+  assert.equal(s.sh(dir, 'git -c alias.st=status -c include.path=/dev/null status -s').status, 0);
+  // A push with the override goes through PodCode's check all the same: the override is dropped,
+  // so a fast-forward push (what fixtures do) goes, and a force-push is refused by the check.
+  const ff = s.sh(s.app, 'echo y > y && git add y && git commit -qm y && git -c init.defaultBranch=main -c core.hooksPath=/dev/null push -q origin main');
+  assert.equal(ff.status, 0, ff.stderr);
+  s.ok(s.app, 'git reset -q --hard HEAD~1 && echo x > x && git add x && git commit -qm rewritten');
+  for (const cmd of ['git -c core.hooksPath=/dev/null push -f origin main', 'git -c core.hooksPath=/dev/null -c user.name=t push -f origin main', 'git config alias.pp push && git -c core.hooksPath=/dev/null pp -f origin main']) {
+    const r = s.sh(s.app, cmd);
+    assert.notEqual(r.status, 0, cmd);
+    assert.match(r.stderr, /PodCode refused/, cmd);
+  }
+  // The Claude text check matches: a hooks-path mention is refused only next to a push.
+  assert.equal(disablesPushGuard('git -c core.hooksPath=/dev/null init -q repo'), null);
+  assert.equal(disablesPushGuard('git -c core.hooksPath=/dev/null commit -qm x'), null);
+  assert.ok(disablesPushGuard('git -c core.hooksPath=/dev/null push -f origin main'));
+});

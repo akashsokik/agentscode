@@ -117,30 +117,35 @@ no() {
   echo "Pushes that overwrite or delete pushed history need the user's approval (take_action force_push). Push a new commit (a revert) instead." >&2
   exit 1
 }
-sub=""; want=""; at=0
+# A -c or --config-env that points core.hooksPath elsewhere matters only to a push: a push drops
+# it below and runs with PodCode's hooks folder all the same. One that defines an alias or
+# includes config is refused for a push or an alias (it could re-point the hooks after ours).
+# init, commit, config and the rest run with any of them as usual (test fixtures do that).
+sub=""; want=""; at=0; flagged=""; hookset=""
 for a in "$@"; do
   at=$((at + 1))
   if [ -n "$want" ]; then
     case "$want$a" in
-      c${HOOKS_PATH}) no 'pointing core.hooksPath elsewhere turns the push check off';;
-      c[aA][lL][iI][aA][sS].*) no 'define aliases in git config, not with -c, so PodCode can see what they run';;
-      c[iI][nN][cC][lL][uU][dD][eE]*) no 'include config with git config, not with -c';;
+      c${HOOKS_PATH}) hookset=1;;
+      c[aA][lL][iI][aA][sS].*) flagged='define aliases in git config, not with -c, so PodCode can see what they run';;
+      c[iI][nN][cC][lL][uU][dD][eE]*) flagged='include config with git config, not with -c';;
     esac
     want=""; continue
   fi
   case "$a" in
     -c|--config-env) want=c;;
     -C|--git-dir|--work-tree|--namespace|--super-prefix|--attr-source|--list-cmds) want=x;;
-    ${HOOKS_PATH}) no 'pointing core.hooksPath elsewhere turns the push check off';;
+    ${HOOKS_PATH}) hookset=1;;
     -*) ;;
     *) sub="$a"; break;;
   esac
 done
 case "$sub" in
-  push) ;;
+  push) [ -n "$flagged" ] && no "$flagged";;
   send-pack|http-push) no "git $sub writes to a remote without the push check";;
   ''|${BUILTINS}) exec "$real" "$@";;
   *)
+    [ -n "$flagged" ] && no "$flagged"
     # An alias, followed through aliases of aliases (at most 5), so a=b, b=push --no-verify is seen.
     name="$sub"; alias=""; depth=0
     while next=$("$real" config --get "alias.$name" 2>/dev/null); do
@@ -175,12 +180,26 @@ if [ "$(cksum < "$hooks/pre-push" 2>/dev/null)" != '${prePushSum}' ]; then
   [ -n "$url" ] && curl -s -m 5 -o /dev/null -X POST "$url/api/push-guard/check" 2>/dev/null
   [ "$(cksum < "$hooks/pre-push" 2>/dev/null)" = '${prePushSum}' ] || no 'its push check was changed, and PodCode could not put it back'
 fi
+if [ -n "$hookset" ]; then
+  i=0; total=$#; drop=""
+  while [ "$i" -lt "$total" ]; do
+    a=$1; shift; i=$((i + 1))
+    if [ -n "$drop" ]; then drop=""; continue; fi
+    if [ "$i" -lt "$at" ]; then
+      case "$a" in
+        -c|--config-env) case "$1" in ${HOOKS_PATH}) drop=1; continue;; esac;;
+        ${HOOKS_PATH}) continue;;
+      esac
+    fi
+    set -- "$@" "$a"
+  done
+fi
 exec "$real" -c "core.hooksPath=$hooks" "$@"
 `;
 
 /** For bash (BASH_ENV): the shim first on PATH again, after a login profile ran. */
 const ENV_SH = (bin: string) => `${PUSH_GUARD_MARK}: keeps PodCode's git first on PATH.
-if [ -n "\${PODCODE_USER_BASH_ENV:-}" ] && [ -f "$PODCODE_USER_BASH_ENV" ]; then . "$PODCODE_USER_BASH_ENV"; fi
+if [ -n "\${PODCODE_USER_BASH_ENV:-}" ] && [ -f "$PODCODE_USER_BASH_ENV" ] && ! grep -q 'PodCode push guard' "$PODCODE_USER_BASH_ENV" 2>/dev/null; then . "$PODCODE_USER_BASH_ENV"; fi
 case "$PATH" in '${bin}:'*) ;; *) PATH='${bin}':"$PATH"; export PATH;; esac
 `;
 
@@ -198,9 +217,34 @@ function findRealGit(dir: string): string {
   for (const entry of (process.env.PATH ?? '').split(path.delimiter)) {
     if (!entry || path.resolve(entry) === own) continue;
     const candidate = path.join(entry, 'git');
-    try { fs.accessSync(candidate, fs.constants.X_OK); if (fs.statSync(candidate).isFile()) return candidate; } catch { /* next */ }
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      if (fs.statSync(candidate).isFile() && !isShim(candidate)) return candidate;
+    } catch { /* next */ }
   }
   return '/usr/bin/git';
+}
+
+/**
+ * Whether a git on PATH is a PodCode shim itself (another PodCode's, say the running app's when
+ * this server runs in an agent's shell): calling it would wrap one shim in another, and it would
+ * refuse this one's own hooks setting on every push.
+ */
+function isShim(file: string): boolean {
+  return isGuardFile(file);
+}
+
+/** Whether a file is one PodCode's push guard wrote (its first lines carry the mark). */
+function isGuardFile(file: string): boolean {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(200);
+    const n = fs.readSync(fd, head, 0, head.length, 0);
+    return head.subarray(0, n).toString('utf8').includes(PUSH_GUARD_MARK);
+  } catch {
+    return false;
+  } finally { if (fd !== null) fs.closeSync(fd); }
 }
 
 /** cksum's output for a text, as the shim compares it. */
@@ -281,8 +325,13 @@ export function pushGuardEnv(env: NodeJS.ProcessEnv = process.env, dir = install
   const envSh = path.join(dir, 'env.sh');
   const rest = (env.PATH ?? '').split(path.delimiter).filter(p => p && p !== bin);
   const out: NodeJS.ProcessEnv = { ...env, PATH: [bin, ...rest].join(path.delimiter), BASH_ENV: envSh, ZDOTDIR: zdot };
-  if (env.BASH_ENV && env.BASH_ENV !== envSh) out.PODCODE_USER_BASH_ENV = env.BASH_ENV;
-  if (env.ZDOTDIR && env.ZDOTDIR !== zdot) out.PODCODE_USER_ZDOTDIR = env.ZDOTDIR;
+  // The user's own startup files, to run first. Inside another PodCode's agent shell (a server
+  // started there, or tests), BASH_ENV and ZDOTDIR are that PodCode's own: keep the user's they
+  // already recorded rather than record PodCode's as the user's, which would source itself forever.
+  const userBashEnv = env.BASH_ENV && env.BASH_ENV !== envSh && !isGuardFile(env.BASH_ENV) ? env.BASH_ENV : env.PODCODE_USER_BASH_ENV;
+  const userZdot = env.ZDOTDIR && env.ZDOTDIR !== zdot && !isGuardFile(path.join(env.ZDOTDIR, '.zshenv')) ? env.ZDOTDIR : env.PODCODE_USER_ZDOTDIR;
+  if (userBashEnv) out.PODCODE_USER_BASH_ENV = userBashEnv; else delete out.PODCODE_USER_BASH_ENV;
+  if (userZdot) out.PODCODE_USER_ZDOTDIR = userZdot; else delete out.PODCODE_USER_ZDOTDIR;
   return out;
 }
 
@@ -378,7 +427,7 @@ export function redeemOverride(token: unknown, refs: unknown, remote?: unknown):
 export function disablesPushGuard(command: string): string | null {
   const text = command.replace(/\\\n/g, ' ');
   if (/\bpush\b[^\n;|&]*\s--no-v|\s--no-v[a-z]*\b[^\n;|&]*\bpush\b/.test(text)) return 'git push --no-verify skips the push check';
-  if (/core\.hooksPath/i.test(text)) return 'changing core.hooksPath turns the push check off';
+  if (/core\.hooksPath/i.test(text) && /\bpush\b/.test(text)) return 'changing core.hooksPath turns the push check off';
   if (/\bsend-pack\b|\bhttp-push\b/.test(text)) return 'git send-pack writes to a remote without the push check';
   if (/(^|[\s;|&(])\/[\w./-]*\/git\s+([^\n;|&]*\s)?push\b/.test(text)) return 'running another git by its full path skips the push check';
   if (/\b(BASH_ENV|ZDOTDIR)=/.test(text)) return 'changing the shell startup that keeps PodCode\'s git first';
