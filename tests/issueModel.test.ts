@@ -50,8 +50,8 @@ test('migrating an old record loses nothing: status by its new name, title, text
   assert.deepEqual([issue.priority, issue.labels, issue.relations], ['none', [], []]);
   assert.deepEqual([issue.agentId, issue.delegationId, issue.notes, issue.by, issue.order, issue.createdAt, issue.updatedAt], ['ada', 'm1', 'Waiting for the API key', 'user', 0, 1000, 2000]);
   assert.deepEqual(issue.activity.map(e => [e.kind, e.by.kind, e.text ?? '']), [['created', 'user', ''], ['comment', 'user', 'Waiting for the API key'], ['migrated', 'podcode', 'Status blocked became needs_you; key ACH-4.']]);
-  // And back for an older build: the same old record.
-  assert.deepEqual(legacyIssue(issue), old);
+  // And back for an older build: the same old record, plus its key (kept so it is never reissued).
+  assert.deepEqual(legacyIssue(issue), { ...old, key: 'ACH-4' });
   const done = migrateIssue(legacy('d1', { status: 'done', doneAt: 3000 }), 'ACH-5', 5000);
   assert.deepEqual([done.status, done.doneAt], ['done', 3000]);
   assert.equal(issueTitle('x'.repeat(200)).length, 118, '117 characters and an ellipsis');
@@ -106,7 +106,7 @@ test('the store migrates super.json once: keys by project code in the order made
   assert.equal(own.issues.length, 5, 'written back once, to issues.json');
   assert.deepEqual(own.issueKeys, { ACH: 2, OBX: 1, ALL: 2 });
   assert.equal(raw.issues2, undefined, 'super.json holds only what older builds know');
-  assert.equal(raw.issueKeys, undefined);
+  assert.deepEqual(raw.issueKeys, { ACH: 2, OBX: 1, ALL: 2 }, 'a copy of the counters, in case issues.json is lost');
   assert.deepEqual(raw.issues.map((g: LegacyIssue) => [g.id, g.status]), [['early', 'in_progress'], ['late', 'queued'], ['other', 'blocked'], ['none', 'queued'], ['gone', 'done']], 'the old format for older builds');
   assert.deepEqual(raw.goals, raw.issues);
   const written = fs.readFileSync(file, 'utf8');
@@ -225,7 +225,8 @@ test('issues.json: used as it is while super.json\'s copy is unchanged; a d2d597
   assert.equal(moved.issue(a.id).priority, 'high');
   assert.equal(moved.addIssue({ text: 'Two', projectId: 'p', by: 'user' }).key, 'ACH-8', 'its counters move too');
   const sup = JSON.parse(fs.readFileSync(path.join(old, 'super.json'), 'utf8'));
-  assert.deepEqual([sup.issues2, sup.issueKeys], [undefined, undefined]);
+  assert.equal(sup.issues2, undefined);
+  assert.deepEqual(sup.issueKeys, { ACH: 8 }, 'only the copy of the counters stays');
 
   // An unreadable issues.json is set aside, never overwritten.
   const bad = tempDir('issue-file-bad');
@@ -266,4 +267,65 @@ test('a description is Markdown: line breaks survive a round trip through the st
   assert.equal(issueDescription('  \n  '), '');
   // An older build still reads it: the old-format copy carries the text as it is.
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'super.json'), 'utf8')).issues.find((g: LegacyIssue) => g.id === a.id).text, 'Something else entirely.\n\nMore.');
+});
+
+test('keys are never handed out again when issues.json is lost: the old copy keeps each key, super.json a copy of the counters (P2)', () => {
+  const dir = tempDir('issue-lost-file');
+  const store = new SuperStore(dir, () => 'ACH');
+  const a = store.addIssue({ text: 'One', projectId: 'p', by: 'user' });
+  const b = store.addIssue({ text: 'Two', projectId: 'p', by: 'user' });
+  const c = store.addIssue({ text: 'Three', projectId: 'p', by: 'user', priority: 'high' });
+  store.removeIssue(b.id);
+  const sup = JSON.parse(fs.readFileSync(path.join(dir, 'super.json'), 'utf8'));
+  assert.deepEqual(sup.issues.map((g: LegacyIssue) => g.key), ['ACH-1', 'ACH-3'], 'the old-format copy carries the keys');
+  assert.deepEqual(sup.issueKeys, { ACH: 3 });
+  fs.writeFileSync(path.join(dir, 'issues.json'), '{broken');
+  const log = console.error; console.error = () => {};
+  let back: SuperStore;
+  try { back = new SuperStore(dir, () => 'ACH'); back.issues(); } finally { console.error = log; }
+  assert.deepEqual([back.issue(a.id).key, back.issue(c.id).key], ['ACH-1', 'ACH-3'], 'each issue keeps its own key');
+  assert.equal(back.addIssue({ text: 'Four', projectId: 'p', by: 'user' }).key, 'ACH-4', 'never ACH-2 (removed) or ACH-3 again');
+});
+
+test('a d2d597e move cut short (super.json rewritten, issues.json never written) keeps every key (P4)', () => {
+  const dir = tempDir('issue-move-cut');
+  const store = new SuperStore(dir, () => 'ACH');
+  store.addIssue({ text: 'One', projectId: 'p', by: 'user' });
+  const two = store.addIssue({ text: 'Two', projectId: 'p', by: 'user' });
+  store.removeIssue(store.addIssue({ text: 'Gone', projectId: 'p', by: 'user' }).id);
+  fs.rmSync(path.join(dir, 'issues.json'));
+  const back = new SuperStore(dir, () => 'ACH');
+  assert.equal(back.issue(two.id).key, 'ACH-2');
+  assert.equal(back.addIssue({ text: 'Next', projectId: 'p', by: 'user' }).key, 'ACH-4', 'past ACH-3, removed before the cut');
+});
+
+test('a save cut short between the two files reads as that, not as an older build; closed dates stay consistent (L2, L3)', () => {
+  const dir = tempDir('issue-cut-save');
+  const store = new SuperStore(dir, () => 'ACH');
+  const a = store.addIssue({ text: 'One', projectId: 'p', by: 'user' }, 1000);
+  const own = fs.readFileSync(path.join(dir, 'issues.json'), 'utf8');
+  store.updateIssue(a.id, { status: 'needs_you' }, 2000);
+  fs.writeFileSync(path.join(dir, 'issues.json'), own); // super.json saved, issues.json not
+  const back = new SuperStore(dir, () => 'ACH').issue(a.id);
+  assert.equal(back.status, 'needs_you');
+  assert.equal(back.activity.at(-1)!.text, 'Recovered after a save was cut short.');
+
+  // An older build edits a canceled issue, and reopens another: one closed time each, in its place.
+  const old = tempDir('issue-old-dates');
+  const s = new SuperStore(old, () => 'ACH');
+  const x = s.addIssue({ text: 'Dropped', projectId: 'p', by: 'user' }, 1000);
+  const y = s.addIssue({ text: 'Dropped too', projectId: 'p', by: 'user' }, 1000);
+  s.updateIssue(x.id, { status: 'canceled' }, 1100);
+  s.updateIssue(y.id, { status: 'canceled' }, 1100);
+  olderBuildWrites(path.join(old, 'super.json'), issues => issues.map(g => g.id === x.id ? { ...g, text: 'Dropped, reworded', updatedAt: 3000 } : g.id === y.id ? { ...g, status: 'queued' as const, doneAt: undefined, updatedAt: 3000 } : g));
+  const after = new SuperStore(old, () => 'ACH');
+  assert.deepEqual([after.issue(x.id).status, after.issue(x.id).canceledAt, after.issue(x.id).doneAt], ['canceled', 1100, undefined]);
+  assert.deepEqual([after.issue(y.id).status, after.issue(y.id).canceledAt, after.issue(y.id).doneAt], ['todo', undefined, undefined]);
+  assert.equal(after.issue(y.id).activity.at(-1)!.text, 'Changed by an older PodCode build.');
+});
+
+test('update_issue takes a title, since a new text never changes it (L4)', async () => {
+  const { updateIssueInput } = await import('../server/comms/tools.ts');
+  assert.ok(updateIssueInput.safeParse({ issue_id: 'abc', title: 'Fixed title', why: 'stale' }).success);
+  assert.ok(!updateIssueInput.safeParse({ issue_id: 'abc', title: 't'.repeat(121), why: 'x' }).success);
 });
