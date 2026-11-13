@@ -104,6 +104,21 @@ test('GitHub merged PRs match branch, title or body and require merge evidence; 
   }
 });
 
+test('an explicitly linked PR branch closes only its project issue without a key or closing phrase', () => {
+  const t = setup();
+  const branch = 'fix/explicitly-linked';
+  t.store.updateIssue(t.issue.id, { branch });
+  const other = t.store.addIssue({ text: 'Other project', projectId: 'p2', by: 'user' }, 1000);
+  t.store.updateIssue(other.id, { branch });
+  const pr: MergedIssuePr = { repo: 'a/b', number: 3, projects: [{ id: 'p1' }], state: 'merged', branch, title: 'Follow-up work', body: `See ${t.issue.key}`, mergedAt: new Date(5000).toISOString(), mergeCommit: 'a'.repeat(40) };
+  assert.equal(t.links.githubMerges([{ ...pr, branch: 'fix/another' }]), 0);
+  assert.equal(t.store.issue(t.issue.id).status, 'todo');
+  assert.equal(t.links.githubMerges([{ ...pr, title: 'Revert the work' }]), 0);
+  assert.equal(t.links.githubMerges([pr]), 1);
+  assert.equal(t.store.issue(t.issue.id).status, 'done');
+  assert.equal(t.store.issue(other.id).status, 'todo');
+});
+
 test('decision links find full branch commit messages and handoff/report citations, never issue ids', async () => {
   const t = setup();
   branch(t.repo, 'feat/ACH-1-ship', 'Implement the issue\n\nUse ACH-D41 and ALL-D1. Refs: ACH-12, ACH-N3.');
@@ -353,8 +368,15 @@ test('GitHub plain mentions only link; branch keys or explicit closing phrases c
     { title: 'Fixes ACH-D43', body: 'See ACH-1', closes: false },
     { title: 'fIxEs ach-1', body: '', closes: true },
     { title: 'Ship', body: 'cLoSeS AcH-1', closes: true },
+    { title: 'Closes: ACH-1', body: '', closes: true },
+    { title: 'Ship', body: 'cLoSeS:\n ach-001', closes: true },
+    { title: 'Ship', body: 'Resolves : ACH-1', closes: true },
+    { title: 'Ship', body: 'Fixes:ACH-1', closes: true },
+    { title: 'Ship', body: 'See: ACH-1', closes: false },
+    { title: 'Ship', body: 'Closes:: ACH-1', closes: false },
     { title: 'Ship', body: 'Resolves ACH-001.', closes: true },
     { title: 'Ship', body: 'Follow-up to ACH-1. Fixes ACH-1.', closes: true },
+    { title: 'Ship', body: 'Follow-up to ACH-1. Fixes: ACH-1.', closes: true },
     { title: 'ACH-1 follow-up. FIXES ach-001.', body: '', closes: true },
     { title: 'Follow-up', body: 'See ACH-1', branch: 'feat/ach-1-work', closes: true },
   ];
