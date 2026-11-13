@@ -315,3 +315,15 @@ test('a title left mid-edit saves only what was typed: a stored title is never t
   const line = sections.slice(sections.indexOf('export function IssueLine('), sections.indexOf('export function IssueLine(') + 900);
   assert.match(line, /onClick=\{\(\) => showIssueInList\(issue\.id\)\}/, 'sub-issue and relation lines select on the Issues page, no issue tab (ACH-D54)');
 });
+
+test('Hal\'s audit: focus follows the selection to the detail when a narrow pane hides its card; the issue tab stacks when narrow (ACH-23)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const page = read('../web/issues/IssuesPage.tsx');
+  assert.match(page, /if \(card && card\.offsetParent !== null\) card\.focus\(/, 'the card only when it shows');
+  assert.match(page, /querySelector<HTMLElement>\('\[data-issue-detail\]'\)\?\.focus\(/, 'else the detail');
+  assert.match(read('../web/issues/IssueInbox.tsx'), /data-issue-detail\s+tabIndex=\{-1\}/);
+  const view = read('../web/issues/IssueView.tsx');
+  assert.match(view, /@container\/issueview flex min-h-0 flex-1 flex-col/, 'stacked below 44rem');
+  assert.match(view, /onClick=\{\(\) => showIssueInList\(parent\.id\)\}/, 'the parent crumb selects on the Issues page, no new tab');
+});
