@@ -63,8 +63,9 @@ export function isMenuKey(e: { key: string; shiftKey: boolean }): boolean {
 
 // ---- Decisions ---------------------------------------------------------------------------------
 
-export type DecisionKind = 'delegate' | 'message' | 'issue' | 'agent' | 'channel' | 'other';
+export type DecisionKind = 'delegate' | 'message' | 'issue' | 'agent' | 'channel' | 'action' | 'other';
 export function decisionKind(tool: string): DecisionKind {
+  if (tool === 'take_action') return 'action';
   if (/^delegate/.test(tool)) return 'delegate';
   if (/message|nudge/.test(tool)) return 'message';
   if (/issue|goal/.test(tool)) return 'issue';

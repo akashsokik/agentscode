@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { cleanAutonomy } from '../shared/autonomy.ts';
 import { DEFAULT_SETTINGS, type Agent, type Channel, type ChannelPost, type Conversation, type Entry, type PeerMessage, type Project, type Settings } from '../shared/types.ts';
 import { DATA_DIR } from './config.ts';
 import { threadRoot, withThreadRoots } from './comms/threads.ts';
@@ -59,6 +60,8 @@ export class Store {
       // Projects are read first, so a damaged project choice can fall back to a project that exists.
       for (const a of raw.agents ?? []) this.agents.set(a.id, migrateAgentProjects(a, id => this.projects.has(id)));
       this.settings = { ...DEFAULT_SETTINGS, ...raw.settings };
+      // The autonomy settings made whole (ALL-D9): Full with every ask-first switch on unless set otherwise.
+      Object.assign(this.settings, cleanAutonomy(this.settings), { superPaused: this.settings.superPaused === true });
       this.messages = raw.messages ?? [];
       this.conversations = raw.conversations ?? [];
       for (const c of raw.channels ?? []) {

@@ -63,7 +63,7 @@ import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
 import {
   addIssueInput, agentCommandInput, proposeRoutineInput, askUserInput, completeIssueInput, updateIssueInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
-  SUPER_TOOLS, canonicalTool, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
+  SUPER_TOOLS, canonicalTool, takeActionInput, type TakeActionInput, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool, decisionAddInput, noteAddInput, refGetInput, refSearchInput, LESSON_LIMIT,
   appScreenshotInput, EYES_TOOLS, runCheckInput, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
 } from './comms/tools.ts';
@@ -91,6 +91,11 @@ import { isAllProjects, normalizeProjectIds, startProjectId, worksOn } from '../
 import { createWorktree, removeWorktree } from './worktrees.ts';
 import { WorkOwners } from './workOwners.ts';
 import { listArchive, type ArchivedAgent } from './agentArchive.ts';
+import { mentionsBranch } from '../shared/work.ts';
+import { forbiddenGit, gatedVerbs } from '../shared/gitGuard.ts';
+import { ensurePushGuard, installPushGuard, issueOverride, pushRemotes } from './pushGuard.ts';
+import { readGit } from './work.ts';
+import { actionVerdict, ASK_FIRST_KEYS, autonomyInstructions, FULL_ACTIONS, NEEDS_BACKUP, SUPER_AUTONOMY, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
 
 const AUTONOMIES: Autonomy[] = ['readonly', 'ask', 'edits', 'full'];
 
@@ -179,6 +184,11 @@ function createEngineRunner(ctx: RunnerContext): Runner {
 }
 
 /** Owns agents, projects and the runners behind them; every change is persisted and broadcast. */
+/** How long the user's yes to an ask-first step stays good: a day (ALL-D9). */
+const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
+/** An approval is for one task text exactly: a hash of it, kept with the question. */
+const taskHash = (task: string | undefined) => (task?.trim() ? createHash('sha256').update(task.trim()).digest('hex').slice(0, 16) : '');
+
 export class AgentManager {
   private store: Store;
   private hub: Broadcaster;
@@ -243,6 +253,8 @@ export class AgentManager {
     this.homes = new AgentHomes(path.join(store.dataDir, 'agents'));
     this.refs = new ProjectRefs(path.join(store.dataDir, 'projects'));
     this.notes = new NotesApi({ refs: this.refs, mentions: new RefMentions(store), projects: () => this.store.projects.values() });
+    // The force-push check every agent's git runs (ALL-D9); rewritten if a file was changed.
+    try { installPushGuard(path.join(store.dataDir, 'git-hooks'), { url: `http://127.0.0.1:${PORT}` }); } catch (err) { console.error('[push-guard] could not install:', (err as Error).message); }
     this.work = new WorkService(new MergeRecords(path.join(store.dataDir, 'work')), {
       owners: new WorkOwners(path.join(store.dataDir, 'work')),
       agents: () => [...this.store.agents.values()],
@@ -742,6 +754,8 @@ export class AgentManager {
 
   async update(id: string, patch: AgentPatch): Promise<Agent> {
     const agent = this.agent(id);
+    // A role you set counts as yours again (the SuperAgent's update_agent marks its own after this).
+    if (patch.role !== undefined && patch.role !== agent.role) delete agent.roleSetBy;
     const name = patch.name === undefined ? undefined : this.agentName(patch.name, id);
     if (patch.autonomy !== undefined && !AUTONOMIES.includes(patch.autonomy)) throw new HttpError(400, 'Unknown autonomy level.');
     if (patch.role !== undefined && !ROLES.some(r => r.id === patch.role) && !(agent.role === 'super' && patch.role === 'super')) throw new HttpError(400, 'Unknown agent role.');
@@ -953,6 +967,7 @@ export class AgentManager {
     agent.unread = false;
     agent.lastActiveAt = Date.now();
     const files: RunnerImage[] = images.map(i => ({ path: i.path, mediaType: i.attachment.mediaType }));
+    ensurePushGuard(); // a guard file an agent changed is put back before any turn (and logged)
     runner.send(prompt, { ...task, entryId }, files.length ? files : undefined);
     agent.queued = runner.queuedUserTasks + this.mailbox.pending(id);
     this.emitAgent(agent);
@@ -1268,6 +1283,8 @@ export class AgentManager {
       const parsed = postInput.safeParse(args);
       if (!parsed.success) throw new HttpError(400, 'Provide a channel id or name, 1 to 10,000 characters of text, and member ids to mention.');
       const input = parsed.data;
+      // The SuperAgent's posts: the shared-history warning always; paused, no mentions that start agents.
+      if (isSuper) this.superHandoffGate(agent, input.text, input.mention_agent_ids.length > 0);
       if (agent.autonomy === 'readonly' && !isSuper && input.mention_agent_ids.length) {
         throw new HttpError(403, 'Plan-only agents can post findings, but need the user\'s approval before starting teammates. Post without mentions.');
       }
@@ -1277,10 +1294,11 @@ export class AgentManager {
       const parsed = delegationInput.safeParse(args);
       if (!parsed.success) throw new HttpError(400, 'Provide a recipient, task kind, task and acceptance criteria within the tool limits.');
       const input = parsed.data;
+      const gate = isSuper ? this.superHandoffGate(agent, `${input.task}\n${input.acceptance_criteria}\n${input.context ?? ''}`) : null;
       const project = input.project ? this.refCode(input.project) : undefined;
       const hint = this.decisionHintFor(input.to_agent_id, `${input.task}\n${input.acceptance_criteria}\n${input.context ?? ''}`, project);
       const receipt = this.mailbox.delegate(id, input.to_agent_id, { kind: input.kind, task: input.task, acceptanceCriteria: input.acceptance_criteria, context: input.context, ...(project ? { project } : {}) }, hint);
-      if (isSuper) this.recordSuper({ tool, summary: `Delegated ${input.kind} to ${this.store.agents.get(input.to_agent_id)?.name ?? 'an agent'}: ${clip(input.task.replace(/\s+/g, ' '), 160)}`, why: clip(input.context ?? input.acceptance_criteria, 300) });
+      if (isSuper) this.recordSuper({ tool, summary: `Delegated ${input.kind} to ${this.store.agents.get(input.to_agent_id)?.name ?? 'an agent'}: ${clip(input.task.replace(/\s+/g, ' '), 160)}`, why: clip(input.context ?? input.acceptance_criteria, 300), ...(gate ? this.gatedMark(gate) : {}) });
       return receipt;
     }
     if (tool === 'report_result') {
@@ -1300,15 +1318,18 @@ export class AgentManager {
     if (tool === 'send_message') {
       const parsed = sendInput.safeParse(args);
       if (!parsed.success) throw new HttpError(400, 'Provide a recipient ID and 1 to 10,000 characters of text.');
+      const gate = isSuper ? this.superHandoffGate(agent, parsed.data.text) : null;
       const hint = this.decisionHintFor(parsed.data.to_agent_id, parsed.data.text);
       // The hint is extra: a message near the length limit goes without it.
       const text = hint && parsed.data.text.length + hint.length + 2 <= 10_000 ? `${parsed.data.text}\n\n${hint}` : parsed.data.text;
       const receipt = this.mailbox.send(id, parsed.data.to_agent_id, text, parsed.data.expects_reply);
-      if (isSuper) this.recordSuper({ tool, summary: `Messaged ${this.store.agents.get(parsed.data.to_agent_id)?.name ?? 'an agent'}: ${clip(parsed.data.text.replace(/\s+/g, ' '), 160)}`, why: '' });
+      if (isSuper) this.recordSuper({ tool, summary: `Messaged ${this.store.agents.get(parsed.data.to_agent_id)?.name ?? 'an agent'}: ${clip(parsed.data.text.replace(/\s+/g, ' '), 160)}`, why: '', ...(gate ? this.gatedMark(gate) : {}) });
       return receipt;
     }
     const parsed = replyInput.safeParse(args);
     if (!parsed.success) throw new HttpError(400, `Provide the message ID and 1 to 10,000 characters of text, and a lesson of up to ${LESSON_LIMIT} if any.`);
+    // The SuperAgent's replies: the shared-history warning always; paused, none that start a turn (expects_reply).
+    if (isSuper) this.superHandoffGate(agent, parsed.data.text, parsed.data.expects_reply === true);
     const original = this.store.messages.find(m => m.id === parsed.data.message_id);
     let text = parsed.data.text;
     let lesson: ReturnType<AgentManager['prepareLesson']> | undefined;
@@ -1509,6 +1530,7 @@ export class AgentManager {
       profile: profile.entries,
       profileOmitted: profile.omitted,
       projects: isAllProjects(agent) ? this.projectFolders() : undefined,
+      ...(agent.role === 'super' ? { autonomy: autonomyInstructions(this.store.settings.superAutonomy, this.store.settings.superAskFirst, this.store.settings.superPaused) } : {}),
       alsoProjects: this.otherFolders(agent),
       readOnlyOthers: codexWritesOnlyStart(agent),
     };
@@ -1668,6 +1690,165 @@ export class AgentManager {
     return agent;
   }
 
+  /**
+   * take_action (ALL-D9): a step under the user's Autonomy setting, checked here rather than left to
+   * the prompt. Never rewrites shared history; ask-first steps need the user's yes to an ask_user
+   * question; a merge needs a reviewer's passing report on its branch; removals need a backup named;
+   * paused, it starts nothing on its own. Then the step goes to the agent (or the agent is removed)
+   * and Decisions logs it with how to undo it.
+   */
+  private async takeAction(caller: Agent, args: Record<string, unknown>): Promise<unknown> {
+    const parsed = takeActionInput.safeParse(args);
+    if (!parsed.success) throw new HttpError(400, 'Give a kind, a summary, a why, the agent, and (except for remove_user_agent) the task.');
+    const input = parsed.data;
+    const kind = input.kind as ActionKind;
+    const settings = this.store.settings;
+    const forUser = caller.currentTask?.source === 'user' || this.inUserWorkMail(caller.id);
+    if (!forUser && settings.superPaused) throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
+    // Shared history: rewrite_history never; other kinds get an early warning from the text (the
+    // push check every agent's git runs is the real gate). A force_push the user approved is the one exception.
+    const rewrite = kind === 'force_push' && input.approved_ask_id ? null : forbiddenGit(`${input.task ?? ''}\n${input.undo ?? ''}`);
+    if (kind === 'rewrite_history' || rewrite) throw new HttpError(403, `${rewrite ? `That asks for ${rewrite}. ` : ''}Rewriting or force-pushing shared history (main, tags, a pushed branch) is never allowed, at any Autonomy level. Find another way, such as a revert commit.`);
+    // Costly work stays within the daily budget (ALL-D2), on Full too.
+    if (kind === 'costly' && !forUser && this.watcher.dailyHeld()) throw new HttpError(409, 'Today\'s budget is used. Costly work you start on your own waits for tomorrow, or ask the user.');
+    const target = this.teammate(input.agent);
+    const subject = (input.target ?? input.branch ?? target.name).trim();
+    // Its own new agents (made on its own) it may remove at any level; agents you made, it asks first.
+    const ownAgent = kind === 'remove_user_agent' && target.createdBy === 'super';
+    const verdict = ownAgent ? 'act' : actionVerdict(kind, settings.superAutonomy, settings.superAskFirst);
+    let approval: SuperAsk | undefined;
+    if (verdict === 'ask') {
+      approval = this.superView().asks.find(a => a.id === input.approved_ask_id);
+      const why = !input.approved_ask_id || !approval ? 'no approved_ask_id given'
+        : !approval.forAction || approval.forAction.kind !== kind || approval.forAction.target.toLowerCase() !== subject.toLowerCase() ? `that question was not for ${kind} of "${subject}" (ask_user with for_action {kind: "${kind}", target: "${subject}", task})`
+        : (approval.forAction.taskHash ?? '') !== taskHash(input.task) ? 'the task is not the one the user approved (ask again with this task)'
+        : approval.answeredAt === undefined ? 'the user has not answered it yet'
+        : approval.dismissed || approval.answer !== approval.options[0] ? 'the user did not choose Yes'
+        : approval.consumedAt !== undefined || this.reservedAsks.has(approval.id) ? 'that approval was used already'
+        : Date.now() - approval.answeredAt > APPROVAL_TTL_MS ? 'that approval is over a day old'
+        : null;
+      if (why) throw new HttpError(409, `Your Autonomy setting (${settings.superAutonomy}) asks the user first for ${kind.replace('_', ' ')}: ${why}. Ask with ask_user (for_action set; PodCode adds the Yes and No), then call take_action again with approved_ask_id.`);
+      // Reserved now, before anything waits, so two calls cannot both use it; given back if this one fails.
+      this.reservedAsks.add(approval!.id);
+    }
+    try {
+      return await this.takeApprovedAction(caller, input, kind, verdict as 'act' | 'ask', forUser, target, approval);
+    } finally {
+      if (approval) this.reservedAsks.delete(approval.id);
+    }
+  }
+
+  /** take_action past its policy check: the step's own checks, then the hand-off and the log. */
+  private async takeApprovedAction(caller: Agent, input: TakeActionInput, kind: ActionKind, verdict: 'act' | 'ask', forUser: boolean, target: Agent, approval: SuperAsk | undefined): Promise<unknown> {
+    const settings = this.store.settings;
+    const project = input.project ? this.projectRef(input.project) : undefined;
+    if (kind === 'merge') {
+      if (!input.branch || !input.commit || !project) throw new HttpError(400, 'A merge names its project, branch and the exact commit the reviewer passed.');
+      const tip = await readGit(['rev-parse', '--verify', '--quiet', `refs/heads/${input.branch}^{commit}`], project.path);
+      if (!tip.ok) throw new HttpError(409, `There is no branch ${input.branch} in ${project.name}.`);
+      if (!tip.out.trim().toLowerCase().startsWith(input.commit.toLowerCase())) throw new HttpError(409, `${input.branch} is at ${tip.out.trim().slice(0, 7)} now, not ${input.commit.slice(0, 7)}: it changed since the review. Have the new commits reviewed first.`);
+      const short = input.commit.slice(0, 7).toLowerCase();
+      // Only a passing answer to a review request for this branch and commit, from a reviewer you
+      // made whose role the SuperAgent did not set on its own.
+      const passed = this.store.messages.some(m => {
+        const from = this.store.agents.get(m.fromAgentId);
+        if (!m.report || m.report.outcome !== 'passed' || from?.role !== 'reviewer' || from.createdBy === 'super' || from.roleSetBy === 'super') return false;
+        const request = this.store.messages.find(r => r.id === m.replyTo);
+        if (!request?.delegation || request.delegation.kind !== 'review') return false;
+        const asked = `${request.delegation.task}\n${request.delegation.acceptanceCriteria}\n${request.delegation.context ?? ''}`;
+        const said = `${m.text}\n${m.report.summary}\n${m.report.evidence ?? ''}`;
+        return mentionsBranch(asked, input.branch!) && mentionsBranch(said, input.branch!) && `${asked}\n${said}`.toLowerCase().includes(short);
+      });
+      if (!passed) throw new HttpError(409, `No reviewer you made has passed ${input.branch} at ${short} yet. Send that commit to a reviewer first; merge after a passing report that names the branch and the commit.`);
+    }
+    // A force-push the user approves is for one feature branch of one project: never main, master,
+    // the remote's default branch or a tag (ALL-D9: shared history is never rewritten), and its
+    // token works only for that branch on that project's remotes (Rhea round 4, M1, L2, L5).
+    let forcePush: { branch: string; remotes: string[] } | null = null;
+    if (kind === 'force_push') {
+      const raw = (input.branch ?? '').trim().replace(/^refs\/heads\//, '');
+      if (!raw || !project) throw new HttpError(400, 'A force-push names its project and the branch (never main, a tag or the default branch).');
+      if (/^refs\//.test(raw) || /^(tags|refs)\//.test(raw)) throw new HttpError(403, 'Tags are shared history: they are never force-pushed.');
+      const defaults = new Set(['main', 'master']);
+      const head = await readGit(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], project.path);
+      if (head.ok && head.out.trim()) defaults.add(head.out.trim().replace(/^[^/]+\//, ''));
+      if (defaults.has(raw)) throw new HttpError(403, `${raw} is the shared main line: it is never force-pushed, at any level. Push a revert instead.`);
+      const tag = await readGit(['rev-parse', '--verify', '--quiet', `refs/tags/${raw}`], project.path);
+      if (tag.ok) throw new HttpError(403, `${raw} is a tag in ${project.name}: tags are never force-pushed.`);
+      const urls = await pushRemotes(project.path);
+      if (!urls.length) throw new HttpError(400, `${project.name} has no remote to push to.`);
+      forcePush = { branch: raw, remotes: urls };
+    }
+    if (NEEDS_BACKUP.includes(kind)) {
+      if (!input.backup) throw new HttpError(400, 'Name the backup (a ref in the project, or an existing path) before anything is removed.');
+      const backup = input.backup.trim();
+      // A path: an existing folder or file under a backups folder, never / or a home folder itself.
+      const resolved = path.isAbsolute(backup) ? path.resolve(backup) : '';
+      const asPath = Boolean(resolved) && fs.existsSync(resolved) && resolved.split(path.sep).some(part => /backup/i.test(part));
+      if (!asPath) {
+        // A ref: a backup/* branch or tag in the project that holds the target commit.
+        if (!project) throw new HttpError(400, 'Name the project, so the backup ref can be checked there.');
+        if (!/^(refs\/(heads|tags)\/)?backup\/[\w./-]+$/.test(backup) || backup === input.branch) throw new HttpError(400, `The backup must be a backup/… ref (or a path in a backups folder), not "${backup}".`);
+        const targetRef = input.commit ?? (input.branch ? `refs/heads/${input.branch}` : null);
+        if (!targetRef) throw new HttpError(400, 'Name the branch or commit being removed, so the backup can be checked to hold it.');
+        const exists = await readGit(['rev-parse', '--verify', '--quiet', `${backup}^{commit}`], project.path);
+        if (!exists.ok) throw new HttpError(400, `The backup "${backup}" does not exist in ${project.name}. Make it first.`);
+        const holds = await readGit(['merge-base', '--is-ancestor', targetRef, backup], project.path);
+        if (!holds.ok) throw new HttpError(400, `The backup "${backup}" does not hold ${input.commit ?? input.branch}. Make it from that commit first.`);
+      }
+    }
+    if (verdict === 'act' && FULL_ACTIONS.some(a => a.kind === kind) && !input.undo && !input.no_undo) {
+      throw new HttpError(400, 'Say how to undo it (undo), or why it cannot be undone (no_undo).');
+    }
+    let receipt: unknown;
+    if (kind === 'remove_user_agent') {
+      if (this.runners.get(target.id)?.busy) throw new HttpError(409, `${target.name} is working. Stop it first.`);
+      await this.remove(target.id, 'keep');
+      receipt = { removed: { id: target.id, name: target.name } };
+    } else {
+      if (!input.task) throw new HttpError(400, 'Give the task: what the agent should do, step by step.');
+      // A force-push the user approved: one token, good for one push, which PodCode's push check accepts.
+      // Only from your yes to this exact push: with the switch off it acts without a token, so the
+      // push check still refuses overwriting anything already pushed (a new branch needs none).
+      const override = kind === 'force_push' && verdict === 'ask' && approval && forcePush ? issueOverride(forcePush) : null;
+      const criteria = override
+        ? `Do exactly this push, once, with PODCODE_PUSH_OVERRIDE=${override} in its environment (it works for one push only), and report_result with evidence (commands and their output).`
+        : `Do exactly this ${kind.replace('_', ' ')} step and report_result with evidence (commands and their output).${input.backup ? ` Backup: ${input.backup}.` : ''} Ordinary pushes that overwrite or delete pushed history are refused by PodCode's push check.`;
+      receipt = this.mailbox.delegate(caller.id, target.id, { kind: 'implementation', task: input.task, acceptanceCriteria: criteria, context: input.why });
+    }
+    const entry = this.recordSuper({
+      tool: 'take_action', why: input.why, summary: clip(input.summary, 300),
+      ...(forUser ? { forUser: true } : {}),
+      ...(verdict === 'act' ? { autonomy: settings.superAutonomy } : {}),
+      ...(input.undo && kind !== 'remove_user_agent' ? { undo: { kind: 'reverse' as const, how: input.undo, agentId: target.id } } : {}),
+      ...(!input.undo && input.no_undo ? { noUndo: input.no_undo } : kind === 'remove_user_agent' ? { noUndo: 'The agent is removed (its files are kept).' } : {}),
+    });
+    if (approval) this.superStore.consumeAsk(approval.id, entry.id);
+    return { done: kind, by: target.name, verdict, receipt };
+  }
+
+  /**
+   * The SuperAgent's free-form hand-offs (delegate_task, send_message, create_agent's first task):
+   * paused, nothing of its own goes; a shared-history rewrite is refused at every level; gated steps
+   * they mention are returned so Decisions shows them (ALL-D9).
+   */
+  private superHandoffGate(caller: Agent, text: string, startsWork = true): { gated: string[]; forUser: boolean } {
+    const forUser = caller.currentTask?.source === 'user' || this.inUserWorkMail(caller.id);
+    if (startsWork && !forUser && this.store.settings.superPaused) throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
+    const rewrite = forbiddenGit(text);
+    if (rewrite) throw new HttpError(403, `That asks for ${rewrite}. Rewriting or force-pushing shared history is never allowed, at any Autonomy level; agents' ordinary pushes that would do it are refused by PodCode's push check too.`);
+    return { gated: gatedVerbs(text), forUser };
+  }
+
+  /** What a hand-off adds to its Decisions entry: the gated steps it mentions, marked by level when done on its own. */
+  private gatedMark(gate: { gated: string[]; forUser: boolean }): Partial<SuperAction> {
+    if (!gate.gated.length) return {};
+    return { gated: gate.gated, ...(!gate.forUser ? { autonomy: this.store.settings.superAutonomy } : {}) };
+  }
+
+  /** Approvals a take_action is using right now (M1): never two at once. */
+  private reservedAsks = new Set<string>();
+
   /** An agent the SuperAgent names by id or name; never itself, for commands that act on an agent. */
   private teammate(ref: unknown): Agent {
     const key = String(ref ?? '').trim();
@@ -1717,7 +1898,17 @@ export class AgentManager {
     if (tool === 'ask_user') {
       const parsed = askUserInput.safeParse(args);
       if (!parsed.success) return fail('Ask one question of up to 300 characters, with 1 to 4 options of up to 80 characters each.');
-      const ask = this.superStore.ask(parsed.data);
+      const { for_action: forAction, ...question } = parsed.data;
+      // A step's approval: PodCode writes the choices, so the yes is always first and plain, and
+      // the approval holds only for this task text (its hash), which the question shows.
+      const ask = forAction
+        ? this.superStore.ask({
+          question: question.question,
+          detail: [question.detail, forAction.task ? `The task, exactly:\n${forAction.task}` : ''].filter(Boolean).join('\n\n'),
+          options: [clip(`Yes, ${forAction.kind.replace('_', ' ')} ${forAction.target}`, 80), 'No'],
+          forAction: { kind: forAction.kind, target: forAction.target, taskHash: taskHash(forAction.task), ...(forAction.task ? { task: forAction.task } : {}) },
+        })
+        : this.superStore.ask(question);
       this.publishSuper();
       return { asked: ask, note: 'The user sees it in PodCode; their answer arrives as a later turn. Do not wait or ask again.' };
     }
@@ -1747,6 +1938,10 @@ export class AgentManager {
       }
       // Issues are handed out only in update turns. Mail about work you asked for skips the wake limits,
       // so an issue started from it would skip them too: starting one (in progress, or given to an agent) there is refused.
+      // Paused: no hand-outs from its own turns (ALL-D9).
+      if (tool === 'update_issue' && (input.status === 'in_progress' || input.agent_id) && this.store.settings.superPaused && caller.currentTask?.source !== 'user' && !this.inUserWorkMail(caller.id)) {
+        throw new HttpError(409, 'The user paused you. Hand out no issues until they resume.');
+      }
       if (tool === 'update_issue' && (input.status === 'in_progress' || input.agent_id) && this.inUserWorkMail(caller.id)) {
         throw new HttpError(409, 'Hand out issues only in update turns, not while handling a report or reply on work the user asked for. Finish this turn; the next update lists the queued issues.');
       }
@@ -1767,6 +1962,7 @@ export class AgentManager {
       this.recordSuper({ tool, why: input.why, undo: { kind: 'issue', issueId: issue.id, before }, summary });
       return { updated: issue };
     }
+    if (tool === 'take_action') return await this.takeAction(caller, args);
     if (tool === 'create_agent') {
       const parsed = createAgentInput.safeParse(args);
       if (!parsed.success) return fail('Give a name, engine, role, an optional project, model, worktree and first task, and a why.');
@@ -1774,17 +1970,21 @@ export class AgentManager {
       // The cap stops only agents it creates on its own: in a turn you gave it, or on mail about work
       // you asked for, it creates what the work needs.
       const forUser = caller.currentTask?.source === 'user' || this.inUserWorkMail(caller.id);
+      const gate = this.superHandoffGate(caller, input.task ?? '');
       const cap = this.store.settings.superMaxCreatesPerDay;
-      if (!forUser && this.superStore.createdSince(Date.now() - 86_400_000) >= cap) {
+      // On Full it creates what the work needs; on Ask and Standard the daily cap holds.
+      if (!forUser && this.store.settings.superAutonomy !== 'full' && this.superStore.createdSince(Date.now() - 86_400_000) >= cap) {
         throw new HttpError(429, `You created ${cap} agents in the last day, the most the user allows (Settings, SuperAgent). Ask the user before creating more.`);
       }
       if (input.project && input.projects) return fail('Give project or projects, not both.');
       const refs = input.projects ?? (input.project ? [input.project] : null);
       const projectIds = refs === null ? null : [...new Set(refs.map(ref => this.projectRef(ref).id))];
       const agent = await this.create({ name: input.name, engine: input.engine, projectIds, role: input.role, model: input.model, worktree: input.worktree, task: input.task });
+      // Made on its own (not for your work): its reviews do not count for the merge gate.
+      if (!forUser) { agent.createdBy = 'super'; this.store.save(); this.emitAgent(agent); }
       const names = (projectIds ?? []).map(pid => this.store.projects.get(pid)?.name).filter(Boolean);
       this.recordSuper({
-        tool, why: input.why, undo: { kind: 'removeAgent', agentId: agent.id }, ...(forUser ? { forUser: true } : {}),
+        tool, why: input.why, undo: { kind: 'removeAgent', agentId: agent.id }, ...(forUser ? { forUser: true } : {}), ...(!forUser && this.store.settings.superAutonomy === 'full' ? { autonomy: 'full' as const } : {}), ...(gate.gated.length ? { gated: gate.gated } : {}),
         summary: `Created ${agent.name} (${rolePreset(agent.role).name}, ${ENGINE_LABELS[agent.engine]}) ${names.length ? `on ${names.join(' and ')}` : 'across all projects'}${input.task ? `, first task: ${clip(input.task.replace(/\s+/g, ' '), 120)}` : ''}`,
       });
       return { created: { id: agent.id, name: agent.name, role: agent.role, autonomy: agent.autonomy, projectIds: agent.projectIds } };
@@ -1794,8 +1994,12 @@ export class AgentManager {
       if (!parsed.success) return fail('Give the agent and what to change (name, role, model or effort), and a why.');
       const input = parsed.data;
       const agent = this.teammate(input.agent_id);
+      // Paused: nothing of its own, not even a change to an agent (ALL-D9).
+      if (this.store.settings.superPaused && caller.currentTask?.source !== 'user' && !this.inUserWorkMail(caller.id)) throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
       const before = { name: agent.name, role: agent.role, model: agent.model, effort: agent.effort };
       await this.update(agent.id, { ...(input.name ? { name: input.name } : {}), ...(input.role ? { role: input.role } : {}), ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {}) });
+      // A role it gave (a reviewer, say) does not count for the merge gate: only roles you set do.
+      if (input.role && input.role !== before.role) { agent.roleSetBy = 'super'; this.store.save(); }
       const changes = [input.name && `name ${before.name} to ${agent.name}`, input.role && `role to ${rolePreset(agent.role).name}`, input.model !== undefined && `model to ${agent.model || 'default'}`, input.effort !== undefined && `effort to ${agent.effort || 'default'}`].filter(Boolean);
       this.recordSuper({ tool, why: input.why, undo: { kind: 'agent', agentId: agent.id, before }, summary: `Changed ${agent.name}: ${changes.join(', ') || 'nothing'}` });
       return { updated: { id: agent.id, name: agent.name, role: agent.role, model: agent.model, effort: agent.effort } };
@@ -1805,6 +2009,10 @@ export class AgentManager {
       if (!parsed.success) return fail('Give the agent id or name, and a why.');
       const agent = this.teammate(parsed.data.agent_id);
       // A fresh session would lift a Stop the user pressed: only the user restarts a stopped agent.
+      // Paused: a fresh session starts an agent working again, so it waits for the user too.
+      if (tool === 'new_session' && this.store.settings.superPaused && caller.currentTask?.source !== 'user' && !this.inUserWorkMail(caller.id)) {
+        throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
+      }
       if (tool === 'new_session' && this.mailbox.stopped(agent.id)) {
         throw new HttpError(409, `The user stopped ${agent.name}. Only the user restarts it: ask them with ask_user instead.`);
       }
@@ -1814,6 +2022,9 @@ export class AgentManager {
       return { done: true, agent: agent.name };
     }
     const memberIds = (refs: string[]) => refs.map(ref => this.teammateOrSelf(ref).id);
+    if (tool === 'create_channel' && this.store.settings.superPaused && caller.currentTask?.source !== 'user' && !this.inUserWorkMail(caller.id)) {
+      throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
+    }
     if (tool === 'create_channel') {
       const parsed = createChannelInput.safeParse(args);
       if (!parsed.success) return fail('Give a channel name, an optional topic, member agent ids, and a why.');
@@ -1864,6 +2075,7 @@ export class AgentManager {
     this.addEntry(id, { id: randomUUID(), kind: 'system', text: clip(line, 300) });
     const runner = this.runnerFor(agent);
     agent.lastActiveAt = Date.now();
+    ensurePushGuard();
     runner.send(prompt, { summary: 'Update from PodCode', source: 'system' });
     this.emitAgent(agent);
   }
@@ -1988,6 +2200,12 @@ export class AgentManager {
       this.updateChannel(undo.channelId, { ...undo.before, memberIds: undo.before.memberIds.filter(m => this.store.agents.has(m)) });
     } else if (undo.kind === 'issue') {
       this.superStore.restoreIssue(undo.issueId, undo.before, undo.removed === true);
+    } else if (undo.kind === 'reverse') {
+      // The reverse step goes back to the SuperAgent as your request, so it runs whatever the caps or a pause.
+      const superId = this.superId();
+      if (!superId) throw new HttpError(409, 'There is no SuperAgent to undo it.');
+      const who = this.store.agents.get(undo.agentId)?.name ?? 'an agent';
+      this.startUserTask(superId, `Undo: ${action.summary}`, `The user pressed Undo on "${action.summary}" in Decisions. Undo it now: have ${who} (or another free agent) do this with take_action or delegate_task, and report back: ${undo.how}`, { summary: clip(`Undo: ${action.summary}`, 280), source: 'user' });
     } else if (undo.kind === 'routine') {
       // Withdraw a proposal; one the user confirmed since is theirs now.
       const routine = this.superStore.routines().find(r => r.id === undo.routineId);
@@ -2680,6 +2898,9 @@ export class AgentManager {
       // about work it began itself. Your turns, and mail about work you asked for, never count.
       if (agent.role === 'super' && (task?.source === 'system' || (task?.source === 'agent' && !this.userWork(task.messageId)))) {
         this.superStore.addAutonomousCost(turnCost);
+      } else if (agent.role !== 'super' && task?.source === 'agent' && task.fromAgentId && task.fromAgentId === this.superId() && !this.userWork(task.messageId)) {
+        // An agent's turn on work the SuperAgent started on its own counts too (ALL-D2, ALL-D9): Full's costly work stays in budget.
+        this.superStore.addAutonomousCost(turnCost);
       }
     }
     if (result.tokens) agent.tokens += result.tokens;
@@ -2859,6 +3080,14 @@ export class AgentManager {
     for (const key of ['superQuietFrom', 'superQuietTo'] as const) {
       if (input[key] !== undefined && !validQuietTime(input[key])) throw new HttpError(400, 'Quiet hours are times like 22:00.');
     }
+    if (input.superAutonomy !== undefined && !SUPER_AUTONOMY.includes(input.superAutonomy)) throw new HttpError(400, 'Autonomy is ask, standard or full.');
+    if (input.superPaused !== undefined && typeof input.superPaused !== 'boolean') throw new HttpError(400, 'Toggles must be true or false.');
+    if (input.superAskFirst !== undefined) {
+      const given = input.superAskFirst as unknown as Record<string, unknown>;
+      if (!given || typeof given !== 'object' || Object.entries(given).some(([k, v]) => !ASK_FIRST_KEYS.includes(k as keyof AskFirst) || typeof v !== 'boolean')) {
+        throw new HttpError(400, 'Ask-first switches are deleteData, outsideAccounts, removeUserAgents and forcePush, each true or false.');
+      }
+    }
     const settings = this.store.settings;
     if (input.messageLimit !== undefined) settings.messageLimit = input.messageLimit;
     if (input.awareness !== undefined) settings.awareness = input.awareness;
@@ -2870,6 +3099,9 @@ export class AgentManager {
     if (input.superDailyBudgetUsd !== undefined) settings.superDailyBudgetUsd = input.superDailyBudgetUsd;
     if (input.superMaxCreatesPerDay !== undefined) settings.superMaxCreatesPerDay = input.superMaxCreatesPerDay;
     for (const key of ['superQuietFrom', 'superQuietTo'] as const) if (input[key] !== undefined) settings[key] = input[key]!.trim();
+    if (input.superAutonomy !== undefined) settings.superAutonomy = input.superAutonomy;
+    if (input.superAskFirst !== undefined) settings.superAskFirst = { ...settings.superAskFirst, ...input.superAskFirst };
+    if (input.superPaused !== undefined) settings.superPaused = input.superPaused;
     this.store.save();
     this.hub.broadcast({ type: 'settings', settings });
     // Mail held for the SuperAgent may go now (wake-ups back on, a bigger budget).
