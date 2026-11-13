@@ -322,7 +322,28 @@ export function closePane(paneId: string): void {
   });
 }
 
-export function closeTab(tabId: string): void {
+/**
+ * Close a tab the user asked to close. A pinned tab stays open by every route (the X, middle-click,
+ * Cmd+W, menus, the palette) until it is unpinned (ACH-D59). Returns whether it closed.
+ */
+export function closeTab(tabId: string): boolean {
+  const tab = layout.tabs.find(t => t.id === tabId);
+  if (!tab || tab.pinned) return false;
+  dropTab(tabId);
+  return true;
+}
+
+/** Whether the user can close this tab now: it exists and is not pinned (ACH-D59). */
+export function canCloseTab(tabId: string | null | undefined): boolean {
+  const tab = tabId ? layout.tabs.find(t => t.id === tabId) : undefined;
+  return Boolean(tab && !tab.pinned);
+}
+
+/**
+ * Take a tab away whatever its pin: only for tabs whose content is gone (a removed agent or channel,
+ * a browser tab closed by its page). The user's own close goes through closeTab.
+ */
+function dropTab(tabId: string): void {
   const index = layout.tabs.findIndex(t => t.id === tabId);
   if (index === -1) return;
   const tabs = layout.tabs.filter(t => t.id !== tabId);
@@ -368,6 +389,12 @@ export function reorderTab(tabId: string, targetId: string): void {
   if (tabs !== layout.tabs) set({ ...layout, tabs });
 }
 
+/** A browser tab whose page closed itself: its content is gone, so it goes even when pinned. */
+export function dropBrowserTab(tabId: string): void {
+  const tab = layout.tabs.find(t => t.id === tabId);
+  if (tab?.content.kind === 'browser') dropTab(tabId);
+}
+
 /** Drop tabs whose agent or channel was removed. */
 export function pruneTabs(agentIds: Set<string>, channelIds: Set<string>): void {
   const stale = layout.tabs.filter(t => {
@@ -378,7 +405,8 @@ export function pruneTabs(agentIds: Set<string>, channelIds: Set<string>): void 
     if ((c.kind === 'file' || c.kind === 'diff') && 'agent' in c.root) return !agentIds.has(c.root.agent);
     return false;
   });
-  for (const tab of stale) closeTab(tab.id);
+  // Their content is gone: dropped even when pinned (closeTab would keep a pinned one).
+  for (const tab of stale) dropTab(tab.id);
 }
 
 export function setSidebar(sidebar: boolean): void { set({ ...layout, sidebar }); }
