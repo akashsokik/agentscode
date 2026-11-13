@@ -113,7 +113,9 @@ test('decision links find full branch commit messages and handoff/report citatio
   await t.links.indexCommits(t.project, 'main', [], mentions);
   const links = mentions.issueDecisions(t.store.issue(t.issue.id));
   assert.deepEqual(links.map(l => l.id), ['ACH-D14', 'ACH-D41', 'ACH-D43', 'ACH-D7', 'ALL-D1', 'ALL-D7']);
-  assert.equal(links.find(l => l.id === 'ACH-D41')?.citations[0].source, 'commit');
+  const commitCitation = links.find(l => l.id === 'ACH-D41')?.citations[0];
+  assert.ok(commitCitation?.source === 'commit');
+  assert.equal(commitCitation.subject, 'Implement the issue');
   assert.equal(mentions.decisionIssues('ACH-D41', t.store.issues())[0].key, 'ACH-1');
   assert.deepEqual(mentions.decisionIssues('ACH-12', t.store.issues()), []);
 });

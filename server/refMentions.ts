@@ -52,7 +52,7 @@ export interface RefCommit {
 /** Commit sources are exposed on the issue links API, without changing Notes' chat targets. */
 export type IssueDecisionCitation = RefCitation | {
   key: string; ts: number; source: 'commit'; who: string;
-  projectId: string; hash: string; branch: string;
+  projectId: string; hash: string; branch: string; subject: string;
 };
 export interface IssueDecisionLink { id: string; citations: IssueDecisionCitation[] }
 
@@ -264,7 +264,7 @@ export class RefMentions {
     }
     for (const c of this.commits.get(issue.projectId ?? '') ?? []) {
       if (!c.issueKeys.includes(issue.key)) continue;
-      add(this.ids(c.text), { key: `commit:${c.projectId}:${c.hash}`, ts: c.at, source: 'commit', who: c.author, projectId: c.projectId, hash: c.hash, branch: c.branch });
+      add(this.ids(c.text), { key: `commit:${c.projectId}:${c.hash}`, ts: c.at, source: 'commit', who: c.author, projectId: c.projectId, hash: c.hash, branch: c.branch, subject: c.text.split('\n', 1)[0].trim() });
     }
     return [...links].sort(([a], [b]) => a.localeCompare(b)).map(([id, citations]) => ({ id, citations: citations.sort((a, b) => b.ts - a.ts) }));
   }
