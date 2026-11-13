@@ -58,13 +58,14 @@ test('local merges close through the store with git activity; restarting and rev
   restarted.localMerges(t.project, t.records.list(fs.realpathSync(t.repo)));
   await t.work.view([t.project], true);
   assert.equal(t.store.issue(t.issue.id).status, 'todo');
-  // A different merge after the reopen, including when it happens in the same whole second.
+  // A merge in a later whole second is unambiguously after reopening.
   git(t.repo, 'checkout', 'feat/ACH-1-ship');
   fs.writeFileSync(path.join(t.repo, 'followup.txt'), 'follow-up');
   git(t.repo, 'add', 'followup.txt');
   git(t.repo, 'commit', '-m', 'follow-up');
   git(t.repo, 'checkout', 'main');
-  git(t.repo, 'merge', '--no-ff', 'feat/ACH-1-ship', '-m', 'Merge feat/ACH-1-ship again');
+  const laterSecond = new Date((Math.floor(Date.now() / 1000) + 1) * 1000).toISOString();
+  execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'merge', '--no-ff', 'feat/ACH-1-ship', '-m', 'Merge feat/ACH-1-ship again'], { cwd: t.repo, env: { ...env, GIT_COMMITTER_DATE: laterSecond }, stdio: 'pipe' });
   await t.work.view([t.project], true);
   assert.equal(t.store.issue(t.issue.id).status, 'done');
   assert.match(t.store.issue(t.issue.id).activity.at(-1)?.text ?? '', new RegExp(git(t.repo, 'rev-parse', 'HEAD')));
@@ -202,7 +203,7 @@ test('commit scans cache immutable branch ranges and invalidate when either end 
   assert.deepEqual(mentions.issueDecisions(t.issue).map(d => d.id), ['ACH-D41', 'ALL-D1']);
 });
 
-test('whole-second merge timestamps close same-second creation/reopen; logged merges stay consumed across restart', () => {
+test('whole-second merge timestamps close same-second creation, but reopening requires a later second', () => {
   const t = setup(1001);
   const hash = branch(t.repo, 'feat/ACH-1-time');
   const record: MergeRecord = { hash, branch: 'feat/ACH-1-time', at: 1000, tree: git(t.repo, 'rev-parse', 'HEAD^{tree}'), tip: git(t.repo, 'rev-parse', 'HEAD^2'), parent: git(t.repo, 'rev-parse', 'HEAD^1'), subject: 'Merge feat/ACH-1-time', names: [], refs: [] };
@@ -216,7 +217,9 @@ test('whole-second merge timestamps close same-second creation/reopen; logged me
   git(t.repo, 'checkout', 'main');
   git(t.repo, 'merge', '--no-ff', 'feat/ACH-1-time', '-m', 'Merge feat/ACH-1-time again');
   const next = { ...record, hash: git(t.repo, 'rev-parse', 'HEAD'), at: 2000 };
-  assert.equal(restarted.localMerges(t.project, [record, next]), 1);
+  assert.equal(restarted.localMerges(t.project, [record, next]), 0, 'same-second order is ambiguous');
+  assert.equal(t.store.issue(t.issue.id).status, 'todo');
+  assert.equal(restarted.localMerges(t.project, [record, next, { ...next, hash: 'c'.repeat(40), at: 3000 }]), 1);
   assert.equal(t.store.issue(t.issue.id).status, 'done');
   assert.equal(restarted.localMerges(t.project, [record, next]), 0);
 });
@@ -280,7 +283,8 @@ test('all observed local merge identities are consumed while closed, durably acr
   const restarted = new IssueLinks(new SuperStore(path.join(t.dir, 'data'), () => 'ACH'), () => 2900);
   assert.equal(restarted.localMerges(t.project, [template, second]), 0);
   assert.equal(t.store.issue(t.issue.id).status, 'todo');
-  assert.equal(restarted.localMerges(t.project, [template, second, { ...template, hash: 'c'.repeat(40) }]), 1);
+  assert.equal(restarted.localMerges(t.project, [template, second, { ...template, hash: 'c'.repeat(40) }]), 0);
+  assert.equal(restarted.localMerges(t.project, [{ ...template, hash: 'd'.repeat(40), at: 3000 }]), 1);
 });
 
 test('all observed GitHub PR merges are consumed while closed and keyed by PR identity and merge hash', () => {
@@ -294,5 +298,21 @@ test('all observed GitHub PR merges are consumed while closed and keyed by PR id
   const restarted = new IssueLinks(new SuperStore(path.join(t.dir, 'data'), () => 'ACH'), () => 2900);
   assert.equal(restarted.githubMerges([first, second]), 0);
   assert.equal(t.store.issue(t.issue.id).status, 'todo');
-  assert.equal(restarted.githubMerges([{ ...first, number: 3 }]), 1, 'another actual PR merge is a new event even with the same commit');
+  assert.equal(restarted.githubMerges([{ ...first, number: 3 }]), 0, 'same-second order is ambiguous');
+  assert.equal(restarted.githubMerges([{ ...first, number: 4, mergedAt: new Date(3000).toISOString() }]), 1, 'another later PR merge is a new event even with the same commit');
+});
+
+test('an unseen historical merge in the reopening second cannot reclose, locally or on GitHub', () => {
+  const t = setup(1001);
+  const a: MergeRecord = { hash: 'a'.repeat(40), branch: 'feat/ACH-1-safe', at: 2000, tree: '', tip: '', subject: 'Merge the issue branch', names: [], refs: [] };
+  const links = new IssueLinks(t.store, () => 2100);
+  assert.equal(links.localMerges(t.project, [a]), 1);
+  t.store.updateIssue(t.issue.id, { status: 'todo' }, 2500);
+  const restarted = new IssueLinks(new SuperStore(path.join(t.dir, 'data'), () => 'ACH'), () => 3000);
+  const unseen = { ...a, hash: 'b'.repeat(40) };
+  assert.equal(restarted.localMerges(t.project, [a, unseen]), 0);
+  assert.equal(t.store.issue(t.issue.id).status, 'todo');
+  const pr: MergedIssuePr = { repo: 'a/b', number: 2, projects: [{ id: 'p1' }], state: 'merged', branch: a.branch, title: 'Ship', mergedAt: new Date(2000).toISOString(), mergeCommit: unseen.hash };
+  assert.equal(restarted.githubMerges([pr]), 0);
+  assert.equal(t.store.issue(t.issue.id).status, 'todo');
 });

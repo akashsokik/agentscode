@@ -28,9 +28,13 @@ export interface IssueLinkStore {
 
 /** A newer merge can finish reopened work; a past merge (even after restarting) cannot. */
 function openSince(issue: SuperIssue): number {
-  // Both reflog and GitHub timestamps are whole seconds; compare in the same precision.
-  const at = Math.max(issue.createdAt, ...issue.activity.filter(e => e.kind === 'status' && e.to && !['done', 'canceled'].includes(e.to)).map(e => e.at));
-  return Math.floor(at / 1000) * 1000;
+  const reopened = issue.activity.filter(e => e.kind === 'status' && e.from && ['done', 'canceled'].includes(e.from) && e.to && !['done', 'canceled'].includes(e.to));
+  if (reopened.length) {
+    // Git cannot order an unseen merge within the same second as a reopen. Never let a past
+    // merge close reopened work: ambiguous same-second events are recorded without closing.
+    return (Math.floor(Math.max(...reopened.map(e => e.at)) / 1000) + 1) * 1000;
+  }
+  return Math.floor(issue.createdAt / 1000) * 1000;
 }
 
 function alreadyLogged(issue: SuperIssue, identity: string): boolean {
