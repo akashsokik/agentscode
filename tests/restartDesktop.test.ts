@@ -36,16 +36,18 @@ function world(quit: 'exits' | 'hangs' | 'holds') {
     fs.writeFileSync(serverUp, '');
   };
   launch();
-  const alive = `[ -f "${pidFile}" ] && kill -0 "$(cat "${pidFile}")" 2>/dev/null`;
+  // 'stubborn': an app that ignores quit and survives kill (set by a test, or by opening when 'stubborn-on-open' exists).
+  const stubborn = path.join(dir, 'stubborn');
+  const alive = `{ [ -f "${stubborn}" ] || { [ -f "${pidFile}" ] && kill -0 "$(cat "${pidFile}")" 2>/dev/null; }; }`;
   const quitAction = quit === 'exits' ? `kill "$(cat "${pidFile}")"; rm -f "${serverUp}"` : quit === 'hangs' ? `rm -f "${serverUp}"` : ':';
   const fakes: Record<string, string> = {
-    osascript: `case "$*" in *"is running"*) if ${alive}; then echo true; else echo false; fi ;; *quit*) ${quitAction} ;; esac`,
+    osascript: `case "$*" in *"is running"*) if ${alive}; then echo true; else echo false; fi ;; *quit*) [ -f "${stubborn}" ] || { ${quitAction}; } ;; esac`,
     lsappinfo: `${alive} && echo "\\"pid\\"=$(cat "${pidFile}")"`,
     // /api/health: the file 'health' when there is one (an old app's page, a window that never signed in), else signed in and idle.
     curl: `[ -f "${serverUp}" ] || exit 7; case "$*" in *"/dev/null"*) exit 0 ;; *"/api/health"*) if [ -f "${dir}/health" ]; then cat "${dir}/health"; else echo '{"ok":true,"busyAgents":0,"window":true}'; fi ;; *) if [ -f "${dir}/state" ]; then cat "${dir}/state"; else echo '{"agents":[]}'; fi ;; esac`,
     // Opening the app starts a new stand-in.
     // Also records any PODCODE_/AGENTSCODE_ setting the opened app would inherit.
-    open: `echo "$1" >> "${opened}"; env | grep -E '^(PODCODE|AGENTSCODE)_' >> "${opened}.env"; sleep 600 >/dev/null 2>&1 & echo $! > "${pidFile}"; touch "${serverUp}"`,
+    open: `[ -f "${dir}/stubborn-on-open" ] && touch "${stubborn}"; echo "$1" >> "${opened}"; env | grep -E '^(PODCODE|AGENTSCODE)_' >> "${opened}.env"; sleep 600 >/dev/null 2>&1 & echo $! > "${pidFile}"; touch "${serverUp}"`,
     pgrep: 'exit 1',
   };
   for (const [name, body] of Object.entries(fakes)) fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
@@ -65,7 +67,7 @@ function world(quit: 'exits' | 'hangs' | 'holds') {
   const pid = () => Number(fs.readFileSync(pidFile, 'utf8'));
   const isAlive = (p: number) => { try { process.kill(p, 0); return true; } catch { return false; } };
   const installed = () => fs.readFileSync(path.join(app, 'build.txt'), 'utf8');
-  const cleanup = () => { try { process.kill(pid()); } catch { /* gone */ } };
+  const cleanup = () => { fs.rmSync(stubborn, { force: true }); try { process.kill(pid()); } catch { /* gone */ } };
   return { dir, app, build, env, run, pid, isAlive, installed, opened, cleanup };
 }
 
@@ -230,10 +232,28 @@ test('busy agents: the health count when it is JSON; an old app that answers hea
     fs.writeFileSync(path.join(w.dir, 'health'), '<!doctype html><html><body>PodCode</body></html>');
     fs.writeFileSync(path.join(w.dir, 'state'), JSON.stringify({ agents: [{ status: 'working' }, { status: 'idle' }, { status: 'waiting' }] }));
     assert.equal(await busy(), '2', 'the old app\'s page is not JSON: /api/state counts');
-    fs.writeFileSync(path.join(w.dir, 'state'), '{"error":"Only the window"}');
+    // A newer app's refusal is not "0 busy" (Rhea L2): only an agents list counts.
+    fs.writeFileSync(path.join(w.dir, 'state'), '{"error":"This window is not signed in to PodCode\'s server."}');
     fs.writeFileSync(path.join(w.dir, 'health'), '{"error":"No such API route."}');
-    assert.equal(await busy(), '0', 'state with no agents list');
+    assert.equal(await busy(), '-1', 'a 401 body is unknown, never idle');
+    fs.writeFileSync(path.join(w.dir, 'state'), '{"agents":[]}');
+    assert.equal(await busy(), '0', 'an empty agents list is idle');
     fs.rmSync(path.join(w.dir, 'server.up'));
     assert.equal(await busy(), '-1', 'no answer at all');
+  } finally { w.cleanup(); }
+});
+
+test('a new app that will not exit is left running, never swapped under it (Rhea L1)', MAC_ONLY, async () => {
+  const w = world('exits');
+  try {
+    fs.writeFileSync(path.join(w.dir, 'health'), '{"ok":true,"busyAgents":0,"window":false}');
+    fs.writeFileSync(path.join(w.dir, 'stubborn-on-open'), '');
+    const { code, out } = await w.run();
+    assert.equal(code, 1, out);
+    assert.match(out, /never signed in to its server/);
+    assert.match(out, /The new app would not exit; left as is\. The previous app is in/);
+    assert.equal(w.installed(), 'new', 'the bundle of the running app was not touched');
+    assert.equal(fs.readFileSync(path.join(w.dir, 'PodCode.app.prev', 'build.txt'), 'utf8'), 'old', 'the previous app is kept');
+    assert.equal(fs.readFileSync(w.opened, 'utf8').trim().split('\n').length, 1, 'not reopened');
   } finally { w.cleanup(); }
 });

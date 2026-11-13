@@ -75,7 +75,8 @@ process.stdin.on('data', d => { raw += d; }).on('end', () => {
   curl -s --max-time 5 "http://127.0.0.1:$PORT/api/state" | node -e "
 let raw = '';
 process.stdin.on('data', d => { raw += d; }).on('end', () => {
-  try { console.log((JSON.parse(raw).agents ?? []).filter(a => a.status === 'working' || a.status === 'waiting').length); }
+  // Only a real state counts: an agents list. A refusal (a newer app's 401) is not \"0 busy\" (Rhea L2).
+  try { const s = JSON.parse(raw); console.log(Array.isArray(s.agents) ? s.agents.filter(a => a.status === 'working' || a.status === 'waiting').length : -1); }
   catch { console.log(-1); }
 });
 " 2>/dev/null || echo -1
@@ -131,6 +132,8 @@ restart() {
   say "The new app's window never signed in to its server; putting the previous app back."
   osascript -e "tell application id \"$BID\" to quit" >/dev/null 2>&1
   if ! gone_within 30; then pid=$(app_pid); [ -n "$pid" ] && kill "$pid" 2>/dev/null; gone_within 10; fi
+  # Never swap the bundle under a running app (Rhea L1): left as is, with both apps where they are.
+  if running; then say "The new app would not exit; left as is. The previous app is in $PREV."; return 1; fi
   rm -rf "$APP" && mv "$PREV" "$APP"
   open "$APP"
   return 1
