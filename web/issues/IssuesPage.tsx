@@ -131,7 +131,8 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
           <InboxLayout
             detailOpen={Boolean(asked)}
             toolbar={<>
-              <InboxFilterTabs label="View" options={ISSUE_VIEWS.map(v => ({ value: v.view, label: v.label, count: page.counts[v.view] }))} value={view} onChange={setView} fit />
+              {/* Counts only where they need you (Mine), as the Pull requests rail: four labels fit the rail's width then. */}
+              <InboxFilterTabs label="View" options={ISSUE_VIEWS.map(v => ({ value: v.view, label: v.label, count: v.view === 'mine' ? page.counts.mine : undefined, attention: v.view === 'mine' }))} value={view} onChange={setView} fit />
               <InboxSearch value={query} onChange={setQuery} placeholder="Filter issues" />
               <FilterChips filters={filters} names={names} onChange={setFilters} onEdit={(property, el) => openFilter(property, el)} />
               {adding ? (
