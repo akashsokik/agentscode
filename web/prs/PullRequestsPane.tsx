@@ -63,7 +63,9 @@ export function PullRequestsPane({ prId, chrome }: { prId?: string; chrome: Pane
   const shown = prsInView(all, view);
   // The Open view also lists what merged in the last week, as the demo does.
   const recent = view === 'open' ? prsInView(all, 'merged').filter(pr => now - Date.parse(pr.mergedAt ?? pr.updatedAt) < RECENT_MS) : [];
-  const selected = all.find(pr => pr.id === prId) ?? shown[0] ?? recent[0];
+  // A PR picked on purpose stays open while you search, as a conversation does in Comms; only
+  // with none picked does the detail follow the first one shown.
+  const selected = (data?.pullRequests ?? []).find(pr => pr.id === prId) ?? shown[0] ?? recent[0];
 
   const title = (
     <span className="flex items-center gap-2">
@@ -114,7 +116,7 @@ export function PullRequestsPane({ prId, chrome }: { prId?: string; chrome: Pane
     const card = document.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(selected.id)}"]`);
     e.preventDefault();
     if (!card?.offsetParent) open({ kind: 'pullRequests' });
-    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(selected.id)}"]`)?.focus());
+    focusCard(selected.id);
   };
   return (
     <PaneFrame chrome={chrome} title={title} actions={actions}>
@@ -253,7 +255,7 @@ function PrInboxDetail({ pr, now, tab, onTab: setTab, fresh, onKeyDown }: { pr: 
     <InboxDetail
       onKeyDown={onKeyDown}
       bar={
-        <InboxBar backLabel="All pull requests" onBack={() => open({ kind: 'pullRequests' })}>
+        <InboxBar backLabel="All pull requests" onBack={() => { open({ kind: 'pullRequests' }); focusCard(pr.id); }}>
           <span className="flex shrink-0 items-center gap-1.5"><StateIcon pr={pr} /><span className="text-content/70">{STATE_WORD[pr.state]}</span></span>
           <span className="shrink-0 tabular-nums">#{pr.number}</span>
           <span className="min-w-0 truncate">{pr.repo}</span>
@@ -450,4 +452,9 @@ function Checks({ pr }: { pr: PullRequest }) {
 function ago(ts: number, now: number): string {
   const t = relativeTime(ts, now);
   return t === 'now' ? 'just now' : `${t} ago`;
+}
+
+/** Focus a PR's card on the next frame (after the list shows again), as Back and Escape hand focus back to the list. */
+function focusCard(id: string): void {
+  requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(id)}"]`)?.focus());
 }
