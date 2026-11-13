@@ -12,6 +12,8 @@ import { RefChip } from '../../notes/RefChip.tsx';
 import { useApp } from '../../store.ts';
 import { AgentAvatar } from '../../ui/Avatar.tsx';
 import { Loading, TextButton } from '../../ui/common.tsx';
+import { KeyValueList } from '../../ui/KeyValueList.tsx';
+import { Segmented } from '../../mono/settings.tsx';
 import { issueLinksSource, linksStatus, type IssueLinks, type LinksStatus } from './issueLinks.ts';
 import { dueTone, RELATION_TYPES, relationRemoval, relationsOf, subIssues, withRelation } from './issueViewModel.ts';
 import { writeIssue } from './issueWrites.ts';
@@ -104,13 +106,9 @@ export function Relations({ issue, issues }: { issue: SuperIssue; issues: SuperI
       {adding ? (
         <Picker anchor={adding} label="Issue" width={340} current="" onClose={() => setAdding(null)} onPick={add}
           header={(
-            <div role="radiogroup" aria-label="Relation" className="mb-1 flex gap-1">
-              {RELATION_TYPES.map(t => (
-                <button key={t.type} type="button" role="radio" aria-checked={type === t.type} onClick={() => setType(t.type)}
-                  className={`h-6 flex-1 rounded-md font-sans text-[11.5px] outline-none ${type === t.type ? 'bg-selection text-content' : 'text-content/60 hover:bg-content/5'}`}>
-                  {t.label}
-                </button>
-              ))}
+            // The settings' Segmented, full width over the picker (ACH-36).
+            <div className="mb-1 grid font-sans">
+              <Segmented label="Relation" value={type} options={RELATION_TYPES.map(t => ({ value: t.type, label: t.label }))} onChange={setType} />
             </div>
           )}
           options={issues.filter(i => i.id !== issue.id && !issue.relations.some(r => r.type === type && r.issueId === i.id)).map(i => ({ value: i.id, label: `${i.key} ${i.title}`, icon: <StatusIcon status={i.status} /> }))} />
@@ -153,12 +151,25 @@ export function InGit({ issue, links: state }: { issue: SuperIssue; links: Issue
   return (
     <Section icon={GitBranch} title="In git">
       {git?.branch || git?.commits.length ? (
-        <div className="flex flex-col gap-0.5 font-sans text-[12.5px]">
-          {git.branch ? <div className="flex min-h-7 items-center"><span className="w-24 shrink-0 text-content/45">Branch</span><span className="truncate font-mono text-[12px] text-content/85">{git.branch.name}</span></div> : null}
-          {git.commits.map((c, i) => (
-            <div key={c.sha} className="flex min-h-7 items-center"><span className="w-24 shrink-0 text-content/45">{i === 0 ? 'Commits' : ''}</span><span className="mr-2 shrink-0 font-mono text-[11.5px] text-content/45">{c.sha.slice(0, 7)}</span><span className="truncate text-content/80">{c.subject}</span></div>
-          ))}
-          {git.closes ? <div className="flex min-h-7 items-center"><span className="w-24 shrink-0 text-content/45">Closes</span><span className="truncate text-content/75">{git.closes}</span></div> : null}
+        // The shared label/value list (ACH-36); the commits share one row, a line each.
+        <div className="font-sans">
+          <KeyValueList
+            labelWidth="6rem"
+            rows={[
+              ...(git.branch ? [['Branch', <span className="truncate font-mono">{git.branch.name}</span>] as [string, ReactNode]] : []),
+              ...(git.commits.length ? [['Commits', (
+                <span className="flex min-w-0 flex-1 flex-col">
+                  {git.commits.map(c => (
+                    <span key={c.sha} className="flex min-h-7 min-w-0 items-center">
+                      <span className="mr-2 shrink-0 font-mono text-[11.5px] text-content/45">{c.sha.slice(0, 7)}</span>
+                      <span className="truncate text-content/80">{c.subject}</span>
+                    </span>
+                  ))}
+                </span>
+              )] as [string, ReactNode]] : []),
+              ...(git.closes ? [['Closes', <span className="truncate text-content/75">{git.closes}</span>] as [string, ReactNode]] : []),
+            ]}
+          />
         </div>
       ) : state.status === 'loading' ? (
         <Loading className="py-1" />
