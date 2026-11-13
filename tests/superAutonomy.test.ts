@@ -5,7 +5,7 @@ import test from 'node:test';
 import { claudeToolPolicy, superMayUse } from '../server/agents/claude.ts';
 import { HttpError } from '../server/errors.ts';
 import { Store } from '../server/store.ts';
-import { ACTION_KINDS, actionVerdict, ALL_ASK_FIRST, autonomyInstructions, cleanAutonomy, SOUL_LINE_FROM, SOUL_LINE_TO, suggestedSoul, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
+import { ACTION_KINDS, actionVerdict, ALL_ASK_FIRST, autonomyInstructions, cleanAutonomy, createCapText, SOUL_LINE_FROM, SOUL_LINE_TO, suggestedSoul, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
 import { DEFAULT_SETTINGS } from '../shared/types.ts';
 import { harness, projectDir, settle, tempDir } from './helpers.ts';
 import { forbiddenGit, gatedVerbs } from '../shared/gitGuard.ts';
@@ -323,4 +323,23 @@ test('settings: validated, saved, and a running SuperAgent session hears the cha
   assert.deepEqual(saved.superAskFirst, { ...ALL_ASK_FIRST, forcePush: false });
   const next = t.runner.ctx.preparePrompt!('Next update.');
   assert.match(next, /Since this session started, the following changed[\s\S]*Autonomy \(Settings, SuperAgent\): Standard/);
+});
+
+test('ALL-D10: no agents-a-day cap on Full (Settings says so); the cap holds on Standard; the daily budget still holds on Full', async () => {
+  assert.match(createCapText('full'), /^Not used on Full/);
+  assert.match(createCapText('standard'), /asks you before creating more/);
+  const t = await team();
+  t.manager.updateSettings({ superMaxCreatesPerDay: 1 });
+  t.runner.complete(); await settle();
+  (t.manager as unknown as { wakeSuper(p: string, l: string): void }).wakeSuper('Update.', 'Update.');
+  await settle();
+  const own = t.runners.get(t.sup.id)!.at(-1)!;
+  const ownCall = (tool: string, args: Record<string, unknown>) => t.manager.commsTool(own.ctx.commsToken!, tool, args);
+  for (const name of ['Ivy', 'Jo', 'Kit']) await ownCall('create_agent', { name, engine: 'claude', role: 'tester', why: 'Work needs it.' });
+  assert.equal([...t.store.agents.values()].filter(a => ['Ivy', 'Jo', 'Kit'].includes(a.name)).length, 3, 'three past a cap of one, on Full');
+  t.manager.updateSettings({ superAutonomy: 'standard' });
+  await assert.rejects(ownCall('create_agent', { name: 'Lu', engine: 'claude', role: 'tester', why: 'x' }), e => status(e) === 429);
+  t.manager.updateSettings({ superAutonomy: 'full', superDailyBudgetUsd: 1 });
+  (t.manager as unknown as { superStore: { addAutonomousCost(usd: number): void } }).superStore.addAutonomousCost(5);
+  await assert.rejects(ownCall('take_action', { kind: 'costly', summary: 'Big job', why: 'x', agent: 'Ada', task: 'go', undo: 'stop' }), e => status(e) === 409 && /budget/.test((e as Error).message));
 });

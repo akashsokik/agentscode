@@ -115,3 +115,10 @@ export const ALWAYS_SAFE: readonly string[] = [
   'Its own work, and the agents it starts, stay within your daily budget',
   'Paused, it starts nothing on its own: here or in Decisions',
 ];
+
+/** The agents-a-day row in Settings: not used on Full (ALL-D10); the daily spending cap still is. */
+export function createCapText(level: SuperAutonomy): string {
+  return level === 'full'
+    ? 'Not used on Full: it creates the agents the work needs (your call, ALL-D10). The daily budget still holds.'
+    : 'Past this, it asks you before creating more. Not used on Full.';
+}
