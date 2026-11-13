@@ -95,8 +95,8 @@ export function createApp(
   // The pre-push asks whether a force-push token is good (one the user approved, once), and the
   // git shim asks PodCode to put back a guard file that was changed (server/pushGuard.ts, ALL-D9).
   app.post('/api/push-guard/redeem', (req, res) => {
-    const ok = redeemOverride(req.body?.token, req.body?.refs);
-    res.status(ok ? 200 : 403).json({ ok });
+    const result = redeemOverride(req.body?.token, req.body?.refs, req.body?.remote);
+    res.status(result.ok ? 200 : 403).json(result);
   });
   app.post('/api/push-guard/check', (_req, res) => { res.json({ restored: ensurePushGuard() }); });
   // Agent processes reach this through the comms MCP server; the bearer token identifies them.

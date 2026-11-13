@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -74,7 +74,11 @@ if [ -n "$bad" ]; then
   code=""
   if [ -n "$token" ] && [ -n "$url" ]; then
     refs=$(printf '%s' "$bad" | tr -d '"\\\\')
-    code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'content-type: application/json' --data "{\\"token\\":\\"$token\\",\\"refs\\":\\"$refs\\"}" "$url/api/push-guard/redeem" 2>/dev/null)
+    remote=$(printf '%s' "$2" | tr -d '"\\\\')
+    answer=$(curl -s -m 5 -w '\\n%{http_code}' -H 'content-type: application/json' --data "{\\"token\\":\\"$token\\",\\"refs\\":\\"$refs\\",\\"remote\\":\\"$remote\\"}" "$url/api/push-guard/redeem" 2>/dev/null)
+    code=$(printf '%s' "$answer" | tail -n 1)
+    why=$(printf '%s' "$answer" | sed -n 's/.*"why":"\\([^"]*\\)".*/\\1/p' | head -n 1)
+    [ -n "$why" ] && echo "PodCode did not take the token: $why." >&2
   fi
   if [ "$code" = 200 ]; then
     echo "PodCode: the force-push you approved, once:$bad" >&2
@@ -126,7 +130,7 @@ for a in "$@"; do
   fi
   case "$a" in
     -c|--config-env) want=c;;
-    -C|--git-dir|--work-tree|--namespace|--super-prefix) want=x;;
+    -C|--git-dir|--work-tree|--namespace|--super-prefix|--attr-source|--list-cmds) want=x;;
     ${HOOKS_PATH}) no 'pointing core.hooksPath elsewhere turns the push check off';;
     -*) ;;
     *) sub="$a"; break;;
@@ -137,11 +141,22 @@ case "$sub" in
   send-pack|http-push) no "git $sub writes to a remote without the push check";;
   ''|${BUILTINS}) exec "$real" "$@";;
   *)
-    alias=$("$real" config --get "alias.$sub" 2>/dev/null) || exec "$real" "$@"
+    # An alias, followed through aliases of aliases (at most 5), so a=b, b=push --no-verify is seen.
+    name="$sub"; alias=""; depth=0
+    while next=$("$real" config --get "alias.$name" 2>/dev/null); do
+      alias="$alias $next"; depth=$((depth + 1))
+      [ "$depth" -ge 5 ] && no "the alias $sub nests too deep for PodCode to see what it runs"
+      case "$next" in '!'*) break;; esac
+      name=\${next%% *}
+      case "$name" in ${BUILTINS}|push|send-pack|http-push) break;; esac
+    done
+    [ -z "$alias" ] && exec "$real" "$@"
     case "$alias" in
       *send-pack*|*http-push*) no "the alias $sub writes to a remote without the push check";;
       ${HOOKS_PATH}) no "the alias $sub points core.hooksPath elsewhere";;
-      '!'*) exec "$real" "$@";;
+    esac
+    case "$alias" in
+      ' !'*) exec "$real" "$@";;
       *push*) case "$alias" in *--no-v*) no "the alias $sub skips the push check (--no-verify)";; esac;;
       *) exec "$real" "$@";;
     esac;;
@@ -271,31 +286,54 @@ export function pushGuardEnv(env: NodeJS.ProcessEnv = process.env, dir = install
   return out;
 }
 
-/** Force-pushes the user approved and not yet made: token, and the branch it is for. Memory only. */
-const overrides = new Map<string, { branch: string | null; at: number }>();
+/** Force-pushes the user approved and not yet made: token, the branch and the remotes it is for. Memory only. */
+const overrides = new Map<string, { branch: string; remotes: string[]; at: number }>();
 const OVERRIDE_TTL = 6 * 60 * 60_000;
 
-/** One push the user approved (take_action force_push): a token the agent passes as PODCODE_PUSH_OVERRIDE, used once. */
-export function issueOverride(binding?: { branch?: string | null } | string): string {
+/** A project's remote URLs (url and pushurl of each), read with one fixed read-only git config call. */
+export function pushRemotes(cwd: string): Promise<string[]> {
+  return new Promise(resolve => execFile('git', ['config', '--get-regexp', '^remote\\..*\\.(url|pushurl)$'], { cwd, timeout: 10_000 }, (error, stdout) => {
+    if (error) { resolve([]); return; }
+    resolve([...new Set(String(stdout).split('\n').map(line => line.split(' ').slice(1).join(' ').trim()).filter(Boolean))]);
+  }));
+}
+
+/** A remote as git may write it: no trailing slash or .git, so the pre-push's URL and \`git remote -v\`'s compare. */
+function sameRemote(url: string): string {
+  return url.trim().replace(/\/+$/, '').replace(/\.git$/, '');
+}
+
+/**
+ * One push the user approved (take_action force_push): a token the agent passes as
+ * PODCODE_PUSH_OVERRIDE, for one branch (never main or a tag; take_action checks) on the
+ * project's remotes, used once within six hours.
+ */
+export function issueOverride(binding: { branch: string; remotes: string[] }): string {
+  const branch = binding.branch.replace(/^refs\/heads\//, '');
+  if (!branch || /^refs\//.test(branch)) throw new Error('A force-push token is for one branch.');
+  // A second lock behind take_action's: main, master and tags are shared history (ALL-D9).
+  if (branch === 'main' || branch === 'master') throw new Error(`${branch} is never force-pushed.`);
   const token = randomBytes(12).toString('hex');
-  const branch = typeof binding === 'object' && binding?.branch ? binding.branch.replace(/^refs\/heads\//, '') : null;
-  overrides.set(token, { branch, at: Date.now() });
+  overrides.set(token, { branch, remotes: binding.remotes.map(sameRemote), at: Date.now() });
   return token;
 }
 
 /**
- * The pre-push asking whether a token is good for the refs it would overwrite: yes once, for the
- * approved branch only (any ref when the approval named none), within six hours.
+ * The pre-push asking whether a token is good for this push: every ref it would overwrite is the
+ * approved branch, never a tag, on one of its remotes. Yes uses the token up; a no leaves it for
+ * the right push (the refusal says why).
  */
-export function redeemOverride(token: unknown, refs: unknown): boolean {
-  if (typeof token !== 'string' || !/^[a-f0-9]{24}$/.test(token)) return false;
+export function redeemOverride(token: unknown, refs: unknown, remote?: unknown): { ok: boolean; why?: string } {
+  if (typeof token !== 'string' || !/^[a-f0-9]{24}$/.test(token)) return { ok: false, why: 'not a token PodCode issued' };
   const entry = overrides.get(token);
-  if (!entry) return false;
-  overrides.delete(token);
-  if (Date.now() - entry.at > OVERRIDE_TTL) return false;
-  if (!entry.branch) return true;
+  if (!entry) return { ok: false, why: 'not a token PodCode issued, or used already' };
+  if (Date.now() - entry.at > OVERRIDE_TTL) { overrides.delete(token); return { ok: false, why: 'the approval is over six hours old' }; }
   const named = String(refs ?? '').split(/\s+/).filter(Boolean).map(r => r.replace(/\(.*$/, ''));
-  return named.length > 0 && named.every(r => r === `refs/heads/${entry.branch}`);
+  if (named.some(r => r.startsWith('refs/tags/'))) return { ok: false, why: 'tags are never force-pushed; the token is still good for its branch' };
+  if (!named.length || !named.every(r => r === `refs/heads/${entry.branch}`)) return { ok: false, why: `the token is for ${entry.branch} only; it is still good for that push` };
+  if (typeof remote !== 'string' || !entry.remotes.includes(sameRemote(remote))) return { ok: false, why: `the token is for ${entry.branch} on ${entry.remotes.join(', ')} only; it is still good for that push` };
+  overrides.delete(token);
+  return { ok: true };
 }
 
 /**

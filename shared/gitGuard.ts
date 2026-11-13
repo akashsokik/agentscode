@@ -10,17 +10,19 @@ function normalise(text: string): string {
   return text.replace(/\\\r?\n/g, ' ').replace(/["'`\\]/g, '').replace(/[ \t]+/g, ' ');
 }
 
-const NEGATION = /\b(do not|don'?t|dont|never(?!\s+mind\b)|must not|mustn'?t|no need to|avoid|should not|shouldn'?t)\b/i;
+// A negation that forbids nothing ("never mind", "avoid nothing") is not one.
+const NEGATION = /\b(do not|don'?t|dont|never|must not|mustn'?t|no need to|avoid|should not|shouldn'?t)\b(?!\s+(mind|nothing|anything)\b)/i;
 const ACTION = /\b(force|push|overwrite|rewrite|reset|rebase|delete|filter-branch|filter-repo)/i;
 
 /**
  * Sentences and clauses that forbid something ("do not force-push", "never rewrite main") are left
  * out: those whose negation comes before the action. Sentences end at . ! ? followed by a space or
- * the end (so "core.x=1" is not split), at ; and new lines, and before "but".
+ * the end (so "core.x=1" is not split), at a colon and a space (not "origin :feat"), at ; and new
+ * lines, and before "but".
  * "Force-push main without waiting" and "never mind the warning" still ask for it.
  */
 function withoutNegations(text: string): string {
-  return text.split(/[.!?](?=\s|$)|[;\n]|\s+(?=but\b)/i).filter(part => {
+  return text.split(/[.!?](?=\s|$)|:(?=\s)|[;\n]|\s+(?=but\b)/i).filter(part => {
     const negation = NEGATION.exec(part);
     const action = ACTION.exec(part);
     return !(negation && action && negation.index < action.index);

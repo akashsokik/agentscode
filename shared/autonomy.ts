@@ -108,7 +108,8 @@ export function suggestedSoul(soul: string): string {
 
 /** What holds at every level, worded as the server enforces it (ALL-D9). */
 export const ALWAYS_SAFE: readonly string[] = [
-  'Agents\' ordinary force-pushes and deletes of pushed history are refused on this Mac (one you approved goes, once). The hard lock is GitHub\'s branch protection on main, where your plan has it',
+  'Agents\' ordinary force-pushes and deletes of pushed history are refused on this Mac (one you approve goes once, for one feature branch: never main, the default branch or a tag). The hard lock is GitHub\'s branch protection on main, where your plan has it',
+  'A push through another copy of git or a plain sh -l login shell can get past this check; orca-site, orcabox and brain-dump rely on it alone (ALL-D12)',
   'Cleanup and deletion name a backup that exists',
   'Merges only the commit a reviewer you made passed',
   'Your Stop on an agent is final',

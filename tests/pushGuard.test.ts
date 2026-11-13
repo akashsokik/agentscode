@@ -91,10 +91,10 @@ async function redeemServer(): Promise<{ url: string; close: () => void }> {
     let body = '';
     req.on('data', d => { body += d; });
     req.on('end', () => {
-      const parsed = body ? JSON.parse(body) as { token?: unknown; refs?: unknown } : {};
-      const ok = req.url === '/api/push-guard/redeem' && redeemOverride(parsed.token, parsed.refs);
-      if (req.url === '/api/push-guard/check') ensurePushGuard();
-      res.writeHead(ok || req.url === '/api/push-guard/check' ? 200 : 403).end();
+      const parsed = body ? JSON.parse(body) as { token?: unknown; refs?: unknown; remote?: unknown } : {};
+      if (req.url === '/api/push-guard/check') { ensurePushGuard(); res.writeHead(200).end('{}'); return; }
+      const result = req.url === '/api/push-guard/redeem' ? redeemOverride(parsed.token, parsed.refs, parsed.remote) : { ok: false };
+      res.writeHead(result.ok ? 200 : 403, { 'content-type': 'application/json' }).end(JSON.stringify(result));
     });
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -102,27 +102,58 @@ async function redeemServer(): Promise<{ url: string; close: () => void }> {
   return { url: `http://127.0.0.1:${port}`, close: () => server.close() };
 }
 
-test('a force-push you approved: PodCode answers for its token once, for that branch only; a token file or made-up token does nothing (T7)', async () => {
+test('a force-push you approved: one feature branch on that project\'s remote, once; a token file, a made-up token, another branch or repo do nothing (T7, Rhea round 4)', async () => {
   const server = await redeemServer();
   try {
     const s = setup({ url: server.url });
-    s.ok(s.app, 'git reset -q --hard HEAD~1 && echo x > x && git add x && git commit -qm rewritten');
-    assert.equal((await run(s.app, 'PODCODE_PUSH_OVERRIDE=deadbeefdeadbeefdeadbeef git push --force origin main', s.agentEnv)).status, 1, 'a made-up token');
+    const remote = s.ok(s.app, 'git remote get-url --push origin');
+    s.ok(s.app, 'git checkout -q -b feat origin/old && git reset -q --hard HEAD~1 && echo x > x && git add x && git commit -qm rewritten');
+    const push = (token: string, ref = 'HEAD:old') => run(s.app, `PODCODE_PUSH_OVERRIDE=${token} git push -q --force origin ${ref}`, s.agentEnv);
+    assert.equal((await push('deadbeefdeadbeefdeadbeef')).status, 1, 'a made-up token');
     // T7: a token file the agent writes itself, where tokens used to live.
     fs.mkdirSync(path.join(s.hooks, 'overrides'), { recursive: true });
     fs.writeFileSync(path.join(s.hooks, 'overrides', 'a'.repeat(24)), 'x');
-    assert.equal((await run(s.app, `PODCODE_PUSH_OVERRIDE=${'a'.repeat(24)} git push --force origin main`, s.agentEnv)).status, 1, 'a forged token file');
-    // Bound to the approved branch: a token for main does not overwrite old.
-    const forMain = issueOverride({ branch: 'main' });
-    assert.equal((await run(s.app, `PODCODE_PUSH_OVERRIDE=${forMain} git push --force origin HEAD:old`, s.agentEnv)).status, 1, 'another branch');
-    const token = issueOverride({ branch: 'main' });
-    const r = await run(s.app, `PODCODE_PUSH_OVERRIDE=${token} git push -q --force origin main`, s.agentEnv);
+    assert.equal((await push('a'.repeat(24))).status, 1, 'a forged token file');
+    // L5: bound to the project's remote, not only the branch name.
+    const elsewhere = issueOverride({ branch: 'old', remotes: ['/some/other/repo.git'] });
+    const r0 = await push(elsewhere);
+    assert.equal(r0.status, 1, 'another repository');
+    assert.match(r0.stderr, /did not take the token: the token is for old on \/some\/other\/repo only/);
+    // L3: a wrong ref does not use the token up; the right push still goes.
+    const token = issueOverride({ branch: 'old', remotes: [remote] });
+    const r1 = await push(token, 'HEAD:main');
+    assert.equal(r1.status, 1, 'another branch');
+    assert.match(r1.stderr, /the token is for old only; it is still good for that push/);
+    const r = await push(token);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stderr, /the force-push you approved, once/);
     s.ok(s.app, 'git commit -q --amend -m again');
-    assert.equal((await run(s.app, `PODCODE_PUSH_OVERRIDE=${token} git push --force origin main`, s.agentEnv)).status, 1, 'used once');
+    assert.equal((await push(token)).status, 1, 'used once');
   } finally { server.close(); }
-  assert.equal(redeemOverride('not-a-token', ''), false);
+  assert.equal(redeemOverride('not-a-token', '').ok, false);
+});
+
+test('a token is never issued for main, master or a tag, and never redeems for a tag (Rhea round 4, M1)', () => {
+  for (const branch of ['main', 'master', 'refs/tags/v1', '']) assert.throws(() => issueOverride({ branch, remotes: ['/r.git'] }), branch);
+  const token = issueOverride({ branch: 'feat/x', remotes: ['/r.git'] });
+  assert.equal(redeemOverride(token, 'refs/tags/feat/x(overwrite)', '/r.git').ok, false);
+  assert.equal(redeemOverride(token, 'refs/heads/feat/x(overwrite)', '/r.git/').ok, true, 'a trailing slash is the same remote');
+});
+
+test('aliases are followed through aliases of aliases, and --attr-source takes a value (Rhea round 4, L1)', () => {
+  const s = setup();
+  s.ok(s.app, 'git reset -q --hard HEAD~1 && echo x > x && git add x && git commit -qm rewritten');
+  for (const cmd of [
+    'git config alias.a b && git config alias.b "push --no-verify" && git a -f origin main',
+    'git config alias.c d && git config alias.d e && git config alias.e "push -f" && git c origin main',
+    'git --attr-source HEAD push --no-verify -f origin main',
+    'git config alias.l1 l2 && git config alias.l2 l3 && git config alias.l3 l4 && git config alias.l4 l5 && git config alias.l5 l6 && git config alias.l6 push && git l1 -f origin main',
+  ]) {
+    const r = s.sh(s.app, cmd);
+    assert.notEqual(r.status, 0, cmd);
+    assert.match(r.stderr, /PodCode refused/, cmd);
+  }
+  assert.equal(s.sh(s.app, 'git config alias.st status && git config alias.s st && git s -s').status, 0, 'an everyday nested alias still runs');
 });
 
 test('the ways around the check are refused: --no-verify (T3), -c core.hooksPath (T4), unset GIT_CONFIG_COUNT (T5), send-pack (T6), aliases, abbreviations', () => {

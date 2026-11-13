@@ -14,7 +14,7 @@ const ASK_FIRST_ROWS: Record<keyof AskFirst, { label: string; description: strin
   deleteData: { label: 'Delete files or data', description: 'Unmerged branches, folders with uncommitted work, an agent\'s files, a backup.' },
   outsideAccounts: { label: 'Change outside accounts', description: 'Railway, Vercel, GitHub settings, anything with billing or other people.' },
   removeUserAgents: { label: 'Remove agents you made', description: 'Agents it created itself it may remove; yours stay yours.' },
-  forcePush: { label: 'Force-push a new branch', description: 'Only a branch never pushed. Main and pushed branches are never force-pushed, at any level.' },
+  forcePush: { label: 'Force-push a feature branch', description: 'One branch you approve, once. Main, the default branch and tags are never force-pushed, at any level.' },
 };
 
 const LEVEL_TEXT: Record<SuperAutonomy, string> = {

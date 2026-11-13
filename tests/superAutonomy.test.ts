@@ -377,17 +377,31 @@ test('M1: one approval cannot be used by two concurrent take_action calls; an ap
   // The backup check awaits git, so both calls would pass the check before either consumed it.
   const results = await Promise.allSettled([t.call('take_action', { ...del, approved_ask_id: id }), t.call('take_action', { ...del, approved_ask_id: id })]);
   assert.deepEqual(results.map(r => r.status).sort(), ['fulfilled', 'rejected'], 'Rhea A9: exactly one goes');
-  // An approved force-push: the delegation carries a one-time token the push check accepts.
-  const force = { kind: 'force_push', summary: 'Force-push fix/x', why: 'Rebased.', agent: 'Ada', target: 'fix/x', task: 'git push --force origin fix/x', undo: 'Push the old tip back from backup/fix-x.' };
+  // An approved force-push: one feature branch of one project, a token bound to its remote (Rhea round 4).
+  const dir = t.dir;
+  git(dir, 'remote', 'add', 'origin', '/srv/web.git');
+  git(dir, 'tag', 'v1');
+  const force = { kind: 'force_push', summary: 'Force-push fix/x', why: 'Rebased.', agent: 'Ada', target: 'fix/x', project: 'web', branch: 'fix/x', task: 'git push --force origin fix/x', undo: 'Push the old tip back from backup/fix-x.' };
   const ok = await approve(t, 'force_push', 'fix/x', undefined, force.task);
   await t.call('take_action', { ...force, approved_ask_id: ok });
   const sent = t.store.messages.filter(m => m.toAgentId === t.ada.id && m.delegation?.task === force.task).at(-1)!;
   const token = /PODCODE_PUSH_OVERRIDE=([a-f0-9]{24})/.exec(sent.delegation!.acceptanceCriteria)?.[1];
   assert.ok(token, 'the token is in the task');
-  // Kept in PodCode's memory, for that branch, once: nothing on disk an agent could write (Rhea round 3).
+  // Kept in PodCode's memory: nothing on disk an agent could write (Rhea round 3).
   assert.ok(!fs.existsSync(path.join(t.store.dataDir, 'git-hooks', 'overrides', token!)), 'not a file');
-  assert.equal(redeemOverride(token, 'refs/heads/fix/x(overwrite)'), true, 'good for fix/x');
-  assert.equal(redeemOverride(token, 'refs/heads/fix/x(overwrite)'), false, 'once');
+  assert.equal(redeemOverride(token, 'refs/heads/fix/x(overwrite)', '/elsewhere.git').ok, false, 'another repository');
+  assert.equal(redeemOverride(token, 'refs/heads/main(overwrite)', '/srv/web.git').ok, false, 'another branch');
+  assert.equal(redeemOverride(token, 'refs/heads/fix/x(overwrite)', '/srv/web.git').ok, true, 'fix/x on its remote, after the misses (they do not use it up)');
+  assert.equal(redeemOverride(token, 'refs/heads/fix/x(overwrite)', '/srv/web.git').ok, false, 'once');
+  // Never main, master, the default branch or a tag; a branch and project are required (M1, L2).
+  for (const [branch, project, why] of [['main', 'web', /shared main line/], ['master', 'web', /shared main line/], ['v1', 'web', /a tag/], ['refs/tags/v1', 'web', /Tags/], ['', 'web', /names its project and the branch/], ['fix/x', '', /names its project and the branch/]] as const) {
+    const task = `git push --force origin ${branch || 'x'}`;
+    const id = await approve(t, 'force_push', branch || 'fix/x', undefined, task);
+    await assert.rejects(t.call('take_action', { ...force, target: branch || 'fix/x', branch: branch || undefined, project: project || undefined, task, approved_ask_id: id }), e => [400, 403].includes(status(e)) && why.test((e as Error).message), `${branch}/${project}`);
+  }
+  git(dir, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
+  const trunk = await approve(t, 'force_push', 'trunk', undefined, 'git push --force origin trunk');
+  await assert.rejects(t.call('take_action', { ...force, target: 'trunk', branch: 'trunk', task: 'git push --force origin trunk', approved_ask_id: trunk }), e => status(e) === 403 && /shared main line/.test((e as Error).message), 'the remote\'s default branch');
   // With the switch off and no approval, a force_push gets no token: the push check still refuses overwriting.
   t.manager.updateSettings({ superAskFirst: { ...ALL_ASK_FIRST, forcePush: false } });
   await t.call('take_action', { ...force, target: 'fix/new', task: 'git push -u origin fix/new', summary: 'Push fix/new' });
@@ -411,6 +425,6 @@ test('M4: paused, its own turns cannot start agents through a channel mention, a
 });
 
 test('the text warning: dots inside commands do not split a sentence; "without" and "never mind" still ask for it (Rhea round 3)', () => {
-  for (const bad of ['git -c core.x=1 push -f origin main', 'Force-push main without waiting for CI.', 'Please force-push main, never mind the warning.', 'Run v1.2.3 checks. Then git push --force origin main.']) assert.ok(forbiddenGit(bad), bad);
-  for (const ok of ['Do not run git push --force.', 'Push the fix, but never force-push main.', 'Merge fix/a into main. Do not force-push.', 'Avoid git push -f; push a revert instead.', 'Run npm test. Then git push origin fix/a.']) assert.equal(forbiddenGit(ok), null, ok);
+  for (const bad of ['git -c core.x=1 push -f origin main', 'Force-push main without waiting for CI.', 'Please force-push main, never mind the warning.', 'Run v1.2.3 checks. Then git push --force origin main.', 'Avoid nothing: force push main now']) assert.ok(forbiddenGit(bad), bad);
+  for (const ok of ['Do not run git push --force.', 'Push the fix, but never force-push main.', 'Merge fix/a into main. Do not force-push.', 'Avoid git push -f; push a revert instead.', 'Run npm test. Then git push origin fix/a.', 'Note: do not force-push main.']) assert.equal(forbiddenGit(ok), null, ok);
 });

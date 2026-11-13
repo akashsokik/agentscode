@@ -93,7 +93,7 @@ import { WorkOwners } from './workOwners.ts';
 import { listArchive, type ArchivedAgent } from './agentArchive.ts';
 import { mentionsBranch } from '../shared/work.ts';
 import { forbiddenGit, gatedVerbs } from '../shared/gitGuard.ts';
-import { ensurePushGuard, installPushGuard, issueOverride } from './pushGuard.ts';
+import { ensurePushGuard, installPushGuard, issueOverride, pushRemotes } from './pushGuard.ts';
 import { readGit } from './work.ts';
 import { actionVerdict, ASK_FIRST_KEYS, autonomyInstructions, FULL_ACTIONS, NEEDS_BACKUP, SUPER_AUTONOMY, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
 
@@ -1760,6 +1760,24 @@ export class AgentManager {
       });
       if (!passed) throw new HttpError(409, `No reviewer you made has passed ${input.branch} at ${short} yet. Send that commit to a reviewer first; merge after a passing report that names the branch and the commit.`);
     }
+    // A force-push the user approves is for one feature branch of one project: never main, master,
+    // the remote's default branch or a tag (ALL-D9: shared history is never rewritten), and its
+    // token works only for that branch on that project's remotes (Rhea round 4, M1, L2, L5).
+    let forcePush: { branch: string; remotes: string[] } | null = null;
+    if (kind === 'force_push') {
+      const raw = (input.branch ?? '').trim().replace(/^refs\/heads\//, '');
+      if (!raw || !project) throw new HttpError(400, 'A force-push names its project and the branch (never main, a tag or the default branch).');
+      if (/^refs\//.test(raw) || /^(tags|refs)\//.test(raw)) throw new HttpError(403, 'Tags are shared history: they are never force-pushed.');
+      const defaults = new Set(['main', 'master']);
+      const head = await readGit(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], project.path);
+      if (head.ok && head.out.trim()) defaults.add(head.out.trim().replace(/^[^/]+\//, ''));
+      if (defaults.has(raw)) throw new HttpError(403, `${raw} is the shared main line: it is never force-pushed, at any level. Push a revert instead.`);
+      const tag = await readGit(['rev-parse', '--verify', '--quiet', `refs/tags/${raw}`], project.path);
+      if (tag.ok) throw new HttpError(403, `${raw} is a tag in ${project.name}: tags are never force-pushed.`);
+      const urls = await pushRemotes(project.path);
+      if (!urls.length) throw new HttpError(400, `${project.name} has no remote to push to.`);
+      forcePush = { branch: raw, remotes: urls };
+    }
     if (NEEDS_BACKUP.includes(kind)) {
       if (!input.backup) throw new HttpError(400, 'Name the backup (a ref in the project, or an existing path) before anything is removed.');
       const backup = input.backup.trim();
@@ -1791,7 +1809,7 @@ export class AgentManager {
       // A force-push the user approved: one token, good for one push, which PodCode's push check accepts.
       // Only from your yes to this exact push: with the switch off it acts without a token, so the
       // push check still refuses overwriting anything already pushed (a new branch needs none).
-      const override = kind === 'force_push' && verdict === 'ask' && approval ? issueOverride({ branch: input.branch ?? input.target ?? null }) : null;
+      const override = kind === 'force_push' && verdict === 'ask' && approval && forcePush ? issueOverride(forcePush) : null;
       const criteria = override
         ? `Do exactly this push, once, with PODCODE_PUSH_OVERRIDE=${override} in its environment (it works for one push only), and report_result with evidence (commands and their output).`
         : `Do exactly this ${kind.replace('_', ' ')} step and report_result with evidence (commands and their output).${input.backup ? ` Backup: ${input.backup}.` : ''} Ordinary pushes that overwrite or delete pushed history are refused by PodCode's push check.`;
