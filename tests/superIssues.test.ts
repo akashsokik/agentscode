@@ -507,3 +507,44 @@ test('the creation cap stops only agents it makes on its own: never in your turn
   await t.call('create_agent', { name: 'Auto', why: 'More hands.' });
   await assert.rejects(t.call('create_agent', { name: 'Auto2', why: 'More hands.' }), e => status(e) === 429);
 });
+
+test('the issue view edits through the app: assignee (an agent, you or nobody), parent, relations and comments, each checked and logged as yours', async () => {
+  const t = await team();
+  t.manager.addIssue({ text: 'Parent' });
+  t.manager.addIssue({ text: 'Child' });
+  t.manager.addIssue({ text: 'Other' });
+  const byText = (text: string) => t.manager.superView().issues.find(g => g.text === text)!;
+  const [parent, child, other] = [byText('Parent'), byText('Child'), byText('Other')];
+  const last = (id: string) => byText(t.manager.superView().issues.find(g => g.id === id)!.text).activity.at(-1)!;
+
+  t.manager.updateIssue(child.id, { assignee: t.ada.id });
+  assert.equal(byText('Child').agentId, t.ada.id);
+  assert.deepEqual([last(child.id).kind, last(child.id).to, last(child.id).by], ['assignee', t.ada.id, { kind: 'user' }]);
+  t.manager.updateIssue(child.id, { assignee: 'user' });
+  assert.equal(byText('Child').forUser, true);
+  assert.equal(byText('Child').agentId, undefined, 'yours takes it off the agent');
+  assert.deepEqual([last(child.id).from, last(child.id).to], [t.ada.id, 'user']);
+  t.manager.updateIssue(child.id, { assignee: null });
+  assert.equal(byText('Child').forUser, undefined);
+  assert.deepEqual([last(child.id).from, last(child.id).to], ['user', undefined]);
+  assert.throws(() => t.manager.updateIssue(child.id, { assignee: 'nobody-by-that-id' }), e => status(e) === 400);
+
+  t.manager.updateIssue(child.id, { parentId: parent.id });
+  assert.equal(byText('Child').parentId, parent.id);
+  assert.throws(() => t.manager.updateIssue(parent.id, { parentId: child.id }), e => status(e) === 400, 'no loops');
+  assert.throws(() => t.manager.updateIssue(child.id, { parentId: child.id }), e => status(e) === 400, 'not itself');
+  assert.throws(() => t.manager.updateIssue(child.id, { parentId: 'gone' }), e => status(e) === 400);
+  t.manager.updateIssue(child.id, { parentId: null });
+  assert.equal(byText('Child').parentId, undefined);
+
+  t.manager.updateIssue(child.id, { relations: [{ type: 'blocks', issueId: other.id }, { type: 'blocks', issueId: other.id }, { type: 'related', issueId: parent.id }] });
+  assert.deepEqual(byText('Child').relations, [{ type: 'blocks', issueId: other.id }, { type: 'related', issueId: parent.id }], 'repeats kept once');
+  assert.throws(() => t.manager.updateIssue(child.id, { relations: [{ type: 'likes', issueId: other.id }] }), e => status(e) === 400);
+  assert.throws(() => t.manager.updateIssue(child.id, { relations: [{ type: 'related', issueId: child.id }] }), e => status(e) === 400);
+  assert.throws(() => t.manager.updateIssue(child.id, { relations: 'blocks' }), e => status(e) === 400);
+
+  t.manager.updateIssue(child.id, { comment: 'First line\nsecond line' });
+  assert.deepEqual([last(child.id).kind, last(child.id).text, last(child.id).by], ['comment', 'First line\nsecond line', { kind: 'user' }]);
+  assert.throws(() => t.manager.updateIssue(child.id, { comment: '   ' }), e => status(e) === 400);
+  assert.throws(() => t.manager.updateIssue(child.id, { comment: 7 }), e => status(e) === 400);
+});

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { IssueActor, IssueEvent, IssuePriority, IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
+import type { IssueActor, IssueEvent, IssuePriority, IssueRelationType, IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
 import { ISSUE_PRIORITIES, ISSUE_STATUSES, ISSUE_TEXT_MAX, ISSUE_TITLE_MAX, issueDescription, isLegacyIssue, isOpenIssue, issueStatusFrom, issueTitle, legacyIssue, migrateIssue, reconcileIssues, type LegacyIssue } from '../shared/issues.ts';
 import { nextIssueKey, NO_PROJECT_CODE } from '../shared/issueKeys.ts';
 import { HttpError } from './errors.ts';
@@ -311,6 +311,14 @@ export class SuperStore {
     branch?: string | null;
     /** Why, in the activity: on the status change it makes, or as its own entry when nothing else changes. Server code only. */
     activityText?: string;
+    /** Assigned to the user (true), which takes it off any agent; false clears it. */
+    forUser?: boolean;
+    /** The issue this is a sub-issue of; null makes it top level. Never itself or one of its own sub-issues. */
+    parentId?: string | null;
+    /** The whole list of relations, replacing the old one. */
+    relations?: unknown;
+    /** A comment, kept in the activity with its line breaks. */
+    comment?: unknown;
   }, now = Date.now(), by: IssueActor = { kind: 'super' }): SuperIssue {
     const stored = this.read();
     const old = stored.issues.find(g => g.id === id);
@@ -343,9 +351,25 @@ export class SuperStore {
       if (patch[key] === undefined) continue;
       if (patch[key]) next[key] = patch[key]; else delete next[key];
     }
-    if (next.agentId !== old.agentId) {
-      if (next.agentId) delete next.forUser;
-      events.push({ at: now, by, kind: 'assignee', ...(old.agentId ? { from: old.agentId } : {}), ...(next.agentId ? { to: next.agentId } : {}) });
+    if (next.agentId) delete next.forUser;
+    if (patch.forUser === true) { next.forUser = true; delete next.agentId; delete next.delegationId; }
+    if (patch.forUser === false) delete next.forUser;
+    // The assignee in the activity: an agent's id, or "user" for you.
+    const assignee = (g: SuperIssue) => g.agentId ?? (g.forUser ? 'user' : undefined);
+    if (assignee(next) !== assignee(old)) {
+      const from = assignee(old), to = assignee(next);
+      events.push({ at: now, by, kind: 'assignee', ...(from ? { from } : {}), ...(to ? { to } : {}) });
+    }
+    if (patch.parentId !== undefined) {
+      if (patch.parentId === null || patch.parentId === '') delete next.parentId;
+      else next.parentId = parentFrom(stored.issues, id, patch.parentId);
+    }
+    if (patch.relations !== undefined) next.relations = relationsFrom(stored.issues, id, patch.relations);
+    if (patch.comment !== undefined) {
+      const comment = issueDescription(patch.comment);
+      if (!comment) throw new HttpError(400, 'A comment needs some text.');
+      if (comment.length > ISSUE_TEXT_MAX) throw new HttpError(400, `Keep a comment under ${ISSUE_TEXT_MAX} characters.`);
+      events.push({ at: now, by, kind: 'comment', text: comment });
     }
     if (status !== undefined && status !== old.status) {
       next.status = status;
@@ -630,6 +654,38 @@ function labelsFrom(raw: unknown): string[] {
   const labels = [...new Set(raw.map(l => String(l ?? '').trim().toLowerCase()).filter(Boolean))];
   if (labels.length > 10 || labels.some(l => l.length > 30)) throw new HttpError(400, 'Up to 10 labels, each under 30 characters.');
   return labels;
+}
+
+/** A parent for issue `id`: an issue that exists, not `id` itself, and not one of `id`'s own sub-issues (no loops). */
+function parentFrom(issues: readonly SuperIssue[], id: string, raw: unknown): string {
+  const parentId = String(raw);
+  const byId = new Map(issues.map(g => [g.id, g]));
+  if (!byId.has(parentId)) throw new HttpError(400, 'No issue with that parent id.');
+  for (let at: string | undefined = parentId, steps = 0; at && steps <= issues.length; at = byId.get(at)?.parentId, steps++) {
+    if (at === id) throw new HttpError(400, 'An issue cannot be under itself or one of its own sub-issues.');
+  }
+  return parentId;
+}
+
+const RELATION_TYPES: readonly IssueRelationType[] = ['blocks', 'related', 'duplicate_of'];
+
+/** Relations for issue `id`: each a known type and another issue that exists, once each, at most 50. */
+function relationsFrom(issues: readonly SuperIssue[], id: string, raw: unknown): SuperIssue['relations'] {
+  if (!Array.isArray(raw)) throw new HttpError(400, 'Relations are a list of { type, issueId }.');
+  const ids = new Set(issues.map(g => g.id));
+  const seen = new Set<string>();
+  const out: SuperIssue['relations'] = [];
+  for (const r of raw as { type?: unknown; issueId?: unknown }[]) {
+    const type = r?.type as IssueRelationType;
+    const issueId = String(r?.issueId ?? '');
+    if (!RELATION_TYPES.includes(type)) throw new HttpError(400, `A relation's type is one of: ${RELATION_TYPES.join(', ')}.`);
+    if (issueId === id) throw new HttpError(400, 'An issue cannot relate to itself.');
+    if (!ids.has(issueId)) throw new HttpError(400, 'No issue with that id to relate to.');
+    const key = `${type}:${issueId}`;
+    if (!seen.has(key)) { seen.add(key); out.push({ type, issueId }); }
+  }
+  if (out.length > 50) throw new HttpError(400, 'Up to 50 relations.');
+  return out;
 }
 
 function issueText(raw: unknown): string {
