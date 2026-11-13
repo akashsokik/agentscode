@@ -265,11 +265,18 @@ export function InboxBarButton({ icon, label, title, onClick, disabled = false }
 }
 
 /** MonoCode's detail header: the title, then whatever follows it (people, a meta line, actions), and tabs below. */
-export function InboxHero({ title, children, tabs }: { title: string; children?: ReactNode; tabs?: ReactNode }) {
+export function InboxHero({ title, heading, children, tabs }: {
+  /** The item's title: the heading's text, and its tooltip. */
+  title: string;
+  /** Drawn in the heading instead of the title text (an issue's in-place title editor); the heading then grows instead of clamping to two lines. */
+  heading?: ReactNode;
+  children?: ReactNode;
+  tabs?: ReactNode;
+}) {
   return (
     <header className="border-b border-stroke">
       <div className={cx('mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-4 pt-5 @min-[40rem]/inbox:px-6', tabs ? '' : 'pb-4')}>
-        <h1 title={title} className="line-clamp-2 font-sans text-[18px] font-semibold leading-tight text-content">{title}</h1>
+        <h1 title={title} className={cx('font-sans text-[18px] font-semibold leading-tight text-content', heading === undefined && 'line-clamp-2')}>{heading ?? title}</h1>
         {children}
         {tabs}
       </div>

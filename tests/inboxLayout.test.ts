@@ -68,3 +68,8 @@ test('Hal\'s audit (ACH-23): no blank narrow pane, a picked PR survives search, 
   assert.match(prs, /const selected = \(data\?\.pullRequests \?\? \[\]\)\.find\(pr => pr\.id === prId\)/, 'selection from the full list, as Comms');
   assert.match(prs, /onBack=\{\(\) => \{ open\(\{ kind: 'pullRequests' \}\); focusCard\(pr\.id\); \}\}/);
 });
+
+test('InboxHero can draw an editor in its heading, for the issue title (ACH-23)', () => {
+  const inbox = read('web/ui/Inbox.tsx');
+  assert.match(inbox, /<h1 title=\{title\} className=\{cx\('font-sans text-\[18px\] font-semibold leading-tight text-content', heading === undefined && 'line-clamp-2'\)\}>\{heading \?\? title\}<\/h1>/);
+});
