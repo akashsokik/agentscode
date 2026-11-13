@@ -10,8 +10,6 @@ export type TabContent =
   | { kind: 'file'; root: Root; path: string }
   | { kind: 'diff'; root: Root; path: string }
   | { kind: 'comms'; conversationId?: string }
-  /** The Issues page (web/issues/IssuesPage.tsx, Fen's). */
-  | { kind: 'issues' }
   /** The Pull requests page (web/prs/PullRequestsPane.tsx); `prId` is the selected PR, owner/name#n. */
   | { kind: 'pullRequests'; prId?: string }
   /** The Work view as a pane (web/work/WorkView.tsx). */
@@ -98,7 +96,6 @@ export function tabKey(content: TabContent): string {
     case 'file': return `file:${rootKey(content.root)}:${content.path}`;
     case 'diff': return `diff:${rootKey(content.root)}:${content.path}`;
     case 'comms': return 'comms';
-    case 'issues': return 'issues';
     case 'pullRequests': return 'pullRequests';
     case 'work': return 'work';
     case 'channel': return `channel:${content.channelId}`;
@@ -113,6 +110,20 @@ export function migrateSuperView(view: string | undefined): SuperView | undefine
   return (SUPER_VIEWS as readonly string[]).includes(view ?? '') ? view as SuperView : undefined;
 }
 
+/**
+ * The tab kinds this build can show. A saved layout can hold others (one from a newer or a feature
+ * build, such as a tab kind that was later renamed); such a tab would crash the tab strip, so it is
+ * dropped on load, and a pane that showed it shows nothing.
+ */
+export const TAB_KINDS = ['agent', 'file', 'diff', 'comms', 'pullRequests', 'work', 'channel', 'walkthrough', 'browser'] as const satisfies readonly TabContent['kind'][];
+
+/** The saved tabs this build knows, and the panes with any unknown tab cleared. */
+export function knownTabs(tabs: Tab[], panes: Pane[]): { tabs: Tab[]; panes: Pane[] } {
+  const known = tabs.filter(t => (TAB_KINDS as readonly string[]).includes(t?.content?.kind));
+  const ids = new Set(known.map(t => t.id));
+  return { tabs: known, panes: panes.map(p => (p.tabId && !ids.has(p.tabId) ? { ...p, tabId: null } : p)) };
+}
+
 function initial(): Layout {
   const fallback: Layout = { tabs: [], panes: [{ id: 'p1', tabId: null }], focused: 'p1', sidebar: true, sidebarView: 'agents', rightPanel: true, rightView: 'overview' };
   try {
@@ -124,6 +135,8 @@ function initial(): Layout {
     const restored: Layout = { ...fallback, ...kept, ...(kept.widths ? { widths } : {}) };
     // The Goals tab is the Issues tab now (ACH-D38).
     restored.superView = migrateSuperView(restored.superView);
+    // A tab kind this build cannot show would crash the strip: drop it (TAB_KINDS).
+    ({ tabs: restored.tabs, panes: restored.panes } = knownTabs(restored.tabs, restored.panes));
     // Pinned tabs come first; a layout saved before pins existed has none and keeps its order.
     restored.tabs = orderTabs(restored.tabs);
     const ids = restored.panes.map(p => p.id);
@@ -181,7 +194,7 @@ function ensureTab(tabs: Tab[], content: TabContent): { tabs: Tab[]; tab: Tab } 
   return { tabs: [...tabs, tab], tab };
 }
 
-/** What the focused pane shows, by kind: the sidebar marks its Comms, Issues and Pull requests rows. */
+/** What the focused pane shows, by kind: the sidebar marks its Pull requests row with it. */
 export function focusedKind(l: Layout): TabContent['kind'] | null {
   const pane = l.panes.find(p => p.id === l.focused);
   return l.tabs.find(t => t.id === pane?.tabId)?.content.kind ?? null;

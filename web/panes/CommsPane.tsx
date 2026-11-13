@@ -12,10 +12,8 @@ import { attempt, useApp } from '../store.ts';
 import { useNow } from '../ui/useNow.ts';
 import { cx, Empty, HeaderButton, StatusLabel, type Tone } from '../ui/common.tsx';
 import { PeerBubble } from './PeerMessages.tsx';
-import {
-  AlertCircle, ArrowLeft, Bot, CheckCheck, CheckCircle, ChevronDown, CircleX, Clock, MessageMultiple, Search, Square, X,
-  type IconComponent,
-} from '../mono/icons.tsx';
+import { AlertCircle, ArrowLeft, Bot, CheckCheck, ChevronDown, Clock, MessageMultiple, Search, Square, X, type IconComponent } from '../mono/icons.tsx';
+import { StatusMark, type StatusState } from '../ui/StatusMark.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useFollowLatest } from './ChannelPosts.tsx';
@@ -58,21 +56,25 @@ export function MessageStatus({ message }: { message: PeerMessage }) {
   );
 }
 
-/** inboxStatusMark for conversations: an icon in the state's colour. Working spins instead. */
-const STATE_MARK: Record<Exclude<ThreadState, 'working'>, { icon: IconComponent; className: string }> = {
+/** inboxStatusMark for conversations. Results use the shared status mark (ACH-D45); stopped and
+ * queued are not results and keep their own icons; working spins. */
+const STATE_MARK: Record<Exclude<ThreadState, 'working'>, { icon: IconComponent; className: string } | { status: StatusState; quiet?: boolean }> = {
   stopped: { icon: Square, className: 'text-content/40' },
   queued: { icon: Clock, className: 'text-content/50' },
-  failed: { icon: CircleX, className: 'text-danger' },
-  changes: { icon: AlertCircle, className: 'text-warning' },
-  blocked: { icon: AlertCircle, className: 'text-warning' },
-  approved: { icon: CheckCircle, className: 'text-success' },
-  done: { icon: CheckCircle, className: 'text-success' },
-  handled: { icon: CheckCheck, className: 'text-content/40' },
+  failed: { status: 'fail' },
+  changes: { status: 'warn' },
+  blocked: { status: 'warn' },
+  approved: { status: 'pass' },
+  done: { status: 'pass' },
+  // Handled needs nothing from you: the pass mark without its colour (was a double tick).
+  handled: { status: 'pass', quiet: true },
 };
 
 function StateIcon({ state, className = 'size-3' }: { state: ThreadState; className?: string }) {
   if (state === 'working') return <TerminalSpinner className="text-content/60" />;
-  const { icon: Icon, className: tone } = STATE_MARK[state];
+  const mark = STATE_MARK[state];
+  if ('status' in mark) return <StatusMark state={mark.status} quiet={mark.quiet} className={className} />;
+  const { icon: Icon, className: tone } = mark;
   return <Icon aria-hidden className={cx('shrink-0', className, tone)} strokeWidth={1.75} />;
 }
 

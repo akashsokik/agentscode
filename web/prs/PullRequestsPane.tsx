@@ -1,18 +1,20 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { checksLabel, isOpen, PR_VIEWS, prsInView, viewCounts, type PrCheck, type PrReview, type PrView, type PullRequest } from '../../shared/prs.ts';
+import { checksLabel, isHttpUrl, isOpen, PR_VIEWS, prsInView, viewCounts, type PrCheck, type PrReview, type PrView, type PullRequest } from '../../shared/prs.ts';
 import { relativeTime } from '../format.ts';
 import { open } from '../layout.ts';
-import { Check, ExternalLink, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, LoaderCircle, Minus, RefreshCw, X } from '../mono/icons.tsx';
+import { ExternalLink, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, RefreshCw } from '../mono/icons.tsx';
 import { WhoAvatar } from '../notes/parts.tsx';
 import { PaneFrame, type PaneChrome } from '../panes/PaneFrame.tsx';
-import { cx, Empty, HeaderButton, Loading, StatusLabel, type Tone } from '../ui/common.tsx';
+import { cx, Empty, HeaderButton, Loading } from '../ui/common.tsx';
+import { StatusMark, StatusText, statusWord, type StatusState } from '../ui/StatusMark.tsx';
+import { KeyValueList } from '../ui/KeyValueList.tsx';
 import { PanelList, PanelRow, PanelSection, PanelToolbar } from '../ui/PanelList.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { loadPrs, usePrs, usePrsData } from './prsData.ts';
 
 // The Pull requests page (ACH-D42, ACH-D43): open and recently merged PRs across the user's
 // projects, read only. Built from the same pieces as Comms and the panel lists: PaneFrame, the panel
-// toolbar's search and views, PanelSection and PanelRow, StatusLabel, and the Notes detail layout.
+// toolbar's search and views, PanelSection and PanelRow, StatusMark (ACH-D45), and KeyValueList.
 
 /** How long a merged PR stays under "Merged recently" in the Open view. */
 const RECENT_MS = 7 * 24 * 3600_000;
@@ -20,7 +22,8 @@ const RECENT_MS = 7 * 24 * 3600_000;
 const STATE_ICON = { open: GitPullRequest, draft: GitPullRequestDraft, merged: GitMerge, closed: GitPullRequestClosed } as const;
 const STATE_TONE: Record<PullRequest['state'], string> = { open: 'text-success', draft: 'text-content/45', merged: 'text-info', closed: 'text-danger' };
 const STATE_WORD: Record<PullRequest['state'], string> = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' };
-const CHECK_TONE: Record<ReturnType<typeof checksLabel>['tone'], Tone> = { success: 'success', danger: 'danger', pending: 'neutral', muted: 'muted' };
+/** A checks summary's mark: passed, failing, running, or none at all (a dashed circle, as MonoCode's skipped). */
+const SUMMARY_STATE: Record<ReturnType<typeof checksLabel>['tone'], StatusState> = { success: 'pass', danger: 'fail', pending: 'pending', muted: 'skip' };
 
 function StateIcon({ pr, className = 'size-3.5' }: { pr: PullRequest; className?: string }) {
   const Icon = STATE_ICON[pr.state];
@@ -40,7 +43,7 @@ function matches(pr: PullRequest, query: string): boolean {
 }
 
 export function PullRequestsPane({ prId, chrome }: { prId?: string; chrome: PaneChrome }) {
-  usePrsData();
+  usePrsData(true);
   const data = usePrs(s => s.data);
   const error = usePrs(s => s.error);
   const loading = usePrs(s => s.loading);
@@ -146,7 +149,7 @@ function PrRow({ pr, now, selected }: { pr: PullRequest; now: number; selected: 
         <>
           {pr.issueKey ? <span className="hidden font-mono text-[var(--link-color)] @min-[36rem]/prs:inline">{pr.issueKey}</span> : null}
           <span className="hidden max-w-[9rem] truncate font-mono text-content/40 @min-[60rem]/prs:inline" title={pr.branch}>{pr.branch}</span>
-          <StatusLabel tone={CHECK_TONE[checks.tone]} busy={checks.tone === 'pending'}>{checks.text}</StatusLabel>
+          <StatusText state={SUMMARY_STATE[checks.tone]} quiet={checks.tone === 'muted'}>{checks.text}</StatusText>
           <WhoAvatar name={pr.author} agentId={pr.agentId} />
           <span className="w-7 text-right">{relativeTime(when, now)}</span>
         </>
@@ -156,19 +159,16 @@ function PrRow({ pr, now, selected }: { pr: PullRequest; now: number; selected: 
   );
 }
 
-const CHECK_ICON: Record<PrCheck['state'], { icon: typeof Check; className: string }> = {
-  success: { icon: Check, className: 'text-success' },
-  failure: { icon: X, className: 'text-danger' },
-  pending: { icon: LoaderCircle, className: 'text-content/45 animate-spin' },
-  skipped: { icon: Minus, className: 'text-content/35' },
-  neutral: { icon: Minus, className: 'text-content/45' },
-};
-const REVIEW_WORD: Record<PrReview['state'], { word: string; tone: Tone }> = {
-  approved: { word: 'Approved', tone: 'success' },
-  changes_requested: { word: 'Changes requested', tone: 'warning' },
-  commented: { word: 'Commented', tone: 'neutral' },
-  dismissed: { word: 'Dismissed', tone: 'muted' },
-  pending: { word: 'Pending', tone: 'muted' },
+/** A check's state as the shared mark (MonoCode: neutral and skipped are both "skipping"). */
+const CHECK_STATE: Record<PrCheck['state'], StatusState> = { failure: 'fail', pending: 'pending', success: 'pass', skipped: 'skip', neutral: 'skip' };
+/** MonoCode's order (CHECK_STATES): failures first, then running, then passed, then skipped. */
+const CHECK_ORDER: StatusState[] = ['fail', 'pending', 'cancel', 'unknown', 'pass', 'skip'];
+const REVIEW: Record<PrReview['state'], { word: string; state: StatusState }> = {
+  approved: { word: 'Approved', state: 'pass' },
+  changes_requested: { word: 'Changes requested', state: 'warn' },
+  commented: { word: 'Commented', state: 'skip' },
+  dismissed: { word: 'Dismissed', state: 'cancel' },
+  pending: { word: 'Pending', state: 'skip' },
 };
 
 function reviewSummary(pr: PullRequest): string {
@@ -196,48 +196,50 @@ function PrDetail({ pr, now }: { pr: PullRequest; now: number }) {
         <span className="truncate">{pr.repo}</span>
         <span aria-hidden>›</span>
         <span className="tabular-nums">#{pr.number}</span>
-        <a href={pr.url} target="_blank" rel="noreferrer" aria-label="Open on GitHub" title="Open on GitHub" className="ml-auto grid size-6 shrink-0 place-items-center rounded-md hover:bg-content/10 hover:text-content">
+        {isHttpUrl(pr.url) ? <a href={pr.url} target="_blank" rel="noreferrer" aria-label="Open on GitHub" title="Open on GitHub" className="ml-auto grid size-6 shrink-0 place-items-center rounded-md hover:bg-content/10 hover:text-content">
           <ExternalLink className="size-3.5" strokeWidth={1.75} />
-        </a>
+        </a> : null}
       </div>
       <h3 className="mt-1.5 text-[14px] font-semibold leading-snug text-content">{pr.title}</h3>
-      <dl className="mt-3 grid grid-cols-[6.5rem_minmax(0,1fr)] text-[12px]">
-        {rows.map(([label, value]) => (
-          <div key={label} className="contents">
-            <dt className="flex min-h-7 items-center text-content/45">{label}</dt>
-            <dd className="flex min-h-7 min-w-0 items-center gap-1.5 text-content/85">{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <div className="mt-3"><KeyValueList rows={rows} /></div>
       {pr.issueKey ? (
         <p className="mt-1 text-[11.5px] leading-relaxed text-content/45">Found by the key in the {pr.branch.includes(pr.issueKey) ? 'branch name' : 'title or description'}.</p>
       ) : null}
 
       <div className="mt-4 flex items-center justify-between text-[12px]">
         <span className="font-medium text-content/70">Checks</span>
-        <StatusLabel tone={CHECK_TONE[checks.tone]} busy={checks.tone === 'pending'}>{checks.text}</StatusLabel>
+        <StatusText state={SUMMARY_STATE[checks.tone]} quiet={checks.tone === 'muted'}>{checks.text}</StatusText>
       </div>
-      {pr.checks.length ? (
-        <ul className="mt-1 flex flex-col text-[12px]">
-          {pr.checks.map((c, i) => {
-            const { icon: Icon, className } = CHECK_ICON[c.state];
-            const body = (
-              <>
-                <Icon aria-hidden className={cx('size-3.5 shrink-0', className)} strokeWidth={2} />
-                <span className="min-w-0 flex-1 truncate text-content/85">{c.name}</span>
-                <span className="shrink-0 text-[11px] text-content/40">{c.state}</span>
-              </>
-            );
-            return (
-              <li key={`${c.name}-${i}`}>
-                {c.url
-                  ? <a href={c.url} target="_blank" rel="noreferrer" className="flex h-7 items-center gap-2 rounded-md px-1 hover:bg-content/5">{body}</a>
-                  : <span className="flex h-7 items-center gap-2 px-1">{body}</span>}
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
+      {CHECK_ORDER.map(state => {
+        const group = pr.checks.filter(c => CHECK_STATE[c.state] === state);
+        if (!group.length) return null;
+        return (
+          <div key={state}>
+            <h4 className="mb-0.5 mt-2.5 flex items-center gap-2 px-1 text-[12px] font-normal text-content/55">
+              {statusWord(state)}
+              <span className="text-[10px] tabular-nums text-content/35">{group.length}</span>
+            </h4>
+            <ul className="flex flex-col text-[12px]">
+              {group.map((c, i) => {
+                const body = (
+                  <>
+                    <span className="grid h-7 w-5 shrink-0 place-items-center"><StatusMark state={state} /></span>
+                    <span className="min-w-0 flex-1 truncate text-content/85">{c.name}</span>
+                    {c.workflow ? <span className="shrink-0 text-[11px] text-content/40">{c.workflow}</span> : null}
+                  </>
+                );
+                return (
+                  <li key={`${c.name}-${i}`}>
+                    {isHttpUrl(c.url)
+                      ? <a href={c.url} target="_blank" rel="noreferrer" aria-label={`${c.name}: ${statusWord(state)}`} className="flex h-7 items-center gap-2 rounded-md px-1 hover:bg-content/5">{body}</a>
+                      : <span aria-label={`${c.name}: ${statusWord(state)}`} className="flex h-7 items-center gap-2 px-1">{body}</span>}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
 
       <div className="mt-4 text-[12px] font-medium text-content/70">Reviews</div>
       {pr.reviews.length ? (
@@ -246,7 +248,7 @@ function PrDetail({ pr, now }: { pr: PullRequest; now: number }) {
             <li key={r.author} className="flex h-7 items-center gap-2 px-1">
               <WhoAvatar name={r.author} />
               <span className="min-w-0 flex-1 truncate text-content/85">{r.author}</span>
-              <StatusLabel tone={REVIEW_WORD[r.state].tone}>{REVIEW_WORD[r.state].word}</StatusLabel>
+              <StatusText state={REVIEW[r.state].state}>{REVIEW[r.state].word}</StatusText>
             </li>
           ))}
         </ul>

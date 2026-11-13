@@ -7,6 +7,8 @@ import { normalizePr, type PrPageData, type PullRequest } from '../shared/prs.ts
 import { GhError, ghArgs } from './github.ts';
 
 export const PRS_CACHE_MS = 60_000;
+/** A refresh within this long of the last read gets that read: repeated clicks never stack up gh calls. */
+export const PRS_REFRESH_FLOOR_MS = 10_000;
 
 export interface PrSource {
   projects: () => Iterable<Project>;
@@ -16,6 +18,11 @@ export interface PrSource {
   /** Runs gh with read-only arguments (server/github.ts runGh). */
   gh: (args: string[]) => Promise<string>;
   now?: () => number;
+  /**
+   * Called with every fresh read from GitHub (not with cached answers), after the cache holds it.
+   * For listeners such as issue auto-close; a throw here is logged and never fails the read.
+   */
+  onRead?: (data: PrPageData) => void | Promise<void>;
 }
 
 /** The PodCode agent that worked on a branch: its worktree is on it, or the branch is agent/<name>/... */
@@ -40,10 +47,12 @@ export class PullRequests {
 
   /** Cached for PRS_CACHE_MS; `refresh` reads GitHub again. Two calls at once share one read. */
   async list(refresh = false): Promise<PrPageData> {
-    if (!refresh && this.cache && this.now() - this.cache.fetchedAt < PRS_CACHE_MS) return this.cache;
+    const age = this.cache ? this.now() - this.cache.fetchedAt : Infinity;
+    if (this.cache && age < (refresh ? PRS_REFRESH_FLOOR_MS : PRS_CACHE_MS)) return this.cache;
     if (this.inflight) return this.inflight;
     this.inflight = this.read().then(data => {
       this.cache = data;
+      if (!data.error) void Promise.resolve().then(() => this.source.onRead?.(data)).catch(err => console.error('[prs] onRead failed:', (err as Error).message));
       return data;
     }).finally(() => { this.inflight = null; });
     return this.inflight;
@@ -51,7 +60,8 @@ export class PullRequests {
 
   private async read(): Promise<PrPageData> {
     const projects = [...this.source.projects()];
-    const codes = projects.flatMap(p => (p.code ? [p.code] : []));
+    // ALL holds issues that belong to no project (Fen's NO_PROJECT_CODE), so ALL-12 links too.
+    const codes = [...projects.flatMap(p => (p.code ? [p.code] : [])), 'ALL'];
     const agents = [...this.source.agents()];
     const skipped: PrPageData['skipped'] = [];
     // Several projects can share a repo (two checkouts of one); read each repo once.
