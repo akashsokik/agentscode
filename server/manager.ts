@@ -339,7 +339,7 @@ export class AgentManager {
         this.runnerFor(this.agent(id)).send(text, task);
       },
       // Mail to the SuperAgent waits while it may not take a turn. Work you asked for (a conversation it
-      // began in a turn you gave it) waits only on the daily budget; the rest on every wake-up limit.
+      // began in a turn you gave any agent) ignores the caps; the rest waits on every wake-up limit.
       // Your own messages never go through here, so they never wait.
       hold: (id, message, conversation) => {
         if (id !== this.superId()) return null;
@@ -347,7 +347,8 @@ export class AgentManager {
         if (reason) this.watcher.noteHeld(message.id, reason);
         return reason;
       },
-      userTurn: id => this.store.agents.get(id)?.role === 'super' && this.store.agents.get(id)?.currentTask?.source === 'user',
+      // ALL-D2 applies to user turns given to any teammate, not only the SuperAgent.
+      userTurn: id => this.store.agents.get(id)?.currentTask?.source === 'user',
       changed: message => this.publishMessage(message),
       conversationChanged: conversation => this.hub.broadcast({ type: 'conversation', conversation }),
       inChannel: (channelId, agentId) => this.channels.isMember(channelId, agentId),

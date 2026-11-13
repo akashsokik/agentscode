@@ -615,7 +615,7 @@ export interface Conversation {
   stoppedBy?: 'user';
   createdAt: number;
   /**
-   * Started by the SuperAgent in a turn the user gave it (or from mail in such a conversation): work
+   * Started by any agent in a turn the user gave it (or from mail in such a conversation): work
    * the user asked for, whose mail never waits on the SuperAgent's wake-up limits.
    */
   userStarted?: boolean;
