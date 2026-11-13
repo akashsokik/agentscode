@@ -152,7 +152,7 @@ export const askUserInput = z.object({
   detail: z.string().trim().max(1500).optional(),
   options: z.array(z.string().trim().min(1).max(80)).min(1).max(4),
   /** The take_action step this asks to approve; the first option is the yes. Needed for ask-first steps. */
-  for_action: z.object({ kind: z.enum(['merge', 'restart', 'push', 'release', 'deploy', 'cleanup', 'project', 'costly', 'delete_data', 'outside_account', 'remove_user_agent', 'force_push', 'rewrite_history']), target: z.string().trim().min(1).max(200) }).optional(),
+  for_action: z.object({ kind: z.enum(['merge', 'restart', 'push', 'release', 'deploy', 'cleanup', 'project', 'costly', 'delete_data', 'outside_account', 'remove_user_agent', 'force_push', 'rewrite_history']), target: z.string().trim().min(1).max(200), task: z.string().trim().min(1).max(3000).optional() }).optional(),
 });
 const issueRef = z.string().trim().min(1).max(40);
 export const proposeRoutineInput = z.object({
@@ -189,6 +189,7 @@ export const takeActionInput = z.object({
   /** The id of the user's answered ask_user question, for what the Autonomy setting asks about first. */
   approved_ask_id: z.string().trim().min(1).max(100).optional(),
 });
+export type TakeActionInput = z.infer<typeof takeActionInput>;
 export const addIssueInput = z.object({
   text: z.string().trim().min(1).max(500),
   /** A project id or name; leave it out for an issue not tied to one. */

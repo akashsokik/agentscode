@@ -63,7 +63,7 @@ import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
 import {
   addIssueInput, agentCommandInput, proposeRoutineInput, askUserInput, completeIssueInput, updateIssueInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
-  SUPER_TOOLS, canonicalTool, takeActionInput, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
+  SUPER_TOOLS, canonicalTool, takeActionInput, type TakeActionInput, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool, decisionAddInput, noteAddInput, refGetInput, refSearchInput, LESSON_LIMIT,
   appScreenshotInput, EYES_TOOLS, runCheckInput, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
 } from './comms/tools.ts';
@@ -93,6 +93,7 @@ import { WorkOwners } from './workOwners.ts';
 import { listArchive, type ArchivedAgent } from './agentArchive.ts';
 import { mentionsBranch } from '../shared/work.ts';
 import { forbiddenGit, gatedVerbs } from '../shared/gitGuard.ts';
+import { installPushGuard, issueOverride } from './pushGuard.ts';
 import { readGit } from './work.ts';
 import { actionVerdict, ASK_FIRST_KEYS, autonomyInstructions, FULL_ACTIONS, NEEDS_BACKUP, SUPER_AUTONOMY, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
 
@@ -185,6 +186,8 @@ function createEngineRunner(ctx: RunnerContext): Runner {
 /** Owns agents, projects and the runners behind them; every change is persisted and broadcast. */
 /** How long the user's yes to an ask-first step stays good: a day (ALL-D9). */
 const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
+/** An approval is for one task text exactly: a hash of it, kept with the question. */
+const taskHash = (task: string | undefined) => (task?.trim() ? createHash('sha256').update(task.trim()).digest('hex').slice(0, 16) : '');
 
 export class AgentManager {
   private store: Store;
@@ -250,6 +253,8 @@ export class AgentManager {
     this.homes = new AgentHomes(path.join(store.dataDir, 'agents'));
     this.refs = new ProjectRefs(path.join(store.dataDir, 'projects'));
     this.notes = new NotesApi({ refs: this.refs, mentions: new RefMentions(store), projects: () => this.store.projects.values() });
+    // The force-push check every agent's git runs (ALL-D9); rewritten if a file was changed.
+    try { installPushGuard(path.join(store.dataDir, 'git-hooks')); } catch (err) { console.error('[push-guard] could not install:', (err as Error).message); }
     this.work = new WorkService(new MergeRecords(path.join(store.dataDir, 'work')), {
       owners: new WorkOwners(path.join(store.dataDir, 'work')),
       agents: () => [...this.store.agents.values()],
@@ -748,6 +753,8 @@ export class AgentManager {
 
   async update(id: string, patch: AgentPatch): Promise<Agent> {
     const agent = this.agent(id);
+    // A role you set counts as yours again (the SuperAgent's update_agent marks its own after this).
+    if (patch.role !== undefined && patch.role !== agent.role) delete agent.roleSetBy;
     const name = patch.name === undefined ? undefined : this.agentName(patch.name, id);
     if (patch.autonomy !== undefined && !AUTONOMIES.includes(patch.autonomy)) throw new HttpError(400, 'Unknown autonomy level.');
     if (patch.role !== undefined && !ROLES.some(r => r.id === patch.role) && !(agent.role === 'super' && patch.role === 'super')) throw new HttpError(400, 'Unknown agent role.');
@@ -1274,6 +1281,8 @@ export class AgentManager {
       const parsed = postInput.safeParse(args);
       if (!parsed.success) throw new HttpError(400, 'Provide a channel id or name, 1 to 10,000 characters of text, and member ids to mention.');
       const input = parsed.data;
+      // The SuperAgent's posts: the shared-history warning always; paused, no mentions that start agents.
+      if (isSuper) this.superHandoffGate(agent, input.text, input.mention_agent_ids.length > 0);
       if (agent.autonomy === 'readonly' && !isSuper && input.mention_agent_ids.length) {
         throw new HttpError(403, 'Plan-only agents can post findings, but need the user\'s approval before starting teammates. Post without mentions.');
       }
@@ -1317,6 +1326,8 @@ export class AgentManager {
     }
     const parsed = replyInput.safeParse(args);
     if (!parsed.success) throw new HttpError(400, `Provide the message ID and 1 to 10,000 characters of text, and a lesson of up to ${LESSON_LIMIT} if any.`);
+    // The SuperAgent's replies: the shared-history warning always; paused, none that start a turn (expects_reply).
+    if (isSuper) this.superHandoffGate(agent, parsed.data.text, parsed.data.expects_reply === true);
     const original = this.store.messages.find(m => m.id === parsed.data.message_id);
     let text = parsed.data.text;
     let lesson: ReturnType<AgentManager['prepareLesson']> | undefined;
@@ -1692,8 +1703,9 @@ export class AgentManager {
     const settings = this.store.settings;
     const forUser = caller.currentTask?.source === 'user' || this.inUserWorkMail(caller.id);
     if (!forUser && settings.superPaused) throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
-    // Shared history, at every level and for every kind: refused in the task and in the undo alike.
-    const rewrite = forbiddenGit(`${input.task ?? ''}\n${input.undo ?? ''}`);
+    // Shared history: rewrite_history never; other kinds get an early warning from the text (the
+    // push check every agent's git runs is the real gate). A force_push the user approved is the one exception.
+    const rewrite = kind === 'force_push' && input.approved_ask_id ? null : forbiddenGit(`${input.task ?? ''}\n${input.undo ?? ''}`);
     if (kind === 'rewrite_history' || rewrite) throw new HttpError(403, `${rewrite ? `That asks for ${rewrite}. ` : ''}Rewriting or force-pushing shared history (main, tags, a pushed branch) is never allowed, at any Autonomy level. Find another way, such as a revert commit.`);
     // Costly work stays within the daily budget (ALL-D2), on Full too.
     if (kind === 'costly' && !forUser && this.watcher.dailyHeld()) throw new HttpError(409, 'Today\'s budget is used. Costly work you start on your own waits for tomorrow, or ask the user.');
@@ -1706,14 +1718,27 @@ export class AgentManager {
     if (verdict === 'ask') {
       approval = this.superView().asks.find(a => a.id === input.approved_ask_id);
       const why = !input.approved_ask_id || !approval ? 'no approved_ask_id given'
-        : !approval.forAction || approval.forAction.kind !== kind || approval.forAction.target.toLowerCase() !== subject.toLowerCase() ? `that question was not for ${kind} of "${subject}" (ask_user with for_action {kind: "${kind}", target: "${subject}"})`
+        : !approval.forAction || approval.forAction.kind !== kind || approval.forAction.target.toLowerCase() !== subject.toLowerCase() ? `that question was not for ${kind} of "${subject}" (ask_user with for_action {kind: "${kind}", target: "${subject}", task})`
+        : (approval.forAction.taskHash ?? '') !== taskHash(input.task) ? 'the task is not the one the user approved (ask again with this task)'
         : approval.answeredAt === undefined ? 'the user has not answered it yet'
-        : approval.dismissed || approval.answer !== approval.options[0] ? 'the user did not choose its first (yes) option'
-        : approval.consumedAt !== undefined ? 'that approval was used already'
+        : approval.dismissed || approval.answer !== approval.options[0] ? 'the user did not choose Yes'
+        : approval.consumedAt !== undefined || this.reservedAsks.has(approval.id) ? 'that approval was used already'
         : Date.now() - approval.answeredAt > APPROVAL_TTL_MS ? 'that approval is over a day old'
         : null;
-      if (why) throw new HttpError(409, `Your Autonomy setting (${settings.superAutonomy}) asks the user first for ${kind.replace('_', ' ')}: ${why}. Ask with ask_user (for_action set, the yes as the first option), then call take_action again with approved_ask_id.`);
+      if (why) throw new HttpError(409, `Your Autonomy setting (${settings.superAutonomy}) asks the user first for ${kind.replace('_', ' ')}: ${why}. Ask with ask_user (for_action set; PodCode adds the Yes and No), then call take_action again with approved_ask_id.`);
+      // Reserved now, before anything waits, so two calls cannot both use it; given back if this one fails.
+      this.reservedAsks.add(approval!.id);
     }
+    try {
+      return await this.takeApprovedAction(caller, input, kind, verdict as 'act' | 'ask', forUser, target, approval);
+    } finally {
+      if (approval) this.reservedAsks.delete(approval.id);
+    }
+  }
+
+  /** take_action past its policy check: the step's own checks, then the hand-off and the log. */
+  private async takeApprovedAction(caller: Agent, input: TakeActionInput, kind: ActionKind, verdict: 'act' | 'ask', forUser: boolean, target: Agent, approval: SuperAsk | undefined): Promise<unknown> {
+    const settings = this.store.settings;
     const project = input.project ? this.projectRef(input.project) : undefined;
     if (kind === 'merge') {
       if (!input.branch || !input.commit || !project) throw new HttpError(400, 'A merge names its project, branch and the exact commit the reviewer passed.');
@@ -1721,19 +1746,36 @@ export class AgentManager {
       if (!tip.ok) throw new HttpError(409, `There is no branch ${input.branch} in ${project.name}.`);
       if (!tip.out.trim().toLowerCase().startsWith(input.commit.toLowerCase())) throw new HttpError(409, `${input.branch} is at ${tip.out.trim().slice(0, 7)} now, not ${input.commit.slice(0, 7)}: it changed since the review. Have the new commits reviewed first.`);
       const short = input.commit.slice(0, 7).toLowerCase();
+      // Only a passing answer to a review request for this branch and commit, from a reviewer you
+      // made whose role the SuperAgent did not set on its own.
       const passed = this.store.messages.some(m => {
         const from = this.store.agents.get(m.fromAgentId);
-        if (!m.report || m.report.outcome !== 'passed' || from?.role !== 'reviewer' || from.createdBy === 'super') return false;
-        const text = `${m.text}\n${m.report.summary}\n${m.report.evidence ?? ''}`;
-        return mentionsBranch(text, input.branch!) && text.toLowerCase().includes(short);
+        if (!m.report || m.report.outcome !== 'passed' || from?.role !== 'reviewer' || from.createdBy === 'super' || from.roleSetBy === 'super') return false;
+        const request = this.store.messages.find(r => r.id === m.replyTo);
+        if (!request?.delegation || request.delegation.kind !== 'review') return false;
+        const asked = `${request.delegation.task}\n${request.delegation.acceptanceCriteria}\n${request.delegation.context ?? ''}`;
+        const said = `${m.text}\n${m.report.summary}\n${m.report.evidence ?? ''}`;
+        return mentionsBranch(asked, input.branch!) && mentionsBranch(said, input.branch!) && `${asked}\n${said}`.toLowerCase().includes(short);
       });
       if (!passed) throw new HttpError(409, `No reviewer you made has passed ${input.branch} at ${short} yet. Send that commit to a reviewer first; merge after a passing report that names the branch and the commit.`);
     }
     if (NEEDS_BACKUP.includes(kind)) {
       if (!input.backup) throw new HttpError(400, 'Name the backup (a ref in the project, or an existing path) before anything is removed.');
-      const asPath = path.isAbsolute(input.backup) && fs.existsSync(input.backup);
-      const asRef = !asPath && project ? (await readGit(['rev-parse', '--verify', '--quiet', `${input.backup}^{commit}`], project.path)).ok : false;
-      if (!asPath && !asRef) throw new HttpError(400, `The backup "${input.backup}" does not exist${project ? ` in ${project.name}` : ' (name the project for a ref)'}. Make it first.`);
+      const backup = input.backup.trim();
+      // A path: an existing folder or file under a backups folder, never / or a home folder itself.
+      const resolved = path.isAbsolute(backup) ? path.resolve(backup) : '';
+      const asPath = Boolean(resolved) && fs.existsSync(resolved) && resolved.split(path.sep).some(part => /backup/i.test(part));
+      if (!asPath) {
+        // A ref: a backup/* branch or tag in the project that holds the target commit.
+        if (!project) throw new HttpError(400, 'Name the project, so the backup ref can be checked there.');
+        if (!/^(refs\/(heads|tags)\/)?backup\/[\w./-]+$/.test(backup) || backup === input.branch) throw new HttpError(400, `The backup must be a backup/… ref (or a path in a backups folder), not "${backup}".`);
+        const targetRef = input.commit ?? (input.branch ? `refs/heads/${input.branch}` : null);
+        if (!targetRef) throw new HttpError(400, 'Name the branch or commit being removed, so the backup can be checked to hold it.');
+        const exists = await readGit(['rev-parse', '--verify', '--quiet', `${backup}^{commit}`], project.path);
+        if (!exists.ok) throw new HttpError(400, `The backup "${backup}" does not exist in ${project.name}. Make it first.`);
+        const holds = await readGit(['merge-base', '--is-ancestor', targetRef, backup], project.path);
+        if (!holds.ok) throw new HttpError(400, `The backup "${backup}" does not hold ${input.commit ?? input.branch}. Make it from that commit first.`);
+      }
     }
     if (verdict === 'act' && FULL_ACTIONS.some(a => a.kind === kind) && !input.undo && !input.no_undo) {
       throw new HttpError(400, 'Say how to undo it (undo), or why it cannot be undone (no_undo).');
@@ -1745,7 +1787,13 @@ export class AgentManager {
       receipt = { removed: { id: target.id, name: target.name } };
     } else {
       if (!input.task) throw new HttpError(400, 'Give the task: what the agent should do, step by step.');
-      const criteria = `Do exactly this ${kind.replace('_', ' ')} step and report_result with evidence (commands and their output).${input.backup ? ` Backup: ${input.backup}.` : ''} Never rewrite or force-push shared history.`;
+      // A force-push the user approved: one token, good for one push, which PodCode's push check accepts.
+      // Only from your yes to this exact push: with the switch off it acts without a token, so the
+      // push check still refuses overwriting anything already pushed (a new branch needs none).
+      const override = kind === 'force_push' && verdict === 'ask' && approval ? issueOverride() : null;
+      const criteria = override
+        ? `Do exactly this push, once, with PODCODE_PUSH_OVERRIDE=${override} in its environment (it works for one push only), and report_result with evidence (commands and their output).`
+        : `Do exactly this ${kind.replace('_', ' ')} step and report_result with evidence (commands and their output).${input.backup ? ` Backup: ${input.backup}.` : ''} Pushes that overwrite or delete pushed history are refused by PodCode's push check.`;
       receipt = this.mailbox.delegate(caller.id, target.id, { kind: 'implementation', task: input.task, acceptanceCriteria: criteria, context: input.why });
     }
     const entry = this.recordSuper({
@@ -1764,11 +1812,11 @@ export class AgentManager {
    * paused, nothing of its own goes; a shared-history rewrite is refused at every level; gated steps
    * they mention are returned so Decisions shows them (ALL-D9).
    */
-  private superHandoffGate(caller: Agent, text: string): { gated: string[]; forUser: boolean } {
+  private superHandoffGate(caller: Agent, text: string, startsWork = true): { gated: string[]; forUser: boolean } {
     const forUser = caller.currentTask?.source === 'user' || this.inUserWorkMail(caller.id);
-    if (!forUser && this.store.settings.superPaused) throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
+    if (startsWork && !forUser && this.store.settings.superPaused) throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
     const rewrite = forbiddenGit(text);
-    if (rewrite) throw new HttpError(403, `That asks for ${rewrite}. Rewriting or force-pushing shared history is never allowed, at any Autonomy level, in any task you send.`);
+    if (rewrite) throw new HttpError(403, `That asks for ${rewrite}. Rewriting or force-pushing shared history is never allowed, at any Autonomy level; agents' pushes that would do it are refused by PodCode's push check too.`);
     return { gated: gatedVerbs(text), forUser };
   }
 
@@ -1777,6 +1825,9 @@ export class AgentManager {
     if (!gate.gated.length) return {};
     return { gated: gate.gated, ...(!gate.forUser ? { autonomy: this.store.settings.superAutonomy } : {}) };
   }
+
+  /** Approvals a take_action is using right now (M1): never two at once. */
+  private reservedAsks = new Set<string>();
 
   /** An agent the SuperAgent names by id or name; never itself, for commands that act on an agent. */
   private teammate(ref: unknown): Agent {
@@ -1828,7 +1879,16 @@ export class AgentManager {
       const parsed = askUserInput.safeParse(args);
       if (!parsed.success) return fail('Ask one question of up to 300 characters, with 1 to 4 options of up to 80 characters each.');
       const { for_action: forAction, ...question } = parsed.data;
-      const ask = this.superStore.ask({ ...question, ...(forAction ? { forAction } : {}) });
+      // A step's approval: PodCode writes the choices, so the yes is always first and plain, and
+      // the approval holds only for this task text (its hash), which the question shows.
+      const ask = forAction
+        ? this.superStore.ask({
+          question: question.question,
+          detail: [question.detail, forAction.task ? `The task, exactly:\n${forAction.task}` : ''].filter(Boolean).join('\n\n'),
+          options: [clip(`Yes, ${forAction.kind.replace('_', ' ')} ${forAction.target}`, 80), 'No'],
+          forAction: { kind: forAction.kind, target: forAction.target, taskHash: taskHash(forAction.task), ...(forAction.task ? { task: forAction.task } : {}) },
+        })
+        : this.superStore.ask(question);
       this.publishSuper();
       return { asked: ask, note: 'The user sees it in PodCode; their answer arrives as a later turn. Do not wait or ask again.' };
     }
@@ -1912,8 +1972,12 @@ export class AgentManager {
       if (!parsed.success) return fail('Give the agent and what to change (name, role, model or effort), and a why.');
       const input = parsed.data;
       const agent = this.teammate(input.agent_id);
+      // Paused: nothing of its own, not even a change to an agent (ALL-D9).
+      if (this.store.settings.superPaused && caller.currentTask?.source !== 'user' && !this.inUserWorkMail(caller.id)) throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
       const before = { name: agent.name, role: agent.role, model: agent.model, effort: agent.effort };
       await this.update(agent.id, { ...(input.name ? { name: input.name } : {}), ...(input.role ? { role: input.role } : {}), ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {}) });
+      // A role it gave (a reviewer, say) does not count for the merge gate: only roles you set do.
+      if (input.role && input.role !== before.role) { agent.roleSetBy = 'super'; this.store.save(); }
       const changes = [input.name && `name ${before.name} to ${agent.name}`, input.role && `role to ${rolePreset(agent.role).name}`, input.model !== undefined && `model to ${agent.model || 'default'}`, input.effort !== undefined && `effort to ${agent.effort || 'default'}`].filter(Boolean);
       this.recordSuper({ tool, why: input.why, undo: { kind: 'agent', agentId: agent.id, before }, summary: `Changed ${agent.name}: ${changes.join(', ') || 'nothing'}` });
       return { updated: { id: agent.id, name: agent.name, role: agent.role, model: agent.model, effort: agent.effort } };

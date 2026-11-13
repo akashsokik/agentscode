@@ -61,6 +61,8 @@ export interface Agent {
   name: string;
   /** 'super': the SuperAgent made it on its own, not for work you asked for. Absent: yours (or made for your work). */
   createdBy?: 'super';
+  /** 'super': the SuperAgent set its current role on its own; that role does not count for the merge gate. */
+  roleSetBy?: 'super';
   engine: EngineKind;
   /** How it looks in the app (shared/avatar.ts); absent, it comes from the id. */
   avatar?: AvatarLook;
@@ -229,7 +231,7 @@ export interface SuperAsk {
   /** The user put it aside without answering. */
   dismissed?: boolean;
   /** The step it asks to approve (take_action kind and target): its first option is the yes. */
-  forAction?: { kind: string; target: string };
+  forAction?: { kind: string; target: string; taskHash?: string; task?: string };
   /** An approval is used once: when, and by which logged step. */
   consumedAt?: number;
   consumedBy?: string;

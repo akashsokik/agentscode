@@ -277,10 +277,15 @@ test('the edit guard is registered in every permission mode and denies soul.md i
     await settle(10);
     assert.equal(captured.options!.permissionMode, mode, autonomy);
     const matchers = (captured.options!.hooks as { PreToolUse?: HookCallbackMatcher[] } | undefined)?.PreToolUse ?? [];
-    assert.equal(matchers.length, 1, `${autonomy}: registered`);
-    assert.equal(matchers[0].matcher, 'Write|Edit|MultiEdit|NotebookEdit');
+    const edits = matchers.find(m => m.matcher === 'Write|Edit|MultiEdit|NotebookEdit');
+    assert.ok(edits, `${autonomy}: registered`);
+    // The push check (ALL-D9) sits beside it, in every mode too: turning it off is refused.
+    const bash = matchers.find(m => m.matcher === 'Bash');
+    assert.ok(bash, `${autonomy}: push check registered`);
+    const shell = await bash!.hooks[0]({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push --no-verify -f origin main' }, tool_use_id: 't', session_id: 's', transcript_path: '', cwd: `${agent.home}/workspace` } as never, 't', { signal: new AbortController().signal });
+    assert.equal((shell as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput?.permissionDecision, 'deny', `${autonomy}: --no-verify refused`);
     const decide = async (tool: string, file: string) => {
-      const out = await matchers[0].hooks[0]({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: { file_path: file, notebook_path: file }, tool_use_id: 't', session_id: 's', transcript_path: '', cwd: `${agent.home}/workspace` } as never, 't', { signal: new AbortController().signal });
+      const out = await edits!.hooks[0]({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: { file_path: file, notebook_path: file }, tool_use_id: 't', session_id: 's', transcript_path: '', cwd: `${agent.home}/workspace` } as never, 't', { signal: new AbortController().signal });
       return (out as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput?.permissionDecision ?? 'allow';
     };
     for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) assert.equal(await decide(tool, `${agent.home}/soul.md`), 'deny', `${autonomy} ${tool}`);

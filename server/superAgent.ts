@@ -275,7 +275,7 @@ export class SuperStore {
     return this.read().asks.filter(isOpen);
   }
 
-  ask(input: { question: string; detail?: string; options: string[]; forAction?: { kind: string; target: string } }, now = Date.now()): SuperAsk {
+  ask(input: { question: string; detail?: string; options: string[]; forAction?: SuperAsk['forAction'] }, now = Date.now()): SuperAsk {
     const stored = this.read();
     const open = stored.asks.filter(isOpen);
     if (open.length >= MAX_OPEN_ASKS) throw new HttpError(409, `${MAX_OPEN_ASKS} questions already wait for the user. Wait for answers before asking more.`);
@@ -284,7 +284,7 @@ export class SuperStore {
     const ask: SuperAsk = {
       id: randomUUID().slice(0, 8), question, ...(input.detail?.trim() ? { detail: input.detail.trim() } : {}),
       options: [...new Set(input.options.map(o => o.trim()).filter(Boolean))], createdAt: now,
-      ...(input.forAction ? { forAction: { kind: input.forAction.kind, target: input.forAction.target.trim() } } : {}),
+      ...(input.forAction ? { forAction: { ...input.forAction, target: input.forAction.target.trim() } } : {}),
     };
     this.write({ ...stored, asks: [ask, ...stored.asks] });
     return ask;
