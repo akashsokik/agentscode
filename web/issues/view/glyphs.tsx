@@ -3,7 +3,9 @@
  * progress (half) and In review (three quarters), the dashed circle for Backlog, an empty ring for
  * Todo, a clock for Waiting, a circled alert for Needs you; Done and Canceled as the shared
  * StatusMark's circled check and minus (ACH-D45). Priority option A: signal bars with the unlit
- * ones dimmed, a "no signal" mark for none, an alert square for urgent.
+ * ones dimmed, a "no signal" mark for none, an alert square for urgent (red, as Fen's set).
+ * Stand-ins: once Fen's feat/issues-page (3656abb) and this branch are both on main, these render
+ * StatusIcon and PriorityIcon from web/issues/issueParts.tsx, so there is one map.
  *
  * Stand-ins: these move to web/mono/icons (Fen, phase 3) and StatusMark (Cy, feat/pr-page). The
  * view imports only from here, so the swap is one file. Same 16px grid and 1.75 stroke as the
@@ -32,7 +34,7 @@ export function StatusGlyph({ status, className, title }: GlyphProps & { status:
     case 'todo': return <svg {...props}><circle cx="8" cy="8" r="5.6" /></svg>;
     case 'in_progress': return <svg {...props}><circle cx="8" cy="8" r="5.6" /><path d="M8 4.4a3.6 3.6 0 0 1 0 7.2Z" fill="currentColor" stroke="none" /></svg>;
     case 'in_review': return <svg {...props}><circle cx="8" cy="8" r="5.6" /><path d="M8 4.4A3.6 3.6 0 1 1 4.4 8H8Z" fill="currentColor" stroke="none" /></svg>;
-    case 'waiting': return <svg {...props}><circle cx="8" cy="8" r="5.6" /><path d="M8 5.3V8l1.8 1.2" /></svg>;
+    case 'waiting': return <svg {...props}><path d="M6 4.5v7M10 4.5v7" /></svg>; // Pause, as Fen's approved set (ACH-D46 A)
     case 'needs_you': return <svg {...props}><circle cx="8" cy="8" r="5.6" /><path d="M8 5.2v3.3M8 10.7v.1" /></svg>;
     case 'done': return <svg {...props}><circle cx="8" cy="8" r="5.6" /><path d="m5.6 8.2 1.7 1.7 3.2-3.4" /></svg>;
     case 'canceled': return <svg {...props}><circle cx="8" cy="8" r="5.6" /><path d="M5.6 8h4.8" /></svg>;
@@ -42,7 +44,7 @@ export function StatusGlyph({ status, className, title }: GlyphProps & { status:
 /** Priority option A: bars lit up to the level, the rest dimmed; none and urgent their own marks. */
 export function PriorityGlyph({ priority, className, title }: GlyphProps & { priority: IssuePriority }) {
   if (priority === 'urgent') {
-    return <svg {...base(`text-warning ${className ?? 'size-3.5'}`, title)}><rect x="2.5" y="2.5" width="11" height="11" rx="2.5" /><path d="M8 5.2v3.3M8 10.7v.1" /></svg>;
+    return <svg {...base(`text-danger ${className ?? 'size-3.5'}`, title)}><rect x="2.5" y="2.5" width="11" height="11" rx="2.5" /><path d="M8 5.2v3.3M8 10.7v.1" /></svg>;
   }
   if (priority === 'none') {
     return <svg {...base(`text-content/40 ${className ?? 'size-3.5'}`, title)}><path d="M3.5 8h1.5M7.25 8h1.5M11 8h1.5" /></svg>;
