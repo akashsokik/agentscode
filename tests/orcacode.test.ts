@@ -131,12 +131,14 @@ function runnerFor(dir: string, agent: Agent, approve: (request: ApprovalRequest
   const entries: Entry[] = [];
   const approvals: ApprovalRequest[] = [];
   const contexts: { used?: number; window?: number }[] = [];
+  let onReady: (() => void) | undefined;
   const hooks: RunnerHooks = {
     session: id => { agent.sessionId = id; },
     entry: entry => { entries.push(entry as Entry); },
     activity: () => {}, turnStart: () => {}, closed: () => {},
     context: reading => { contexts.push(reading); },
     turnEnd: result => { results.push(result); },
+    ready: () => onReady?.(),
     approval: async request => { approvals.push(request); return { allow: approve(request) }; },
   };
   const runner = new OrcacodeRunner({
@@ -145,8 +147,21 @@ function runnerFor(dir: string, agent: Agent, approve: (request: ApprovalRequest
     cwd: dir, binPath: fakeOrcacode(dir), hooks, commsToken: 'tok-1',
   });
   const turn = async (text: string) => {
-    runner.send(text);
-    for (let i = 0; i < 300 && runner.busy; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    const completed = Promise.withResolvers<void>();
+    onReady = completed.resolve;
+    // Completion comes from the child's ready hook, after its output and result are handled.
+    // This generous watchdog only detects a hung fixture; suite load must not end the wait early.
+    const watchdog = setTimeout(() => {
+      runner.close();
+      completed.reject(new Error('Fake OrcaCode did not become ready within 30 seconds.'));
+    }, 30_000);
+    try {
+      runner.send(text);
+      await completed.promise;
+    } finally {
+      clearTimeout(watchdog);
+      onReady = undefined;
+    }
   };
   const run = () => JSON.parse(fs.readFileSync(path.join(dir, 'run.json'), 'utf8')) as { args: string[]; prompt: string; mcp: string | null };
   return { runner, results, entries, approvals, contexts, turn, run };
