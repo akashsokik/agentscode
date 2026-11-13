@@ -103,7 +103,8 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
   }
   if (c.kind === 'issue') {
     const issue = snapshot?.super.issues.find(i => i.id === c.issueId);
-    return { icon: issue ? <StatusGlyph status={issue.status} /> : <CircleDashed className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: issue ? `${issue.key} ${issue.title}` : 'Issue', meta: issue ? 'Issue' : 'Removed' };
+    // A removed issue's tab: the dashed circle in Cy's GONE_ICON tone (ACH-D48); it becomes GONE_ICON on merge.
+    return { icon: issue ? <StatusGlyph status={issue.status} /> : <CircleDashed className="size-3.5 shrink-0 text-content/40" strokeWidth={1.75} />, headline: issue ? `${issue.key} ${issue.title}` : 'Issue', meta: issue ? 'Issue' : 'Removed' };
   }
   if (c.kind === 'work') {
     return { icon: <GitBranch className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: 'Work', meta: 'Branches, merges and cleanup' };
