@@ -52,9 +52,11 @@ function IssueBody({ issue, issues, projectName, chrome, sidebar }: { issue: Sup
   );
   return (
     <PaneFrame chrome={chrome} title={title}>
+      {/* The container the layout below asks about (a container query cannot ask its own element). */}
+      <div className="@container/issueview flex min-h-0 flex-1 flex-col">
       <div
         // A narrow pane stacks the properties under the body rather than squeezing it (ACH-23).
-        className="@container/issueview flex min-h-0 flex-1 flex-col overflow-y-auto @min-[44rem]/issueview:flex-row @min-[44rem]/issueview:overflow-hidden"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto @min-[44rem]/issueview:flex-row @min-[44rem]/issueview:overflow-hidden"
         onKeyDown={e => {
           const property = propertyKey(e, e.target);
           if (!property) return;
@@ -90,6 +92,7 @@ function IssueBody({ issue, issues, projectName, chrome, sidebar }: { issue: Sup
         <div className="shrink-0 border-t border-content/7 px-5 pb-8 pt-6 @min-[44rem]/issueview:w-[320px] @min-[44rem]/issueview:overflow-y-auto @min-[44rem]/issueview:border-l @min-[44rem]/issueview:border-t-0">
           <PropertySidebar ref={sidebar} issue={issue} issues={issues} />
         </div>
+      </div>
       </div>
     </PaneFrame>
   );

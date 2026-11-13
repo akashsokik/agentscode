@@ -166,8 +166,8 @@ export function IssueInboxDetail({ issue, issues, now, sidebar, onBack }: {
           <Relations issue={issue} issues={issues} />
           <InGit issue={issue} links={links} />
           <Decisions links={links} />
-          <Activity issue={issue} />
         </div>
+        <Activity issue={issue} embedded />
       </div>
     </InboxDetail>
   );

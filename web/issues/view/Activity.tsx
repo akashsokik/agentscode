@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { Kbd } from '../../ui/Kbd.tsx';
 import { TEXTAREA, TextButton } from '../../ui/common.tsx';
 import { Section } from './Sections.tsx';
+import { InboxSection, TimelineStop } from '../../ui/Inbox.tsx';
 import type { IssueStatus } from '../../../shared/types.ts';
 import { ISSUE_STATUS_LABEL } from '../../../shared/issues.ts';
 import { StatusIcon } from '../issueParts.tsx';
@@ -31,36 +32,43 @@ function Who({ actor }: { actor: IssueActor }) {
   return <span aria-hidden className="grid size-4 shrink-0 place-items-center rounded-full bg-content/10 text-[9px] font-semibold text-content/60">{actor.kind === 'user' ? 'Y' : 'P'}</span>;
 }
 
-function EventRow({ event }: { event: IssueEvent }) {
+function EventRow({ event, first, last }: { event: IssueEvent; first: boolean; last: boolean }) {
   const agents = useApp(s => s.snapshot?.agents) ?? [];
   const name = (id: string) => agents.find(a => a.id === id)?.name;
   const issues = useApp(s => s.snapshot?.super.issues) ?? [];
   const issueKey = (id: string) => issues.find(i => i.id === id)?.key;
   const status = event.kind === 'status' && event.to && event.to in ISSUE_STATUS_LABEL ? event.to as IssueStatus : null;
+  // A stop on the shared timeline (Comms' TimelineStop, ACH-36): the mark on the rail, the line beside it.
   return (
-    <li className="font-sans">
-      <div className="flex min-h-[30px] items-center gap-2 text-[12.5px]">
-        {status ? <StatusIcon status={status} /> : <Who actor={event.by} />}
+    <TimelineStop first={first} last={last} node={status ? <StatusIcon status={status} /> : <Who actor={event.by} />}>
+      <div className="flex h-5 min-w-0 items-center gap-2 font-sans text-[12.5px]">
         <p className="min-w-0 flex-1 truncate text-content/60"><span className="font-medium text-content/85">{actorName(event.by, name)}</span> {activityLine(event, name, issueKey)}</p>
         <time dateTime={new Date(event.at).toISOString()} title={new Date(event.at).toLocaleString()} className="shrink-0 text-[11.5px] tabular-nums text-content/40">{when(event.at)}</time>
       </div>
       {event.kind === 'comment' && event.text ? (
-        <div className="mb-1 ml-6 rounded-lg bg-content/4 px-3 py-2">
+        <div className="mt-1.5 rounded-lg bg-content/4 px-3 py-2">
           <Markdown inert text={event.text} className="text-[12.5px] leading-relaxed text-content/80" />
         </div>
       ) : null}
-    </li>
+    </TimelineStop>
   );
 }
 
-export function Activity({ issue }: { issue: SuperIssue }) {
+/**
+ * The activity and its comment box. On the Issues page (`embedded`) it is one of the detail's
+ * InboxSections, as Comms' Activity; the issue tab keeps the section header its other sections use.
+ */
+export function Activity({ issue, embedded = false }: { issue: SuperIssue; embedded?: boolean }) {
   const events = activityOf(issue);
-  return (
-    <Section icon={Clock} title="Activity">
-      <ol aria-label="Activity">{events.map((e, i) => <EventRow key={`${e.at}:${i}`} event={e} />)}</ol>
+  const body = (
+    <>
+      <ol aria-label="Activity" className="flex flex-col">
+        {events.map((e, i) => <EventRow key={`${e.at}:${i}`} event={e} first={i === 0} last={i === events.length - 1} />)}
+      </ol>
       <CommentBox issueId={issue.id} />
-    </Section>
+    </>
   );
+  return embedded ? <InboxSection title="Activity" count={events.length || undefined}>{body}</InboxSection> : <Section icon={Clock} title="Activity">{body}</Section>;
 }
 
 /** A comment on the issue: Markdown, line breaks kept. ⌘⏎ posts; it clears once posted, and stays on a refusal. */

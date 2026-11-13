@@ -324,7 +324,8 @@ test('Hal\'s audit: focus follows the selection to the detail when a narrow pane
   assert.match(page, /querySelector<HTMLElement>\('\[data-issue-detail\]'\)\?\.focus\(/, 'else the detail');
   assert.match(read('../web/issues/IssueInbox.tsx'), /data-issue-detail\s+tabIndex=\{-1\}/);
   const view = read('../web/issues/IssueView.tsx');
-  assert.match(view, /@container\/issueview flex min-h-0 flex-1 flex-col/, 'stacked below 44rem');
+  assert.match(view, /<div className="@container\/issueview flex min-h-0 flex-1 flex-col">\s*<div\b/, 'the container is a wrapper: a container query cannot ask its own element');
+  assert.match(view, /className="flex min-h-0 flex-1 flex-col overflow-y-auto @min-\[44rem\]\/issueview:flex-row/, 'stacked below 44rem, side by side above');
   assert.match(view, /onClick=\{\(\) => showIssueInList\(parent\.id\)\}/, 'the parent crumb selects on the Issues page, no new tab');
 });
 
@@ -338,4 +339,19 @@ test('In git reads loading, failed and found-nothing apart: only a server read s
   assert.equal(linksStatus({ id: 'a', links: local, failed: false }, 'a'), 'failed', 'the server did not answer: the local stand-in is not a read');
   assert.equal(linksStatus({ id: 'a', links: null, failed: true }, 'a'), 'failed', 'rejected');
   assert.equal(linksStatus({ id: 'a', links: server, failed: true }, 'a'), 'ready', 'a failed refresh keeps the last read');
+});
+
+test('the issue view sections sit on the shared primitives, with no hand-built copies (ACH-36)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const sections = read('../web/issues/view/Sections.tsx');
+  assert.match(sections, /<Segmented label="Relation"/, 'the relation chooser is the settings\' Segmented');
+  assert.doesNotMatch(sections, /role="radiogroup"|role="radio"/, 'no hand-built radio row left');
+  assert.match(sections, /<KeyValueList\s+labelWidth="6rem"/, 'In git is the shared label/value list');
+  assert.doesNotMatch(sections, /w-24 shrink-0 text-content\/45">(Branch|Closes)/, 'no hand-built label column left in In git');
+  const activity = read('../web/issues/view/Activity.tsx');
+  assert.match(activity, /<TimelineStop first=\{first\} last=\{last\}/, 'each event is a stop on the shared timeline');
+  assert.match(activity, /embedded \? <InboxSection title="Activity"/, 'an InboxSection on the Issues page; the issue tab keeps its section header');
+  assert.match(read('../web/issues/IssueInbox.tsx'), /<Activity issue=\{issue\} embedded \/>/);
+  assert.match(read('../web/ui/KeyValueList.tsx'), /<dt className="[^"]*self-start/, 'a label stays on the first line of a value of several lines');
 });
