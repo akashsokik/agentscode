@@ -3,7 +3,7 @@ import { ISSUE_PRIORITIES, ISSUE_PRIORITY_LABEL, ISSUE_STATUSES, ISSUE_STATUS_LA
 import type { IssuePriority, IssueStatus, SuperIssue } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { relativeTime } from '../format.ts';
-import { AlertSquare, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleAlert, CircleDashed, CircleHalf, CircleThreeQuarter, Copy, Minus, NoSignal, Pause, SignalHigh, SignalLow, SignalMedium, Trash2 } from '../mono/icons.tsx';
+import { AlertSquare, CheckCircle, ChevronLeft, ChevronRight, Circle, CircleAlert, CircleDashed, CircleHalf, CircleThreeQuarter, Copy, Maximize2, Minus, NoSignal, Pause, SignalHigh, SignalLow, SignalMedium, Trash2 } from '../mono/icons.tsx';
 import { LAYER } from '../mono/layers.ts';
 import { StatusMark } from '../ui/StatusMark.tsx';
 import { STATUS_MARKS, type StatusState } from '../ui/statusMarks.ts';
@@ -14,6 +14,7 @@ import { attempt, useApp } from '../store.ts';
 import { cx, MenuDivider, MenuLabel, MenuRow, MenuRowRole } from '../ui/common.tsx';
 import { PanelRow } from '../ui/PanelList.tsx';
 import { dueBucket, type RowProperty } from './issuesView.ts';
+import { openIssue } from './openIssue.ts';
 
 // The pieces an issue is drawn with, shared by the Issues page and (phase 4) the right panel's list.
 
@@ -100,15 +101,16 @@ export function assigneeName(issue: SuperIssue, agentName: string | undefined): 
 /**
  * One issue on one wide line: status, title, then (as the Display chooses) key, priority, labels,
  * project, due date, assignee and when it last changed. The narrower the page, the fewer of these
- * show (container `issues`); the full text is in the row's tooltip.
+ * show (container `issues`); the full text is in the row's tooltip. A click, Enter or Open opens
+ * the issue view in a tab (openIssue): the row never unfolds to show details.
  */
-export function IssueRow({ issue, properties, today, now, expanded, onOpen }: {
+export function IssueRow({ issue, properties, today, now, onOpen = () => openIssue(issue.id) }: {
   issue: SuperIssue;
   properties: readonly RowProperty[];
   today: string;
   now: number;
-  expanded: boolean;
-  onOpen: () => void;
+  /** Defaults to opening the issue view. */
+  onOpen?: () => void;
 }) {
   const project = useApp(s => (issue.projectId ? s.snapshot?.projects.find(p => p.id === issue.projectId) : undefined));
   const agentName = useApp(s => (issue.agentId ? s.snapshot?.agents.find(a => a.id === issue.agentId)?.name : undefined));
@@ -145,16 +147,10 @@ export function IssueRow({ issue, properties, today, now, expanded, onOpen }: {
           {show('updated') ? <span className="hidden min-w-8 whitespace-nowrap text-right @min-[30rem]/issues:inline">{relativeTime(issue.updatedAt, now)}</span> : null}
         </>
       )}
-      expanded={expanded}
       onOpen={onOpen}
       menuLabel={`Issue ${issue.key}`}
       menu={close => <IssueMenu issue={issue} close={close} onOpen={onOpen} />}
-    >
-      {issue.text.trim() !== issue.title.trim() ? <p className="mb-1 whitespace-pre-wrap break-words">{issue.text}</p> : null}
-      <p className="text-[11px] text-content/45">
-        {issue.key} · added by {issue.by === 'user' ? 'you' : 'the SuperAgent'} {relativeTime(issue.createdAt, now)} ago{who ? ` · with ${issue.forUser ? 'you' : who}` : ''}
-      </p>
-    </PanelRow>
+    />
   );
 }
 
@@ -279,7 +275,7 @@ export function IssueMenu({ issue, close, onOpen }: { issue: SuperIssue; close: 
   if (confirming) return <RemoveConfirm issue={issue} close={close} onBack={() => setConfirming(false)} />;
   return (
     <MenuPage page="main">
-      {onOpen ? <MenuRow icon={ChevronDown} title="Open" shortcut="Enter" onSelect={() => { close(); onOpen(); }} /> : null}
+      {onOpen ? <MenuRow icon={Maximize2} title="Open" shortcut="Enter" onSelect={() => { close(); onOpen(); }} /> : null}
       <StatusPriorityRows issue={issue} close={close} />
       <MenuDivider />
       <MenuRow icon={Copy} title={`Copy ${issue.key}`} onSelect={() => { close(); void navigator.clipboard?.writeText(issue.key); }} />

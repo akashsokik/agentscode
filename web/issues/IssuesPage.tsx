@@ -23,7 +23,7 @@ import {
 // Active, Backlog and Mine, with Filter (F) and its chips, Display (⇧V) for grouping, order and row
 // properties, and wide one-line rows. Built from the panel list's pieces (ACH-D23): PaneFrame,
 // PanelToolbar, PanelSection, PanelRow, ContextMenu rows and mono's Popover, Segmented and Toggle.
-// An issue opens in place for now; the full issue view comes in phase 4.
+// An issue opens the issue view in a tab, with its properties sidebar (openIssue, ACH-D43 section C).
 
 const EMPTY_VIEW: Record<IssuesViewName, string> = {
   all: 'No issues yet.',
@@ -43,7 +43,6 @@ export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
   const [filters, setFilters] = useState<IssueFilters>({});
   const [display, setDisplayState] = useState<IssuesDisplay>(() => readDisplay());
   const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(new Set());
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [projectId, setProjectId] = useState('');
   // Each menu remembers what had focus when it opened, to give it back on close.
@@ -93,7 +92,7 @@ export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
   );
 
   const row = (issue: SuperIssue) => (
-    <IssueRow key={issue.id} issue={issue} properties={display.properties} today={today} now={now} expanded={expanded === issue.id} onOpen={() => setExpanded(id => (id === issue.id ? null : issue.id))} />
+    <IssueRow key={issue.id} issue={issue} properties={display.properties} today={today} now={now} />
   );
 
   return (
