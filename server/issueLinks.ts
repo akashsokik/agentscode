@@ -61,20 +61,19 @@ export class IssueLinks {
     this.store = store; this.now = now; this.changed = changed; this.source = source;
   }
 
-  private codes(): Set<string> {
-    return new Set(['ALL', ...(this.source?.projects() ?? []).flatMap(p => p.code ? [p.code] : []), ...this.store.issues().map(i => i.key.slice(0, i.key.lastIndexOf('-')))]);
+  private codes(issues: readonly SuperIssue[] = this.store.issues()): Set<string> {
+    return new Set(['ALL', ...(this.source?.projects() ?? []).flatMap(p => p.code ? [p.code] : []), ...issues.map(i => i.key.slice(0, i.key.lastIndexOf('-')))]);
   }
 
-  private keys(text: string): string[] {
-    return issueKeysIn(text, this.codes());
+  private keys(text: string, codes = this.codes()): string[] {
+    return issueKeysIn(text, codes);
   }
 
   /** A mention links a PR; only an explicit closing phrase completes its issue. */
-  private closingKeys(text: string): string[] {
+  private closingKeys(text: string, codes = this.codes()): string[] {
     const upper = text.toUpperCase();
     const keys = new Set<string>();
-    const codes = this.codes();
-    for (const phrase of upper.matchAll(/\b(?:FIX(?:ES|ED)?|CLOS(?:E|ES|ED)|RESOLV(?:E|ES|ED))\s+/g)) {
+    for (const phrase of upper.matchAll(/\b(?:FIX(?:ES|ED)?|CLOS(?:E|ES|ED)|RESOLV(?:E|ES|ED))(?:\s*:\s*|\s+)/g)) {
       // Match the phrase first: the shared key matcher deduplicates repeated mentions.
       const match = findIssueKeys(upper.slice(phrase.index + phrase[0].length), codes)[0];
       if (match?.index === 0) keys.add(match.key);
@@ -82,7 +81,7 @@ export class IssueLinks {
     return [...keys];
   }
 
-  /** Local merge detection uses Work's existing cache, independently of its view being open.
+  /** Local checks reuse verified evidence until HEAD/ref/reflog files change; idle ticks run no Git.
    * GitHub closures are delivered by PullRequests.onRead; this timer never polls gh. */
   async refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
@@ -122,21 +121,35 @@ export class IssueLinks {
     return { id: ref.id, issues: this.source.mentions.decisionIssues(ref.id, this.store.issues()) };
   }
 
+  private recordMerge(issues: Map<string, SuperIssue>, issue: SuperIssue, text: string, ref: string, closes: boolean): boolean {
+    try {
+      issues.set(issue.id, this.store.updateIssue(issue.id, { ...(closes ? { status: 'done' as const } : {}), activityText: text, activityRef: ref }, this.now(), { kind: 'git' }));
+      return true;
+    } catch (err) {
+      // An earlier update can prune an old closed issue from the store's retained history.
+      if (!(err instanceof HttpError) || err.status !== 404) throw err;
+      issues.delete(issue.id);
+      return false;
+    }
+  }
+
   /** Called with Work's verified records, before its UI's 30-merge limit. No new git reads. */
   localMerges(project: Project, records: MergeRecord[]): number {
     this.records.set(project.id, records);
     let changed = 0, observed = 0;
+    const issues = new Map(this.store.issues().map(issue => [issue.id, issue]));
+    const codes = this.codes([...issues.values()]);
     for (const record of [...records].sort((a, b) => a.at - b.at)) {
       // A revert must never act like a merge, even if someone names a merge branch that way.
       if (/^revert\b/i.test(record.subject) || !/^[a-f0-9]{40}$/.test(record.hash)) continue;
-      const keys = this.keys(record.branch);
-      for (const issue of this.store.issues()) {
+      const keys = this.keys(record.branch, codes);
+      for (const issue of issues.values()) {
         if (issue.projectId !== project.id) continue;
         if (!keys.includes(issue.key) && issue.branch !== record.branch) continue;
         if (record.at < Math.floor(issue.createdAt / 1000) * 1000 || alreadyLogged(issue, record.hash)) continue;
         // Consume even while closed: replaying an observed second merge after reopen must be inert.
         const closes = isOpenIssue(issue) && record.at >= openSince(issue);
-        this.store.updateIssue(issue.id, { ...(closes ? { status: 'done' as const } : {}), activityText: `Merged ${record.hash} from ${record.branch}.`, activityRef: record.hash }, this.now(), { kind: 'git' });
+        if (!this.recordMerge(issues, issue, `Merged ${record.hash} from ${record.branch}.`, record.hash, closes)) continue;
         observed++;
         if (closes) changed++;
       }
@@ -147,18 +160,20 @@ export class IssueLinks {
 
   githubMerges(prs: readonly MergedIssuePr[]): number {
     let changed = 0, observed = 0;
+    const issues = new Map(this.store.issues().map(issue => [issue.id, issue]));
+    const codes = this.codes([...issues.values()]);
     for (const pr of prs) {
       const at = pr.mergedAt ? Date.parse(pr.mergedAt) : NaN;
       if (pr.state.toLowerCase() !== 'merged' || !Number.isFinite(at) || !pr.mergeCommit || !/^[a-f0-9]{40}$/.test(pr.mergeCommit)) continue;
       if (/^revert\b/i.test(pr.title)) continue;
-      const keys = [...new Set([...this.keys(pr.branch.toUpperCase()), ...this.closingKeys(pr.title), ...this.closingKeys(pr.body ?? '')])];
-      for (const issue of this.store.issues()) {
+      const keys = [...new Set([...this.keys(pr.branch.toUpperCase(), codes), ...this.closingKeys(pr.title, codes), ...this.closingKeys(pr.body ?? '', codes)])];
+      for (const issue of issues.values()) {
         if (!pr.projects.some(p => p.id === issue.projectId)) continue;
-        if (!keys.includes(issue.key)) continue;
+        if (!keys.includes(issue.key) && issue.branch !== pr.branch) continue;
         const identity = `${pr.repo}#${pr.number}:${pr.mergeCommit}`;
         if (at < Math.floor(issue.createdAt / 1000) * 1000 || alreadyLogged(issue, identity)) continue;
         const closes = isOpenIssue(issue) && at >= openSince(issue);
-        this.store.updateIssue(issue.id, { ...(closes ? { status: 'done' as const } : {}), activityText: `Merged ${pr.repo}#${pr.number} (${pr.mergeCommit}) from ${pr.branch}.`, activityRef: identity }, this.now(), { kind: 'git' });
+        if (!this.recordMerge(issues, issue, `Merged ${pr.repo}#${pr.number} (${pr.mergeCommit}) from ${pr.branch}.`, identity, closes)) continue;
         observed++;
         if (closes) changed++;
       }
