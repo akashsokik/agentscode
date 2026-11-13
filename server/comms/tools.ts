@@ -151,6 +151,8 @@ export const askUserInput = z.object({
   question: z.string().trim().min(1).max(300),
   detail: z.string().trim().max(1500).optional(),
   options: z.array(z.string().trim().min(1).max(80)).min(1).max(4),
+  /** The take_action step this asks to approve; the first option is the yes. Needed for ask-first steps. */
+  for_action: z.object({ kind: z.enum(['merge', 'restart', 'push', 'release', 'deploy', 'cleanup', 'project', 'costly', 'delete_data', 'outside_account', 'remove_user_agent', 'force_push', 'rewrite_history']), target: z.string().trim().min(1).max(200) }).optional(),
 });
 const issueRef = z.string().trim().min(1).max(40);
 export const proposeRoutineInput = z.object({
@@ -173,10 +175,17 @@ export const takeActionInput = z.object({
   task: z.string().trim().min(1).max(3000).optional(),
   /** How to undo it, as an instruction an agent can follow (a revert, a backup ref, the previous build). */
   undo: z.string().trim().min(1).max(1000).optional(),
-  /** merge: the branch, which needs a reviewer's passing report first. */
+  /** What it acts on, matched against an approval's for_action.target (defaults to branch, else agent). */
+  target: z.string().trim().min(1).max(200).optional(),
+  /** merge: the branch, and the exact commit a reviewer passed. */
   branch: z.string().trim().min(1).max(200).optional(),
-  /** cleanup, delete_data: where the backup is (a backup/ ref, a copy). */
+  commit: z.string().trim().regex(/^[0-9a-f]{7,40}$/i).optional(),
+  /** merge, cleanup, delete_data: the project (id, code or name) whose repository is checked. */
+  project: z.string().trim().min(1).max(200).optional(),
+  /** cleanup, delete_data: the backup, a ref in the project (checked with git) or an existing path. */
   backup: z.string().trim().min(1).max(500).optional(),
+  /** When a step it takes on its own has no undo (a deploy with no rollback): why. */
+  no_undo: z.string().trim().min(1).max(300).optional(),
   /** The id of the user's answered ask_user question, for what the Autonomy setting asks about first. */
   approved_ask_id: z.string().trim().min(1).max(100).optional(),
 });

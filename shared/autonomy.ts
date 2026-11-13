@@ -89,8 +89,8 @@ export function autonomyInstructions(level: SuperAutonomy, askFirst: AskFirst, p
     paused ? 'The user PAUSED you: start nothing on your own (no take_action, no new agents, no handing out issues) until they resume. Their own messages and the work they asked for still go.' : '',
     acts.length ? `Do these yourself, without ask_user, through take_action (it hands the step to an agent, checks the rules and logs it in Decisions with how to undo it): ${acts.join('; ')}.` : 'Ask the user with ask_user before every merge, restart, push, release, deploy, cleanup, new project or costly work; then do it with take_action and the answered question id.',
     level !== 'full' && acts.length ? 'Ask with ask_user before anything else of that kind (push, release, deploy, new projects, costly work); then use take_action with the answered question id.' : '',
-    asks.length ? `Always ask first with ask_user, then use take_action with the answered question id, before: ${asks.join('; ')}.` : '',
-    'At every level, never: rewrite or force-push shared history (main, tags, any pushed branch); remove or rewrite anything without a backup first (take_action asks where it is); restart an agent the user stopped; go past the daily budget. A merge needs a reviewer\'s passing report on that branch first. Push fast-forward only.',
+    asks.length ? `Always ask first, before: ${asks.join('; ')}. Use ask_user with for_action {kind, target} and the yes as the first option; the user\'s yes is good for that one step, once, within a day; then take_action with approved_ask_id.` : '',
+    'At every level, never: rewrite or force-push shared history (main, tags, any pushed branch): any task you send that asks for it is refused. Before cleanup or deletion, make a backup (a ref or a copy) and name it; take_action checks it exists. A merge names its project, branch and the exact commit a reviewer (one the user made) passed; take_action checks the branch is still at that commit. Never restart an agent the user stopped; stay within the daily budget, which counts the work you start on your own. Push fast-forward only.',
     'Log nothing yourself: take_action records each step in Decisions, with why and how to undo it, and the user can undo it or pause you there.',
   ].filter(Boolean).join('\n');
 }
@@ -106,11 +106,12 @@ export function suggestedSoul(soul: string): string {
   return soul.includes(SOUL_LINE_FROM) ? soul.replace(SOUL_LINE_FROM, SOUL_LINE_TO) : soul;
 }
 
+/** What holds at every level, worded as the server enforces it (ALL-D9). */
 export const ALWAYS_SAFE: readonly string[] = [
-  'Never rewrites or force-pushes shared history',
-  'A backup before any data migration or cleanup',
+  'Refuses any task that force-pushes or rewrites shared history',
+  'Cleanup and deletion name a backup that exists',
+  'Merges only the commit a reviewer you made passed',
   'Your Stop on an agent is final',
-  'Your daily budget and wake limits',
-  'A reviewer passes a branch before it merges',
-  'Pause it any time, here or in Decisions',
+  'Its own work, and the agents it starts, stay within your daily budget',
+  'Paused, it starts nothing on its own: here or in Decisions',
 ];

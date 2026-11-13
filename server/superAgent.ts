@@ -265,11 +265,17 @@ export class SuperStore {
     this.write({ ...stored, issues: before ? [...rest, before] : rest });
   }
 
+  /** An approval used by a step: never again. */
+  consumeAsk(id: string, by: string, now = Date.now()): void {
+    const stored = this.read();
+    this.write({ ...stored, asks: stored.asks.map(a => (a.id === id ? { ...a, consumedAt: now, consumedBy: by } : a)) });
+  }
+
   openAsks(): SuperAsk[] {
     return this.read().asks.filter(isOpen);
   }
 
-  ask(input: { question: string; detail?: string; options: string[] }, now = Date.now()): SuperAsk {
+  ask(input: { question: string; detail?: string; options: string[]; forAction?: { kind: string; target: string } }, now = Date.now()): SuperAsk {
     const stored = this.read();
     const open = stored.asks.filter(isOpen);
     if (open.length >= MAX_OPEN_ASKS) throw new HttpError(409, `${MAX_OPEN_ASKS} questions already wait for the user. Wait for answers before asking more.`);
@@ -278,6 +284,7 @@ export class SuperStore {
     const ask: SuperAsk = {
       id: randomUUID().slice(0, 8), question, ...(input.detail?.trim() ? { detail: input.detail.trim() } : {}),
       options: [...new Set(input.options.map(o => o.trim()).filter(Boolean))], createdAt: now,
+      ...(input.forAction ? { forAction: { kind: input.forAction.kind, target: input.forAction.target.trim() } } : {}),
     };
     this.write({ ...stored, asks: [ask, ...stored.asks] });
     return ask;

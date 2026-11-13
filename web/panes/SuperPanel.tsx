@@ -181,7 +181,7 @@ function DecisionItem({ action, now, expanded, onToggle }: { action: SuperAction
       title={summary}
       label={`${summary}${undone ? ', undone' : ''}, ${fullTime(action.at)}`}
       dim={undone}
-      meta={<>{action.autonomy === 'full' ? <span title="Done on its own under Full autonomy" className="inline-flex h-4 items-center rounded-[4px] border border-content/12 px-1 text-[9.5px] font-semibold tracking-wide text-content/50">FULL</span> : null}<time dateTime={new Date(action.at).toISOString()}>{undone ? 'Undone · ' : ''}{shortWhen(action.at, now)}</time></>}
+      meta={<>{action.gated?.length ? <span title={`A delegated task that mentions ${action.gated.join(', ')}: not checked by take_action`} className="inline-flex h-4 items-center rounded-[4px] border border-content/12 px-1 text-[9.5px] font-semibold tracking-wide text-content/50">VIA DELEGATE</span> : null}{action.autonomy === 'full' ? <span title="Done on its own under Full autonomy" className="inline-flex h-4 items-center rounded-[4px] border border-content/12 px-1 text-[9.5px] font-semibold tracking-wide text-content/50">FULL</span> : null}<time dateTime={new Date(action.at).toISOString()}>{undone ? 'Undone · ' : ''}{shortWhen(action.at, now)}</time></>}
       actions={undoable ? <RowAction label={`Undo: ${summary}`} busy={busy} onClick={() => void undo()}>{busy ? 'Undoing…' : 'Undo'}</RowAction> : undefined}
       expanded={expanded}
       onOpen={onToggle}
@@ -198,6 +198,8 @@ function DecisionItem({ action, now, expanded, onToggle }: { action: SuperAction
       <p className="whitespace-pre-wrap break-words">{action.summary}</p>
       {action.why ? <p className="mt-1 text-content/50">Why: {action.why}</p> : null}
       {action.undo?.kind === 'reverse' ? <p className="mt-1 text-content/50">Undo hands this back to an agent: {action.undo.how}</p> : null}
+      {action.noUndo ? <p className="mt-1 text-content/50">No undo: {action.noUndo}</p> : null}
+      {action.gated?.length ? <p className="mt-1 text-content/50">It mentions {action.gated.join(', ')}, sent as a delegation: take_action's checks did not run, only the shared-history rule.</p> : null}
       <p className="mt-1 text-[11px] text-content/40">{fullTime(action.at)}{undone ? ` · undone ${fullTime(action.undoneAt!)}` : ''}</p>
       {undoable ? <div className="mt-2 flex gap-1.5"><DetailButton busy={busy} onClick={() => void undo()}>{busy ? 'Undoing…' : 'Undo'}</DetailButton></div> : null}
     </PanelRow>

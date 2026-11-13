@@ -59,6 +59,8 @@ export interface AgentTask {
 export interface Agent {
   id: string;
   name: string;
+  /** 'super': the SuperAgent made it on its own, not for work you asked for. Absent: yours (or made for your work). */
+  createdBy?: 'super';
   engine: EngineKind;
   /** How it looks in the app (shared/avatar.ts); absent, it comes from the id. */
   avatar?: AvatarLook;
@@ -226,6 +228,11 @@ export interface SuperAsk {
   answer?: string;
   /** The user put it aside without answering. */
   dismissed?: boolean;
+  /** The step it asks to approve (take_action kind and target): its first option is the yes. */
+  forAction?: { kind: string; target: string };
+  /** An approval is used once: when, and by which logged step. */
+  consumedAt?: number;
+  consumedBy?: string;
 }
 
 /** How to take back something the SuperAgent did on its own. */
@@ -258,6 +265,10 @@ export interface SuperAction {
   forUser?: boolean;
   /** The Autonomy level it acted under, when it acted without asking (Decisions marks Full ones). */
   autonomy?: SuperAutonomy;
+  /** Gated steps (merge, push, delete, ...) a delegated task mentions, done outside take_action. */
+  gated?: string[];
+  /** Why a step it took on its own has no Undo. */
+  noUndo?: string;
 }
 
 /** queued: waiting its turn; in_progress: an agent is on it; blocked: waiting for the user; done. */
