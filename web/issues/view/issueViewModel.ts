@@ -74,7 +74,14 @@ export function actorName(actor: IssueActor, agentName: (id: string) => string |
 }
 
 /** One activity entry as a line: what changed, in plain words. Comments carry their text apart. */
-export function activityLine(event: IssueEvent, agentName: (id: string) => string | undefined): string {
+export function activityLine(event: IssueEvent, agentName: (id: string) => string | undefined, issueKey: (id: string) => string | undefined = () => undefined): string {
+  const key = (id: string) => issueKey(id) ?? 'a removed issue';
+  const relation = (value: string) => {
+    const at = value.indexOf(':');
+    const type = value.slice(0, at) as IssueRelationType;
+    const words = RELATION_TYPES.find(r => r.type === type)?.label.toLowerCase() ?? type;
+    return `${words} ${key(value.slice(at + 1))}`;
+  };
   const statusWord = (s?: string) => (s && s in ISSUE_STATUS_LABEL ? ISSUE_STATUS_LABEL[s as IssueStatus] : s ?? '');
   switch (event.kind) {
     case 'created': return 'created the issue';
@@ -82,6 +89,8 @@ export function activityLine(event: IssueEvent, agentName: (id: string) => strin
     case 'status': return `moved it ${event.from ? `from ${statusWord(event.from)} ` : ''}to ${statusWord(event.to)}${event.text ? ` (${event.text})` : ''}`;
     case 'priority': return `set priority ${event.to && event.to in ISSUE_PRIORITY_LABEL ? ISSUE_PRIORITY_LABEL[event.to as IssuePriority] : event.to}`;
     case 'assignee': return event.to === 'user' ? 'assigned it to you' : event.to ? `assigned it to ${agentName(event.to) ?? 'an agent'}` : 'unassigned it';
+    case 'parent': return event.to ? `set the parent to ${key(event.to)}` : 'removed the parent';
+    case 'relation': return event.to ? `added: ${relation(event.to)}` : event.from ? `removed: ${relation(event.from)}` : 'changed its relations';
     case 'migrated': return event.text ? `updated it to the new issue model: ${event.text}` : 'updated it to the new issue model';
     default: return 'changed it';
   }

@@ -34,12 +34,14 @@ function Who({ actor }: { actor: IssueActor }) {
 function EventRow({ event }: { event: IssueEvent }) {
   const agents = useApp(s => s.snapshot?.agents) ?? [];
   const name = (id: string) => agents.find(a => a.id === id)?.name;
+  const issues = useApp(s => s.snapshot?.super.issues) ?? [];
+  const issueKey = (id: string) => issues.find(i => i.id === id)?.key;
   const status = event.kind === 'status' && event.to && event.to in ISSUE_STATUS_LABEL ? event.to as IssueStatus : null;
   return (
     <li className="font-sans">
       <div className="flex min-h-[30px] items-center gap-2 text-[12.5px]">
         {status ? <StatusGlyph status={status} /> : <Who actor={event.by} />}
-        <p className="min-w-0 flex-1 truncate text-content/60"><span className="font-medium text-content/85">{actorName(event.by, name)}</span> {activityLine(event, name)}</p>
+        <p className="min-w-0 flex-1 truncate text-content/60"><span className="font-medium text-content/85">{actorName(event.by, name)}</span> {activityLine(event, name, issueKey)}</p>
         <time dateTime={new Date(event.at).toISOString()} title={new Date(event.at).toLocaleString()} className="shrink-0 text-[11.5px] tabular-nums text-content/40">{when(event.at)}</time>
       </div>
       {event.kind === 'comment' && event.text ? (

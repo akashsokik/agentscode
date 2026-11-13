@@ -179,3 +179,14 @@ test('parent: any other issue, open ones first, never itself or one below it; as
   assert.equal(commentToPost('  Looks good.\n\n- one\n- two  \n'), 'Looks good.\n\n- one\n- two');
   assert.equal(commentToPost('   \n '), undefined);
 });
+
+test('activity reads parent and relation changes with the issues\' keys (Fen\'s da575ac events)', () => {
+  const agent = () => undefined;
+  const keys = (id: string) => ({ p1: 'ACH-3', o7: 'ACH-7', o2: 'ACH-2' } as Record<string, string>)[id];
+  const e = (over: Partial<IssueEvent>): IssueEvent => ({ at: 1, by: { kind: 'user' }, kind: 'parent', ...over });
+  assert.equal(activityLine(e({ to: 'p1' }), agent, keys), 'set the parent to ACH-3');
+  assert.equal(activityLine(e({ from: 'p1' }), agent, keys), 'removed the parent');
+  assert.equal(activityLine(e({ kind: 'relation', to: 'blocks:o7' }), agent, keys), 'added: blocks ACH-7');
+  assert.equal(activityLine(e({ kind: 'relation', from: 'related:o2' }), agent, keys), 'removed: related to ACH-2');
+  assert.equal(activityLine(e({ kind: 'relation', to: 'duplicate_of:gone' }), agent, keys), 'added: duplicate of a removed issue');
+});
