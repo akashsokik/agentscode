@@ -1335,11 +1335,16 @@ export class AgentManager {
       // The issue records the delegation (assignee and delegation id), by whoever handed it out.
       if (issue) {
         const to = this.store.agents.get(input.to_agent_id);
-        this.superStore.updateIssue(issue.id, {
-          ...(assigns ? { agentId: input.to_agent_id, forUser: false, delegationId: receipt.id } : {}),
-          activityText: `Handed to ${to?.name ?? 'an agent'} as ${input.kind}.`, activityRef: `delegation:${receipt.id}`,
-        }, Date.now(), isSuper ? { kind: 'super' } : { kind: 'agent', id });
-        this.publishSuper();
+        // The handoff is sent: an issue removed in between must not turn that into an error (a retry would send it twice).
+        try {
+          this.superStore.updateIssue(issue.id, {
+            ...(assigns ? { agentId: input.to_agent_id, forUser: false, delegationId: receipt.id } : {}),
+            activityText: `Handed to ${to?.name ?? 'an agent'} as ${input.kind}.`, activityRef: `delegation:${receipt.id}`,
+          }, Date.now(), isSuper ? { kind: 'super' } : { kind: 'agent', id });
+          this.publishSuper();
+        } catch (err) {
+          if (!(err instanceof HttpError && err.status === 404)) throw err;
+        }
       }
       if (isSuper) this.recordSuper({ tool, summary: `Delegated ${input.kind}${issue ? ` on ${issue.key}` : ''} to ${this.store.agents.get(input.to_agent_id)?.name ?? 'an agent'}: ${clip(input.task.replace(/\s+/g, ' '), 160)}`, why: clip(input.context ?? input.acceptance_criteria, 300), ...(gate ? this.gatedMark(gate) : {}) });
       return receipt;
@@ -2007,7 +2012,9 @@ export class AgentManager {
         ...(input.due_date !== undefined ? { dueDate: input.due_date } : {}),
         ...(input.labels !== undefined ? { labels: input.labels } : {}),
         ...(input.parent !== undefined ? { parentId: input.parent === '' ? null : this.superStore.issueByRef(input.parent).id } : {}),
-        ...(input.relations !== undefined ? { relations: input.relations.map(r => ({ type: r.type, issueId: this.superStore.issueByRef(r.issue).id })) } : {}),
+        // A target already related keeps its id even if that issue was removed since (the store keeps
+        // dangling relations, 94f6f59); a new one must exist.
+        ...(input.relations !== undefined ? { relations: input.relations.map(r => ({ type: r.type, issueId: before.relations.some(x => x.issueId === r.issue) ? r.issue : this.superStore.issueByRef(r.issue).id })) } : {}),
         ...assignee,
         ...(input.delegation_id !== undefined ? { delegationId: input.delegation_id } : {}),
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
@@ -2224,7 +2231,7 @@ export class AgentManager {
   }
 
   /** list_issues: the backlog filtered, each issue without its activity (activityCount instead). */
-  private listIssues(filter: ListIssuesInput): (Omit<SuperIssue, 'activity'> & { activityCount: number })[] {
+  private listIssues(filter: ListIssuesInput): (Omit<SuperIssue, 'activity' | 'relations'> & { relations: (SuperIssue['relations'][number] & { key?: string; gone?: true })[]; parentGone?: true; activityCount: number })[] {
     const statuses = filter.status?.map(s => issueStatusFrom(s));
     const project = filter.project === undefined ? undefined
       : filter.project.toUpperCase() === NO_PROJECT_CODE ? null
@@ -2233,6 +2240,7 @@ export class AgentManager {
     const assigneeId = assignee === undefined || assignee === 'user' || assignee === 'none' ? undefined : this.teammate(filter.assignee).id;
     const parentId = filter.parent === undefined ? undefined : this.superStore.issueByRef(filter.parent).id;
     const words = (filter.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const byId = new Map(this.superStore.issues().map(i => [i.id, i]));
     const today = localDay(new Date());
     const weekEnd = localDay(new Date(Date.now() + 6 * 86_400_000));
     return this.superStore.issues().filter(i => {
@@ -2253,7 +2261,13 @@ export class AgentManager {
         if (!words.every(w => hay.includes(w))) return false;
       }
       return true;
-    }).map(({ activity, ...rest }) => ({ ...rest, activityCount: activity.length }));
+    }).map(({ activity, relations, ...rest }) => ({
+      ...rest,
+      // Each relation with its target's key, or gone: true when that issue was removed (it stays until dropped).
+      relations: relations.map(r => { const target = byId.get(r.issueId); return target ? { ...r, key: target.key } : { ...r, gone: true as const }; }),
+      ...(rest.parentId && !byId.has(rest.parentId) ? { parentGone: true as const } : {}),
+      activityCount: activity.length,
+    }));
   }
 
   /** Who the app assigns an issue to: an agent (its id), you ("user"), or nobody (null or ""). */

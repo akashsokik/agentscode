@@ -157,3 +157,34 @@ test('a plain delegate_task (no issue) is unchanged', async () => {
   const receipt = await t.mcp('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'Build it', acceptance_criteria: 'Tests pass' }) as { text: string };
   assert.doesNotMatch(receipt.text, /Issue:|feat\//);
 });
+
+test('relations survive a removed target through the tools: drop one, add one, keep the gone one; list_issues marks it (Ivy M1)', async () => {
+  const t = await team();
+  const add = async (text: string) => ((await t.mcp('add_issue', { text, project: 'web', why: 'x' })) as { added: SuperIssue }).added;
+  const a = await add('A'); const b = await add('B'); const c = await add('C'); const d = await add('D');
+  await t.mcp('update_issue', { issue_id: a.key, relations: [{ type: 'related', issue: b.key }, { type: 'blocks', issue: c.key }], why: 'x' });
+  t.manager.removeIssue(b.id);
+  const listed = ((await t.mcp('list_issues', { query: 'A' })) as { issues: { key: string; relations: { issueId: string; key?: string; gone?: true }[] }[] }).issues.find(i => i.key === a.key)!;
+  assert.deepEqual(listed.relations.map(r => [r.issueId, r.key, r.gone]), [[b.id, undefined, true], [c.id, c.key, undefined]]);
+  // Resend the list as list_issues gave it, without C and with D: the gone B is kept by its id.
+  const { updated } = await t.mcp('update_issue', { issue_id: a.key, relations: [{ type: 'related', issue: b.id }, { type: 'blocks', issue: d.key }], why: 'x' }) as { updated: SuperIssue };
+  assert.deepEqual(updated.relations, [{ type: 'related', issueId: b.id }, { type: 'blocks', issueId: d.id }]);
+  // A removed issue that was not already related is still refused.
+  t.manager.removeIssue(c.id);
+  await assert.rejects(t.mcp('update_issue', { issue_id: a.key, relations: [{ type: 'blocks', issue: c.id }], why: 'x' }), /No issue/);
+  // Label limits match the store's: at most 10, each at most 30 characters.
+  await assert.rejects(t.mcp('update_issue', { issue_id: a.key, labels: Array.from({ length: 11 }, (_, i) => `l${i}`), why: 'x' }), /labels|Invalid|10/i);
+  await assert.rejects(t.mcp('update_issue', { issue_id: a.key, labels: ['x'.repeat(31)], why: 'x' }), /labels|Invalid|30/i);
+});
+
+test('an issue removed while its handoff is sent: the handoff stands, no error to retry on (Ivy L2)', async () => {
+  const t = await team();
+  const { added } = await t.mcp('add_issue', { text: 'Gone soon', project: 'web', why: 'x' }) as { added: SuperIssue };
+  const store = (t.manager as unknown as { superStore: { updateIssue: (...a: unknown[]) => unknown } }).superStore;
+  const real = store.updateIssue.bind(store);
+  store.updateIssue = () => { throw new HttpError(404, 'No issue with that id.'); };
+  try {
+    const receipt = await t.mcp('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'Build it', acceptance_criteria: 'Tests pass', issue: added.key }) as { text: string };
+    assert.match(receipt.text, /Issue: WEB-1 Gone soon/);
+  } finally { store.updateIssue = real; }
+});

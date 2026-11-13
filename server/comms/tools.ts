@@ -197,7 +197,8 @@ const issueStatus = z.enum(['needs_you', 'in_review', 'in_progress', 'waiting', 
 const issuePriority = z.enum(['urgent', 'high', 'normal', 'low', 'none']);
 /** A calendar day, "2026-11-20"; '' clears it. */
 const issueDue = z.union([z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal('')]);
-const issueLabels = z.array(z.string().trim().min(1).max(40)).max(20);
+/** As the store keeps them: up to 10, each at most 30 characters. */
+const issueLabels = z.array(z.string().trim().min(1).max(30)).max(10);
 /** An agent (id or name), "user" for the user, or '' (or "none") for nobody. */
 const issueAssignee = z.string().trim().max(100);
 const issueRelation = z.object({ type: z.enum(['blocks', 'related', 'duplicate_of']), issue: issueRef });
@@ -209,7 +210,7 @@ export const listIssuesInput = z.object({
   assignee: issueAssignee.min(1).optional(),
   /** A project (id, name or code); ALL for issues with no project. */
   project: z.string().trim().min(1).max(200).optional(),
-  label: z.string().trim().min(1).max(40).optional(),
+  label: z.string().trim().min(1).max(30).optional(),
   due: z.enum(['overdue', 'today', 'this_week', 'none']).optional(),
   /** Sub-issues of this issue (id or key). */
   parent: issueRef.optional(),
@@ -246,7 +247,7 @@ export const updateIssueInput = z.object({
   labels: issueLabels.optional(),
   /** The parent issue (id or key); '' makes it top level. */
   parent: z.union([issueRef, z.literal('')]).optional(),
-  /** The whole relation list, replacing the old one. */
+  /** The whole relation list, replacing the old one. A relation already on the issue may keep a removed target (list_issues marks it gone). */
   relations: z.array(issueRelation).max(50).optional(),
   /** An agent (id or name), "user", or '' for nobody. Same as agent_id, which stays for older calls. */
   assignee: issueAssignee.optional(),
