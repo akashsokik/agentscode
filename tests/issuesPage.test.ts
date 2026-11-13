@@ -225,6 +225,7 @@ test('the Issues page is the shared inbox layout: a card click selects the issue
   assert.match(page, /from '\.\.\/ui\/Inbox\.tsx'/, 'it imports the shared layout, not a copy');
   assert.match(page, /<InboxLayout\b/);
   assert.match(page, /<InboxList label="Issues" onMove=\{move\}/, 'the arrow keys move the selection');
+  assert.match(page, /onRailKeyDown=\{onRailKeyDown\}/, 'J and K move it too, only from the rail (Cy\'s onRailKeyDown), not from the detail');
   assert.match(page, /detail=\{selected && issues \? <IssueInboxDetail key=\{selected\.id\}/, 'the selected issue (or the first, as Comms) shows on the right');
   assert.match(page, /detailOpen=\{Boolean\(asked\)\}/, 'in a narrow pane, the detail replaces the list once one is picked');
   assert.doesNotMatch(page, /PanelRow|IssueRow|openIssue\(/, 'no inline rows, no jump to a tab');

@@ -94,11 +94,12 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
     if (!isPageKey(e)) return;
     if (e.key === 'f' && !e.shiftKey) { e.preventDefault(); openFilter(); return; }
     if (e.key === 'V' && e.shiftKey) { e.preventDefault(); openDisplay(trigger('display')); return; }
-    // J and K move the selection, as the arrow keys do in the list.
-    if ((e.key === 'j' || e.key === 'k') && !e.shiftKey) {
-      const id = move(e.key === 'j' ? 1 : -1);
-      if (id) { e.preventDefault(); focusCard(id); }
-    }
+  };
+  // J and K move the selection in the rail, as the arrow keys do (InboxLayout's onRailKeyDown).
+  const onRailKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!isPageKey(e) || e.shiftKey || (e.key !== 'j' && e.key !== 'k')) return;
+    const id = move(e.key === 'j' ? 1 : -1);
+    if (id) { e.preventDefault(); focusCard(id); }
   };
 
   const title = (
@@ -130,6 +131,7 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
         ) : (
           <InboxLayout
             detailOpen={Boolean(asked)}
+            onRailKeyDown={onRailKeyDown}
             toolbar={<>
               {/* Counts only where they need you (Mine), as the Pull requests rail: four labels fit the rail's width then. */}
               <InboxFilterTabs label="View" options={ISSUE_VIEWS.map(v => ({ value: v.view, label: v.label, count: v.view === 'mine' ? page.counts.mine : undefined, attention: v.view === 'mine' }))} value={view} onChange={setView} fit />
