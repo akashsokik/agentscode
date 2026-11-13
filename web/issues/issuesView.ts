@@ -293,6 +293,17 @@ export function groupIssues(issues: readonly SuperIssue[], display: IssuesDispla
   return groups.filter(g => g.items.length || (display.showEmptyGroups && (display.groupBy === 'status' || display.groupBy === 'priority') && (display.showClosed || !g.closed)));
 }
 
+/**
+ * The issues the Display lets through: without "Sub-issues", only top-level ones, and an issue whose
+ * parent is gone (removed, or never there) counts as top-level so it never drops out of sight.
+ * Without "Done and Canceled", only open ones.
+ */
+export function displayedIssues(issues: readonly SuperIssue[] | undefined, display: Pick<IssuesDisplay, 'showSubIssues' | 'showClosed'>): SuperIssue[] {
+  const all = issues ?? [];
+  const ids = new Set(all.map(g => g.id));
+  return all.filter(g => (display.showSubIssues || !g.parentId || !ids.has(g.parentId)) && (display.showClosed || isOpenIssue(g)));
+}
+
 /** Everything the page shows, from the issues and the user's choices. */
 export function issuesPage(issues: readonly SuperIssue[] | undefined, choice: { view: IssuesViewName; filters: IssueFilters; query: string; display: IssuesDisplay }, names: IssueNames, today: string): {
   counts: Record<IssuesViewName, number>;
@@ -301,7 +312,7 @@ export function issuesPage(issues: readonly SuperIssue[] | undefined, choice: { 
   /** Issues the view has before the filters and search: tells "nothing here" from "nothing matches". */
   inView: number;
 } {
-  const all = (issues ?? []).filter(g => (choice.display.showSubIssues || !g.parentId) && (choice.display.showClosed || isOpenIssue(g)));
+  const all = displayedIssues(issues, choice.display);
   const kept = all.filter(g => matchesFilters(g, choice.filters, today) && matchesQuery(g, choice.query));
   const counts = Object.fromEntries(ISSUE_VIEWS.map(v => [v.view, kept.filter(g => inView(g, v.view)).length])) as Record<IssuesViewName, number>;
   const shown = kept.filter(g => inView(g, choice.view));

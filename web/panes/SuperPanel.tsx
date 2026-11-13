@@ -19,7 +19,8 @@ import { AgentAvatar } from '../ui/Avatar.tsx';
 import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar, RowAction, RowIcon } from '../ui/PanelList.tsx';
 import { Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleDot, Clock, Copy, CornerDownRight, ListBullet, ListFilter, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
-import { DueDate, isPageKey, PriorityMark, StatusIcon, StatusPriorityRows } from '../issues/issueParts.tsx';
+import { DueDate, PriorityMark, restoreFocus, StatusIcon, StatusPriorityRows } from '../issues/issueParts.tsx';
+import { isPageKey } from '../issues/pageKeys.ts';
 import { FilterChips, FilterMenu } from '../issues/IssueFilters.tsx';
 import { activeFilters, localDay, matchesFilters, type IssueFilters, type IssueNames, type IssueProperty } from '../issues/issuesView.ts';
 import { WhoAvatar } from '../notes/parts.tsx';
@@ -265,7 +266,7 @@ export function IssuesView() {
   const [open, setOpen] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [filters, setFilters] = useState<IssueFilters>({});
-  const [filterMenu, setFilterMenu] = useState<{ anchor: HTMLElement | null; start?: IssueProperty } | null>(null);
+  const [filterMenu, setFilterMenu] = useState<{ anchor: HTMLElement | null; start?: IssueProperty; opener: Element | null } | null>(null);
   const agents = useApp(s => s.snapshot?.agents);
   const now = useNow();
   const today = localDay(now);
@@ -287,8 +288,10 @@ export function IssuesView() {
   );
   const closeAdd = () => { setAdding(false); focusAdd(root.current); };
   const filterButton = () => root.current?.querySelector<HTMLElement>('[data-issues-filter]') ?? null;
+  // Closing the Filter menu gives focus back to what had it (else the button), so F still works.
+  const closeFilter = () => { restoreFocus(filterMenu?.opener ?? null, filterButton()); setFilterMenu(null); };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (isPageKey(e) && e.key === 'f' && !e.shiftKey) { e.preventDefault(); setFilterMenu({ anchor: filterButton() }); }
+    if (isPageKey(e) && e.key === 'f' && !e.shiftKey) { e.preventDefault(); setFilterMenu({ anchor: filterButton(), opener: document.activeElement }); }
   };
   return (
     <div ref={root} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col font-sans">
@@ -300,13 +303,13 @@ export function IssuesView() {
         onAdd={() => setAdding(a => !a)}
         addLabel="Add an issue"
       >
-        <button type="button" data-issues-filter aria-label="Filter" title="Filter (F)" aria-haspopup="dialog" aria-expanded={Boolean(filterMenu)} onClick={e => setFilterMenu(m => (m ? null : { anchor: e.currentTarget }))} className={`relative grid size-[26px] shrink-0 place-items-center rounded-[7px] transition-colors hover:bg-content/5 hover:text-content ${activeFilters(filters).length ? 'text-content' : 'text-content/50'}`}>
+        <button type="button" data-issues-filter aria-label="Filter" title="Filter (F)" aria-haspopup="dialog" aria-expanded={Boolean(filterMenu)} onClick={e => (filterMenu ? closeFilter() : setFilterMenu({ anchor: e.currentTarget, opener: document.activeElement }))} className={`relative grid size-[26px] shrink-0 place-items-center rounded-[7px] transition-colors hover:bg-content/5 hover:text-content ${activeFilters(filters).length ? 'text-content' : 'text-content/50'}`}>
           <ListFilter className="size-3.5" strokeWidth={1.75} />
         </button>
       </PanelToolbar>
-      <FilterChips filters={filters} names={names} onChange={setFilters} onEdit={(property, el) => setFilterMenu({ anchor: el, start: property })} />
+      <FilterChips filters={filters} names={names} onChange={setFilters} onEdit={(property, el) => setFilterMenu({ anchor: el, start: property, opener: document.activeElement })} />
       {filterMenu ? (
-        <FilterMenu key={filterMenu.start ?? 'all'} anchor={filterMenu.anchor} start={filterMenu.start} issues={issues ?? []} filters={filters} onChange={setFilters} names={names} today={today} onClose={() => setFilterMenu(null)} />
+        <FilterMenu key={filterMenu.start ?? 'all'} anchor={filterMenu.anchor} start={filterMenu.start} issues={issues ?? []} filters={filters} onChange={setFilters} names={names} today={today} onClose={closeFilter} />
       ) : null}
       {adding ? (
         <Composer placeholder="Add an issue for the SuperAgent" label="New issue" onClose={closeAdd} onAdd={async text => Boolean(await attempt(() => api.addIssue({ text, projectId: projectId || null })))}>
