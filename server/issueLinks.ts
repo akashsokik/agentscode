@@ -16,7 +16,7 @@ export interface MergedIssuePr {
   state: string;
   branch: string;
   title: string;
-  body: string;
+  body?: string;
   mergedAt?: string | null;
   mergeCommit?: string | null;
 }
