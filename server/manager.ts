@@ -62,7 +62,7 @@ import { ScopedRunner, type ExecutionContext } from './agents/scoped.ts';
 import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
 import {
-  addIssueInput, agentCommandInput, proposeRoutineInput, askUserInput, completeIssueInput, updateIssueInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
+  addIssueInput, listIssuesInput, type ListIssuesInput, type UpdateIssueInput, agentCommandInput, proposeRoutineInput, askUserInput, completeIssueInput, updateIssueInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
   SUPER_TOOLS, canonicalTool, takeActionInput, type TakeActionInput, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool, decisionAddInput, noteAddInput, refGetInput, refSearchInput, LESSON_LIMIT,
   appScreenshotInput, EYES_TOOLS, runCheckInput, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
@@ -96,6 +96,8 @@ import { forbiddenGit, gatedVerbs } from '../shared/gitGuard.ts';
 import { ensurePushGuard, installPushGuard, issueOverride, pushRemotes } from './pushGuard.ts';
 import { readGit } from './work.ts';
 import { actionVerdict, ASK_FIRST_KEYS, autonomyInstructions, FULL_ACTIONS, NEEDS_BACKUP, SUPER_AUTONOMY, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
+import { isOpenIssue, issueStatusFrom } from '../shared/issues.ts';
+import { NO_PROJECT_CODE } from '../shared/issueKeys.ts';
 
 const AUTONOMIES: Autonomy[] = ['readonly', 'ask', 'edits', 'full'];
 
@@ -1297,21 +1299,36 @@ export class AgentManager {
       const gate = isSuper ? this.superHandoffGate(agent, `${input.task}\n${input.acceptance_criteria}\n${input.context ?? ''}`) : null;
       const project = input.project ? this.refCode(input.project) : undefined;
       const hint = this.decisionHintFor(input.to_agent_id, `${input.task}\n${input.acceptance_criteria}\n${input.context ?? ''}`, project);
-      const receipt = this.mailbox.delegate(id, input.to_agent_id, { kind: input.kind, task: input.task, acceptanceCriteria: input.acceptance_criteria, context: input.context, ...(project ? { project } : {}) }, hint);
-      if (isSuper) this.recordSuper({ tool, summary: `Delegated ${input.kind} to ${this.store.agents.get(input.to_agent_id)?.name ?? 'an agent'}: ${clip(input.task.replace(/\s+/g, ' '), 160)}`, why: clip(input.context ?? input.acceptance_criteria, 300), ...(gate ? this.gatedMark(gate) : {}) });
+      // The issue the work is for (ACH-D41): its key and the branch and commit rule go into the handoff.
+      const issue = input.issue ? this.superStore.issueByRef(input.issue) : undefined;
+      if (issue && isSuper) this.issueHandOutGate(agent, undefined, input.to_agent_id);
+      const receipt = this.mailbox.delegate(id, input.to_agent_id, {
+        kind: input.kind, task: input.task, acceptanceCriteria: input.acceptance_criteria, context: input.context, ...(project ? { project } : {}),
+        ...(issue ? { issue: { id: issue.id, key: issue.key, title: issue.title } } : {}),
+      }, hint);
+      // The issue records the delegation (assignee and delegation id), by whoever handed it out.
+      if (issue) {
+        const to = this.store.agents.get(input.to_agent_id);
+        this.superStore.updateIssue(issue.id, {
+          agentId: input.to_agent_id, forUser: false, delegationId: receipt.id,
+          activityText: `Handed to ${to?.name ?? 'an agent'} as ${input.kind}.`, activityRef: `delegation:${receipt.id}`,
+        }, Date.now(), isSuper ? { kind: 'super' } : { kind: 'agent', id });
+        this.publishSuper();
+      }
+      if (isSuper) this.recordSuper({ tool, summary: `Delegated ${input.kind}${issue ? ` on ${issue.key}` : ''} to ${this.store.agents.get(input.to_agent_id)?.name ?? 'an agent'}: ${clip(input.task.replace(/\s+/g, ' '), 160)}`, why: clip(input.context ?? input.acceptance_criteria, 300), ...(gate ? this.gatedMark(gate) : {}) });
       return receipt;
     }
     if (tool === 'report_result') {
       const parsed = reportInput.safeParse(args);
       if (!parsed.success) throw new HttpError(400, 'Provide the request message ID, outcome, summary and evidence within the tool limits.');
       const { message_id, lesson, ...report } = parsed.data;
-      if (!lesson) return this.mailbox.report(id, message_id, report);
+      if (!lesson) return this.logReportOnIssue(id, message_id, report, this.mailbox.report(id, message_id, report));
       // Checked before the note is saved, so a refused report leaves no stray lesson behind.
       const { request, previous } = this.mailbox.checkReport(id, message_id, { ...report, lesson });
       if (previous) return previous;
       // The note is checked and its id known first, but written only once the report is sent.
       const note = this.prepareLesson(agent, lesson, request.delegation.project, [`delegation:${message_id}`]);
-      const sent = this.mailbox.report(id, message_id, { ...report, lesson: { id: note.id, text: lesson } });
+      const sent = this.logReportOnIssue(id, message_id, report, this.mailbox.report(id, message_id, { ...report, lesson: { id: note.id, text: lesson } }));
       const error = note.commit();
       return error ? { ...sent, lessonError: error } : sent;
     }
@@ -1912,7 +1929,11 @@ export class AgentManager {
       this.publishSuper();
       return { asked: ask, note: 'The user sees it in PodCode; their answer arrives as a later turn. Do not wait or ask again.' };
     }
-    if (tool === 'list_issues') return { issues: this.superStore.issues() };
+    if (tool === 'list_issues') {
+      const parsed = listIssuesInput.safeParse(args ?? {});
+      if (!parsed.success) return fail('Filter by status, priority, assignee, project, label, due (overdue, today, this_week, none), parent or query.');
+      return { issues: this.listIssues(parsed.data) };
+    }
     if (tool === 'list_routines') return { routines: this.superStore.routines() };
     if (tool === 'propose_routine') {
       const parsed = proposeRoutineInput.safeParse(args);
@@ -1924,41 +1945,62 @@ export class AgentManager {
     }
     if (tool === 'add_issue') {
       const parsed = addIssueInput.safeParse(args);
-      if (!parsed.success) return fail('Give the issue in up to 500 characters, an optional project, and a why.');
-      const issue = this.superStore.addIssue({ text: parsed.data.text, projectId: parsed.data.project ? this.projectRef(parsed.data.project).id : null, by: 'super' });
-      this.recordSuper({ tool, why: parsed.data.why, undo: { kind: 'issue', issueId: issue.id, before: null }, summary: `Added the issue "${clip(issue.text, 120)}"` });
+      if (!parsed.success) return fail('Give the issue\'s description (text), and optionally a title, project, status, priority, due_date, labels, parent and assignee, and a why.');
+      const input = parsed.data;
+      const assignee = input.assignee === undefined ? {} : this.issueToolAssignee(input.assignee);
+      this.issueHandOutGate(caller, input.status, assignee.agentId);
+      let issue = this.superStore.addIssue({
+        text: input.text, projectId: input.project ? this.projectRef(input.project).id : null, by: 'super',
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.priority !== undefined ? { priority: input.priority } : {}),
+        ...(input.due_date ? { dueDate: input.due_date } : {}),
+        ...(input.labels !== undefined ? { labels: input.labels } : {}),
+        ...(input.parent !== undefined ? { parentId: this.superStore.issueByRef(input.parent).id } : {}),
+      });
+      if (assignee.agentId || assignee.forUser) issue = this.superStore.updateIssue(issue.id, assignee);
+      this.recordSuper({ tool, why: input.why, undo: { kind: 'issue', issueId: issue.id, before: null }, summary: `Added the issue ${issue.key} "${clip(issue.title, 120)}"` });
       return { added: issue };
     }
     if (tool === 'update_issue' || tool === 'complete_issue') {
       const parsed = tool === 'update_issue' ? updateIssueInput.safeParse(args) : completeIssueInput.safeParse(args);
-      if (!parsed.success) return fail('Give the issue id, what to change (status, text, title, agent_id, delegation_id or notes), and a why.');
-      const input = parsed.data as { issue_id: string; status?: SuperIssue['status']; text?: string; title?: string; agent_id?: string; delegation_id?: string; notes?: string; why: string };
-      if (tool === 'update_issue' && [input.status, input.text, input.title, input.agent_id, input.delegation_id, input.notes].every(v => v === undefined)) {
-        return fail('Say what to change: status, text, title, agent_id, delegation_id or notes.');
+      if (!parsed.success) return fail('Give the issue id or key, what to change (status, text, title, priority, due_date, labels, parent, relations, assignee, agent_id, delegation_id, notes or comment), and a why.');
+      const input = parsed.data as Partial<UpdateIssueInput> & { issue_id: string; notes?: string; why: string };
+      const fields = ['status', 'text', 'title', 'priority', 'due_date', 'labels', 'parent', 'relations', 'assignee', 'agent_id', 'delegation_id', 'notes', 'comment'] as const;
+      if (tool === 'update_issue' && fields.every(f => input[f] === undefined)) {
+        return fail('Say what to change: status, text, title, priority, due_date, labels, parent, relations, assignee, agent_id, delegation_id, notes or comment.');
       }
-      // Issues are handed out only in update turns. Mail about work you asked for skips the wake limits,
-      // so an issue started from it would skip them too: starting one (in progress, or given to an agent) there is refused.
-      // Paused: no hand-outs from its own turns (ALL-D9).
-      if (tool === 'update_issue' && (input.status === 'in_progress' || input.agent_id) && this.store.settings.superPaused && caller.currentTask?.source !== 'user' && !this.inUserWorkMail(caller.id)) {
-        throw new HttpError(409, 'The user paused you. Hand out no issues until they resume.');
-      }
-      if (tool === 'update_issue' && (input.status === 'in_progress' || input.agent_id) && this.inUserWorkMail(caller.id)) {
-        throw new HttpError(409, 'Hand out issues only in update turns, not while handling a report or reply on work the user asked for. Finish this turn; the next update lists the queued issues.');
-      }
-      const before = this.superStore.issue(input.issue_id);
-      const agentId = input.agent_id === undefined ? undefined : input.agent_id === '' ? '' : this.teammate(input.agent_id).id;
+      // assignee is the new name for agent_id, and can also be the user.
+      const assignee = input.assignee !== undefined ? this.issueToolAssignee(input.assignee)
+        : input.agent_id !== undefined ? (input.agent_id === '' ? { agentId: '', forUser: false } : { agentId: this.teammate(input.agent_id).id, forUser: false }) : {};
+      if (tool === 'update_issue') this.issueHandOutGate(caller, input.status, assignee.agentId);
+      const before = this.superStore.issueByRef(input.issue_id);
       const issue = this.superStore.updateIssue(before.id, {
         ...(tool === 'complete_issue' ? { status: 'done' as const } : input.status ? { status: input.status } : {}),
         ...(input.text !== undefined ? { text: input.text } : {}),
         ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(agentId !== undefined ? { agentId } : {}),
+        ...(input.priority !== undefined ? { priority: input.priority } : {}),
+        ...(input.due_date !== undefined ? { dueDate: input.due_date } : {}),
+        ...(input.labels !== undefined ? { labels: input.labels } : {}),
+        ...(input.parent !== undefined ? { parentId: input.parent === '' ? null : this.superStore.issueByRef(input.parent).id } : {}),
+        ...(input.relations !== undefined ? { relations: input.relations.map(r => ({ type: r.type, issueId: this.superStore.issueByRef(r.issue).id })) } : {}),
+        ...assignee,
         ...(input.delegation_id !== undefined ? { delegationId: input.delegation_id } : {}),
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
+        ...(input.comment !== undefined ? { comment: input.comment } : {}),
       });
-      const who = issue.agentId ? this.store.agents.get(issue.agentId)?.name : undefined;
+      const who = issue.agentId ? this.store.agents.get(issue.agentId)?.name : issue.forUser ? 'you' : undefined;
+      const changed = [
+        issue.status !== before.status && issue.status.replace('_', ' '),
+        who && (issue.agentId !== before.agentId || issue.forUser !== before.forUser) && `given to ${who}`,
+        issue.priority !== before.priority && `priority ${issue.priority}`,
+        input.text !== undefined && 'reworded', input.title !== undefined && 'retitled', input.notes !== undefined && 'notes',
+        input.comment !== undefined && 'comment', input.labels !== undefined && 'labels', input.relations !== undefined && 'relations',
+        input.parent !== undefined && 'parent', input.due_date !== undefined && 'due date',
+      ].filter(Boolean);
       // The title, one line, names it in the Decisions log (the text may run to several lines).
-      const summary = tool === 'complete_issue' ? `Completed the issue "${clip(issue.title, 120)}"`
-        : `Issue "${clip(issue.title, 100)}": ${[issue.status !== before.status && issue.status.replace('_', ' '), who && issue.agentId !== before.agentId && `given to ${who}`, input.text !== undefined && 'reworded', input.title !== undefined && 'retitled', input.notes !== undefined && 'notes'].filter(Boolean).join(', ') || 'updated'}`;
+      const summary = tool === 'complete_issue' ? `Completed the issue ${issue.key} "${clip(issue.title, 120)}"`
+        : `Issue ${issue.key} "${clip(issue.title, 100)}": ${changed.join(', ') || 'updated'}`;
       this.recordSuper({ tool, why: input.why, undo: { kind: 'issue', issueId: issue.id, before }, summary });
       return { updated: issue };
     }
@@ -2114,6 +2156,80 @@ export class AgentManager {
       ...(body?.labels !== undefined ? { labels: body.labels } : {}),
     }, Date.now(), { kind: 'user' });
     return this.publishSuper();
+  }
+
+  /**
+   * A report on delegated work for an issue goes into that issue's activity, by the agent that
+   * reported it, once (the report's message id is its ref). An issue removed since is left alone.
+   */
+  private logReportOnIssue(agentId: string, requestId: string, report: { outcome: string; summary: string }, sent: PeerMessage): PeerMessage {
+    const issue = this.store.messages.find(m => m.id === requestId)?.delegation?.issue;
+    if (!issue) return sent;
+    try {
+      this.superStore.updateIssue(issue.id, {
+        activityText: `Reported ${report.outcome}: ${clip(report.summary.replace(/\s+/g, ' '), 300)}`,
+        activityRef: `report:${sent.id}`,
+      }, Date.now(), { kind: 'agent', id: agentId });
+      this.publishSuper();
+    } catch (err) {
+      if (!(err instanceof HttpError && err.status === 404)) throw err;
+    }
+    return sent;
+  }
+
+  /** Who an agent tool assigns an issue to: an agent (id or name), "user", or nobody (''). */
+  private issueToolAssignee(raw: string): { agentId?: string; forUser?: boolean } {
+    if (raw === '') return { agentId: '', forUser: false };
+    if (raw.toLowerCase() === 'user') return { forUser: true };
+    return { agentId: this.teammate(raw).id, forUser: false };
+  }
+
+  /**
+   * Handing out an issue (starting it, or giving it to an agent) happens only in update turns:
+   * mail about work the user asked for skips the wake limits, so an issue started from it would skip
+   * them too; and when the user paused the SuperAgent, none from its own turns (ALL-D9).
+   */
+  private issueHandOutGate(caller: Agent, status: string | undefined, agentId: string | undefined): void {
+    if (status !== 'in_progress' && !agentId) return;
+    if (this.store.settings.superPaused && caller.currentTask?.source !== 'user' && !this.inUserWorkMail(caller.id)) {
+      throw new HttpError(409, 'The user paused you. Hand out no issues until they resume.');
+    }
+    if (this.inUserWorkMail(caller.id)) {
+      throw new HttpError(409, 'Hand out issues only in update turns, not while handling a report or reply on work the user asked for. Finish this turn; the next update lists the queued issues.');
+    }
+  }
+
+  /** list_issues: the backlog filtered, each issue without its activity (activityCount instead). */
+  private listIssues(filter: ListIssuesInput): (Omit<SuperIssue, 'activity'> & { activityCount: number })[] {
+    const statuses = filter.status?.map(s => issueStatusFrom(s));
+    const project = filter.project === undefined ? undefined
+      : filter.project.toUpperCase() === NO_PROJECT_CODE ? null
+      : ([...this.store.projects.values()].find(p => p.code === filter.project!.toUpperCase()) ?? this.projectRef(filter.project)).id;
+    const assignee = filter.assignee === undefined ? undefined : filter.assignee.toLowerCase();
+    const assigneeId = assignee === undefined || assignee === 'user' || assignee === 'none' ? undefined : this.teammate(filter.assignee).id;
+    const parentId = filter.parent === undefined ? undefined : this.superStore.issueByRef(filter.parent).id;
+    const words = (filter.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const today = localDay(new Date());
+    const weekEnd = localDay(new Date(Date.now() + 6 * 86_400_000));
+    return this.superStore.issues().filter(i => {
+      if (statuses && !statuses.includes(i.status)) return false;
+      if (filter.priority && !filter.priority.includes(i.priority)) return false;
+      if (project !== undefined && i.projectId !== project) return false;
+      if (assignee === 'user' && !i.forUser) return false;
+      if (assignee === 'none' && (i.agentId || i.forUser)) return false;
+      if (assigneeId && i.agentId !== assigneeId) return false;
+      if (filter.label && !i.labels.includes(filter.label.toLowerCase())) return false;
+      if (parentId && i.parentId !== parentId) return false;
+      if (filter.due === 'none' && i.dueDate) return false;
+      if (filter.due === 'overdue' && !(i.dueDate && i.dueDate < today && isOpenIssue(i))) return false;
+      if (filter.due === 'today' && i.dueDate !== today) return false;
+      if (filter.due === 'this_week' && !(i.dueDate && i.dueDate >= today && i.dueDate <= weekEnd)) return false;
+      if (words.length) {
+        const hay = `${i.key} ${i.title} ${i.text}`.toLowerCase();
+        if (!words.every(w => hay.includes(w))) return false;
+      }
+      return true;
+    }).map(({ activity, ...rest }) => ({ ...rest, activityCount: activity.length }));
   }
 
   /** Who the app assigns an issue to: an agent (its id), you ("user"), or nobody (null or ""). */
@@ -3109,4 +3225,9 @@ export class AgentManager {
     if (superId) setImmediate(() => this.mailbox.drain(superId));
     return settings;
   }
+}
+
+/** A local calendar day, "2026-11-20". */
+function localDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }

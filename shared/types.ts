@@ -567,6 +567,8 @@ export interface Delegation {
   context?: string;
   /** The project code the work is about (ACH), when the lead named one; lessons from it are filed there. */
   project?: string;
+  /** The issue the work is for (ACH-D41): its key is in the handoff, and the report is logged on it. */
+  issue?: { id: string; key: string; title: string };
 }
 
 export interface Report {

@@ -104,6 +104,8 @@ export const delegationInput = z.object({
   context: z.string().trim().max(3000).optional(),
   /** The project the work is about (code, name or ALL); lessons reported back are filed there. */
   project: z.string().trim().min(1).max(200).optional(),
+  /** The issue this work is for (id or key, ACH-25): its key goes into the handoff, and the issue records the delegation and its report. */
+  issue: z.string().trim().min(1).max(40).optional(),
 });
 const channelRef = z.string().trim().min(1).max(80);
 const why = z.string().trim().min(1).max(500);
@@ -190,25 +192,74 @@ export const takeActionInput = z.object({
   approved_ask_id: z.string().trim().min(1).max(100).optional(),
 });
 export type TakeActionInput = z.infer<typeof takeActionInput>;
+/** Any status: the current names, or the old ones (queued is todo, blocked is needs_you) from before ACH-D41. */
+const issueStatus = z.enum(['needs_you', 'in_review', 'in_progress', 'waiting', 'todo', 'backlog', 'done', 'canceled', 'queued', 'blocked']);
+const issuePriority = z.enum(['urgent', 'high', 'normal', 'low', 'none']);
+/** A calendar day, "2026-11-20"; '' clears it. */
+const issueDue = z.union([z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal('')]);
+const issueLabels = z.array(z.string().trim().min(1).max(40)).max(20);
+/** An agent (id or name), "user" for the user, or '' for nobody. */
+const issueAssignee = z.string().trim().max(100);
+const issueRelation = z.object({ type: z.enum(['blocks', 'related', 'duplicate_of']), issue: issueRef });
+export const listIssuesInput = z.object({
+  /** Only these statuses (current or old names). */
+  status: z.array(issueStatus).max(10).optional(),
+  priority: z.array(issuePriority).max(5).optional(),
+  /** An agent (id or name), "user", or "none" for unassigned. */
+  assignee: issueAssignee.min(1).optional(),
+  /** A project (id, name or code); ALL for issues with no project. */
+  project: z.string().trim().min(1).max(200).optional(),
+  label: z.string().trim().min(1).max(40).optional(),
+  due: z.enum(['overdue', 'today', 'this_week', 'none']).optional(),
+  /** Sub-issues of this issue (id or key). */
+  parent: issueRef.optional(),
+  /** Words that must all appear in the key, title or text. */
+  query: z.string().trim().min(1).max(200).optional(),
+});
 export const addIssueInput = z.object({
+  /** The description (Markdown). */
   text: z.string().trim().min(1).max(ISSUE_TEXT_MAX),
+  /** One line; from the text's first line when left out. */
+  title: z.string().trim().min(1).max(ISSUE_TITLE_MAX).optional(),
   /** A project id or name; leave it out for an issue not tied to one. */
   project: z.string().trim().min(1).max(200).optional(),
+  status: issueStatus.optional(),
+  priority: issuePriority.optional(),
+  due_date: issueDue.optional(),
+  labels: issueLabels.optional(),
+  /** The issue this is a sub-issue of (id or key). */
+  parent: issueRef.optional(),
+  assignee: issueAssignee.optional(),
   why,
 });
 export const updateIssueInput = z.object({
+  /** The issue's id or key (ACH-25). */
   issue_id: issueRef,
-  /** The current names, or the old ones (queued is todo, blocked is needs_you) from before ACH-D41. */
-  status: z.enum(['needs_you', 'in_review', 'in_progress', 'waiting', 'todo', 'backlog', 'done', 'canceled', 'queued', 'blocked']).optional(),
+  status: issueStatus.optional(),
+  /** The description (Markdown). */
   text: z.string().trim().min(1).max(ISSUE_TEXT_MAX).optional(),
   /** The one-line title; a new text never changes it, so set it here when the issue is reworded. */
   title: z.string().trim().min(1).max(ISSUE_TITLE_MAX).optional(),
+  priority: issuePriority.optional(),
+  due_date: issueDue.optional(),
+  /** The whole label list, replacing the old one. */
+  labels: issueLabels.optional(),
+  /** The parent issue (id or key); '' makes it top level. */
+  parent: z.union([issueRef, z.literal('')]).optional(),
+  /** The whole relation list, replacing the old one. */
+  relations: z.array(issueRelation).max(50).optional(),
+  /** An agent (id or name), "user", or '' for nobody. Same as agent_id, which stays for older calls. */
+  assignee: issueAssignee.optional(),
   /** The agent on it (id or name), and the delegation's message id; '' clears either. */
   agent_id: z.string().trim().max(100).optional(),
   delegation_id: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(1000).optional(),
+  /** A comment, kept in the issue's activity with its line breaks. */
+  comment: z.string().trim().min(1).max(ISSUE_TEXT_MAX).optional(),
   why,
 });
+export type UpdateIssueInput = z.infer<typeof updateIssueInput>;
+export type ListIssuesInput = z.infer<typeof listIssuesInput>;
 export const completeIssueInput = z.object({ issue_id: issueRef, notes: z.string().trim().max(1000).optional(), why });
 const projectRef = z.string().trim().min(1).max(200);
 export const ghPrsInput = z.object({ project: projectRef.optional() });
@@ -359,7 +410,7 @@ export function createCommsMcpServer(call: CommsHandler, options: { executive?: 
     inputSchema: refSearchInput.shape, annotations: { readOnlyHint: true },
   }, args => invoke('ref_search', args));
   server.registerTool('delegate_task', {
-    description: 'Lead only: assign implementation, testing, validation or review to a teammate with acceptance criteria and file or commit context. Name the project (code, name or ALL) so lessons reported back are filed there. Returns immediately; the result report arrives later. Prefer a Tester for validation.',
+    description: 'Lead only: assign implementation, testing, validation or review to a teammate with acceptance criteria and file or commit context. Name the project (code, name or ALL) so lessons reported back are filed there, and the issue (id or key, ACH-25) when the work is one: its key goes into the handoff with the branch and commit rule, the issue records the delegation, and the report is logged on it. Returns immediately; the result report arrives later. Prefer a Tester for validation.',
     inputSchema: delegationInput.shape,
   }, args => invoke('delegate_task', args));
   server.registerTool('list_delegations', {
@@ -458,15 +509,15 @@ function registerSuperTools(server: McpServer, invoke: Invoke): void {
     inputSchema: askUserInput.shape,
   }, args => invoke('ask_user', args));
   server.registerTool('list_issues', {
-    description: 'The issues backlog, in order: each issue\'s id, key (ACH-25), title, text, project, status (needs_you, in_review, in_progress, waiting, todo, backlog, done, canceled) and the agent and delegation on it. Work it top down: when an agent is free, give it the next todo issue and mark it in_progress.',
-    inputSchema: {}, annotations: { readOnlyHint: true },
+    description: 'The issues backlog, in order: each issue\'s id, key (ACH-25), title, text, project, status (needs_you, in_review, in_progress, waiting, todo, backlog, done, canceled), priority (urgent, high, normal, low, none), due date, labels, assignee, parent, relations and delegation. Filter by status, priority, assignee ("user", "none" or an agent), project (ALL for none), label, due (overdue, today, this_week, none), parent or query words. Work it by status, then priority, then order: when an agent is free, give it the next todo issue with delegate_task and its issue, and mark it in_progress. Needs you is what to ask the user about.',
+    inputSchema: listIssuesInput.shape, annotations: { readOnlyHint: true },
   }, args => invoke('list_issues', args));
   server.registerTool('add_issue', {
-    description: `Add an issue to the end of the backlog, optionally for a project (id or name). The user adds issues too. ${note}`,
+    description: `Add an issue to the end of the backlog: its description (text, Markdown), and optionally a one-line title, project (id or name), status (todo unless said), priority, due_date ("2026-11-20"), labels, parent (id or key) and assignee (an agent, or "user"). It gets a key such as ACH-25. The user adds issues too. ${note}`,
     inputSchema: addIssueInput.shape,
   }, args => invoke('add_issue', args));
   server.registerTool('update_issue', {
-    description: `Change an issue: its status (in_progress when an agent starts it, needs_you when it waits for the user, waiting when it waits on someone else, in_review, todo to put it back, canceled to drop it; the old names queued and blocked still work), text, title (a new text keeps the old title, so set it when the issue is reworded), the agent and delegation on it, or notes. ${note}`,
+    description: `Change an issue, by id or key: its status (in_progress when an agent starts it, in_review, waiting when it waits on someone else, needs_you when it waits for the user, todo to put it back, backlog, canceled to drop it; the old names queued and blocked still work), text, title (a new text keeps the old title, so set it when the issue is reworded), priority, due_date ('' clears), labels or relations (each the whole new list; a duplicate is canceled with a duplicate_of relation), parent ('' for none), assignee (an agent, "user" or ''), delegation, notes, or a comment for its activity. ${note}`,
     inputSchema: updateIssueInput.shape,
   }, args => invoke('update_issue', args));
   server.registerTool('complete_issue', {

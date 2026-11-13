@@ -290,6 +290,19 @@ export class SuperStore {
     return found;
   }
 
+  /** An issue by its id or its key (ACH-25, any case; ACH-025 is ACH-25). */
+  issueByRef(ref: string): SuperIssue {
+    const raw = String(ref ?? '').trim();
+    const issues = this.read().issues;
+    const byId = issues.find(g => g.id === raw);
+    if (byId) return byId;
+    const m = /^([A-Za-z][A-Za-z0-9]{1,5})-(\d{1,6})$/.exec(raw);
+    const key = m ? `${m[1].toUpperCase()}-${Number(m[2])}` : '';
+    const byKey = key ? issues.find(g => g.key === key) : undefined;
+    if (!byKey) throw new HttpError(404, `No issue ${raw}. Give its id or key (list_issues).`);
+    return byKey;
+  }
+
   /** A new issue at the end of the backlog, Todo unless said, with its key (ACH-25) and a "created" event. */
   addIssue(input: { text: string; projectId: string | null; by: SuperIssue['by']; title?: string; status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown; parentId?: string }, now = Date.now()): SuperIssue {
     const stored = this.read();
@@ -782,8 +795,8 @@ export function updatePrompt(events: SuperEvent[], openAsks: SuperAsk[], now: nu
   const shownIssues = open.slice(0, 8);
   const backlog = open.length ? [
     '',
-    'Open issues, in order (work them top down: give the next todo one to a free agent and mark it in_progress with update_issue):',
-    ...shownIssues.map((g, i) => `${i + 1}. [${g.id}] ${g.key} ${g.status}${g.priority !== 'none' ? `, ${g.priority}` : ''}${g.dueDate ? `, due ${g.dueDate}` : ''}: ${g.text}`),
+    'Open issues, in order (give the next todo one to a free agent: mark it in_progress with update_issue, then delegate_task with its issue):',
+    ...shownIssues.map((g, i) => `${i + 1}. [${g.id}] ${g.key} ${g.status}${g.priority !== 'none' ? `, ${g.priority}` : ''}${g.dueDate ? `, due ${g.dueDate}` : ''}: ${g.title}`),
     ...(open.length > shownIssues.length ? [`(${open.length - shownIssues.length} more; list_issues has them all)`] : []),
   ] : [];
   const waited = held ? ['', `While you could not take a turn (${held.reasons.join('; ')}), ${held.count} ${held.count === 1 ? 'message to you waited' : 'messages to you waited'}. ${held.count === 1 ? 'It comes' : 'They come'} as ${held.count === 1 ? 'its own turn' : 'their own turns'} after this update.`] : [];
