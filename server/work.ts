@@ -180,7 +180,7 @@ type RecordFile = Record<string, MergeRecord[]>;
 export class MergeRecords {
   private file: string;
   private data: RecordFile | null = null;
-  constructor(dir: string) { this.file = path.join(dir, 'merges.json'); }
+  constructor(dir: string, filename = 'merges.json') { this.file = path.join(dir, filename); }
 
   private load(): RecordFile {
     if (this.data) return this.data;
@@ -205,7 +205,6 @@ export class MergeRecords {
     for (const record of found) {
       const known = list.find(r => r.hash === record.hash);
       if (!known) { list.push(record); changed = true; continue; }
-      if (record.fastForward && !known.fastForward && known.tip === known.hash) { known.fastForward = true; changed = true; }
       for (const key of ['reviewer', 'conversationId'] as const) {
         if (!known[key] && record[key]) { known[key] = record[key]; changed = true; }
       }
@@ -349,6 +348,8 @@ export class WorkService {
   /** A build already running for a project, so polls arriving together share it. */
   private building = new Map<string, Promise<WorkProject>>();
   private records: MergeRecords;
+  /** Kept apart from Work's merges.json: fast-forwards belong only to issue-link evidence. */
+  private issueRecords: MergeRecords | null;
   private git: GitRunner;
   private ctx: WorkContext;
   private owners: WorkOwners;
@@ -357,6 +358,7 @@ export class WorkService {
 
   constructor(records: MergeRecords, ctx: WorkContext, git: GitRunner = readGit) {
     this.records = records;
+    this.issueRecords = ctx.onMerges ? new MergeRecords(path.join(ctx.dataDir, 'issue-links'), 'fast-forwards.json') : null;
     this.ctx = ctx;
     this.git = git;
     this.owners = ctx.owners ?? new WorkOwners(null);
@@ -571,10 +573,11 @@ export class WorkService {
     return (await this.git(['merge-base', '--is-ancestor', a, b], cwd)).ok;
   }
 
-  /** Read main's reflog and keep a record of every merge into it, with its reviewer and task. */
+  /** Work keeps ordinary merges; the optional issue consumer keeps fast-forwards separately. */
   private async captureMerges(facts: RepoFacts): Promise<MergeRecord[]> {
     const { root, defaultBranch } = facts;
-    const known = new Set(this.records.list(root).map(r => r.hash));
+    const normal = this.records.list(root);
+    const forwards = this.issueRecords?.list(root) ?? [];
     const log = await this.git(['reflog', 'show', '--date=unix', '--format=%H%x1f%gd%x1f%gs', `refs/heads/${defaultBranch}`], root);
     const found: MergeRecord[] = [];
     const messages = this.ctx.messages();
@@ -585,27 +588,32 @@ export class WorkService {
       const merge = /^merge ([^:\s]+):/.exec(what ?? '');
       // Merging origin's main (or any remote branch) back in is not anyone's work.
       if (!hash || !merge || merge[1] === defaultBranch || /^(origin|upstream|refs\/remotes)\//.test(merge[1])) continue;
+      const fastForward = /Fast-forward/i.test(what ?? '');
+      if (fastForward && !this.issueRecords) continue;
       const at = Number(/@\{(\d+)\}/.exec(selector ?? '')?.[1] ?? 0) * 1000;
       const branch = merge[1];
       const info = fromMessages(branch, messages, agents);
-      const fastForward = /Fast-forward/i.test(what ?? '');
-      if (known.has(hash)) {
-        // Fill in what messages say now (a review that landed after the first look).
-        found.push({ hash, tree: '', tip: '', branch, at, subject: '', names: [], ...(fastForward ? { fastForward: true } : {}), refs: info.refs.filter(this.ctx.knownRef), ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
+      const known = (fastForward ? forwards : normal).find(r => r.hash === hash);
+      const forwardFlag = fastForward ? { fastForward: true as const } : {};
+      if (known) {
+        // Fill in what messages say now, in the same store the record belongs to.
+        found.push({ ...known, ...forwardFlag, refs: info.refs.filter(this.ctx.knownRef), ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
         continue;
       }
-      const parts = await this.git(['log', '-1', '--format=%T%x1f%P%x1f%s', hash], root);
-      if (!parts.ok) continue; // the commit is gone: nothing to record
-      const [tree, parents, subject] = parts.out.trim().split('\x1f');
+      // Restoring a known merge by FF can reuse its tree/subject, with no extra Git read.
+      const saved = fastForward ? normal.find(r => r.hash === hash) : undefined;
+      const parts = saved ? null : await this.git(['log', '-1', '--format=%T%x1f%P%x1f%s', hash], root);
+      if (!saved && !parts?.ok) continue;
+      const [tree, parents, subject] = saved ? [saved.tree, '', saved.subject] : parts!.out.trim().split('\x1f');
       const tip = fastForward ? hash : parents?.split(' ')[1];
       if (!tree || !tip) continue;
       const refs = [...new Set([...info.refs, ...findRefIds(subject ?? '', this.ctx.knownRef).map(r => r.id)])].filter(this.ctx.knownRef);
-      // A fast-forward's previous main is already in the next reflog entry.
       const parent = fastForward ? entries[index + 1]?.split('\x1f')[0] : parents?.split(' ')[0];
-      found.push({ hash, tree, tip, ...(fastForward ? { fastForward: true } : {}), ...(parent ? { parent } : {}), branch, at, subject: subject ?? '', names: namesInMergeSubject(subject ?? ''), refs, ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
+      found.push({ hash, tree, tip, ...forwardFlag, ...(parent ? { parent } : {}), branch, at, subject: subject ?? '', names: namesInMergeSubject(subject ?? ''), refs, ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
     }
-    this.records.merge(root, found.filter(r => r.tree || known.has(r.hash)));
-    return this.records.list(root);
+    this.records.merge(root, found.filter(r => !r.fastForward));
+    this.issueRecords?.merge(root, found.filter(r => r.fastForward));
+    return [...this.records.list(root), ...(this.issueRecords?.list(root) ?? [])];
   }
 
   /**
