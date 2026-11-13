@@ -11,7 +11,8 @@ import { useNotes } from '../../notes/refsState.ts';
 import { RefChip } from '../../notes/RefChip.tsx';
 import { useApp } from '../../store.ts';
 import { AgentAvatar } from '../../ui/Avatar.tsx';
-import { issueLinksSource, type IssueLinks } from './issueLinks.ts';
+import { Loading, TextButton } from '../../ui/common.tsx';
+import { issueLinksSource, linksStatus, type IssueLinks, type LinksStatus } from './issueLinks.ts';
 import { dueTone, RELATION_TYPES, relationRemoval, relationsOf, subIssues, withRelation } from './issueViewModel.ts';
 import { writeIssue } from './issueWrites.ts';
 import { Picker } from './Picker.tsx';
@@ -118,18 +119,34 @@ export function Relations({ issue, issues }: { issue: SuperIssue; issues: SuperI
   );
 }
 
-/** In git and Decisions, from the links source (local until Hal's API lands). */
-export function useIssueLinks(issue: SuperIssue): IssueLinks | null {
-  const [links, setLinks] = useState<IssueLinks | null>(null);
+/**
+ * In git and Decisions, from the links source. Loading, a failed read and a read that found
+ * nothing read differently (Hal's audit, ACH-23): only a read from the server can say nothing names
+ * the issue. The local links (the issue's own text) stand in when the server's route did not
+ * answer, so git is then "could not read", with a retry. The last links stay while the same issue
+ * refreshes, so the section does not flash Loading on every update.
+ */
+export interface IssueLinksState { links: IssueLinks | null; status: LinksStatus; retry: () => void }
+
+export function useIssueLinks(issue: SuperIssue): IssueLinksState {
+  const [state, setState] = useState<{ id: string; links: IssueLinks | null; failed: boolean }>({ id: issue.id, links: null, failed: false });
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
-    void issueLinksSource()(issue).then(l => { if (live) setLinks(l); }, () => { if (live) setLinks(null); });
+    void issueLinksSource()(issue).then(
+      l => { if (live) setState({ id: issue.id, links: l, failed: false }); },
+      () => { if (live) setState(s => ({ id: issue.id, links: s.id === issue.id ? s.links : null, failed: true })); },
+    );
     return () => { live = false; };
-  }, [issue]);
-  return links;
+  }, [issue, attempt]);
+  const retry = () => { setState({ id: issue.id, links: null, failed: false }); setAttempt(a => a + 1); };
+  const links = state.id === issue.id ? state.links : null;
+  return { links, status: linksStatus(state, issue.id), retry };
 }
 
-export function InGit({ issue, links }: { issue: SuperIssue; links: IssueLinks | null }) {
+
+export function InGit({ issue, links: state }: { issue: SuperIssue; links: IssueLinksState }) {
+  const links = state.links;
   // The branch the issue records (an agent that started it), when the links name none.
   const git = links?.git && !links.git.branch && issue.branch ? { ...links.git, branch: { name: issue.branch } } : links?.git ?? (issue.branch ? { commits: [], branch: { name: issue.branch } } : undefined);
   const quiet = 'font-sans text-[12.5px] text-content/45';
@@ -143,6 +160,10 @@ export function InGit({ issue, links }: { issue: SuperIssue; links: IssueLinks |
           ))}
           {git.closes ? <div className="flex min-h-7 items-center"><span className="w-24 shrink-0 text-content/45">Closes</span><span className="truncate text-content/75">{git.closes}</span></div> : null}
         </div>
+      ) : state.status === 'loading' ? (
+        <Loading className="py-1" />
+      ) : state.status === 'failed' ? (
+        <p className={quiet}>Could not read the branches and commits for {issue.key} just now. <TextButton onClick={state.retry}>Try again</TextButton></p>
       ) : (
         <p className={quiet}>No branch or commit names {issue.key} yet. An agent that starts it names its branch feat/{issue.key}-…, and it closes when that merges into main.</p>
       )}
@@ -150,8 +171,10 @@ export function InGit({ issue, links }: { issue: SuperIssue; links: IssueLinks |
   );
 }
 
-export function Decisions({ links }: { links: IssueLinks | null }) {
+export function Decisions({ links: state }: { links: IssueLinksState }) {
   const byId = useNotes(s => s.byId);
+  // The decisions cited in the issue's own text show even when the server's read failed.
+  const links = state.links;
   const ids = links?.decisions ?? [];
   if (!ids.length) return null;
   return (

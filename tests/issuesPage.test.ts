@@ -327,3 +327,15 @@ test('Hal\'s audit: focus follows the selection to the detail when a narrow pane
   assert.match(view, /@container\/issueview flex min-h-0 flex-1 flex-col/, 'stacked below 44rem');
   assert.match(view, /onClick=\{\(\) => showIssueInList\(parent\.id\)\}/, 'the parent crumb selects on the Issues page, no new tab');
 });
+
+test('In git reads loading, failed and found-nothing apart: only a server read says nothing names the issue (Hal\'s audit, ACH-23)', async () => {
+  const { linksStatus } = await import('../web/issues/view/issueLinks.ts');
+  const server = { git: { commits: [] }, decisions: [], source: 'server' as const };
+  const local = { git: { commits: [] }, decisions: ['ACH-D1'], source: 'local' as const };
+  assert.equal(linksStatus({ id: 'a', links: null, failed: false }, 'a'), 'loading', 'in flight');
+  assert.equal(linksStatus({ id: 'a', links: server, failed: false }, 'b'), 'loading', 'another issue\'s links: this one is loading');
+  assert.equal(linksStatus({ id: 'a', links: server, failed: false }, 'a'), 'ready', 'read: an empty answer may say nothing names it');
+  assert.equal(linksStatus({ id: 'a', links: local, failed: false }, 'a'), 'failed', 'the server did not answer: the local stand-in is not a read');
+  assert.equal(linksStatus({ id: 'a', links: null, failed: true }, 'a'), 'failed', 'rejected');
+  assert.equal(linksStatus({ id: 'a', links: server, failed: true }, 'a'), 'ready', 'a failed refresh keeps the last read');
+});
