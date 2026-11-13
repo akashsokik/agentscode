@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { IssueActor, IssueEvent, IssuePriority, IssueRelationType, IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
 import { ISSUE_PRIORITIES, ISSUE_STATUSES, ISSUE_TEXT_MAX, ISSUE_TITLE_MAX, issueDescription, isLegacyIssue, isOpenIssue, issueStatusFrom, issueTitle, legacyIssue, migrateIssue, reconcileIssues, type LegacyIssue } from '../shared/issues.ts';
-import { nextIssueKey, NO_PROJECT_CODE } from '../shared/issueKeys.ts';
+import { CODE_PATTERN, nextIssueKey, NO_PROJECT_CODE } from '../shared/issueKeys.ts';
 import { HttpError } from './errors.ts';
 import { inQuietHours, validQuietTime } from '../shared/superAgent.ts';
 
@@ -64,7 +64,11 @@ interface Stored {
  * old-format copy written to super.json alongside: while super.json still holds exactly that, no
  * older build has changed the issues and the list here is used as it is.
  */
-interface IssuesFile { issues: SuperIssue[]; issueKeys: Record<string, number>; legacy: string }
+interface IssuesFile {
+  issues: SuperIssue[]; issueKeys: Record<string, number>; legacy: string;
+  /** The save it was written in; super.json carries the same id (issuesWrite), so a save cut short between the two files shows. */
+  write?: string;
+}
 
 function legacyStamp(list: unknown[]): string {
   return createHash('sha256').update(JSON.stringify(list)).digest('hex').slice(0, 16);
@@ -121,26 +125,33 @@ export class SuperStore {
    * order the issues were made; a list a d2d597e build kept in super.json ("issues2") moves over as
    * it is. Either way the result is written back once.
    */
-  private readIssues(raw: Partial<Stored> & LegacyStored & { issues2?: unknown; issueKeys?: unknown }): { issues: SuperIssue[]; issueKeys: Record<string, number> } {
+  private readIssues(raw: Partial<Stored> & LegacyStored & { issues2?: unknown; issueKeys?: unknown; issuesWrite?: unknown }): { issues: SuperIssue[]; issueKeys: Record<string, number> } {
     const file = this.readIssuesFile();
-    const counterSource = file?.issueKeys ?? raw.issueKeys;
-    let counters: Record<string, number> = counterSource && typeof counterSource === 'object' ? sanitizeCounters(counterSource as Record<string, unknown>) : {};
+    // Counters from both files, the higher of each: super.json keeps a copy, so losing issues.json
+    // (or a crash in the one-time move) never hands a key out again.
+    let counters = maxCounters(file?.issueKeys, raw.issueKeys && typeof raw.issueKeys === 'object' ? sanitizeCounters(raw.issueKeys as Record<string, unknown>) : undefined);
     const current = file ? file.issues : Array.isArray(raw.issues2) ? raw.issues2.filter(validIssue) : null;
     const hasLegacy = Array.isArray(raw.issues) || Array.isArray(raw.goals);
     const legacyRaw = hasLegacy ? storedIssues(raw) : null;
     // Nothing older has touched super.json's copy since this build wrote it: no reconciling.
     if (file && legacyRaw && file.legacy === legacyStamp(legacyRaw) && raw.issues2 === undefined) return { issues: file.issues, issueKeys: counters };
     const legacy = legacyRaw ? legacyRaw.filter(isLegacyIssue).sort((a, b) => a.createdAt - b.createdAt) : null;
-    const inUse = (current ?? []).map(i => i.key);
+    // Every key the old copy still carries counts as given, so a fresh key goes past them all.
+    counters = maxCounters(counters, countersOf([...(current ?? []).map(i => i.key), ...(legacy ?? []).flatMap(o => (validKey(o.key) ? [o.key!] : []))]));
+    const given = new Set((current ?? []).map(i => i.key));
     const keyFor = (old: LegacyIssue) => {
-      // Never a key given before: past the counter and every key in use (nextIssueKey).
-      const next = nextIssueKey(this.code(old.projectId), counters, inUse);
+      // Its own key back when it has one no other issue holds; otherwise the next one never given.
+      if (validKey(old.key) && !given.has(old.key!)) { given.add(old.key!); return old.key!; }
+      const next = nextIssueKey(this.code(old.projectId), counters, given);
       counters = next.counters;
-      inUse.push(next.key);
+      given.add(next.key);
       return next.key;
     };
+    // super.json says this build saved it (issuesWrite) but issues.json is from an earlier save:
+    // the save was cut short, which is not an older build's edit.
+    const cutShort = file !== null && typeof raw.issuesWrite === 'string' && raw.issuesWrite !== file.write;
     // In backlog order, as the file keeps them: open by order, then the latest closed.
-    const issues = orderIssues(reconcileIssues(current, legacy, keyFor, Date.now()));
+    const issues = orderIssues(reconcileIssues(current, legacy, keyFor, Date.now(), cutShort ? 'Recovered after a save was cut short.' : undefined));
     // Written back when anything moved: a first migration, a reconcile, or issues.json still to make.
     if (!file || raw.issues2 !== undefined || JSON.stringify(issues) !== JSON.stringify(current) || (legacyRaw && file.legacy !== legacyStamp(legacyRaw))) {
       if (file || issues.length || hasLegacy || raw.issues2 !== undefined) this.pendingWrite = true;
@@ -159,6 +170,7 @@ export class SuperStore {
         issues: raw.issues.filter(validIssue),
         issueKeys: raw.issueKeys && typeof raw.issueKeys === 'object' ? sanitizeCounters(raw.issueKeys as Record<string, unknown>) : {},
         legacy: typeof raw.legacy === 'string' ? raw.legacy : '',
+        ...(typeof raw.write === 'string' ? { write: raw.write } : {}),
       };
     } catch {
       const aside = `${this.issuesFile}.unreadable-${Date.now()}`;
@@ -177,18 +189,22 @@ export class SuperStore {
     // For older builds (a manual downgrade): the same issues in the old format, under "issues" and,
     // from before ACH-D38, "goals". What they change there is read back (readIssues).
     const legacy = issues.map(legacyIssue);
+    const save = randomUUID().slice(0, 8);
     const next = {
       asks: [...open, ...closed].sort((a, b) => b.createdAt - a.createdAt), log: stored.log.slice(0, LOG_KEPT), wakes: stored.wakes.slice(-100),
       ...(stored.autoSpend ? { autoSpend: stored.autoSpend } : {}),
       ...(stored.briefDay ? { briefDay: stored.briefDay } : {}),
       issues: legacy,
       goals: legacy,
+      // A copy of the counters (older builds drop it; issues.json keeps the real one), and this save's id.
+      issueKeys: stored.issueKeys,
+      issuesWrite: save,
       routines: stored.routines,
     };
     // super.json first: if the second write never happens, its copy is newer than issues.json's
     // stamp, and the next read reconciles it like an older build's edit (an added issue is kept).
     writeJson(this.file, next);
-    writeJson(this.issuesFile, { issues, issueKeys: stored.issueKeys, legacy: legacyStamp(JSON.parse(JSON.stringify(legacy)) as unknown[]) } satisfies IssuesFile);
+    writeJson(this.issuesFile, { issues, issueKeys: stored.issueKeys, legacy: legacyStamp(JSON.parse(JSON.stringify(legacy)) as unknown[]), write: save } satisfies IssuesFile);
   }
 
   view(agentId: string | null): SuperState {
@@ -886,5 +902,29 @@ function writeJson(file: string, value: unknown): void {
 function sanitizeCounters(raw: Record<string, unknown>): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [code, n] of Object.entries(raw)) if (typeof n === 'number' && Number.isFinite(n) && n >= 0) out[code] = Math.floor(n);
+  return out;
+}
+
+/** A whole issue key (ACH-25), as written in an old-format copy. */
+function validKey(key: unknown): boolean {
+  if (typeof key !== 'string') return false;
+  const m = new RegExp(`^(${CODE_PATTERN})-(\\d{1,6})$`).exec(key);
+  return Boolean(m) && Number(m![2]) > 0 && !key.includes('-0');
+}
+
+/** The highest number each code has in these keys. */
+function countersOf(keys: Iterable<string>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const key of keys) {
+    const m = new RegExp(`^(${CODE_PATTERN})-(\\d+)$`).exec(key);
+    if (m) out[m[1]] = Math.max(out[m[1]] ?? 0, Number(m[2]));
+  }
+  return out;
+}
+
+/** Counters together, the higher of each. */
+function maxCounters(...all: (Record<string, number> | undefined)[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const c of all) for (const [code, n] of Object.entries(c ?? {})) out[code] = Math.max(out[code] ?? 0, n);
   return out;
 }
