@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { checksLabel, isHttpUrl, isOpen, PR_VIEWS, prsInView, viewCounts, type PrCheck, type PrDetail, type PrReview, type PrView, type PullRequest } from '../../shared/prs.ts';
 import { api } from '../api.ts';
 import { relativeTime } from '../format.ts';
@@ -6,7 +6,7 @@ import { open } from '../layout.ts';
 import { Copy, ExternalLink, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, RefreshCw } from '../mono/icons.tsx';
 import { WhoAvatar } from '../notes/parts.tsx';
 import { PaneFrame, type PaneChrome } from '../panes/PaneFrame.tsx';
-import { cx, Empty, HeaderButton, Loading } from '../ui/common.tsx';
+import { ChipButton, cx, Empty, HeaderButton, Loading } from '../ui/common.tsx';
 import { ACTION_GHOST, ACTION_OUTLINE, InboxBar, InboxCard, InboxDetail, InboxFilterTabs, InboxGroup, InboxHero, InboxLayout, InboxList, InboxSearch, InboxSection, InboxTabs, TimelineStop } from '../ui/Inbox.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
 import { StatusMark, StatusText, statusWord, type StatusState } from '../ui/StatusMark.tsx';
@@ -52,6 +52,11 @@ export function PullRequestsPane({ prId, chrome }: { prId?: string; chrome: Pane
   const now = useNow();
   const [view, setView] = useState<PrView>('open');
   const [query, setQuery] = useState('');
+  // The detail's tab stays as you move between PRs, as in MonoCode's inbox.
+  const [tab, setTab] = useState<PrTab>('summary');
+  // Bumped by Refresh, so the PR on screen reads its files and commits again too.
+  const [fresh, setFresh] = useState(0);
+  const refresh = () => { setFresh(n => n + 1); void loadPrs(true); };
 
   const all = useMemo(() => (data?.pullRequests ?? []).filter(pr => matches(pr, query)), [data, query]);
   const counts = viewCounts(all);
@@ -65,44 +70,73 @@ export function PullRequestsPane({ prId, chrome }: { prId?: string; chrome: Pane
       <GitPullRequest className="size-3.5 text-content/55" strokeWidth={1.75} />
       <span className="text-content">Pull requests</span>
       {data ? <span className="font-normal text-content/45">{counts.open} open</span> : null}
+      {data ? <span title={new Date(data.fetchedAt).toLocaleString()} className="font-normal text-content/35">· {loading ? 'updating…' : `updated ${ago(data.fetchedAt, now)}`}</span> : null}
     </span>
   );
-  const actions = <HeaderButton icon={RefreshCw} label="Refresh pull requests" disabled={loading} onClick={() => void loadPrs(true)} />;
+  // Spins while a read runs (still, under reduced motion).
+  const actions = <HeaderButton icon={RefreshCw} label={loading ? 'Refreshing pull requests' : 'Refresh pull requests'} disabled={loading} onClick={refresh} className={loading ? '[&_svg]:animate-spin motion-reduce:[&_svg]:animate-none' : ''} />;
+  const retry = <ChipButton onClick={refresh} disabled={loading}>{loading ? 'Trying…' : 'Try again'}</ChipButton>;
 
   if (!data) {
     return (
       <PaneFrame chrome={chrome} title={title} actions={actions}>
-        {error ? <Empty icon={GitPullRequest} title="Pull requests could not be loaded">{error}</Empty> : <Loading />}
+        {error ? <Empty icon={GitPullRequest} title="Pull requests could not be loaded" action={retry}>{error}</Empty> : <Loading />}
       </PaneFrame>
     );
   }
   if (data.error) {
     return (
       <PaneFrame chrome={chrome} title={title} actions={actions}>
-        <Empty icon={GitPullRequest} title="GitHub could not be read">{data.error}</Empty>
+        <Empty icon={GitPullRequest} title="GitHub could not be read" action={retry}>{data.error}</Empty>
       </PaneFrame>
     );
   }
 
   const card = (pr: PullRequest) => <li key={pr.id}><PrCard pr={pr} now={now} active={selected?.id === pr.id} /></li>;
   const listed = [...shown, ...recent];
+  const move = (step: -1 | 1) => {
+    const at = listed.findIndex(pr => pr.id === selected?.id);
+    const next = listed[Math.max(0, Math.min(listed.length - 1, at + step))];
+    if (next) open({ kind: 'pullRequests', prId: next.id });
+    return next?.id;
+  };
+  // J and K walk the list from anywhere in the rail, as the arrows do in the list; never while typing.
+  const onRailKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || (e.key !== 'j' && e.key !== 'k')) return;
+    if ((e.target as HTMLElement).closest('input, textarea, [contenteditable="true"]')) return;
+    e.preventDefault();
+    const id = move(e.key === 'j' ? 1 : -1);
+    if (id) requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(id)}"]`)?.focus());
+  };
+  // Escape in the detail goes back to the selected card (and to the list, when only one side shows).
+  const onDetailKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || !selected) return;
+    const card = document.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(selected.id)}"]`);
+    e.preventDefault();
+    if (!card?.offsetParent) open({ kind: 'pullRequests' });
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(selected.id)}"]`)?.focus());
+  };
   return (
     <PaneFrame chrome={chrome} title={title} actions={actions}>
       <InboxLayout
         detailOpen={Boolean(prId)}
+        onRailKeyDown={onRailKey}
         toolbar={<>
           <InboxFilterTabs options={PR_VIEWS.map(v => ({ value: v.view, label: TAB_LABEL[v.view], count: v.view === 'needsReview' || v.view === 'checksFailing' ? counts[v.view] : undefined, attention: v.view === 'checksFailing' }))} value={view} onChange={setView} fit />
           <InboxSearch value={query} onChange={setQuery} placeholder="Filter pull requests" />
+          {/* A failed refresh keeps what was read before, and says so where it is seen. */}
+          {error ? (
+            <p role="status" className="flex shrink-0 items-center gap-2 border-b border-stroke px-3 py-2 font-sans text-[11.5px] leading-snug text-warning">
+              <span className="min-w-0 flex-1">Could not refresh ({error}). Showing what was read {ago(data.fetchedAt, now)}.</span>
+              <ChipButton onClick={refresh} disabled={loading}>{loading ? 'Trying…' : 'Try again'}</ChipButton>
+            </p>
+          ) : null}
         </>}
         list={
           <InboxList
             label="Pull requests"
-            onMove={step => {
-              const at = listed.findIndex(pr => pr.id === selected?.id);
-              const next = listed[Math.max(0, Math.min(listed.length - 1, at + step))];
-              if (next) open({ kind: 'pullRequests', prId: next.id });
-              return next?.id;
-            }}
+            onMove={move}
+            activeId={selected?.id}
             empty={listed.length ? undefined : query.trim() ? 'No pull requests match.' : EMPTY[view]}
             footer={data.skipped.length ? `Not shown: ${data.skipped.map(s => `${s.project} (${s.reason.replace(/\.$/, '').toLowerCase()})`).join(', ')}.` : undefined}
           >
@@ -111,7 +145,7 @@ export function PullRequestsPane({ prId, chrome }: { prId?: string; chrome: Pane
             {recent.map(card)}
           </InboxList>
         }
-        detail={selected ? <PrInboxDetail key={selected.id} pr={selected} now={now} /> : null}
+        detail={selected ? <PrInboxDetail key={selected.id} pr={selected} now={now} tab={tab} onTab={setTab} fresh={fresh} onKeyDown={onDetailKey} /> : null}
       />
     </PaneFrame>
   );
@@ -180,15 +214,18 @@ function reviewSummary(pr: PullRequest): string {
 type PrTab = 'summary' | 'code' | 'checks';
 
 /** One PR's files and commits, read when it is shown (cached by the server). */
-function usePrDetail(pr: PullRequest): { detail: PrDetail | null; error: string | null } {
+function usePrDetail(pr: PullRequest, fresh: number): { detail: PrDetail | null; error: string | null } {
   const [state, setState] = useState<{ detail: PrDetail | null; error: string | null }>({ detail: null, error: null });
+  const first = useRef(fresh);
   useEffect(() => {
     let live = true;
-    api.prDetail(pr.repo, pr.number)
+    // After a Refresh press, read GitHub again (the server keeps its 10 s floor).
+    api.prDetail(pr.repo, pr.number, fresh !== first.current)
       .then(detail => { if (live) setState({ detail, error: null }); })
-      .catch((err: Error) => { if (live) setState({ detail: null, error: err.message }); });
+      // A failed re-read keeps the files and commits already shown.
+      .catch((err: Error) => { if (live) setState(prev => ({ detail: prev.detail, error: err.message })); });
     return () => { live = false; };
-  }, [pr.repo, pr.number]);
+  }, [pr.repo, pr.number, fresh]);
   return state;
 }
 
@@ -196,15 +233,25 @@ function usePrDetail(pr: PullRequest): { detail: PrDetail | null; error: string 
  * The selected PR, as MonoCode's InboxDetail: the identity bar, then the title, who and when and
  * which branches, the actions, the Summary / Code / Checks tabs, and its commits as the activity.
  */
-function PrInboxDetail({ pr, now }: { pr: PullRequest; now: number }) {
-  const [tab, setTab] = useState<PrTab>('summary');
-  const [copied, setCopied] = useState(false);
-  const { detail, error } = usePrDetail(pr);
+function PrInboxDetail({ pr, now, tab, onTab: setTab, fresh, onKeyDown }: { pr: PullRequest; now: number; tab: PrTab; onTab: (tab: PrTab) => void; fresh: number; onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => void }) {
+  const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const copyLink = () => {
+    const done = (state: 'copied' | 'failed') => {
+      setCopy(state);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopy('idle'), 2000);
+    };
+    navigator.clipboard.writeText(pr.url).then(() => done('copied'), () => done('failed'));
+  };
+  const { detail, error } = usePrDetail(pr, fresh);
   const checks = checksLabel(pr.checksSummary);
   const linked = isHttpUrl(pr.url);
   const created = detail?.createdAt ? Date.parse(detail.createdAt) : NaN;
   return (
     <InboxDetail
+      onKeyDown={onKeyDown}
       bar={
         <InboxBar backLabel="All pull requests" onBack={() => open({ kind: 'pullRequests' })}>
           <span className="flex shrink-0 items-center gap-1.5"><StateIcon pr={pr} /><span className="text-content/70">{STATE_WORD[pr.state]}</span></span>
@@ -252,11 +299,11 @@ function PrInboxDetail({ pr, now }: { pr: PullRequest; now: number }) {
           <button
             type="button"
             disabled={!linked}
-            onClick={() => void navigator.clipboard.writeText(pr.url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}
+            onClick={copyLink}
             className={ACTION_OUTLINE}
           >
             <Copy className="size-3.5" strokeWidth={1.75} />
-            {copied ? 'Copied' : 'Copy link'}
+            <span aria-live="polite">{copy === 'copied' ? 'Copied' : copy === 'failed' ? 'Copy failed' : 'Copy link'}</span>
           </button>
           {linked ? (
             <a href={pr.url} target="_blank" rel="noreferrer" className={ACTION_GHOST}>
@@ -275,7 +322,7 @@ function PrInboxDetail({ pr, now }: { pr: PullRequest; now: number }) {
         </InboxSection>
       ) : tab === 'code' ? (
         <InboxSection title="Changed files" count={detail ? <span className="tabular-nums"><span className="text-success">+{detail.additions}</span> <span className="text-danger">−{detail.deletions}</span></span> : undefined}>
-          {detail ? <Files detail={detail} /> : error ? <p className="font-sans text-[12px] text-content/45">{error}</p> : <Loading className="py-2" />}
+          {detail ? <Files detail={detail} /> : error ? <p className="font-sans text-[12px] text-content/45">The changed files could not be read ({error}).</p> : <Loading className="py-2" />}
         </InboxSection>
       ) : (
         <InboxSection title="Checks" count={checks.text}>
@@ -284,7 +331,7 @@ function PrInboxDetail({ pr, now }: { pr: PullRequest; now: number }) {
       )}
 
       <InboxSection title="Activity" count={detail ? `${detail.commitsTotal} ${detail.commitsTotal === 1 ? 'commit' : 'commits'}` : undefined}>
-        {detail ? <Commits pr={pr} detail={detail} now={now} /> : error ? <p className="font-sans text-[12px] text-content/45">{error}</p> : <Loading className="py-2" />}
+        {detail ? <Commits pr={pr} detail={detail} now={now} /> : error ? <p className="font-sans text-[12px] text-content/45">The commits could not be read ({error}).</p> : <Loading className="py-2" />}
         <p className="mt-5 font-sans text-[11.5px] leading-relaxed text-content/45">
           Read only, through the gh commands the SuperAgent already uses. Merging stays a decision for you{isOpen(pr) ? ', on GitHub' : ''}.
         </p>
@@ -397,4 +444,10 @@ function Checks({ pr }: { pr: PullRequest }) {
       })}
     </>
   );
+}
+
+/** "just now", or "2m ago". */
+function ago(ts: number, now: number): string {
+  const t = relativeTime(ts, now);
+  return t === 'now' ? 'just now' : `${t} ago`;
 }
