@@ -20,9 +20,11 @@ export const ACTION_OUTLINE = `${ACTION} h-7 border border-content/15 text-conte
 export const ACTION_GHOST = `${ACTION} h-7 text-content/70 hover:bg-content/10 hover:text-content`;
 
 /** The split: the list rail on the left, the selected item's detail on the right. */
-export function InboxLayout({ toolbar, list, detail, detailOpen }: {
-  /** Above the list: InboxFilterTabs and InboxSearch, or a page's own filter controls. */
+export function InboxLayout({ toolbar, list, detail, detailOpen, onRailKeyDown }: {
+  /** Above the list: InboxFilterTabs and InboxSearch, or a page's own filter controls (chips and an add row too). */
   toolbar: ReactNode;
+  /** Keys anywhere in the rail (a page's J/K or shortcuts). InboxList's own ArrowUp/ArrowDown runs only when given onMove. */
+  onRailKeyDown?: (e: KeyboardEvent<HTMLDivElement>) => void;
   list: ReactNode;
   /** The selected item's InboxDetail; null when nothing is selected. */
   detail: ReactNode | null;
@@ -31,7 +33,8 @@ export function InboxLayout({ toolbar, list, detail, detailOpen }: {
 }) {
   return (
     <div className="@container/inbox flex min-h-0 flex-1">
-      <div className={cx('flex w-full shrink-0 flex-col border-stroke @min-[40rem]/inbox:w-[min(19rem,42%)] @min-[40rem]/inbox:border-r', detailOpen && '@max-[40rem]/inbox:hidden')}>
+      {/* The rail is its own container (rail), so its rows can drop detail as it narrows. */}
+      <div onKeyDown={onRailKeyDown} className={cx('@container/rail flex w-full shrink-0 flex-col border-stroke @min-[40rem]/inbox:w-[min(19rem,42%)] @min-[40rem]/inbox:border-r', detailOpen && '@max-[40rem]/inbox:hidden')}>
         {toolbar}
         {list}
       </div>
