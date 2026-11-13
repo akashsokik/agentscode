@@ -289,7 +289,7 @@ test('a saved tab of a kind this build does not know is dropped on load, and its
   assert.ok(TAB_KINDS.includes('pullRequests'));
   const tabs = [
     { id: 't1', content: { kind: 'pullRequests' } },
-    { id: 't2', content: { kind: 'issues' } },
+    { id: 't2', content: { kind: 'retiredKind' } },
     { id: 't3', content: { kind: 'comms' } },
     { id: 't4' },
   ] as never;
@@ -297,4 +297,7 @@ test('a saved tab of a kind this build does not know is dropped on load, and its
   const out = knownTabs(tabs, panes);
   assert.deepEqual(out.tabs.map(t => t.id), ['t1', 't3']);
   assert.deepEqual(out.panes, [{ id: 'p1', tabId: null }, { id: 'p2', tabId: 't3' }]);
+  // Every kind must be listed, or its tabs vanish on reload: the list is a Record over TabContent['kind'], so a missing kind fails the typecheck.
+  const fs = await import('node:fs');
+  assert.match(fs.readFileSync(new URL('../web/layout.ts', import.meta.url), 'utf8'), /const TAB_KIND_SET: Record<TabContent\['kind'\], true> = \{/);
 });

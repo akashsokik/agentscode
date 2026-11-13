@@ -12,7 +12,7 @@ import { attempt, useApp } from '../store.ts';
 import { useNow } from '../ui/useNow.ts';
 import { cx, Empty, HeaderButton, StatusLabel, type Tone } from '../ui/common.tsx';
 import { PeerBubble } from './PeerMessages.tsx';
-import { AlertCircle, ArrowLeft, Bot, CheckCheck, ChevronDown, Clock, MessageMultiple, Search, Square, X, type IconComponent } from '../mono/icons.tsx';
+import { ArrowLeft, Bot, CheckCheck, ChevronDown, Clock, MessageMultiple, Search, Square, X, type IconComponent } from '../mono/icons.tsx';
 import { StatusMark, type StatusState } from '../ui/StatusMark.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
@@ -486,7 +486,7 @@ function TailStop({ stop, agents, fresh, first, last }: { stop: TimelineTail; ag
   }
   if (stop.kind === 'budget') {
     return (
-      <TimelineStop first={first} last={last} fresh={fresh} node={<AlertCircle className="size-4 text-warning" strokeWidth={1.75} />}>
+      <TimelineStop first={first} last={last} fresh={fresh} node={<StatusMark state="warn" />}>
         <p className="flex h-5 min-w-0 items-center gap-1.5 font-sans text-[12px] text-content/50">
           <span className="shrink-0 font-medium text-content">Message budget used up</span>
           <span aria-hidden>·</span>

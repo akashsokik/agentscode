@@ -30,6 +30,8 @@ test('the status places listed for ACH-D45 use the shared mark, not a bare tick 
   assert.doesNotMatch(pr, /icon: (Check|X)\b/);
   assert.match(pr, /<StatusMark state=\{state\}/);
   assert.doesNotMatch(read('web/panes/CommsPane.tsx'), /CheckCheck, className/, 'handled is no longer a double tick');
+  assert.match(read('web/panes/CommsPane.tsx'), /node=\{<StatusMark state="warn" \/>\}/, 'the used-up message budget is the warn mark');
+  assert.doesNotMatch(read('web/panes/CommsPane.tsx'), /AlertCircle/);
   assert.doesNotMatch(read('web/panes/Transcript.tsx'), /<X className="size-3.5 shrink-0 text-danger"/);
   assert.match(read('web/panes/PeerMessages.tsx'), /<StatusMark state=\{TONE_STATE\[tone\]\}/);
   assert.match(read('web/App.tsx'), /<StatusMark state=\{t.tone === 'error' \? 'fail' : 'pass'\}/);
