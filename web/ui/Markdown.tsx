@@ -10,11 +10,14 @@ import { openUiLive } from '../openuiTrust.ts';
 import { rehypeRefChips } from './rehypeRefChips.ts';
 import { RefChip } from '../notes/RefChip.tsx';
 import { isKnownRef, useNotes } from '../notes/refsState.ts';
+import { githubHtmlPlugins, isWebUrl } from './remoteMarkdown.ts';
 import { IssueKeyChip, isKnownIssueKey, useIssueKeysKey } from './IssueKeyChip.tsx';
 
 const remarkPlugins = [remarkGfm];
 const refChips = [rehypeRefChips, { known: isKnownRef, issue: isKnownIssueKey }];
 const rehypePlugins = [[rehypeHighlight, { detect: false }], refChips] as never;
+/** A GitHub PR description: its HTML sanitized as GitHub does (remoteMarkdown.ts, ACH-41), then highlighting and chips. */
+const remoteRehypePlugins = [...githubHtmlPlugins, [rehypeHighlight, { detect: false }], refChips] as never;
 // Chips first, so word fading treats each chip as one word.
 const wordRehypePlugins = [[rehypeHighlight, { detect: false }], refChips, rehypeWordFade] as never;
 
@@ -56,10 +59,10 @@ const inertComponents = componentsFor(true);
  */
 const remoteComponents: Components = {
   ...inertComponents,
-  a: ({ node: _node, href, children }) => (/^https?:\/\//i.test(href ?? '') ? <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <span>{children}</span>),
+  a: ({ node: _node, href, children }) => (isWebUrl(href) ? <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <span>{children}</span>),
   img: ({ src, alt }) => {
     const label = alt?.trim() || 'image';
-    return typeof src === 'string' && /^https?:\/\//i.test(src) ? <a href={src} target="_blank" rel="noreferrer noopener">[{label}]</a> : <span>[{label}]</span>;
+    return isWebUrl(src) ? <a href={src} target="_blank" rel="noreferrer noopener">[{label}]</a> : <span>[{label}]</span>;
   },
 };
 
@@ -74,14 +77,14 @@ export const Markdown = memo(function Markdown({ text, className = '', words = f
   words?: boolean;
   /** Text from another agent: interactive blocks render as plain code. */
   inert?: boolean;
-  /** Text from outside PodCode (GitHub): inert, http(s) links only, no remote images. */
+  /** Text from outside PodCode (a GitHub PR description): its HTML rendered after GitHub's sanitizing (ACH-41), inert, http(s) links only, no remote images. */
   remote?: boolean;
 }) {
   // Text is parsed again when an id is added or removed, so new ids become chips in old messages.
   const ids = useNotes(s => s.idsKey);
   // And when an issue is added or removed, so its key becomes a chip, or text again.
   const issueKeys = useIssueKeysKey();
-  const rehype = useMemo(() => (words ? [...(wordRehypePlugins as unknown[])] : [...(rehypePlugins as unknown[])]) as never, [words, ids, issueKeys]);
+  const rehype = useMemo(() => (remote ? [...(remoteRehypePlugins as unknown[])] : words ? [...(wordRehypePlugins as unknown[])] : [...(rehypePlugins as unknown[])]) as never, [remote, words, ids, issueKeys]);
   return (
     <div className={`agent-markdown min-w-0 font-sans text-sm leading-6 ${className}`}>
       <ReactMarkdown

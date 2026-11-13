@@ -1675,6 +1675,25 @@ html.layout-inset.theme-light .dialog-scrim {
   padding: 0.5rem 1rem;
 }
 
+/* A collapsible section in a GitHub description (ACH-41): <details>/<summary>, flat, from the
+   existing tokens, opening and closing like GitHub's. */
+.agent-markdown details {
+  margin: 0.5rem 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-content) 4%, transparent);
+  padding: 0.25rem 0.75rem;
+}
+.agent-markdown details[open] { padding-bottom: 0.5rem; }
+.agent-markdown summary {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0.25rem 0;
+  color: color-mix(in srgb, var(--color-content) 80%, transparent);
+  font-weight: 500;
+}
+.agent-markdown summary:hover { color: var(--color-content); }
+.agent-markdown summary:focus-visible { background: color-mix(in srgb, var(--color-content) 8%, transparent); }
+
 .agent-markdown table {
   display: block;
   max-width: 100%;

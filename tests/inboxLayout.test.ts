@@ -37,7 +37,7 @@ test('remote Markdown never loads an image from someone else\'s server and links
   const remote = md.slice(md.indexOf('const remoteComponents'), md.indexOf('};', md.indexOf('const remoteComponents')));
   assert.match(remote, /img: \(\{ src, alt \}\) =>/);
   assert.doesNotMatch(remote, /<img/, 'an image is its alt text, linked');
-  assert.match(remote, /\^https\?:/);
+  assert.match(remote, /isWebUrl\(/, 'http(s) only, through remoteMarkdown.ts');
 });
 
 test('polish (ACH-23): keyboard, focus, copy and refresh feedback, errors with a retry', () => {
