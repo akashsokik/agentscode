@@ -128,6 +128,10 @@ export function IssueInboxDetail({ issue, issues, now, sidebar, onBack }: {
       )}
     >
       <div
+        // Focus lands here when a narrow pane swaps the list for this detail; S/P/D/L and Esc work at once.
+        data-issue-detail
+        tabIndex={-1}
+        className="outline-none"
         onKeyDown={e => {
           // Not typed into a field, a menu or a picker (those are portals: isPageKey leaves them out).
           if (!isPageKey(e)) return;

@@ -11,22 +11,25 @@ import { useRef } from 'react';
 import { Folder } from '../mono/icons.tsx';
 import { PaneFrame, type PaneChrome } from '../panes/PaneFrame.tsx';
 import { useApp } from '../store.ts';
-import { Empty } from '../ui/common.tsx';
+import { Empty, Loading } from '../ui/common.tsx';
 import { Activity } from './view/Activity.tsx';
 import { IssueDescription, IssueTitle } from './view/EditableText.tsx';
 import { parentOf, propertyKey } from './view/issueViewModel.ts';
 import { PropertySidebar, type PropertySidebarHandle } from './view/PropertySidebar.tsx';
 import { Decisions, InGit, Relations, SubIssues, useIssueLinks } from './view/Sections.tsx';
-import { open } from '../layout.ts';
+import { showIssueInList } from './openIssue.ts';
 import type { SuperIssue } from '../../shared/types.ts';
 import { CircleDashed } from '../mono/icons.tsx';
 import { StatusIcon } from './issueParts.tsx';
 
 export function IssueView({ issueId, chrome }: { issueId: string; chrome: PaneChrome }) {
-  const issues = useApp(s => s.snapshot?.super.issues) ?? [];
+  const loaded = useApp(s => s.snapshot?.super.issues);
+  const issues = loaded ?? [];
   const projects = useApp(s => s.snapshot?.projects) ?? [];
   const issue = issues.find(i => i.id === issueId);
   const sidebar = useRef<PropertySidebarHandle>(null);
+  // Not loaded yet is not gone (Hal's audit, ACH-23).
+  if (!loaded) return <PaneFrame chrome={chrome} title={<span className="text-content/60">Issue</span>}><Loading /></PaneFrame>;
   if (!issue) {
     return (
       <PaneFrame chrome={chrome} title={<span className="text-content/60">Issue</span>}>
@@ -50,7 +53,8 @@ function IssueBody({ issue, issues, projectName, chrome, sidebar }: { issue: Sup
   return (
     <PaneFrame chrome={chrome} title={title}>
       <div
-        className="flex min-h-0 flex-1 overflow-hidden"
+        // A narrow pane stacks the properties under the body rather than squeezing it (ACH-23).
+        className="@container/issueview flex min-h-0 flex-1 flex-col overflow-y-auto @min-[44rem]/issueview:flex-row @min-[44rem]/issueview:overflow-hidden"
         onKeyDown={e => {
           const property = propertyKey(e, e.target);
           if (!property) return;
@@ -58,7 +62,7 @@ function IssueBody({ issue, issues, projectName, chrome, sidebar }: { issue: Sup
           sidebar.current?.open(property);
         }}
       >
-        <article aria-label={`${issue.key} ${issue.title}`} className="min-w-0 flex-1 overflow-y-auto px-8 pb-12 pt-6">
+        <article aria-label={`${issue.key} ${issue.title}`} className="min-w-0 shrink-0 px-5 pb-8 pt-6 @min-[44rem]/issueview:flex-1 @min-[44rem]/issueview:shrink @min-[44rem]/issueview:overflow-y-auto @min-[44rem]/issueview:px-8 @min-[44rem]/issueview:pb-12">
           <div className="mx-auto flex max-w-[760px] flex-col gap-6">
             <div className="flex flex-col gap-2">
               <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 font-sans text-[12px] text-content/50">
@@ -67,7 +71,7 @@ function IssueBody({ issue, issues, projectName, chrome, sidebar }: { issue: Sup
                 {parent ? (
                   <>
                     <span aria-hidden>›</span>
-                    <button type="button" onClick={() => open({ kind: 'issue', issueId: parent.id })} className="truncate rounded px-0.5 hover:text-content/80" title={parent.title}>{parent.key}</button>
+                    <button type="button" onClick={() => showIssueInList(parent.id)} className="truncate rounded px-0.5 hover:text-content/80" title={parent.title}>{parent.key}</button>
                   </>
                 ) : null}
                 <span aria-hidden>›</span>
@@ -83,7 +87,7 @@ function IssueBody({ issue, issues, projectName, chrome, sidebar }: { issue: Sup
             <Activity issue={issue} />
           </div>
         </article>
-        <div className="w-[320px] shrink-0 overflow-y-auto border-l border-content/7 px-5 pb-8 pt-6">
+        <div className="shrink-0 border-t border-content/7 px-5 pb-8 pt-6 @min-[44rem]/issueview:w-[320px] @min-[44rem]/issueview:overflow-y-auto @min-[44rem]/issueview:border-l @min-[44rem]/issueview:border-t-0">
           <PropertySidebar ref={sidebar} issue={issue} issues={issues} />
         </div>
       </div>

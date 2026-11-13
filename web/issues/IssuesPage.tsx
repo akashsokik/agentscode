@@ -76,6 +76,15 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
   const detailOpen = Boolean(asked) && !peek;
   const lastFocusedCard = useRef<string | undefined>(undefined);
   const focusCard = (id: string) => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: false }));
+  /**
+   * Focus where the selection is: its card, or the detail when the card is hidden (a narrow pane
+   * showing the detail), never a hidden element (Hal's audit, ACH-23).
+   */
+  const focusSelection = (id: string) => requestAnimationFrame(() => {
+    const card = root.current?.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(id)}"]`);
+    if (card && card.offsetParent !== null) card.focus({ preventScroll: false });
+    else root.current?.querySelector<HTMLElement>('[data-issue-detail]')?.focus({ preventScroll: true });
+  });
   /** Select an issue on purpose (a click, Enter): the detail opens, in a narrow pane too. */
   const select = (id: string) => { movedTo.current = undefined; setPeek(false); showIssueInList(id); };
   /** Select without opening a narrow pane's detail (the arrows, J/K, a neighbour after a removal). */
@@ -119,7 +128,7 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
     if (change?.view) setView(change.view);
     if (change?.filters) setFilters(change.filters);
     if (change?.query !== undefined) setQuery(change.query);
-    focusCard(asked.id);
+    focusSelection(asked.id);
     // Only when a different issue is asked for, not on every list change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issueId, Boolean(asked)]);
