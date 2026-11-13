@@ -98,3 +98,13 @@ export function issueLinksSource(): IssueLinksSource {
 export function setIssueLinksSource(next: IssueLinksSource): void {
   source = next;
 }
+
+/** Where an issue's links read stands (Hal's audit, ACH-23). */
+export type LinksStatus = 'loading' | 'ready' | 'failed';
+
+/** Where a links read stands for an issue: still loading (or another issue's), read from the server, or failed (a rejection, or only the local stand-in). */
+export function linksStatus(state: { id: string; links: IssueLinks | null; failed: boolean }, issueId: string): LinksStatus {
+  if (state.id !== issueId) return 'loading';
+  if (state.links?.source === 'server') return 'ready';
+  return state.failed || state.links ? 'failed' : 'loading';
+}
