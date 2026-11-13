@@ -258,3 +258,14 @@ test('an issue opened from elsewhere is revealed: All when the view leaves it ou
   assert.deepEqual(revealIssue(issue('i4', { status: 'todo', labels: ['ui'] }), { ...base, filters: { labels: ['git'] }, query: 'nothing like it' }, TODAY), { filters: {}, query: '' });
   assert.deepEqual(revealIssue(issue('i5', { status: 'canceled' }), { ...base, view: 'all', display: { ...DEFAULT_DISPLAY, groupBy: 'priority' } }, TODAY), null, 'not grouped by status: nothing to unfold');
 });
+
+test('the right panel keeps the SuperAgent\'s tabs while the Issues page, an issue or the Pull requests page is in front (ACH-D55)', async () => {
+  const { keepsSuperPanel } = await import('../web/layout.ts');
+  for (const kind of ['issues', 'issue', 'pullRequests'] as const) assert.equal(keepsSuperPanel(kind), true, kind);
+  for (const kind of ['agent', 'comms', 'file', 'channel', 'work', 'browser'] as const) assert.equal(keepsSuperPanel(kind), false, kind);
+  assert.equal(keepsSuperPanel(null), false, 'no tab');
+  const { readFileSync } = await import('node:fs');
+  const panel = readFileSync(new URL('../web/right/RightPanel.tsx', import.meta.url), 'utf8');
+  assert.match(panel, /const followsSuper = keepsSuperPanel\(focusedKind\(layout\)\);/);
+  assert.match(panel, /followsSuper \? s\.snapshot\?\.agents\.find\(a => a\.role === 'super'\)/, 'the panel takes the SuperAgent as its agent then');
+});

@@ -207,6 +207,16 @@ function ensureTab(tabs: Tab[], content: TabContent): { tabs: Tab[]; tab: Tab } 
   return { tabs: [...tabs, tab], tab };
 }
 
+/**
+ * Tabs that keep the SuperAgent's tabs in the right panel while they are in front (ACH-D55): the Issues
+ * page, an issue, the Pull requests page. Its backlog and decisions stay at hand while you work them.
+ */
+export const SUPER_PANEL_KINDS: readonly TabContent['kind'][] = ['issues', 'issue', 'pullRequests'];
+
+export function keepsSuperPanel(kind: TabContent['kind'] | null): boolean {
+  return kind !== null && SUPER_PANEL_KINDS.includes(kind);
+}
+
 /** What the focused pane shows, by kind: the sidebar marks its Comms, Issues and Pull requests rows. */
 export function focusedKind(l: Layout): TabContent['kind'] | null {
   const pane = l.panes.find(p => p.id === l.focused);
