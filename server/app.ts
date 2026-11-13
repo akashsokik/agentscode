@@ -225,6 +225,13 @@ export function createApp(
   app.post('/api/super/issues/:issueId/move', (req, res) => {
     res.json(manager.moveIssue(param(req, 'issueId'), req.body?.to));
   });
+  // Read-only links for the issue view and the Notes tab (ACH-D43).
+  app.get('/api/issues/:issueId/decisions', async (req, res) => {
+    res.json(await manager.issueLinks.decisions(param(req, 'issueId')));
+  });
+  app.get(['/api/refs/:id/issues', '/api/notes/:id/issues'], async (req, res) => {
+    res.json(await manager.issueLinks.issuesForDecision(param(req, 'id')));
+  });
   // The same under the old name (ACH-D38), for a window still running the build before the rename.
   app.post('/api/super/goals', (req, res) => { res.json(manager.addIssue(req.body ?? {})); });
   app.patch('/api/super/goals/:issueId', (req, res) => { res.json(manager.updateIssue(param(req, 'issueId'), req.body ?? {})); });

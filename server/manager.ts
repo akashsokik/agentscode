@@ -83,6 +83,7 @@ import { ALL_CODE, ALL_INDEXES_LIMIT, decisionHint, deriveCode, isActive, isCode
 import { NotesApi } from './notesApi.ts';
 import { MergeRecords, WorkService } from './work.ts';
 import { RefMentions } from './refMentions.ts';
+import { IssueLinks } from './issueLinks.ts';
 import { BrowserBridge, BROWSER_WRITE_OPS, compactConsole, type BrowserOp } from './browserBridge.ts';
 import { blockedReason, normalizeAddress } from '../shared/browser.ts';
 import { createWalkthrough, deleteWalkthrough, listWalkthroughs, readWalkthrough, summaryOf, walkthroughImage, walkthroughMarkdown, type StepRoot } from './walkthroughs.ts';
@@ -200,6 +201,9 @@ export class AgentManager {
   private refs: ProjectRefs;
   /** The Notes tab's read API over the notes and where each id is cited. */
   readonly notes: NotesApi;
+  private readonly refMentions: RefMentions;
+  /** Git/PR completion and decision citations for issues (ACH-D43). */
+  readonly issueLinks: IssueLinks;
   /** The Work view: branches in progress, merges into main, the graph and cleanup (server/work.ts). */
   readonly work: WorkService;
   /** The memory each agent's app view was last sent, to notice memory.md changing on disk. */
@@ -242,7 +246,8 @@ export class AgentManager {
     this.channelAttachments = new Attachments(path.join(store.dataDir, 'channel-attachments'));
     this.homes = new AgentHomes(path.join(store.dataDir, 'agents'));
     this.refs = new ProjectRefs(path.join(store.dataDir, 'projects'));
-    this.notes = new NotesApi({ refs: this.refs, mentions: new RefMentions(store), projects: () => this.store.projects.values() });
+    this.refMentions = new RefMentions(store);
+    this.notes = new NotesApi({ refs: this.refs, mentions: this.refMentions, projects: () => this.store.projects.values() });
     this.work = new WorkService(new MergeRecords(path.join(store.dataDir, 'work')), {
       owners: new WorkOwners(path.join(store.dataDir, 'work')),
       agents: () => [...this.store.agents.values()],
@@ -250,10 +255,14 @@ export class AgentManager {
       agentsDir: path.join(store.dataDir, 'agents'),
       dataDir: store.dataDir,
       knownRef: id => this.refs.get(id) !== null,
+      onMerges: (project, records) => { this.issueLinks.localMerges(project, records); },
     });
     this.profile = new ProfileStore(store.dataDir);
     // Issue keys use the project's code (ACH-25; ACH-D41).
     this.superStore = new SuperStore(store.dataDir, id => this.store.projects.get(id)?.code);
+    this.issueLinks = new IssueLinks(this.superStore, Date.now, () => { this.publishSuper(); }, {
+      projects: () => [...this.store.projects.values()], work: this.work, mentions: this.refMentions, refs: this.refs,
+    });
     this.watcher = new SuperWatcher({
       superId: () => this.superId(),
       idle: () => {
@@ -2058,6 +2067,8 @@ export class AgentManager {
 
   /** Every minute: send what waits if it may go now, and report agents stuck in a turn or on the user. */
   private superTick(): void {
+    // Uses Work/PR's existing caches; independent of whether a SuperAgent exists.
+    void this.issueLinks.refresh().catch(() => { /* A failed read is retried next tick; no closure is inferred. */ });
     const superId = this.superId();
     if (!superId) return;
     this.watcher.morning();

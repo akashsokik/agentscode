@@ -295,6 +295,8 @@ export interface WorkContext {
   knownRef: (id: string) => boolean;
   /** Who owns each branch and commit (ACH-D34); kept in memory when not given. */
   owners?: WorkOwners;
+  /** Existing, verified merge evidence for issue auto-close (ACH-D43); no additional Git reads. */
+  onMerges?: (project: Project, records: MergeRecord[]) => void;
 }
 
 interface RepoFacts {
@@ -530,7 +532,8 @@ export class WorkService {
     const found: MergeRecord[] = [];
     const messages = this.ctx.messages();
     const agents = this.ctx.agents();
-    for (const line of log.out.split('\n')) {
+    const entries = log.out.split('\n');
+    for (const [index, line] of entries.entries()) {
       const [hash, selector, what] = line.split('\x1f');
       const merge = /^merge ([^:\s]+):/.exec(what ?? '');
       // Merging origin's main (or any remote branch) back in is not anyone's work.
@@ -546,10 +549,12 @@ export class WorkService {
       const parts = await this.git(['log', '-1', '--format=%T%x1f%P%x1f%s', hash], root);
       if (!parts.ok) continue; // the commit is gone: nothing to record
       const [tree, parents, subject] = parts.out.trim().split('\x1f');
-      const tip = parents?.split(' ')[1];
+      const fastForward = /Fast-forward/i.test(what ?? '');
+      const tip = parents?.split(' ')[1] ?? (fastForward ? hash : undefined);
       if (!tree || !tip) continue;
       const refs = [...new Set([...info.refs, ...findRefIds(subject ?? '', this.ctx.knownRef).map(r => r.id)])].filter(this.ctx.knownRef);
-      const parent = parents?.split(' ')[0];
+      // A fast-forward's previous main is already in the next reflog entry.
+      const parent = fastForward ? entries[index + 1]?.split('\x1f')[0] : parents?.split(' ')[0];
       found.push({ hash, tree, tip, ...(parent ? { parent } : {}), branch, at, subject: subject ?? '', names: namesInMergeSubject(subject ?? ''), refs, ...(info.reviewer ? { reviewer: info.reviewer } : {}), ...(info.conversationId ? { conversationId: info.conversationId } : {}) });
     }
     this.records.merge(root, found.filter(r => r.tree || known.has(r.hash)));
@@ -685,6 +690,7 @@ export class WorkService {
     // A record counts only with evidence that its work is on main now (a merge undone by a reset has none).
     const evidence = await this.evidence(allRecords, mapped, defaultBranch, root);
     const records = allRecords.filter(r => evidence.has(r.hash));
+    this.ctx.onMerges?.(project, records);
     const byRecord = await this.mergedBranches(records, root);
     /**
      * On origin's main: the merge's commit as it is on main now is not among the local-only ones. A
