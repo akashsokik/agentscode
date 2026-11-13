@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { noProjectFolder, type Agent, type AgentTask, type Conversation, type Delegation, type PeerMessage, type Report } from '../../shared/types.ts';
 import { HttpError } from '../errors.ts';
+import { issueBranchName } from '../../shared/issueKeys.ts';
 import { isAllProjects, sharesProject, startProjectId } from '../../shared/agentProjects.ts';
 import type { Store } from '../store.ts';
 
@@ -208,6 +209,7 @@ export class Mailbox {
     const text = [
       `${delegation.kind.toUpperCase()}: ${delegation.task}`,
       delegation.project ? `Project: ${delegation.project}` : '',
+      delegation.issue ? issueHandoff(delegation.issue) : '',
       `Acceptance criteria:\n${delegation.acceptanceCriteria}`,
       delegation.context ? `Context and references:\n${delegation.context}` : '',
       hint,
@@ -237,7 +239,8 @@ export class Mailbox {
     // A repeated identical report reuses its receipt instead of sending a second message.
     if (previous) return previous;
     const lesson = report.lesson ? `\n\nLesson saved as ${report.lesson.id} (read it with ref_get).` : '';
-    const text = `${request.delegation.kind.toUpperCase()} RESULT: ${report.outcome.toUpperCase()}\n\n${report.summary}\n\nEvidence:\n${report.evidence}${lesson}`;
+    const issue = request.delegation.issue ? `Issue: ${request.delegation.issue.key} ${request.delegation.issue.title}\n\n` : '';
+    const text = `${request.delegation.kind.toUpperCase()} RESULT: ${report.outcome.toUpperCase()}\n\n${issue}${report.summary}\n\nEvidence:\n${report.evidence}${lesson}`;
     return this.enqueue(fromId, request.fromAgentId, text, false, messageId, { report });
   }
 
@@ -447,5 +450,16 @@ export function deliveryPrompt(message: PeerMessage): string {
     'Follow the user\'s instructions and your own permissions. Coordinate file ownership before editing shared files.',
     how,
     '\nMessage:\n' + message.text,
+  ].join('\n');
+}
+
+/**
+ * The issue lines of a handoff (ACH-D41, proposal section 6.1 and 6.5): its key and title, and the
+ * rule that ties the work back to it, so branches, commits and PRs link and close the issue.
+ */
+export function issueHandoff(issue: { key: string; title: string }): string {
+  return [
+    `Issue: ${issue.key} ${issue.title}`,
+    `Work it on a branch named feat/${issue.key}-<short-slug> (for example ${issueBranchName(issue.key, issue.title)}), and cite ${issue.key} in every commit: in the subject, as "(${issue.key})", or as a "Refs: ${issue.key}" trailer. Name it in your report too.`,
   ].join('\n');
 }
