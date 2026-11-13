@@ -22,6 +22,7 @@ import { IssuesPage } from './issues/IssuesPage.tsx';
 import { openIssueCount } from './sidebar/navCounts.ts';
 import { prsOpenCount } from './prs/prsData.ts';
 import { CommsPane } from './panes/CommsPane.tsx';
+import { IssueView } from './issues/IssueView.tsx';
 import { WorkPane } from './work/WorkView.tsx';
 import { DiffPane, FilePane } from './panes/FilePane.tsx';
 import { HomePane } from './panes/HomePane.tsx';
@@ -52,6 +53,7 @@ import { useTabCloseMotion } from './mono/useTabCloseMotion.ts';
 import { AgentAvatar } from './ui/Avatar.tsx';
 import { AvatarStack } from './ui/AvatarStack.tsx';
 import { StaleBuildNotice } from './ui/StaleBuildNotice.tsx';
+import { StatusIcon } from './issues/issueParts.tsx';
 
 const MAX_PANES = 3;
 
@@ -106,6 +108,11 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
       // not a URL yet
     }
     return { icon: <Globe className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: c.title || host || 'New tab', meta: agent ? `Browser, ${agent.name}` : host || 'Browser' };
+  }
+  if (c.kind === 'issue') {
+    const issue = snapshot?.super.issues.find(i => i.id === c.issueId);
+    // A removed issue's tab: the shared "gone" mark (ACH-D48).
+    return { icon: issue ? <StatusIcon status={issue.status} /> : GONE_ICON, headline: issue ? `${issue.key} ${issue.title}` : 'Issue', meta: issue ? 'Issue' : 'Removed' };
   }
   if (c.kind === 'work') {
     return { icon: <GitBranch className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: 'Work', meta: 'Branches, merges and cleanup' };
@@ -410,6 +417,7 @@ function PaneView({ pane, tab, chrome, actions }: { pane: Pane; tab: Tab | undef
     case 'file': return <FilePane key={pane.id + tab.id} root={c.root} path={c.path} chrome={chrome} />;
     case 'diff': return <DiffPane key={pane.id + tab.id} root={c.root} path={c.path} chrome={chrome} />;
     case 'comms': return <CommsPane conversationId={c.conversationId} chrome={chrome} />;
+    case 'issue': return <IssueView issueId={c.issueId} chrome={chrome} />;
     case 'issues': return <IssuesPage chrome={chrome} />;
     case 'pullRequests': return <PullRequestsPane prId={c.prId} chrome={chrome} />;
     case 'work': return <WorkPane chrome={chrome} />;

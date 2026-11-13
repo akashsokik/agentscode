@@ -10,6 +10,8 @@ export type TabContent =
   | { kind: 'file'; root: Root; path: string }
   | { kind: 'diff'; root: Root; path: string }
   | { kind: 'comms'; conversationId?: string }
+  /** One issue in the full pane (web/issues/IssueView.tsx, ACH-D43 phase 4). */
+  | { kind: 'issue'; issueId: string }
   /** The Issues page (web/issues/IssuesPage.tsx, Fen's). */
   | { kind: 'issues' }
   /** The Pull requests page (web/prs/PullRequestsPane.tsx); `prId` is the selected PR, owner/name#n. */
@@ -98,6 +100,7 @@ export function tabKey(content: TabContent): string {
     case 'file': return `file:${rootKey(content.root)}:${content.path}`;
     case 'diff': return `diff:${rootKey(content.root)}:${content.path}`;
     case 'comms': return 'comms';
+    case 'issue': return `issue:${content.issueId}`;
     case 'issues': return 'issues';
     case 'pullRequests': return 'pullRequests';
     case 'work': return 'work';
@@ -123,7 +126,7 @@ export function migrateSuperView(view: string | undefined): SuperView | undefine
  * here: a kind missing from this list would make knownTabs drop those tabs on every reload.
  */
 const TAB_KIND_SET: Record<TabContent['kind'], true> = {
-  agent: true, file: true, diff: true, comms: true, issues: true, pullRequests: true, work: true, channel: true, walkthrough: true, browser: true,
+  agent: true, file: true, diff: true, comms: true, issue: true, issues: true, pullRequests: true, work: true, channel: true, walkthrough: true, browser: true,
 };
 export const TAB_KINDS = Object.keys(TAB_KIND_SET) as TabContent['kind'][];
 
