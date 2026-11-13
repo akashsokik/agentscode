@@ -57,3 +57,14 @@ test('ACH-D48: stopped is the cancel mark, a gone tab is a dashed circle, decisi
   assert.match(chip, /glyph = true \}: \{/, 'RefChip takes glyph, on by default');
   assert.equal(chip.match(/<KindGlyph kind=\{summary\.kind\} show=\{glyph\} \/>/g)?.length, 2, 'both the inert span and the button honour it');
 });
+
+test('the pending chips on delegations and threads use the shared mark, with their own words (ACH-39)', () => {
+  const peer = fs.readFileSync(new URL('../web/panes/PeerMessages.tsx', import.meta.url), 'utf8');
+  const chip = peer.slice(peer.indexOf('function StateChip('), peer.indexOf('function StateChip(') + 500);
+  assert.match(chip, /<StatusText state="pending">\{state\.label\}<\/StatusText>/, 'a delegation at work: the pending mark, then its label');
+  assert.doesNotMatch(peer, /TerminalSpinner/, 'no spinner of its own');
+  const posts = fs.readFileSync(new URL('../web/panes/ChannelPosts.tsx', import.meta.url), 'utf8');
+  const card = posts.slice(posts.indexOf('function ThreadCard('), posts.indexOf('function ThreadCard(') + 1200);
+  assert.match(card, /working`, icon: <StatusMark state="pending" \/> \}/, 'a thread someone works on: the pending mark; its label stays in the title');
+  assert.doesNotMatch(card, /<Loader\b/, 'no hand-picked loader');
+});

@@ -18,8 +18,7 @@ import { useApp } from '../store.ts';
 import { cx, TextButton } from '../ui/common.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
 import { CornerDownRight } from '../mono/icons.tsx';
-import { StatusMark, type StatusState } from '../ui/StatusMark.tsx';
-import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
+import { StatusMark, StatusText, type StatusState } from '../ui/StatusMark.tsx';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 
 /** The transcript's teammate messages, indexed, so a report and its delegation find each other. */
@@ -248,7 +247,8 @@ export function PeerPrompt({ message, arrivedAt, firstAt }: { message: PeerMessa
 
 function StateChip({ state }: { state: DelegationState }) {
   if (state.tone === 'busy') {
-    return <span className="inline-flex shrink-0 items-center gap-1 text-content/55"><TerminalSpinner className="text-content/55" />{state.label}</span>;
+    // The shared pending mark and its words (ACH-D45, ACH-39), not a spinner of its own.
+    return <StatusText state="pending">{state.label}</StatusText>;
   }
   if (state.tone === 'neutral') return <span className="shrink-0 text-content/45">{state.label}</span>;
   return <OutcomeChip words={state.label} tone={state.tone} />;
