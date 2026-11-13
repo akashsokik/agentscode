@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Markdown } from '../../ui/Markdown.tsx';
 import { Kbd } from '../../ui/Kbd.tsx';
 import { TEXTAREA, TextButton } from '../../ui/common.tsx';
-import { commitEdit, descriptionToSave, TEXT_MAX, TITLE_MAX, titleToSave } from './issueViewModel.ts';
+import { commitEdit, descriptionToSave, TEXT_MAX, TITLE_MAX, titleToSave, titleToSaveOnLeave } from './issueViewModel.ts';
 import { writeIssue } from './issueWrites.ts';
 
 export function IssueTitle({ id, title, size = 'text-[20px]' }: {
@@ -23,7 +23,7 @@ export function IssueTitle({ id, title, size = 'text-[20px]' }: {
   const pending = useRef({ draft, title });
   pending.current = { draft, title };
   useEffect(() => () => {
-    const next = titleToSave(pending.current.draft, pending.current.title);
+    const next = titleToSaveOnLeave(pending.current.draft, pending.current.title);
     if (next) void writeIssue(id, { title: next });
   }, [id]);
   const save = async () => {
