@@ -6,7 +6,7 @@ import type { Root } from '../api.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { cost, relativeTime } from '../format.ts';
 import { refreshGit, useGitStatus } from '../git.ts';
-import { focusedAgentId, focusedChannelId, open, openToSide, setRightPanel, setRightView, setSuperView, SUPER_VIEWS, useLayout, type Layout, type SuperView } from '../layout.ts';
+import { focusedAgentId, focusedChannelId, focusedKind, keepsSuperPanel, open, openToSide, setRightPanel, setRightView, setSuperView, SUPER_VIEWS, useLayout, type Layout, type SuperView } from '../layout.ts';
 import { ALL_PROJECTS } from '../projects.ts';
 import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
@@ -284,7 +284,9 @@ const COUNT_WORDS: Partial<Record<PanelView, (n: number) => string>> = {
 export function RightPanel() {
   const layout = useLayout();
   const agentId = focusedAgentId(layout);
-  const agent = useApp(s => s.snapshot?.agents.find(a => a.id === agentId));
+  // With the Issues page, an issue or the Pull requests page in front, the panel stays the SuperAgent's (ACH-D55).
+  const followsSuper = keepsSuperPanel(focusedKind(layout));
+  const agent = useApp(s => (followsSuper ? s.snapshot?.agents.find(a => a.role === 'super') : s.snapshot?.agents.find(a => a.id === agentId)));
   const inFlight = useApp(s => s.snapshot?.messages.filter(m => !m.channelId && (m.status === 'queued' || m.status === 'delivering')).length ?? 0);
   const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectIds?.[0]]);
   const { status: git } = useGitStatus(root, agent ? `${agent.status}:${agent.turns}` : undefined);

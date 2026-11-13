@@ -171,13 +171,9 @@ export function isKeyboardFocus(el: { matches(selector: string): boolean } | nul
 }
 
 /**
- * A row's armed "Remove?" (the second press confirms). Armed from the menu, the row opens so the
- * confirm is in view, and focus goes to it; it disarms after a few seconds, but never while it
- * has focus (someone is about to press it).
+ * A row's armed "Remove?" (the second press confirms) disarms after a few seconds, but never while
+ * it has focus (someone is about to press it).
  */
-export function armRemove(expanded: boolean, fromMenu: boolean): { open: boolean; focusConfirm: boolean } {
-  return { open: fromMenu && !expanded, focusConfirm: fromMenu };
-}
 export function keepArmed(confirmHasFocus: boolean): boolean {
   return confirmHasFocus;
 }

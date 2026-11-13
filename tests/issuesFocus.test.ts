@@ -32,7 +32,10 @@ test('no control in the SuperAgent tabs is disabled just for being busy, and mov
   assert.match(composer, /readOnly=\{busy\}/);
   assert.doesNotMatch(src, /<select[^>]*\n?[^>]*disabled=\{busy\}/, 'the status select stays enabled');
   assert.match(src, /api\.moveIssue\(issue\.id, to\)\)\.then\(onSettled\)/, 'B2: a move puts focus back on the row');
-  assert.match(src, /api\.updateIssue\(issue\.id, \{ status: s \}\)\)\.then\(onSettled\)/, 'B3: a status change puts focus back on the row');
+  // B3: status (and priority) change through the row menu's submenus, which put focus back on the row.
+  assert.match(src, /<StatusPriorityRows issue=\{issue\} close=\{close\} onChanged=\{onSettled\} \/>/, 'B3: a status change puts focus back on the row');
+  const parts = fs.readFileSync(new URL('../web/issues/issueParts.tsx', import.meta.url), 'utf8');
+  assert.match(parts, /api\.updateIssue\(issue\.id, patch\)\)\.then\(\(\) => onChanged\?\.\(\)\)/);
   assert.match(src, /onSettled=\{\(\) => focusRow\(root\.current, issue\.id\)\}/);
 });
 

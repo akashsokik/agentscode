@@ -5,22 +5,22 @@
  */
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { SuperAutonomy } from '../../shared/autonomy.ts';
-import type { IssueStatus, RoutineSchedule, SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../../shared/types.ts';
+import type { RoutineSchedule, SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { openAsks } from '../super.ts';
 import { ISSUE_STATUS_LABEL, heldText, migrateSeen, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type SuperTab } from '../superText.ts';
 import { ISSUE_PRIORITY_LABEL, ISSUE_TITLE_MAX, isOpenIssue } from '../../shared/issues.ts';
-import { armRemove, cleanSummary, decisionGroups, keepArmed, decisionKind, focusAfterRemoval, issueGroups, issueMoves, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
-import { open } from '../layout.ts';
+import { cleanSummary, decisionGroups, keepArmed, decisionKind, focusAfterRemoval, issueGroups, issueMoves, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
 import { attempt, useApp } from '../store.ts';
 import { INPUT, MenuDivider, MenuRow, PRIMARY, TEXTAREA, TextButton } from '../ui/common.tsx';
 import { Kbd } from '../ui/Kbd.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar, RowAction, RowIcon } from '../ui/PanelList.tsx';
-import { Zap, Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleDot, Clock, Copy, CornerDownRight, ListBullet, ListFilter, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
+import { Zap, Maximize2, Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleDot, Clock, Copy, CornerDownRight, ListBullet, ListFilter, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { DueDate, PriorityMark, restoreFocus, StatusIcon, StatusPriorityRows } from '../issues/issueParts.tsx';
+import { showIssueInList } from '../issues/openIssue.ts';
 import { isPageKey } from '../issues/pageKeys.ts';
 import { FilterChips, FilterMenu } from '../issues/IssueFilters.tsx';
 import { activeFilters, localDay, matchesFilters, type IssueFilters, type IssueNames, type IssueProperty } from '../issues/issuesView.ts';
@@ -279,9 +279,9 @@ export function Composer({ placeholder, label, onAdd, onClose, children }: { pla
 
 /**
  * The issues backlog (ACH-D37): what you want done, in order. Open issues by status (needs you, in
- * progress, queued), then Done folded at the end; + opens a one-line composer. An issue opens in
- * place with its notes, who has it, its status and Edit; move, mark done and remove are also in
- * its menu and, on hover, its icons.
+ * progress, queued), then Done folded at the end; + opens a one-line composer. An issue opens on the
+ * Issues page, selected (showIssueInList, ACH-D52); renaming, moving, status, priority and remove
+ * are in its menu and, on hover, its icons.
  */
 export function IssuesView() {
   const issues = useApp(s => s.snapshot?.super.issues);
@@ -290,7 +290,6 @@ export function IssuesView() {
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useState(false);
   const [projectId, setProjectId] = useState('');
-  const [open, setOpen] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [filters, setFilters] = useState<IssueFilters>({});
   const [filterMenu, setFilterMenu] = useState<{ anchor: HTMLElement | null; start?: IssueProperty; opener: Element | null } | null>(null);
@@ -306,12 +305,11 @@ export function IssuesView() {
   const backlog = (issues ?? []).filter(isOpenIssue).sort((a, b) => a.order - b.order);
   const moves = issueMoves(sections, backlog);
   const root = useRef<HTMLDivElement>(null);
-  const toggle = (id: string) => setOpen(o => (o === id ? null : id));
   const doneShown = filter === 'done' || showDone || Boolean(query.trim());
   // The rows on screen, in order: where focus goes when one is removed.
   const shownIds = [...ordered, ...(doneShown ? done : [])].map(g => g.id);
   const item = (issue: SuperIssue) => (
-    <IssueItem key={issue.id} issue={issue} today={today} moves={moves.get(issue.id) ?? { up: null, down: null }} expanded={open === issue.id} onToggle={() => toggle(issue.id)} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, issue.id))} onSettled={() => focusRow(root.current, issue.id)} />
+    <IssueItem key={issue.id} issue={issue} today={today} moves={moves.get(issue.id) ?? { up: null, down: null }} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, issue.id))} onSettled={() => focusRow(root.current, issue.id)} />
   );
   const closeAdd = () => { setAdding(false); focusAdd(root.current); };
   const filterButton = () => root.current?.querySelector<HTMLElement>('[data-issues-filter]') ?? null;
@@ -369,7 +367,7 @@ export function IssuesView() {
   );
 }
 
-function IssueItem({ issue, today, moves, expanded, onToggle, onRemoved, onSettled }: { issue: SuperIssue; today: string; moves: { up: number | null; down: number | null }; expanded: boolean; onToggle: () => void; onRemoved: () => void; /** After a change that can move the row: focus it again. */ onSettled: () => void }) {
+function IssueItem({ issue, today, moves, onRemoved, onSettled }: { issue: SuperIssue; today: string; moves: { up: number | null; down: number | null }; onRemoved: () => void; /** After a change that can move the row: focus it again. */ onSettled: () => void }) {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === issue.projectId));
   const agent = useApp(s => (issue.agentId ? s.snapshot?.agents.find(a => a.id === issue.agentId) : undefined));
   const [editing, setEditing] = useState(false);
@@ -377,12 +375,14 @@ function IssueItem({ issue, today, moves, expanded, onToggle, onRemoved, onSettl
   const [title, setTitle] = useState(issue.title);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // Remove armed from the menu shows its confirm under the row (the row's hover actions are not in view then).
+  const [confirmInline, setConfirmInline] = useState(false);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const [focusConfirm, setFocusConfirm] = useState(false);
   // The confirm disarms after a few seconds, unless it has focus (someone is about to press it).
   useEffect(() => {
     if (!confirming) return;
-    const timer = setInterval(() => { if (!keepArmed(document.activeElement === confirmButton.current)) setConfirming(false); }, 4000);
+    const timer = setInterval(() => { if (!keepArmed(document.activeElement === confirmButton.current)) { setConfirming(false); setConfirmInline(false); } }, 4000);
     return () => clearInterval(timer);
   }, [confirming]);
   // Armed from the menu: once the row is open and the menu has gone, focus the confirm.
@@ -393,18 +393,18 @@ function IssueItem({ issue, today, moves, expanded, onToggle, onRemoved, onSettl
     return () => clearTimeout(timer);
   }, [focusConfirm, confirming]);
   const armFromMenu = () => {
-    const next = armRemove(expanded, true);
-    if (next.open) onToggle();
     setConfirming(true);
-    setFocusConfirm(next.focusConfirm);
+    setConfirmInline(true);
+    setFocusConfirm(true);
   };
   const named = `${issue.key} "${issue.title.length > 60 ? `${issue.title.slice(0, 59)}…` : issue.title}"`;
   const run = async (action: () => Promise<unknown>) => { setBusy(true); const ok = await attempt(action); setBusy(false); return ok; };
   const save = async () => { if (!busy && title.trim() && await run(() => api.updateIssue(issue.id, { title: title.trim() }))) { setEditing(false); onSettled(); } };
   const done = !isOpenIssue(issue);
-  // A status change moves the row to another section: focus follows it (or goes to + if it folded away).
-  const status = (s: IssueStatus) => { if (!busy) void run(() => api.updateIssue(issue.id, { status: s })).then(onSettled); };
-  const edit = () => { setTitle(issue.title); setEditing(true); if (!expanded) onToggle(); };
+  const edit = () => { setTitle(issue.title); setEditing(true); };
+  // The row unfolds only to rename it or to confirm a removal from the menu, never to show details:
+  // a click, Enter or Open shows the issue on the Issues page, selected (showIssueInList, ACH-D52).
+  const inline = editing || (confirming && confirmInline);
   const moveTo = (to: number | null) => { if (to !== null && !busy) void run(() => api.moveIssue(issue.id, to)).then(onSettled); };
   const removeNow = async () => { if (await run(() => api.removeIssue(issue.id))) onRemoved(); };
   const remove = <RowAction label={`Confirm removing ${named}`} busy={busy} onClick={() => void removeNow()}><span className="text-danger">Remove?</span></RowAction>;
@@ -431,12 +431,12 @@ function IssueItem({ issue, today, moves, expanded, onToggle, onRemoved, onSettl
           <RowIcon icon={Trash2} label={`Remove ${named}`} busy={busy} onClick={() => setConfirming(true)} />
         </>
       )}
-      expanded={expanded}
-      onOpen={onToggle}
+      expanded={inline ? true : undefined}
+      onOpen={() => showIssueInList(issue.id)}
       menuLabel={`Issue ${named}`}
       menu={close => (
         <>
-          <MenuRow icon={expanded ? ChevronUp : ChevronDown} title={expanded ? 'Close' : 'Open'} shortcut="Enter" onSelect={() => { close(); onToggle(); }} />
+          <MenuRow icon={Maximize2} title="Open" shortcut="Enter" onSelect={() => { close(); showIssueInList(issue.id); }} />
           <MenuRow icon={Pencil} title="Edit title" onSelect={() => { close(); edit(); }} />
           {!done ? (
             <>
@@ -469,23 +469,12 @@ function IssueItem({ issue, today, moves, expanded, onToggle, onRemoved, onSettl
           </div>
         </div>
       ) : null}
-      {/* The description stays in view while the title is renamed: only the title changes here. */}
-      <p className={`whitespace-pre-wrap break-words ${editing ? 'mt-1.5' : ''}`}>{issue.text}</p>
-      {issue.notes ? <p className="mt-1 text-content/50">{issue.notes}</p> : null}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {agent ? <DetailButton onClick={() => open({ kind: 'agent', agentId: agent.id })}>{done ? 'Done by' : 'With'} {agent.name}</DetailButton> : null}
-        <select
-          aria-label={`Status of ${named}`}
-          value={issue.status}
-          aria-busy={busy || undefined}
-          onChange={e => status(e.target.value as IssueStatus)}
-          className="h-6 rounded-md border border-content/12 bg-transparent px-1 text-[11.5px] text-content/75 outline-none"
-        >
-          {(Object.keys(ISSUE_STATUS_LABEL) as IssueStatus[]).map(s => <option key={s} value={s}>{ISSUE_STATUS_LABEL[s]}</option>)}
-        </select>
-        {!editing ? <DetailButton onClick={edit}>Edit title</DetailButton> : null}
-        {confirming ? <DetailButton ref={confirmButton} danger label={`Confirm removing ${named}`} busy={busy} onClick={() => void removeNow()}>Remove?</DetailButton> : <DetailButton onClick={() => setConfirming(true)}>Remove</DetailButton>}
-      </div>
+      {confirming && confirmInline ? (
+        <div className="flex items-center justify-end gap-1.5">
+          <TextButton onClick={() => { setConfirming(false); setConfirmInline(false); }}>Cancel</TextButton>
+          <DetailButton ref={confirmButton} danger label={`Confirm removing ${named}`} busy={busy} onClick={() => void removeNow()}>Remove?</DetailButton>
+        </div>
+      ) : null}
     </PanelRow>
   );
 }

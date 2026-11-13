@@ -13,7 +13,7 @@ export type TabContent =
   /** One issue in the full pane (web/issues/IssueView.tsx, ACH-D43 phase 4). */
   | { kind: 'issue'; issueId: string }
   /** The Issues page (web/issues/IssuesPage.tsx, Fen's). */
-  | { kind: 'issues' }
+  | { kind: 'issues'; issueId?: string }
   /** The Pull requests page (web/prs/PullRequestsPane.tsx); `prId` is the selected PR, owner/name#n. */
   | { kind: 'pullRequests'; prId?: string }
   /** The Work view as a pane (web/work/WorkView.tsx). */
@@ -196,8 +196,8 @@ function ensureTab(tabs: Tab[], content: TabContent): { tabs: Tab[]; tab: Tab } 
   const key = tabKey(content);
   const existing = tabs.find(t => tabKey(t.content) === key);
   if (existing) {
-    // Comms and Pull requests tabs carry the selected item; keep the newest selection.
-    if (content.kind === 'comms' || content.kind === 'pullRequests') {
+    // Comms, Issues and Pull requests tabs carry the selected item; keep the newest selection.
+    if (content.kind === 'comms' || content.kind === 'issues' || content.kind === 'pullRequests') {
       const tab = { ...existing, content };
       return { tabs: tabs.map(t => (t.id === existing.id ? tab : t)), tab };
     }
@@ -205,6 +205,16 @@ function ensureTab(tabs: Tab[], content: TabContent): { tabs: Tab[]; tab: Tab } 
   }
   const tab = { id: newId('t'), content };
   return { tabs: [...tabs, tab], tab };
+}
+
+/**
+ * Tabs that keep the SuperAgent's tabs in the right panel while they are in front (ACH-D55): the Issues
+ * page, an issue, the Pull requests page. Its backlog and decisions stay at hand while you work them.
+ */
+export const SUPER_PANEL_KINDS: readonly TabContent['kind'][] = ['issues', 'issue', 'pullRequests'];
+
+export function keepsSuperPanel(kind: TabContent['kind'] | null): boolean {
+  return kind !== null && SUPER_PANEL_KINDS.includes(kind);
 }
 
 /** What the focused pane shows, by kind: the sidebar marks its Comms, Issues and Pull requests rows. */
