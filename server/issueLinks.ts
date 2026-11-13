@@ -23,7 +23,7 @@ export interface MergedIssuePr {
 
 export interface IssueLinkStore {
   issues(): SuperIssue[];
-  updateIssue(id: string, patch: { status?: 'done'; activityText: string }, now: number, by: { kind: 'git' }): SuperIssue;
+  updateIssue(id: string, patch: { status?: 'done'; activityText: string; activityRef: string }, now: number, by: { kind: 'git' }): SuperIssue;
 }
 
 /** A newer merge can finish reopened work; a past merge (even after restarting) cannot. */
@@ -38,7 +38,7 @@ function openSince(issue: SuperIssue): number {
 }
 
 function alreadyLogged(issue: SuperIssue, identity: string): boolean {
-  return issue.activity.some(e => e.by.kind === 'git' && e.text?.includes(identity));
+  return issue.activity.some(e => e.ref === identity);
 }
 
 export interface IssueLinkSource {
@@ -120,7 +120,7 @@ export class IssueLinks {
         if (record.at < Math.floor(issue.createdAt / 1000) * 1000 || alreadyLogged(issue, record.hash)) continue;
         // Consume even while closed: replaying an observed second merge after reopen must be inert.
         const closes = isOpenIssue(issue) && record.at >= openSince(issue);
-        this.store.updateIssue(issue.id, { ...(closes ? { status: 'done' as const } : {}), activityText: `Merged ${record.hash} from ${record.branch}.` }, this.now(), { kind: 'git' });
+        this.store.updateIssue(issue.id, { ...(closes ? { status: 'done' as const } : {}), activityText: `Merged ${record.hash} from ${record.branch}.`, activityRef: record.hash }, this.now(), { kind: 'git' });
         observed++;
         if (closes) changed++;
       }
@@ -139,10 +139,10 @@ export class IssueLinks {
       for (const issue of this.store.issues()) {
         if (!pr.projects.some(p => p.id === issue.projectId)) continue;
         if (!keys.includes(issue.key) && issue.branch !== pr.branch) continue;
-        const identity = `${pr.repo}#${pr.number} (${pr.mergeCommit})`;
+        const identity = `${pr.repo}#${pr.number}:${pr.mergeCommit}`;
         if (at < Math.floor(issue.createdAt / 1000) * 1000 || alreadyLogged(issue, identity)) continue;
         const closes = isOpenIssue(issue) && at >= openSince(issue);
-        this.store.updateIssue(issue.id, { ...(closes ? { status: 'done' as const } : {}), activityText: `Merged ${identity} from ${pr.branch}.` }, this.now(), { kind: 'git' });
+        this.store.updateIssue(issue.id, { ...(closes ? { status: 'done' as const } : {}), activityText: `Merged ${pr.repo}#${pr.number} (${pr.mergeCommit}) from ${pr.branch}.`, activityRef: identity }, this.now(), { kind: 'git' });
         observed++;
         if (closes) changed++;
       }

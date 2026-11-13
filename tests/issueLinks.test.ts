@@ -49,6 +49,7 @@ test('local merges close through the store with git activity; restarting and rev
   assert.equal(t.store.issue(t.issue.id).status, 'done');
   assert.deepEqual(t.store.issue(t.issue.id).activity.at(-1)?.by, { kind: 'git' });
   assert.match(t.store.issue(t.issue.id).activity.at(-1)?.text ?? '', new RegExp(hash));
+  assert.equal(t.store.issue(t.issue.id).activity.at(-1)?.ref, hash);
   const n = t.store.issue(t.issue.id).activity.length;
   await t.work.view([t.project], true);
   assert.equal(t.store.issue(t.issue.id).activity.length, n);
@@ -93,6 +94,7 @@ test('GitHub merged PRs match branch, title or body and require merge evidence; 
     assert.equal(t.links.githubMerges([pr]), 1);
     assert.equal(t.store.issue(t.issue.id).status, 'done');
     assert.match(t.store.issue(t.issue.id).activity.at(-1)?.text ?? '', /a\/b#12/);
+    assert.equal(t.store.issue(t.issue.id).activity.at(-1)?.ref, `a/b#12:${'a'.repeat(40)}`);
     t.store.updateIssue(t.issue.id, { status: 'todo' }, 6000);
     assert.equal(new IssueLinks(t.store).githubMerges([pr]), 0);
     assert.equal(t.links.githubMerges([{ ...pr, mergeCommit: 'b'.repeat(40), mergedAt: new Date(7000).toISOString() }]), 1);
@@ -316,5 +318,20 @@ test('an unseen historical merge in the reopening second cannot reclose, locally
   assert.equal(t.store.issue(t.issue.id).status, 'todo');
   const pr: MergedIssuePr = { repo: 'a/b', number: 2, projects: [{ id: 'p1' }], state: 'merged', branch: a.branch, title: 'Ship', mergedAt: new Date(2000).toISOString(), mergeCommit: unseen.hash };
   assert.equal(restarted.githubMerges([pr]), 0);
+  assert.equal(t.store.issue(t.issue.id).status, 'todo');
+});
+
+test('merge identity comes from activityRef, never a hash mentioned in human-readable activity text', () => {
+  const t = setup(1001);
+  const record: MergeRecord = { hash: 'a'.repeat(40), branch: 'feat/ACH-1-ref', at: 2000, tree: '', tip: '', subject: 'Merge the issue branch', names: [], refs: [] };
+  t.store.updateIssue(t.issue.id, { activityText: `Diagnostics mentioned ${record.hash}, before the merge happened.` }, 1500, { kind: 'git' });
+  const links = new IssueLinks(t.store, () => 2100);
+  assert.equal(links.localMerges(t.project, [record]), 1);
+  assert.equal(t.store.issue(t.issue.id).activity.at(-1)?.ref, record.hash);
+  t.store.updateIssue(t.issue.id, { status: 'todo' }, 2500);
+  const restarted = new IssueLinks(new SuperStore(path.join(t.dir, 'data'), () => 'ACH'), () => 4000);
+  const count = t.store.issue(t.issue.id).activity.length;
+  assert.equal(restarted.localMerges(t.project, [record]), 0);
+  assert.equal(t.store.issue(t.issue.id).activity.length, count);
   assert.equal(t.store.issue(t.issue.id).status, 'todo');
 });
