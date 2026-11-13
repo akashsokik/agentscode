@@ -104,11 +104,13 @@ export function assigneeName(issue: SuperIssue, agentName: string | undefined): 
  * show (container `issues`); the full text is in the row's tooltip. A click, Enter or Open opens
  * the issue view in a tab (openIssue): the row never unfolds to show details.
  */
-export function IssueRow({ issue, properties, today, now, onOpen = () => openIssue(issue.id) }: {
+export function IssueRow({ issue, properties, today, now, selected = false, onOpen = () => openIssue(issue.id) }: {
   issue: SuperIssue;
   properties: readonly RowProperty[];
   today: string;
   now: number;
+  /** The issue the page has selected (ACH-D52). */
+  selected?: boolean;
   /** Defaults to opening the issue view. */
   onOpen?: () => void;
 }) {
@@ -130,6 +132,7 @@ export function IssueRow({ issue, properties, today, now, onOpen = () => openIss
       id={issue.id}
       lead={<StatusIcon status={issue.status} />}
       label={label}
+      selected={selected}
       dim={closed}
       title={(
         <span className="flex min-w-0 items-center gap-2">

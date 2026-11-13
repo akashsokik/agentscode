@@ -4,6 +4,7 @@ import type { SuperIssue } from '../shared/types.ts';
 import {
   activeFilters, chipText, clearFilter, DEFAULT_DISPLAY, displayedIssues, displayFrom, dueBucket, filterOptions, groupIssues, inView, issuesPage, localDay,
   matchesFilters, matchesQuery, NONE, readDisplay, saveDisplay, sortIssues, toggleFilter, YOU, type IssuesDisplay,
+  revealIssue,
 } from '../web/issues/issuesView.ts';
 import { isPageKey } from '../web/issues/pageKeys.ts';
 import { knownTabs, tabKey, TAB_KINDS } from '../web/layout.ts';
@@ -217,21 +218,43 @@ test('opening an issue shows its issue view in a tab; the same issue focuses the
   assert.deepEqual(shown(), { kind: 'issue', issueId: 'i1' }, 'its tab is shown again');
 });
 
-test('both issue lists open the issue view on a click, Enter or Open; neither unfolds a row to show details', async () => {
+test('a page row opens the issue view; a panel row shows the issue on the Issues page; neither unfolds a row to show details', async () => {
   const { readFileSync } = await import('node:fs');
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
   const parts = read('../web/issues/issueParts.tsx');
   const row = parts.slice(parts.indexOf('export function IssueRow('), parts.indexOf('export function MenuPage'));
   assert.match(row, /onOpen = \(\) => openIssue\(issue\.id\)/, 'the page row opens the issue view by default');
   assert.doesNotMatch(row, /expanded=/, 'the page row has no expand');
-  assert.match(read('../web/issues/IssuesPage.tsx'), /<IssueRow key=\{issue\.id\} issue=\{issue\} properties=\{display\.properties\} today=\{today\} now=\{now\} \/>/);
+  assert.match(read('../web/issues/IssuesPage.tsx'), /<IssueRow key=\{issue\.id\} issue=\{issue\} properties=\{display\.properties\} today=\{today\} now=\{now\} selected=\{issue\.id === issueId\} \/>/, 'no onOpen override: the default opens the view; the selected issue is marked');
   const panel = read('../web/panes/SuperPanel.tsx');
   const item = panel.slice(panel.indexOf('function IssueItem('), panel.indexOf('export function RoutinesView'));
-  assert.match(item, /onOpen=\{\(\) => openIssue\(issue\.id\)\}/, 'a panel row opens the issue view');
-  assert.match(item, /title="Open" shortcut="Enter" onSelect=\{\(\) => \{ close\(\); openIssue\(issue\.id\); \}\}/, 'and so does Open in its menu');
+  assert.match(item, /onOpen=\{\(\) => showIssueInList\(issue\.id\)\}/, 'a panel row shows the issue on the Issues page (ACH-D52)');
+  assert.match(item, /title="Open" shortcut="Enter" onSelect=\{\(\) => \{ close\(\); showIssueInList\(issue\.id\); \}\}/, 'and so does Open in its menu');
   // It unfolds only to rename (Edit title) or to confirm a removal armed from the menu.
   assert.match(item, /expanded=\{inline \? true : undefined\}/);
   assert.match(item, /const inline = editing \|\| \(confirming && confirmInline\);/);
   assert.doesNotMatch(item, /\{issue\.text\}/, 'no description shown in the row');
   assert.match(item, /aria-label=\{`Title of \$\{named\}`\}/, 'Edit title stays');
+});
+
+test('the right panel opens the Issues page with the issue selected; one Issues tab keeps the newest selection', async () => {
+  const { getLayout } = await import('../web/layout.ts');
+  const { showIssueInList } = await import('../web/issues/openIssue.ts');
+  const issuesTabs = () => getLayout().tabs.filter(t => t.content.kind === 'issues');
+  const before = issuesTabs().length;
+  showIssueInList('a');
+  showIssueInList('b');
+  assert.equal(issuesTabs().length, Math.max(before, 1), 'one Issues tab');
+  assert.deepEqual(issuesTabs()[0].content, { kind: 'issues', issueId: 'b' });
+  const shown = getLayout().tabs.find(t => t.id === getLayout().panes.find(p => p.id === getLayout().focused)?.tabId)?.content;
+  assert.deepEqual(shown, { kind: 'issues', issueId: 'b' }, 'and it is the one shown');
+});
+
+test('an issue opened from elsewhere is revealed: All when the view leaves it out, filters and search cleared when they hide it, its closed group unfolded', () => {
+  const base = { view: 'active' as const, filters: {}, query: '', display: DEFAULT_DISPLAY };
+  assert.equal(revealIssue(issue('i1', { status: 'todo' }), base, TODAY), null, 'already shown');
+  assert.deepEqual(revealIssue(issue('i2', { status: 'backlog' }), base, TODAY), { view: 'all' });
+  assert.deepEqual(revealIssue(issue('i3', { status: 'done' }), base, TODAY), { view: 'all', unfold: 'done' });
+  assert.deepEqual(revealIssue(issue('i4', { status: 'todo', labels: ['ui'] }), { ...base, filters: { labels: ['git'] }, query: 'nothing like it' }, TODAY), { filters: {}, query: '' });
+  assert.deepEqual(revealIssue(issue('i5', { status: 'canceled' }), { ...base, view: 'all', display: { ...DEFAULT_DISPLAY, groupBy: 'priority' } }, TODAY), null, 'not grouped by status: nothing to unfold');
 });

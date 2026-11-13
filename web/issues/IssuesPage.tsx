@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { isOpenIssue } from '../../shared/issues.ts';
 import type { SuperIssue } from '../../shared/types.ts';
 import { api } from '../api.ts';
@@ -9,13 +9,13 @@ import { Composer } from '../panes/SuperPanel.tsx';
 import { attempt, useApp } from '../store.ts';
 import { ChipButton, Empty, HeaderButton } from '../ui/common.tsx';
 import { Kbd } from '../ui/Kbd.tsx';
-import { DetailButton, focusAdd, PanelEmpty, PanelList, PanelSection, PanelToolbar } from '../ui/PanelList.tsx';
+import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelSection, PanelToolbar } from '../ui/PanelList.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { DisplayMenu, FilterChips, FilterMenu } from './IssueFilters.tsx';
 import { IssueRow, restoreFocus } from './issueParts.tsx';
 import { isPageKey } from './pageKeys.ts';
 import {
-  activeFilters, displayedIssues, inView, ISSUE_VIEWS, issuesPage, localDay, readDisplay, saveDisplay,
+  activeFilters, displayedIssues, inView, ISSUE_VIEWS, issuesPage, localDay, readDisplay, revealIssue, saveDisplay,
   type IssueFilters, type IssueNames, type IssueProperty, type IssuesDisplay, type IssuesViewName,
 } from './issuesView.ts';
 
@@ -32,7 +32,7 @@ const EMPTY_VIEW: Record<IssuesViewName, string> = {
   mine: 'Nothing is waiting on you. Issues assigned to you or needing you show here.',
 };
 
-export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
+export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The selected issue (ACH-D52): opened from the right panel, say. */ issueId?: string }) {
   const issues = useApp(s => s.snapshot?.super.issues);
   const agents = useApp(s => s.snapshot?.agents);
   const projects = useApp(s => s.snapshot?.projects);
@@ -57,6 +57,19 @@ export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
     project: id => projects?.find(p => p.id === id)?.name,
   }), [agents, projects]);
   const page = issuesPage(issues, { view, filters, query, display }, names, today);
+  // An issue opened from elsewhere: make sure its row shows, then scroll to it and give it focus.
+  const selectedIssue = issueId ? issues?.find(g => g.id === issueId) : undefined;
+  useEffect(() => {
+    if (!selectedIssue) return;
+    const change = revealIssue(selectedIssue, { view, filters, query, display }, today);
+    if (change?.view) setView(change.view);
+    if (change?.filters) setFilters(change.filters);
+    if (change?.query !== undefined) setQuery(change.query);
+    if (change?.unfold) setUnfolded(s => new Set(s).add(change.unfold!));
+    focusRow(root.current, selectedIssue.id);
+    // Only when a different issue is asked for, not on every list change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issueId, Boolean(selectedIssue)]);
   const open = (issues ?? []).filter(isOpenIssue).length;
   const filtering = Boolean(query.trim() || activeFilters(filters).length);
 
@@ -92,7 +105,7 @@ export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
   );
 
   const row = (issue: SuperIssue) => (
-    <IssueRow key={issue.id} issue={issue} properties={display.properties} today={today} now={now} />
+    <IssueRow key={issue.id} issue={issue} properties={display.properties} today={today} now={now} selected={issue.id === issueId} />
   );
 
   return (

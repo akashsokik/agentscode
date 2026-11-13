@@ -12,3 +12,12 @@ export function issueTab(issueId: string): TabContent {
 export function openIssue(issueId: string): void {
   open(issueTab(issueId));
 }
+
+/**
+ * The Issues page with one issue selected (ACH-D52): its row is shown, scrolled to and selected, and
+ * its detail goes in the page's detail pane once that lands. The right panel's Issues list opens
+ * issues this way. One Issues tab: it takes the newest selection.
+ */
+export function showIssueInList(issueId: string): void {
+  open({ kind: 'issues', issueId });
+}

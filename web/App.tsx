@@ -418,7 +418,7 @@ function PaneView({ pane, tab, chrome, actions }: { pane: Pane; tab: Tab | undef
     case 'diff': return <DiffPane key={pane.id + tab.id} root={c.root} path={c.path} chrome={chrome} />;
     case 'comms': return <CommsPane conversationId={c.conversationId} chrome={chrome} />;
     case 'issue': return <IssueView issueId={c.issueId} chrome={chrome} />;
-    case 'issues': return <IssuesPage chrome={chrome} />;
+    case 'issues': return <IssuesPage chrome={chrome} issueId={c.issueId} />;
     case 'pullRequests': return <PullRequestsPane prId={c.prId} chrome={chrome} />;
     case 'work': return <WorkPane chrome={chrome} />;
     case 'channel': return <ChannelPane key={pane.id + c.channelId} channelId={c.channelId} chrome={chrome} />;

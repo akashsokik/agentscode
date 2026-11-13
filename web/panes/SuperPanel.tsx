@@ -20,7 +20,7 @@ import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelRow, Pane
 import { Zap, Maximize2, Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleDot, Clock, Copy, CornerDownRight, ListBullet, ListFilter, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { DueDate, PriorityMark, restoreFocus, StatusIcon, StatusPriorityRows } from '../issues/issueParts.tsx';
-import { openIssue } from '../issues/openIssue.ts';
+import { showIssueInList } from '../issues/openIssue.ts';
 import { isPageKey } from '../issues/pageKeys.ts';
 import { FilterChips, FilterMenu } from '../issues/IssueFilters.tsx';
 import { activeFilters, localDay, matchesFilters, type IssueFilters, type IssueNames, type IssueProperty } from '../issues/issuesView.ts';
@@ -279,8 +279,8 @@ export function Composer({ placeholder, label, onAdd, onClose, children }: { pla
 
 /**
  * The issues backlog (ACH-D37): what you want done, in order. Open issues by status (needs you, in
- * progress, queued), then Done folded at the end; + opens a one-line composer. An issue opens the
- * issue view in a tab (openIssue, ACH-D43 section C); renaming, moving, status, priority and remove
+ * progress, queued), then Done folded at the end; + opens a one-line composer. An issue opens on the
+ * Issues page, selected (showIssueInList, ACH-D52); renaming, moving, status, priority and remove
  * are in its menu and, on hover, its icons.
  */
 export function IssuesView() {
@@ -403,7 +403,7 @@ function IssueItem({ issue, today, moves, onRemoved, onSettled }: { issue: Super
   const done = !isOpenIssue(issue);
   const edit = () => { setTitle(issue.title); setEditing(true); };
   // The row unfolds only to rename it or to confirm a removal from the menu, never to show details:
-  // a click, Enter or Open opens the issue view in a tab (openIssue, ACH-D43 section C).
+  // a click, Enter or Open shows the issue on the Issues page, selected (showIssueInList, ACH-D52).
   const inline = editing || (confirming && confirmInline);
   const moveTo = (to: number | null) => { if (to !== null && !busy) void run(() => api.moveIssue(issue.id, to)).then(onSettled); };
   const removeNow = async () => { if (await run(() => api.removeIssue(issue.id))) onRemoved(); };
@@ -432,11 +432,11 @@ function IssueItem({ issue, today, moves, onRemoved, onSettled }: { issue: Super
         </>
       )}
       expanded={inline ? true : undefined}
-      onOpen={() => openIssue(issue.id)}
+      onOpen={() => showIssueInList(issue.id)}
       menuLabel={`Issue ${named}`}
       menu={close => (
         <>
-          <MenuRow icon={Maximize2} title="Open" shortcut="Enter" onSelect={() => { close(); openIssue(issue.id); }} />
+          <MenuRow icon={Maximize2} title="Open" shortcut="Enter" onSelect={() => { close(); showIssueInList(issue.id); }} />
           <MenuRow icon={Pencil} title="Edit title" onSelect={() => { close(); edit(); }} />
           {!done ? (
             <>
