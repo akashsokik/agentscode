@@ -177,6 +177,15 @@ export function MenuPage({ page, focus = true, children }: { page: string; /** O
   return <div ref={box}>{children}</div>;
 }
 
+/** A key pressed on the list itself, not typed into a field or a menu: the list's own shortcuts (F, J, K) may take it. */
+export function isPageKey(e: KeyboardEvent<HTMLElement>): boolean {
+  const target = e.target as HTMLElement;
+  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return false;
+  if (target.isContentEditable || target.closest('input, textarea, select, [role="dialog"], [role="menu"]')) return false;
+  // React passes key presses up from portals (menus, popovers); only the list's own DOM counts.
+  return e.currentTarget.contains(target);
+}
+
 /**
  * Arrow keys, Home and End move between a menu's rows; from a search field, Down goes to the first
  * value. Kept inside: the menu a flyout hangs off never sees them.
@@ -260,32 +269,54 @@ export function SubmenuRow({ icon, title, value, open, onOpen }: { icon?: typeof
  */
 export function IssueMenu({ issue, close, onOpen }: { issue: SuperIssue; close: () => void; onOpen?: () => void }) {
   const [confirming, setConfirming] = useState(false);
-  const [sub, setSub] = useState<{ which: 'status' | 'priority'; anchor: HTMLElement; focus: boolean } | null>(null);
-  const update = (patch: { status?: IssueStatus; priority?: IssuePriority }) => { close(); void attempt(() => api.updateIssue(issue.id, patch)); };
-  // Hover or click opens a row's submenu; the other rows close it.
-  const openSub = (which: 'status' | 'priority') => (anchor: HTMLElement, focus: boolean) => setSub(s => (s?.which === which && !focus ? s : { which, anchor, focus }));
-  if (confirming) {
-    return (
-      <MenuPage page="remove">
-        <MenuLabel>Remove {issue.key}?</MenuLabel>
-        <MenuRow icon={Trash2} title="Remove" hint="You can undo it from the SuperAgent's Decisions." danger onSelect={() => { close(); void attempt(() => api.removeIssue(issue.id)); }} />
-        <MenuRow icon={ChevronLeft} title="Back" onSelect={() => setConfirming(false)} />
-      </MenuPage>
-    );
-  }
+  if (confirming) return <RemoveConfirm issue={issue} close={close} onBack={() => setConfirming(false)} />;
   return (
     <MenuPage page="main">
-      <div onMouseEnter={() => setSub(null)}>
-        {onOpen ? <MenuRow icon={ChevronDown} title="Open" shortcut="Enter" onSelect={() => { close(); onOpen(); }} /> : null}
-      </div>
+      {onOpen ? <MenuRow icon={ChevronDown} title="Open" shortcut="Enter" onSelect={() => { close(); onOpen(); }} /> : null}
+      <StatusPriorityRows issue={issue} close={close} />
+      <MenuDivider />
+      <MenuRow icon={Copy} title={`Copy ${issue.key}`} onSelect={() => { close(); void navigator.clipboard?.writeText(issue.key); }} />
+      {isOpenIssue(issue) ? <MenuRow icon={Minus} title="Cancel issue" onSelect={() => { close(); void attempt(() => api.updateIssue(issue.id, { status: 'canceled' })); }} /> : null}
+      <MenuRow icon={Trash2} title="Remove…" danger onSelect={() => setConfirming(true)} />
+    </MenuPage>
+  );
+}
+
+/** Remove, confirmed in place inside the menu. */
+export function RemoveConfirm({ issue, close, onBack, onRemoved }: { issue: SuperIssue; close: () => void; onBack: () => void; onRemoved?: () => void }) {
+  return (
+    <MenuPage page="remove">
+      <MenuLabel>Remove {issue.key}?</MenuLabel>
+      <MenuRow icon={Trash2} title="Remove" hint="You can undo it from the SuperAgent's Decisions." danger onSelect={() => { close(); void attempt(() => api.removeIssue(issue.id)).then(ok => { if (ok) onRemoved?.(); }); }} />
+      <MenuRow icon={ChevronLeft} title="Back" onSelect={onBack} />
+    </MenuPage>
+  );
+}
+
+/**
+ * An issue's Status and Priority rows, each opening its submenu (ACH-D46, option B), for any issue
+ * menu: the Issues page's and the right panel's. Pointing at another row of the menu closes the
+ * open submenu. `onChanged` runs after a change is saved (the panel puts focus back on the row).
+ */
+export function StatusPriorityRows({ issue, close, onChanged }: { issue: SuperIssue; close: () => void; onChanged?: () => void }) {
+  const [sub, setSub] = useState<{ which: 'status' | 'priority'; anchor: HTMLElement; focus: boolean } | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const menu = box.current?.closest('[role="menu"]');
+    if (!menu || !sub) return;
+    const over = (e: Event) => { if (!box.current?.contains(e.target as Node)) setSub(null); };
+    menu.addEventListener('pointerover', over);
+    return () => menu.removeEventListener('pointerover', over);
+  }, [sub]);
+  const update = (patch: { status?: IssueStatus; priority?: IssuePriority }) => {
+    close();
+    void attempt(() => api.updateIssue(issue.id, patch)).then(() => onChanged?.());
+  };
+  const openSub = (which: 'status' | 'priority') => (anchor: HTMLElement, focus: boolean) => setSub(s => (s?.which === which && !focus ? s : { which, anchor, focus }));
+  return (
+    <div ref={box}>
       <SubmenuRow icon={tinted(ISSUE_ICON[issue.status].icon, ISSUE_ICON[issue.status].tint)} title="Status" value={ISSUE_STATUS_LABEL[issue.status]} open={sub?.which === 'status'} onOpen={openSub('status')} />
       <SubmenuRow icon={tinted(PRIORITY_ICON[issue.priority].icon, PRIORITY_ICON[issue.priority].tint)} title="Priority" value={ISSUE_PRIORITY_LABEL[issue.priority]} open={sub?.which === 'priority'} onOpen={openSub('priority')} />
-      <div onMouseEnter={() => setSub(null)}>
-        <MenuDivider />
-        <MenuRow icon={Copy} title={`Copy ${issue.key}`} onSelect={() => { close(); void navigator.clipboard?.writeText(issue.key); }} />
-        {isOpenIssue(issue) ? <MenuRow icon={Minus} title="Cancel issue" onSelect={() => update({ status: 'canceled' })} /> : null}
-        <MenuRow icon={Trash2} title="Remove…" danger onSelect={() => setConfirming(true)} />
-      </div>
       {sub?.which === 'status' ? (
         <Submenu key={`status-${sub.focus}`} anchor={sub.anchor} focus={sub.focus} label={`Status of ${issue.key}`} onClose={() => setSub(null)}>
           {ISSUE_STATUSES.map(st => {
@@ -302,7 +333,7 @@ export function IssueMenu({ issue, close, onOpen }: { issue: SuperIssue; close: 
           })}
         </Submenu>
       ) : null}
-    </MenuPage>
+    </div>
   );
 }
 

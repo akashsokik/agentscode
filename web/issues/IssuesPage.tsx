@@ -12,7 +12,7 @@ import { Kbd } from '../ui/Kbd.tsx';
 import { DetailButton, focusAdd, PanelEmpty, PanelList, PanelSection, PanelToolbar } from '../ui/PanelList.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { DisplayMenu, FilterChips, FilterMenu } from './IssueFilters.tsx';
-import { IssueRow } from './issueParts.tsx';
+import { isPageKey, IssueRow } from './issueParts.tsx';
 import {
   activeFilters, inView, ISSUE_VIEWS, issuesPage, localDay, readDisplay, saveDisplay,
   type IssueFilters, type IssueNames, type IssueProperty, type IssuesDisplay, type IssuesViewName,
@@ -30,15 +30,6 @@ const EMPTY_VIEW: Record<IssuesViewName, string> = {
   backlog: 'The backlog is empty.',
   mine: 'Nothing is waiting on you. Issues assigned to you or needing you show here.',
 };
-
-/** A key pressed on the page itself, not typed into a field: the page's own shortcuts may take it. */
-function isPageKey(e: KeyboardEvent<HTMLElement>): boolean {
-  const target = e.target as HTMLElement;
-  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return false;
-  if (target.isContentEditable || target.closest('input, textarea, select, [role="dialog"], [role="menu"]')) return false;
-  // React passes key presses up from portals (menus, popovers); only the page's own DOM counts.
-  return e.currentTarget.contains(target);
-}
 
 export function IssuesPage({ chrome }: { chrome: PaneChrome }) {
   const issues = useApp(s => s.snapshot?.super.issues);
