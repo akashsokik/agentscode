@@ -11,7 +11,7 @@ import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { useNow } from '../ui/useNow.ts';
 import { cx, Empty, HeaderButton, StatusLabel, type Tone } from '../ui/common.tsx';
-import { InboxBar, InboxCard, InboxDetail, InboxFilterTabs, InboxHero, InboxLayout, InboxList, InboxSearch, InboxSection, TimelineStop } from '../ui/Inbox.tsx';
+import { InboxBar, InboxBarButton, InboxCard, InboxDetail, InboxFilterTabs, InboxHero, InboxLayout, InboxList, InboxSearch, InboxSection, TimelineStop } from '../ui/Inbox.tsx';
 import { PeerBubble } from './PeerMessages.tsx';
 import { Bot, CheckCheck, ChevronDown, Clock, MessageMultiple, Square, type IconComponent } from '../mono/icons.tsx';
 import { StatusMark, type StatusState } from '../ui/StatusMark.tsx';
@@ -306,15 +306,12 @@ function ThreadView({ thread, state, title, agents, now }: { thread: CommsThread
             <span className="@max-[28rem]/detail:hidden">{count(thread.messages.length, 'message', limit)}</span>
           </span>
           {thread.conversation && !thread.conversation.stopped ? (
-            <button
-              type="button"
-              onClick={() => void attempt(() => api.stopConversation(thread.id))}
+            <InboxBarButton
+              icon={<Square className="size-2.5 fill-current" strokeWidth={0} />}
+              label="Stop"
               title="Stop conversation: no more messages are delivered in it"
-              className="inline-flex h-6.5 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-content/70 transition-[color,background-color,transform] duration-150 hover:bg-content/10 hover:text-content active:scale-[0.97] motion-reduce:transition-none"
-            >
-              <Square className="size-2.5 fill-current" strokeWidth={0} />
-              <span className="@max-[28rem]/detail:hidden">Stop</span>
-            </button>
+              onClick={() => void attempt(() => api.stopConversation(thread.id))}
+            />
           ) : null}
         </InboxBar>
       }

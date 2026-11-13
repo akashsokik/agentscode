@@ -220,6 +220,23 @@ export function InboxBar({ backLabel, onBack, children }: { backLabel: string; o
   );
 }
 
+/** A quiet action in an InboxBar (Comms' Stop): an icon and a label that hides when the detail is narrow. */
+export function InboxBarButton({ icon, label, title, onClick, disabled = false }: { icon: ReactNode; label: string; title?: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? label}
+      aria-label={label}
+      className="inline-flex h-6.5 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-content/70 transition-[color,background-color,transform] duration-150 hover:bg-content/10 hover:text-content active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none"
+    >
+      {icon}
+      <span className="@max-[28rem]/detail:hidden">{label}</span>
+    </button>
+  );
+}
+
 /** MonoCode's detail header: the title, then whatever follows it (people, a meta line, actions), and tabs below. */
 export function InboxHero({ title, children, tabs }: { title: string; children?: ReactNode; tabs?: ReactNode }) {
   return (
