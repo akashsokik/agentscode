@@ -387,7 +387,7 @@ export class SuperStore {
       if (patch.parentId === null || patch.parentId === '') delete next.parentId;
       else next.parentId = parentFrom(stored.issues, id, patch.parentId);
     }
-    if (patch.relations !== undefined) next.relations = relationsFrom(stored.issues, id, patch.relations);
+    if (patch.relations !== undefined) next.relations = relationsFrom(stored.issues, id, patch.relations, old.relations);
     if (patch.comment !== undefined) {
       const comment = issueDescription(patch.comment);
       if (!comment) throw new HttpError(400, 'A comment needs some text.');
@@ -697,8 +697,12 @@ function parentFrom(issues: readonly SuperIssue[], id: string, raw: unknown): st
 
 const RELATION_TYPES: readonly IssueRelationType[] = ['blocks', 'related', 'duplicate_of'];
 
-/** Relations for issue `id`: each a known type and another issue that exists, once each, at most 50. */
-function relationsFrom(issues: readonly SuperIssue[], id: string, raw: unknown): SuperIssue['relations'] {
+/**
+ * Relations for issue `id`: each a known type and another issue, once each, at most 50. A newly added
+ * one must point at an issue that exists; one the issue already had (`kept`) stays as it is even if
+ * its target was removed since, so the others can still be edited and an undone removal reconnects.
+ */
+function relationsFrom(issues: readonly SuperIssue[], id: string, raw: unknown, kept: SuperIssue['relations'] = []): SuperIssue['relations'] {
   if (!Array.isArray(raw)) throw new HttpError(400, 'Relations are a list of { type, issueId }.');
   const ids = new Set(issues.map(g => g.id));
   const seen = new Set<string>();
@@ -708,7 +712,8 @@ function relationsFrom(issues: readonly SuperIssue[], id: string, raw: unknown):
     const issueId = String(r?.issueId ?? '');
     if (!RELATION_TYPES.includes(type)) throw new HttpError(400, `A relation's type is one of: ${RELATION_TYPES.join(', ')}.`);
     if (issueId === id) throw new HttpError(400, 'An issue cannot relate to itself.');
-    if (!ids.has(issueId)) throw new HttpError(400, 'No issue with that id to relate to.');
+    const had = kept.some(k => k.type === type && k.issueId === issueId);
+    if (!ids.has(issueId) && !had) throw new HttpError(400, 'No issue with that id to relate to.');
     const key = `${type}:${issueId}`;
     if (!seen.has(key)) { seen.add(key); out.push({ type, issueId }); }
   }
