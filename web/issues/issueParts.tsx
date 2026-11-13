@@ -2,19 +2,15 @@ import { forwardRef, useEffect, useRef, useState, type ComponentProps, type Keyb
 import { ISSUE_PRIORITIES, ISSUE_PRIORITY_LABEL, ISSUE_STATUSES, ISSUE_STATUS_LABEL, isOpenIssue } from '../../shared/issues.ts';
 import type { IssuePriority, IssueStatus, SuperIssue } from '../../shared/types.ts';
 import { api } from '../api.ts';
-import { relativeTime } from '../format.ts';
 import { AlertSquare, CheckCircle, ChevronLeft, ChevronRight, Circle, CircleAlert, CircleDashed, CircleHalf, CircleThreeQuarter, Copy, Maximize2, Minus, NoSignal, Pause, SignalHigh, SignalLow, SignalMedium, Trash2 } from '../mono/icons.tsx';
 import { LAYER } from '../mono/layers.ts';
 import { StatusMark } from '../ui/StatusMark.tsx';
 import { STATUS_MARKS, type StatusState } from '../ui/statusMarks.ts';
 import { Popover } from '../mono/Popover.tsx';
 import { menuKeyTarget } from '../ui/menuFocus.ts';
-import { WhoAvatar } from '../notes/parts.tsx';
-import { attempt, useApp } from '../store.ts';
+import { attempt } from '../store.ts';
 import { cx, MenuDivider, MenuLabel, MenuRow, MenuRowRole } from '../ui/common.tsx';
-import { PanelRow } from '../ui/PanelList.tsx';
-import { dueBucket, type RowProperty } from './issuesView.ts';
-import { openIssue } from './openIssue.ts';
+import { dueBucket } from './issuesView.ts';
 
 // The pieces an issue is drawn with, shared by the Issues page and (phase 4) the right panel's list.
 
@@ -80,81 +76,11 @@ export function DueDate({ dueDate, today }: { dueDate: string; today: string }) 
   );
 }
 
-function Labels({ labels }: { labels: string[] }) {
-  if (!labels.length) return null;
-  const shown = labels.slice(0, 2);
-  return (
-    <span className="flex min-w-0 items-center gap-1" title={labels.join(', ')}>
-      {shown.map(l => <span key={l} className="max-w-[7rem] truncate rounded-[5px] bg-content/7 px-1.5 leading-[18px] text-content/60">{l}</span>)}
-      {labels.length > shown.length ? <span className="text-content/40">+{labels.length - shown.length}</span> : null}
-    </span>
-  );
-}
-
 /** Who an issue is with, in words: "You", the agent's name, or nobody. */
 export function assigneeName(issue: SuperIssue, agentName: string | undefined): string | null {
   if (issue.forUser) return 'You';
   if (issue.agentId) return agentName ?? 'Removed agent';
   return null;
-}
-
-/**
- * One issue on one wide line: status, title, then (as the Display chooses) key, priority, labels,
- * project, due date, assignee and when it last changed. The narrower the page, the fewer of these
- * show (container `issues`); the full text is in the row's tooltip. A click, Enter or Open opens
- * the issue view in a tab (openIssue): the row never unfolds to show details.
- */
-export function IssueRow({ issue, properties, today, now, selected = false, onOpen = () => openIssue(issue.id) }: {
-  issue: SuperIssue;
-  properties: readonly RowProperty[];
-  today: string;
-  now: number;
-  /** The issue the page has selected (ACH-D52). */
-  selected?: boolean;
-  /** Defaults to opening the issue view. */
-  onOpen?: () => void;
-}) {
-  const project = useApp(s => (issue.projectId ? s.snapshot?.projects.find(p => p.id === issue.projectId) : undefined));
-  const agentName = useApp(s => (issue.agentId ? s.snapshot?.agents.find(a => a.id === issue.agentId)?.name : undefined));
-  const show = (p: RowProperty) => properties.includes(p);
-  const who = assigneeName(issue, agentName);
-  const closed = !isOpenIssue(issue);
-  const label = [
-    `${issue.key} ${ISSUE_STATUS_LABEL[issue.status]}: ${issue.title}`,
-    issue.priority !== 'none' ? `${ISSUE_PRIORITY_LABEL[issue.priority]} priority` : '',
-    issue.labels.length ? `labels ${issue.labels.join(', ')}` : '',
-    project ? project.name : '',
-    issue.dueDate ? `due ${issue.dueDate}` : '',
-    who ? `with ${who}` : '',
-  ].filter(Boolean).join(', ');
-  return (
-    <PanelRow
-      id={issue.id}
-      lead={<StatusIcon status={issue.status} />}
-      label={label}
-      selected={selected}
-      dim={closed}
-      title={(
-        <span className="flex min-w-0 items-center gap-2">
-          {show('key') ? <span className="w-14 shrink-0 font-mono text-[11px] text-content/45">{issue.key}</span> : null}
-          <span className="truncate">{issue.title}</span>
-        </span>
-      )}
-      meta={(
-        <>
-          {show('priority') ? <PriorityMark priority={issue.priority} /> : null}
-          {show('labels') ? <span className="hidden @min-[40rem]/issues:flex"><Labels labels={issue.labels} /></span> : null}
-          {show('project') && project ? <span className="hidden font-mono text-[10.5px] @min-[34rem]/issues:inline">{project.code ?? project.name}</span> : null}
-          {show('due') && issue.dueDate ? <DueDate dueDate={issue.dueDate} today={today} /> : null}
-          {show('assignee') && who ? <span title={who} className="inline-flex"><WhoAvatar name={who} agentId={issue.forUser ? undefined : issue.agentId} className="size-3.5" /></span> : null}
-          {show('updated') ? <span className="hidden min-w-8 whitespace-nowrap text-right @min-[30rem]/issues:inline">{relativeTime(issue.updatedAt, now)}</span> : null}
-        </>
-      )}
-      onOpen={onOpen}
-      menuLabel={`Issue ${issue.key}`}
-      menu={close => <IssueMenu issue={issue} close={close} onOpen={onOpen} />}
-    />
-  );
 }
 
 /**

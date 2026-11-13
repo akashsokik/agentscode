@@ -218,21 +218,28 @@ test('opening an issue shows its issue view in a tab; the same issue focuses the
   assert.deepEqual(shown(), { kind: 'issue', issueId: 'i1' }, 'its tab is shown again');
 });
 
-test('a page row opens the issue view; a panel row shows the issue on the Issues page; neither unfolds a row to show details', async () => {
+test('the Issues page is the shared inbox layout: a card click selects the issue and its detail shows beside the list (ACH-D54)', async () => {
   const { readFileSync } = await import('node:fs');
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
-  const parts = read('../web/issues/issueParts.tsx');
-  const row = parts.slice(parts.indexOf('export function IssueRow('), parts.indexOf('export function MenuPage'));
-  assert.match(row, /onOpen = \(\) => openIssue\(issue\.id\)/, 'the page row opens the issue view by default');
-  assert.doesNotMatch(row, /expanded=/, 'the page row has no expand');
-  assert.match(read('../web/issues/IssuesPage.tsx'), /<IssueRow key=\{issue\.id\} issue=\{issue\} properties=\{display\.properties\} today=\{today\} now=\{now\} selected=\{issue\.id === issueId\} \/>/, 'no onOpen override: the default opens the view; the selected issue is marked');
+  const page = read('../web/issues/IssuesPage.tsx');
+  assert.match(page, /from '\.\.\/ui\/Inbox\.tsx'/, 'it imports the shared layout, not a copy');
+  assert.match(page, /<InboxLayout\b/);
+  assert.match(page, /<InboxList label="Issues" onMove=\{move\}/, 'the arrow keys move the selection');
+  assert.match(page, /onRailKeyDown=\{onRailKeyDown\}/, 'J and K move it too, only from the rail (Cy\'s onRailKeyDown), not from the detail');
+  assert.match(page, /detail=\{selected && issues \? <IssueInboxDetail key=\{selected\.id\}/, 'the selected issue (or the first, as Comms) shows on the right');
+  assert.match(page, /detailOpen=\{Boolean\(asked\)\}/, 'in a narrow pane, the detail replaces the list once one is picked');
+  assert.doesNotMatch(page, /PanelRow|IssueRow|openIssue\(/, 'no inline rows, no jump to a tab');
+  const inbox = read('../web/issues/IssueInbox.tsx');
+  assert.match(inbox, /<InboxCard\b[\s\S]*?onSelect=\{select\}/);
+  assert.match(inbox, /const select = \(\) => showIssueInList\(issue\.id\);/, 'a click selects the issue in the page');
+  assert.match(inbox, /<InboxDetail\b/);
+  for (const piece of ['PropertySidebar', 'IssueDescription', 'SubIssues', 'Relations', 'InGit', 'Decisions', 'Activity']) assert.match(inbox, new RegExp(`<${piece}\\b`), `Ada's ${piece}`);
   const panel = read('../web/panes/SuperPanel.tsx');
   const item = panel.slice(panel.indexOf('function IssueItem('), panel.indexOf('export function RoutinesView'));
-  assert.match(item, /onOpen=\{\(\) => showIssueInList\(issue\.id\)\}/, 'a panel row shows the issue on the Issues page (ACH-D52)');
+  assert.match(item, /onOpen=\{\(\) => showIssueInList\(issue\.id\)\}/, 'a panel row shows the issue on the Issues page');
   assert.match(item, /title="Open" shortcut="Enter" onSelect=\{\(\) => \{ close\(\); showIssueInList\(issue\.id\); \}\}/, 'and so does Open in its menu');
   // It unfolds only to rename (Edit title) or to confirm a removal armed from the menu.
   assert.match(item, /expanded=\{inline \? true : undefined\}/);
-  assert.match(item, /const inline = editing \|\| \(confirming && confirmInline\);/);
   assert.doesNotMatch(item, /\{issue\.text\}/, 'no description shown in the row');
   assert.match(item, /aria-label=\{`Title of \$\{named\}`\}/, 'Edit title stays');
 });
@@ -250,13 +257,13 @@ test('the right panel opens the Issues page with the issue selected; one Issues 
   assert.deepEqual(shown, { kind: 'issues', issueId: 'b' }, 'and it is the one shown');
 });
 
-test('an issue opened from elsewhere is revealed: All when the view leaves it out, filters and search cleared when they hide it, its closed group unfolded', () => {
+test('an issue opened from elsewhere is revealed: All when the view leaves it out, filters and search cleared when they hide it', () => {
   const base = { view: 'active' as const, filters: {}, query: '', display: DEFAULT_DISPLAY };
   assert.equal(revealIssue(issue('i1', { status: 'todo' }), base, TODAY), null, 'already shown');
   assert.deepEqual(revealIssue(issue('i2', { status: 'backlog' }), base, TODAY), { view: 'all' });
-  assert.deepEqual(revealIssue(issue('i3', { status: 'done' }), base, TODAY), { view: 'all', unfold: 'done' });
+  assert.deepEqual(revealIssue(issue('i3', { status: 'done' }), base, TODAY), { view: 'all' });
   assert.deepEqual(revealIssue(issue('i4', { status: 'todo', labels: ['ui'] }), { ...base, filters: { labels: ['git'] }, query: 'nothing like it' }, TODAY), { filters: {}, query: '' });
-  assert.deepEqual(revealIssue(issue('i5', { status: 'canceled' }), { ...base, view: 'all', display: { ...DEFAULT_DISPLAY, groupBy: 'priority' } }, TODAY), null, 'not grouped by status: nothing to unfold');
+  assert.deepEqual(revealIssue(issue('i5', { status: 'canceled' }), { ...base, view: 'all' }, TODAY), null, 'All shows closed issues too');
 });
 
 test('the right panel keeps the SuperAgent\'s tabs while the Issues page, an issue or the Pull requests page is in front (ACH-D55)', async () => {
