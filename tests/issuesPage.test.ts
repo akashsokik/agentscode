@@ -304,3 +304,14 @@ test('when the shown issue leaves the list, the selection goes to its neighbour 
   assert.equal(neighbourAfterLeaving(['a'], [], 'a'), null, 'nothing left');
   assert.equal(neighbourAfterLeaving(['a'], ['a'], 'z'), null, 'was not listed');
 });
+
+test('a title left mid-edit saves only what was typed: a stored title is never tidied by passing through (ACH-23)', async () => {
+  const { titleToSaveOnLeave } = await import('../web/issues/view/issueViewModel.ts');
+  assert.equal(titleToSaveOnLeave('a  b', 'a  b'), null, 'untouched, even if it has a double space');
+  assert.equal(titleToSaveOnLeave('New name', 'Old name'), 'New name');
+  assert.equal(titleToSaveOnLeave('', 'Old name'), null, 'emptied: nothing saved');
+  const { readFileSync } = await import('node:fs');
+  const sections = readFileSync(new URL('../web/issues/view/Sections.tsx', import.meta.url), 'utf8');
+  const line = sections.slice(sections.indexOf('export function IssueLine('), sections.indexOf('export function IssueLine(') + 900);
+  assert.match(line, /onClick=\{\(\) => showIssueInList\(issue\.id\)\}/, 'sub-issue and relation lines select on the Issues page, no issue tab (ACH-D54)');
+});

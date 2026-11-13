@@ -139,6 +139,15 @@ export function propertyKey(e: { key: string; metaKey: boolean; ctrlKey: boolean
 export const TITLE_MAX = ISSUE_TITLE_MAX;
 export const TEXT_MAX = ISSUE_TEXT_MAX;
 
+/**
+ * A title to save when its editor goes away mid-edit (another issue picked): only one the user
+ * changed, so a stored title the editor would tidy (a double space, say) is never rewritten just
+ * by passing through (ACH-23).
+ */
+export function titleToSaveOnLeave(draft: string, title: string): string | null {
+  return draft === title ? null : titleToSave(draft, title);
+}
+
 /** A title edit to save: one line, spaces collapsed, within the limit; null when empty or unchanged (it reverts). */
 export function titleToSave(draft: string, title: string): string | null {
   const next = draft.replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX);
