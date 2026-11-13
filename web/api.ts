@@ -25,6 +25,7 @@ import type {
   Settings,
   Snapshot,
   TerminalInfo,
+  IssuePriority,
   IssueStatus,
   RoutineSchedule,
   SuperState,
@@ -154,7 +155,7 @@ export const api = {
   answerSuper: (askId: string, body: { answer: string } | { dismiss: true }) => request<SuperState>('POST', `/api/super/asks/${askId}`, body),
   /** The issues backlog: add, change, remove and reorder (0 first). Changes also arrive as `super` events. */
   addIssue: (body: { text: string; projectId: string | null }) => request<SuperState>('POST', '/api/super/issues', body),
-  updateIssue: (issueId: string, body: { text?: string; projectId?: string | null; status?: IssueStatus }) => request<SuperState>('PATCH', `/api/super/issues/${issueId}`, body),
+  updateIssue: (issueId: string, body: { text?: string; title?: string; projectId?: string | null; status?: IssueStatus; priority?: IssuePriority; dueDate?: string | null; labels?: string[] }) => request<SuperState>('PATCH', `/api/super/issues/${issueId}`, body),
   removeIssue: (issueId: string) => request<SuperState>('DELETE', `/api/super/issues/${issueId}`),
   moveIssue: (issueId: string, to: number) => request<SuperState>('POST', `/api/super/issues/${issueId}/move`, { to }),
   /** Scheduled routines: add (on at once), change, confirm a proposal, turn on or off, remove. */

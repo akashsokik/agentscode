@@ -1,7 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
+import type { IssueActor, IssueEvent, IssuePriority, IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
+import { ISSUE_PRIORITIES, ISSUE_STATUSES, ISSUE_TEXT_MAX, ISSUE_TITLE_MAX, issueDescription, isLegacyIssue, isOpenIssue, issueStatusFrom, issueTitle, legacyIssue, migrateIssue, reconcileIssues, type LegacyIssue } from '../shared/issues.ts';
+import { CODE_PATTERN, nextIssueKey, NO_PROJECT_CODE } from '../shared/issueKeys.ts';
 import { HttpError } from './errors.ts';
 import { inQuietHours, validQuietTime } from '../shared/superAgent.ts';
 
@@ -11,7 +13,9 @@ export { inQuietHours, validQuietTime };
 // commands only (server/comms/tools.ts SUPER_TOOLS) and never edits: it has no edit tools or shell
 // on any engine (server/agents/claude.ts claudeToolPolicy; read-only autonomy for Codex and OrcaCode).
 // What it keeps lives in the data dir:
-//   super.json   its asks to the user and its decision log, newest first, capped; its issues backlog
+//   super.json   its asks to the user and its decision log, newest first, capped; the issues in the
+//                format builds before ACH-D41 read (they keep only the keys they know when they write)
+//   issues.json  the issues as they are now and the key counters (ACH-D41), which older builds never open
 // The watcher here wakes it: agents finishing, failing, getting stuck or waiting for the user are
 // batched into one update turn, only while it is idle, within a budget and outside quiet hours.
 
@@ -22,7 +26,7 @@ const LOG_KEPT = 200;
 /** Issues kept: open ones always, then the latest done. */
 const DONE_ISSUES_KEPT = 50;
 export const MAX_OPEN_ISSUES = 50;
-export const ISSUE_STATUSES: IssueStatus[] = ['queued', 'in_progress', 'blocked', 'done'];
+export { ISSUE_STATUSES };
 /** Open asks at once: past this it must wait for answers. */
 export const MAX_OPEN_ASKS = 5;
 /** Updates wait this long for more to batch with. */
@@ -34,6 +38,7 @@ export const STUCK_WORKING_MS = 45 * 60_000;
 export const STUCK_WAITING_MS = 20 * 60_000;
 
 const FILE = 'super.json';
+const ISSUES_FILE = 'issues.json';
 
 interface Stored {
   asks: SuperAsk[];
@@ -48,14 +53,53 @@ interface Stored {
   /** The local day of the last morning brief. */
   briefDay?: string;
   issues: SuperIssue[];
+  /** The highest issue number each project code has given, so a key is never reused (ACH-D41). */
+  issueKeys: Record<string, number>;
   routines: SuperRoutine[];
+}
+
+/**
+ * issues.json: the issues and key counters, apart from super.json so an older build, which rewrites
+ * super.json with only the keys it knows, can never drop them (ACH-N23). `legacy` is a hash of the
+ * old-format copy written to super.json alongside: while super.json still holds exactly that, no
+ * older build has changed the issues and the list here is used as it is.
+ */
+interface IssuesFile {
+  issues: SuperIssue[]; issueKeys: Record<string, number>; legacy: string;
+  /** The save it was written in; super.json carries the same id (issuesWrite), so a save cut short between the two files shows. */
+  write?: string;
+}
+
+function legacyStamp(list: unknown[]): string {
+  return createHash('sha256').update(JSON.stringify(list)).digest('hex').slice(0, 16);
 }
 
 export class SuperStore {
   private file: string;
-  constructor(dataDir: string) { this.file = path.join(dataDir, FILE); }
+  private issuesFile: string;
+  /**
+   * @param codeFor a project's code for issue keys (ACH, OBX); issues with no project, or a
+   *   project it does not know, use ALL.
+   */
+  private codeFor: (projectId: string) => string | null | undefined;
+  constructor(dataDir: string, codeFor: (projectId: string) => string | null | undefined = () => null) {
+    this.file = path.join(dataDir, FILE);
+    this.issuesFile = path.join(dataDir, ISSUES_FILE);
+    this.codeFor = codeFor;
+  }
+
+  private code(projectId: string | null): string {
+    return (projectId && this.codeFor(projectId)) || NO_PROJECT_CODE;
+  }
 
   private read(): Stored {
+    const stored = this.readFile();
+    // Migrated or reconciled issues are written back at once, so it happens once.
+    if (this.pendingWrite) { this.pendingWrite = false; this.write(stored); }
+    return stored;
+  }
+
+  private readFile(): Stored {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<Stored> & LegacyStored;
       return {
@@ -64,30 +108,103 @@ export class SuperStore {
         wakes: Array.isArray(raw.wakes) ? raw.wakes.filter(n => typeof n === 'number') : [],
         ...(raw.autoSpend && typeof raw.autoSpend.usd === 'number' && typeof raw.autoSpend.day === 'string' ? { autoSpend: raw.autoSpend } : {}),
         ...(typeof raw.briefDay === 'string' ? { briefDay: raw.briefDay } : {}),
-        issues: storedIssues(raw).filter(validIssue),
+        ...this.readIssues(raw),
         routines: Array.isArray(raw.routines) ? raw.routines.filter(validRoutine) : [],
       };
     } catch {
-      return { asks: [], log: [], wakes: [], issues: [], routines: [] };
+      // No super.json (or none readable): issues.json still holds the issues.
+      return { asks: [], log: [], wakes: [], ...this.readIssues({}), routines: [] };
     }
   }
+
+  /**
+   * The issues (ACH-D41): issues.json's list, reconciled with the old-format copy in super.json
+   * ("issues", or "goals" before ACH-D38) when an older build has changed that copy since this build
+   * wrote it (shared/issues.ts reconcileIssues: its edits win, its additions get new keys, its
+   * removals stay removed). The first start of this build migrates the old list, giving keys in the
+   * order the issues were made; a list a d2d597e build kept in super.json ("issues2") moves over as
+   * it is. Either way the result is written back once.
+   */
+  private readIssues(raw: Partial<Stored> & LegacyStored & { issues2?: unknown; issueKeys?: unknown; issuesWrite?: unknown }): { issues: SuperIssue[]; issueKeys: Record<string, number> } {
+    const file = this.readIssuesFile();
+    // Counters from both files, the higher of each: super.json keeps a copy, so losing issues.json
+    // (or a crash in the one-time move) never hands a key out again.
+    let counters = maxCounters(file?.issueKeys, raw.issueKeys && typeof raw.issueKeys === 'object' ? sanitizeCounters(raw.issueKeys as Record<string, unknown>) : undefined);
+    const current = file ? file.issues : Array.isArray(raw.issues2) ? raw.issues2.filter(validIssue) : null;
+    const hasLegacy = Array.isArray(raw.issues) || Array.isArray(raw.goals);
+    const legacyRaw = hasLegacy ? storedIssues(raw) : null;
+    // Nothing older has touched super.json's copy since this build wrote it: no reconciling.
+    if (file && legacyRaw && file.legacy === legacyStamp(legacyRaw) && raw.issues2 === undefined) return { issues: file.issues, issueKeys: counters };
+    const legacy = legacyRaw ? legacyRaw.filter(isLegacyIssue).sort((a, b) => a.createdAt - b.createdAt) : null;
+    // Every key the old copy still carries counts as given, so a fresh key goes past them all.
+    counters = maxCounters(counters, countersOf([...(current ?? []).map(i => i.key), ...(legacy ?? []).flatMap(o => (validKey(o.key) ? [o.key!] : []))]));
+    const given = new Set((current ?? []).map(i => i.key));
+    const keyFor = (old: LegacyIssue) => {
+      // Its own key back when it has one no other issue holds; otherwise the next one never given.
+      if (validKey(old.key) && !given.has(old.key!)) { given.add(old.key!); return old.key!; }
+      const next = nextIssueKey(this.code(old.projectId), counters, given);
+      counters = next.counters;
+      given.add(next.key);
+      return next.key;
+    };
+    // super.json says this build saved it (issuesWrite) but issues.json is from an earlier save:
+    // the save was cut short, which is not an older build's edit.
+    const cutShort = file !== null && typeof raw.issuesWrite === 'string' && raw.issuesWrite !== file.write;
+    // In backlog order, as the file keeps them: open by order, then the latest closed.
+    const issues = orderIssues(reconcileIssues(current, legacy, keyFor, Date.now(), cutShort ? 'Recovered after a save was cut short.' : undefined));
+    // Written back when anything moved: a first migration, a reconcile, or issues.json still to make.
+    if (!file || raw.issues2 !== undefined || JSON.stringify(issues) !== JSON.stringify(current) || (legacyRaw && file.legacy !== legacyStamp(legacyRaw))) {
+      if (file || issues.length || hasLegacy || raw.issues2 !== undefined) this.pendingWrite = true;
+    }
+    return { issues, issueKeys: counters };
+  }
+
+  /** issues.json, or null when there is none yet. A file that cannot be read is set aside, never overwritten. */
+  private readIssuesFile(): IssuesFile | null {
+    let text: string;
+    try { text = fs.readFileSync(this.issuesFile, 'utf8'); } catch { return null; }
+    try {
+      const raw = JSON.parse(text) as Partial<IssuesFile>;
+      if (!Array.isArray(raw.issues)) throw new Error('no issues list');
+      return {
+        issues: raw.issues.filter(validIssue),
+        issueKeys: raw.issueKeys && typeof raw.issueKeys === 'object' ? sanitizeCounters(raw.issueKeys as Record<string, unknown>) : {},
+        legacy: typeof raw.legacy === 'string' ? raw.legacy : '',
+        ...(typeof raw.write === 'string' ? { write: raw.write } : {}),
+      };
+    } catch {
+      const aside = `${this.issuesFile}.unreadable-${Date.now()}`;
+      try { fs.renameSync(this.issuesFile, aside); console.error(`[super] ${ISSUES_FILE} could not be read; kept as ${path.basename(aside)}`); } catch { /* gone already */ }
+      return null;
+    }
+  }
+
+  /** Set by a read that migrated or reconciled issues: the next read writes the result back. */
+  private pendingWrite = false;
 
   private write(stored: Stored): void {
     const open = stored.asks.filter(isOpen);
     const closed = stored.asks.filter(a => !isOpen(a)).slice(0, Math.max(0, ASKS_KEPT - open.length));
-    const next: Stored & { goals: SuperIssue[] } = {
+    const issues = orderIssues(stored.issues);
+    // For older builds (a manual downgrade): the same issues in the old format, under "issues" and,
+    // from before ACH-D38, "goals". What they change there is read back (readIssues).
+    const legacy = issues.map(legacyIssue);
+    const save = randomUUID().slice(0, 8);
+    const next = {
       asks: [...open, ...closed].sort((a, b) => b.createdAt - a.createdAt), log: stored.log.slice(0, LOG_KEPT), wakes: stored.wakes.slice(-100),
       ...(stored.autoSpend ? { autoSpend: stored.autoSpend } : {}),
       ...(stored.briefDay ? { briefDay: stored.briefDay } : {}),
-      issues: orderIssues(stored.issues),
-      // For one release, the same list under its old name too, so a build from before the rename
-      // (a manual downgrade) still finds the backlog (ACH-D38). Read ignores it while "issues" has any.
-      goals: orderIssues(stored.issues),
+      issues: legacy,
+      goals: legacy,
+      // A copy of the counters (older builds drop it; issues.json keeps the real one), and this save's id.
+      issueKeys: stored.issueKeys,
+      issuesWrite: save,
       routines: stored.routines,
     };
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    fs.writeFileSync(`${this.file}.tmp`, `${JSON.stringify(next)}\n`);
-    fs.renameSync(`${this.file}.tmp`, this.file);
+    // super.json first: if the second write never happens, its copy is newer than issues.json's
+    // stamp, and the next read reconciles it like an older build's edit (an added issue is kept).
+    writeJson(this.file, next);
+    writeJson(this.issuesFile, { issues, issueKeys: stored.issueKeys, legacy: legacyStamp(JSON.parse(JSON.stringify(legacy)) as unknown[]), write: save } satisfies IssuesFile);
   }
 
   view(agentId: string | null): SuperState {
@@ -173,47 +290,99 @@ export class SuperStore {
     return found;
   }
 
-  /** A new issue at the end of the backlog, queued. */
-  addIssue(input: { text: string; projectId: string | null; by: SuperIssue['by'] }, now = Date.now()): SuperIssue {
+  /** A new issue at the end of the backlog, Todo unless said, with its key (ACH-25) and a "created" event. */
+  addIssue(input: { text: string; projectId: string | null; by: SuperIssue['by']; title?: string; status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown; parentId?: string }, now = Date.now()): SuperIssue {
     const stored = this.read();
     const text = issueText(input.text);
-    if (stored.issues.filter(g => g.status !== 'done').length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already. Finish or remove some first.`);
-    if (stored.issues.some(g => g.status !== 'done' && g.text === text)) throw new HttpError(409, 'That issue is already in the backlog.');
+    const open = stored.issues.filter(isOpenIssue);
+    if (open.length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already. Finish or remove some first.`);
+    if (open.some(g => g.text === text)) throw new HttpError(409, 'That issue is already in the backlog.');
+    const status = input.status === undefined ? 'todo' : issueStatusFrom(input.status);
+    if (!status) throw new HttpError(400, `An issue's status is one of: ${ISSUE_STATUSES.join(', ')}.`);
+    if (input.parentId !== undefined && !stored.issues.some(g => g.id === input.parentId)) throw new HttpError(404, 'No parent issue with that id.');
+    const { key, counters } = nextIssueKey(this.code(input.projectId), stored.issueKeys, stored.issues.map(g => g.key));
+    const creator: IssueActor = input.by === 'user' ? { kind: 'user' } : { kind: 'super' };
     const issue: SuperIssue = {
-      id: randomUUID().slice(0, 8), text, projectId: input.projectId, status: 'queued',
-      order: stored.issues.filter(g => g.status !== 'done').length, createdAt: now, updatedAt: now, by: input.by,
+      id: randomUUID().slice(0, 8), key, title: input.title !== undefined ? titleText(input.title) : issueTitle(text), text, projectId: input.projectId,
+      status, priority: input.priority === undefined ? 'none' : priorityFrom(input.priority), labels: input.labels === undefined ? [] : labelsFrom(input.labels), relations: [],
+      ...(input.dueDate !== undefined && input.dueDate !== null ? { dueDate: dueDateFrom(input.dueDate) } : {}),
+      ...(input.parentId ? { parentId: input.parentId } : {}),
+      order: open.length, createdAt: now, updatedAt: now, by: input.by,
+      ...(status === 'done' ? { doneAt: now } : status === 'canceled' ? { canceledAt: now } : {}),
+      activity: [{ at: now, by: creator, kind: 'created' }],
     };
-    this.write({ ...stored, issues: [...stored.issues, issue] });
+    this.write({ ...stored, issueKeys: counters, issues: [...stored.issues, issue] });
     return issue;
   }
 
   /**
-   * Change an issue's text, project, status, links or notes. Done stamps doneAt; leaving done clears
-   * it. A link set to '' is removed.
+   * Change an issue: text, title, project, status (by its current or old name), priority, due date,
+   * labels, the agent and delegation on it, or notes. Status, priority and assignee changes go in
+   * its activity, by `by`. Done stamps doneAt and canceled canceledAt; reopening clears them and puts
+   * it at the end of the backlog.
    */
-  updateIssue(id: string, patch: Partial<Pick<SuperIssue, 'text' | 'projectId' | 'status' | 'agentId' | 'delegationId' | 'notes'>>, now = Date.now()): SuperIssue {
+  updateIssue(id: string, patch: Partial<Pick<SuperIssue, 'text' | 'title' | 'projectId' | 'agentId' | 'delegationId' | 'notes'>> & {
+    status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown;
+    /** The branch the work is on; '' or null clears it. Server code only (git links): neither the app nor the tools pass it. */
+    branch?: string | null;
+    /** Why, in the activity: on the status change it makes, or as its own entry when nothing else changes. Server code only. */
+    activityText?: string;
+  }, now = Date.now(), by: IssueActor = { kind: 'super' }): SuperIssue {
     const stored = this.read();
     const old = stored.issues.find(g => g.id === id);
     if (!old) throw new HttpError(404, 'No issue with that id.');
-    if (patch.status !== undefined && !ISSUE_STATUSES.includes(patch.status)) throw new HttpError(400, 'An issue is queued, in_progress, blocked or done.');
+    const status = patch.status === undefined ? undefined : issueStatusFrom(patch.status);
+    if (status === null) throw new HttpError(400, `An issue's status is one of: ${ISSUE_STATUSES.join(', ')}.`);
     const next: SuperIssue = { ...old, updatedAt: now };
-    if (patch.text !== undefined) next.text = issueText(patch.text);
+    const events: IssueEvent[] = [];
+    if (patch.text !== undefined) {
+      // The title stays: it is set when the issue is made (from the text's start unless given) and
+      // changes only on its own, so editing the description never re-titles an issue.
+      next.text = issueText(patch.text);
+    }
+    if (patch.title !== undefined) next.title = titleText(patch.title);
     if (patch.projectId !== undefined) next.projectId = patch.projectId;
+    if (patch.priority !== undefined) {
+      next.priority = priorityFrom(patch.priority);
+      if (next.priority !== old.priority) events.push({ at: now, by, kind: 'priority', from: old.priority, to: next.priority });
+    }
+    if (patch.dueDate !== undefined) {
+      if (patch.dueDate === null || patch.dueDate === '') delete next.dueDate; else next.dueDate = dueDateFrom(patch.dueDate);
+    }
+    if (patch.labels !== undefined) next.labels = labelsFrom(patch.labels);
     if (patch.notes !== undefined) {
       const notes = String(patch.notes).replace(/\s+/g, ' ').trim().slice(0, 1000);
       if (notes) next.notes = notes; else delete next.notes;
+      if (notes && notes !== old.notes) events.push({ at: now, by, kind: 'comment', text: notes });
     }
     for (const key of ['agentId', 'delegationId'] as const) {
       if (patch[key] === undefined) continue;
       if (patch[key]) next[key] = patch[key]; else delete next[key];
     }
-    if (patch.status !== undefined) {
-      next.status = patch.status;
-      if (patch.status === 'done') next.doneAt = old.doneAt ?? now;
-      else delete next.doneAt;
-      // Reopened, it joins the end of the backlog.
-      if (old.status === 'done' && patch.status !== 'done') next.order = stored.issues.filter(g => g.status !== 'done').length;
+    if (next.agentId !== old.agentId) {
+      if (next.agentId) delete next.forUser;
+      events.push({ at: now, by, kind: 'assignee', ...(old.agentId ? { from: old.agentId } : {}), ...(next.agentId ? { to: next.agentId } : {}) });
     }
+    if (status !== undefined && status !== old.status) {
+      next.status = status;
+      events.push({ at: now, by, kind: 'status', from: old.status, to: status });
+      delete next.doneAt;
+      delete next.canceledAt;
+      if (status === 'done') next.doneAt = now;
+      if (status === 'canceled') next.canceledAt = now;
+      // Reopened, it joins the end of the backlog.
+      if (!isOpenIssue(old) && isOpenIssue(next)) next.order = stored.issues.filter(isOpenIssue).length;
+    }
+    if (patch.branch !== undefined) {
+      const branch = String(patch.branch ?? '').trim().slice(0, 200);
+      if (branch) next.branch = branch; else delete next.branch;
+    }
+    const why = patch.activityText === undefined ? '' : String(patch.activityText).replace(/\s+/g, ' ').trim().slice(0, 1000);
+    if (why) {
+      const status = events.find(e => e.kind === 'status');
+      if (status) status.text = why; else events.push({ at: now, by, kind: 'comment', text: why });
+    }
+    next.activity = [...old.activity, ...events];
     this.write({ ...stored, issues: stored.issues.map(g => (g.id === id ? next : g)) });
     return next;
   }
@@ -229,7 +398,7 @@ export class SuperStore {
   /** Move an open issue to a place in the open backlog (0 first). */
   moveIssue(id: string, to: number): SuperIssue[] {
     const stored = this.read();
-    const open = orderIssues(stored.issues).filter(g => g.status !== 'done');
+    const open = orderIssues(stored.issues).filter(isOpenIssue);
     const from = open.findIndex(g => g.id === id);
     if (from < 0) throw new HttpError(404, 'No open issue with that id.');
     const [issue] = open.splice(from, 1);
@@ -243,24 +412,27 @@ export class SuperStore {
    * Put an issue back as it was (undo); null removes it. Refused (409) when the issue is gone since, or
    * when putting it back would break the open-issue cap or repeat another open issue.
    */
-  restoreIssue(id: string, before: SuperIssue | null, removed = false): void {
+  restoreIssue(id: string, recorded: SuperIssue | LegacyIssue | null, removed = false): void {
     const stored = this.read();
     const current = stored.issues.find(g => g.id === id);
+    // An undo record written before ACH-D41 holds the old format: read it as a current issue, keeping the key it has now.
+    const before = recorded && !validIssue(recorded) && isLegacyIssue(recorded) ? migrateIssue(recorded, current?.key ?? nextIssueKey(this.code(recorded.projectId), stored.issueKeys, stored.issues.map(g => g.key)).key, Date.now()) : recorded as SuperIssue | null;
+    const openCount = (list: SuperIssue[]) => list.filter(isOpenIssue).length;
     // A removal undone: the issue comes back as it was, once, and only if it fits the backlog now.
     if (removed && before) {
       if (current) throw new HttpError(409, 'That issue is back already.');
-      if (before.status !== 'done') {
-        if (stored.issues.filter(g => g.status !== 'done').length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already.`);
-        if (stored.issues.some(g => g.status !== 'done' && g.text === before.text)) throw new HttpError(409, 'Another open issue says the same thing now.');
+      if (isOpenIssue(before)) {
+        if (openCount(stored.issues) >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already.`);
+        if (stored.issues.some(g => isOpenIssue(g) && g.text === before.text)) throw new HttpError(409, 'Another open issue says the same thing now.');
       }
-      this.write({ ...stored, issues: [...stored.issues, { ...before, order: before.status === 'done' ? before.order : Math.min(before.order, stored.issues.filter(g => g.status !== 'done').length) }] });
+      this.write({ ...stored, issues: [...stored.issues, { ...before, order: isOpenIssue(before) ? Math.min(before.order, openCount(stored.issues)) : before.order }] });
       return;
     }
     if (!current) throw new HttpError(409, 'That issue was removed since, so there is nothing to undo.');
     const rest = stored.issues.filter(g => g.id !== id);
-    if (before && before.status !== 'done') {
-      if (current.status === 'done' && rest.filter(g => g.status !== 'done').length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already.`);
-      if (rest.some(g => g.status !== 'done' && g.text === before.text)) throw new HttpError(409, 'Another open issue says the same thing now.');
+    if (before && isOpenIssue(before)) {
+      if (!isOpenIssue(current) && openCount(rest) >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already.`);
+      if (rest.some(g => isOpenIssue(g) && g.text === before.text)) throw new HttpError(409, 'Another open issue says the same thing now.');
     }
     this.write({ ...stored, issues: before ? [...rest, before] : rest });
   }
@@ -391,15 +563,17 @@ export function issueWording(summary: string): string {
     .replace(/^Goal "/, 'Issue "');
 }
 
-/** An issue as super.json must hold it; anything else (a hand edit gone wrong) is left out. */
+/** An issue as issues.json must hold it; anything else (a hand edit gone wrong) is left out. */
 function validIssue(raw: unknown): raw is SuperIssue {
   const g = raw as Partial<SuperIssue> | null;
-  return Boolean(g) && typeof g!.id === 'string' && typeof g!.text === 'string' && g!.text.trim() !== ''
+  return Boolean(g) && typeof g!.id === 'string' && typeof g!.key === 'string' && typeof g!.title === 'string' && typeof g!.text === 'string' && g!.text.trim() !== ''
     && (g!.projectId === null || typeof g!.projectId === 'string') && ISSUE_STATUSES.includes(g!.status as IssueStatus)
+    && ISSUE_PRIORITIES.includes(g!.priority as IssuePriority) && Array.isArray(g!.labels) && Array.isArray(g!.relations) && Array.isArray(g!.activity)
     && typeof g!.order === 'number' && Number.isFinite(g!.order) && typeof g!.createdAt === 'number' && typeof g!.updatedAt === 'number'
     && (g!.by === 'user' || g!.by === 'super')
     && (g!.agentId === undefined || typeof g!.agentId === 'string') && (g!.delegationId === undefined || typeof g!.delegationId === 'string')
-    && (g!.notes === undefined || typeof g!.notes === 'string') && (g!.doneAt === undefined || typeof g!.doneAt === 'number');
+    && (g!.notes === undefined || typeof g!.notes === 'string') && (g!.doneAt === undefined || typeof g!.doneAt === 'number')
+    && (g!.branch === undefined || typeof g!.branch === 'string');
 }
 
 /** One line: an issue is a short statement, so newlines and runs of space are folded (the inputs are single-line too). */
@@ -451,18 +625,49 @@ export function routineDue(routine: SuperRoutine, now: Date): number | null {
   return now.getTime() >= slot && last < slot ? slot : null;
 }
 
+function titleText(raw: unknown): string {
+  const title = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!title) throw new HttpError(400, 'Give the issue a title.');
+  if (title.length > ISSUE_TITLE_MAX) throw new HttpError(400, `Keep a title under ${ISSUE_TITLE_MAX} characters.`);
+  return title;
+}
+
+function priorityFrom(raw: unknown): IssuePriority {
+  if ((ISSUE_PRIORITIES as readonly unknown[]).includes(raw)) return raw as IssuePriority;
+  throw new HttpError(400, `An issue's priority is one of: ${ISSUE_PRIORITIES.join(', ')}.`);
+}
+
+/** A calendar day, "2026-11-20", that exists. */
+function dueDateFrom(raw: unknown): string {
+  const day = String(raw ?? '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  const date = m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) : null;
+  if (!date || date.toISOString().slice(0, 10) !== day) throw new HttpError(400, 'A due date is a day like 2026-11-20.');
+  return day;
+}
+
+/** Labels: short words, each once, at most 10. */
+function labelsFrom(raw: unknown): string[] {
+  if (!Array.isArray(raw)) throw new HttpError(400, 'Labels are a list of words.');
+  const labels = [...new Set(raw.map(l => String(l ?? '').trim().toLowerCase()).filter(Boolean))];
+  if (labels.length > 10 || labels.some(l => l.length > 30)) throw new HttpError(400, 'Up to 10 labels, each under 30 characters.');
+  return labels;
+}
+
 function issueText(raw: unknown): string {
-  const text = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  const text = issueDescription(raw);
   if (!text) throw new HttpError(400, 'Say what the issue is.');
-  if (text.length > 500) throw new HttpError(400, 'Keep an issue under 500 characters.');
+  if (text.length > ISSUE_TEXT_MAX) throw new HttpError(400, `Keep an issue's description under ${ISSUE_TEXT_MAX} characters.`);
   return text;
 }
 
-/** Open issues by their order (renumbered 0, 1, 2, ...), then the latest done ones, newest first. */
+const closedAt = (g: SuperIssue) => g.doneAt ?? g.canceledAt ?? g.updatedAt;
+
+/** Open issues by their order (renumbered 0, 1, 2, ...), then the latest done or canceled ones, newest first. */
 export function orderIssues(issues: readonly SuperIssue[]): SuperIssue[] {
-  const open = issues.filter(g => g.status !== 'done').sort((a, b) => a.order - b.order || a.createdAt - b.createdAt).map((g, i) => ({ ...g, order: i }));
-  const done = issues.filter(g => g.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)).slice(0, DONE_ISSUES_KEPT);
-  return [...open, ...done];
+  const open = issues.filter(isOpenIssue).sort((a, b) => a.order - b.order || a.createdAt - b.createdAt).map((g, i) => ({ ...g, order: i }));
+  const closed = issues.filter(g => !isOpenIssue(g)).sort((a, b) => closedAt(b) - closedAt(a)).slice(0, DONE_ISSUES_KEPT);
+  return [...open, ...closed];
 }
 const localDay = (now: Date) => `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
 
@@ -486,12 +691,12 @@ export function updatePrompt(events: SuperEvent[], openAsks: SuperAsk[], now: nu
   const lines = shown.map(e => `- ${time(e.at)} ${e.text}${e.untrusted ? `: <untrusted>${e.untrusted.replace(/<\/?untrusted>/gi, '')}</untrusted>` : ''}`);
   const more = events.length > shown.length ? [`- (${events.length - shown.length} earlier updates left out)`] : [];
   const waiting = openAsks.length ? [``, `Still waiting for the user: ${openAsks.map(a => `"${a.question}"`).join('; ')}. Do not ask these again.`] : [];
-  const open = issues.filter(g => g.status !== 'done');
+  const open = issues.filter(isOpenIssue);
   const shownIssues = open.slice(0, 8);
   const backlog = open.length ? [
     '',
-    'Open issues, in order (work them top down: give the next queued one to a free agent and mark it in_progress with update_issue):',
-    ...shownIssues.map((g, i) => `${i + 1}. [${g.id}] ${g.status}: ${g.text}`),
+    'Open issues, in order (work them top down: give the next todo one to a free agent and mark it in_progress with update_issue):',
+    ...shownIssues.map((g, i) => `${i + 1}. [${g.id}] ${g.key} ${g.status}${g.priority !== 'none' ? `, ${g.priority}` : ''}${g.dueDate ? `, due ${g.dueDate}` : ''}: ${g.text}`),
     ...(open.length > shownIssues.length ? [`(${open.length - shownIssues.length} more; list_issues has them all)`] : []),
   ] : [];
   const waited = held ? ['', `While you could not take a turn (${held.reasons.join('; ')}), ${held.count} ${held.count === 1 ? 'message to you waited' : 'messages to you waited'}. ${held.count === 1 ? 'It comes' : 'They come'} as ${held.count === 1 ? 'its own turn' : 'their own turns'} after this update.`] : [];
@@ -625,4 +830,41 @@ export class SuperWatcher {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
+}
+
+function writeJson(file: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(`${file}.tmp`, `${JSON.stringify(value)}\n`);
+  fs.renameSync(`${file}.tmp`, file);
+}
+
+/** Key counters as stored: whole numbers only, so a hand edit cannot make a key go back. */
+function sanitizeCounters(raw: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [code, n] of Object.entries(raw)) if (typeof n === 'number' && Number.isFinite(n) && n >= 0) out[code] = Math.floor(n);
+  return out;
+}
+
+/** A whole issue key (ACH-25), as written in an old-format copy. */
+function validKey(key: unknown): boolean {
+  if (typeof key !== 'string') return false;
+  const m = new RegExp(`^(${CODE_PATTERN})-(\\d{1,6})$`).exec(key);
+  return Boolean(m) && Number(m![2]) > 0 && !key.includes('-0');
+}
+
+/** The highest number each code has in these keys. */
+function countersOf(keys: Iterable<string>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const key of keys) {
+    const m = new RegExp(`^(${CODE_PATTERN})-(\\d+)$`).exec(key);
+    if (m) out[m[1]] = Math.max(out[m[1]] ?? 0, Number(m[2]));
+  }
+  return out;
+}
+
+/** Counters together, the higher of each. */
+function maxCounters(...all: (Record<string, number> | undefined)[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const c of all) for (const [code, n] of Object.entries(c ?? {})) out[code] = Math.max(out[code] ?? 0, n);
+  return out;
 }

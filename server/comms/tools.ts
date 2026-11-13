@@ -1,4 +1,4 @@
-import { currentToolName } from '../../shared/issues.ts';
+import { currentToolName, ISSUE_TEXT_MAX, ISSUE_TITLE_MAX } from '../../shared/issues.ts';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { PRESSABLE_KEYS } from '../../shared/browser.ts';
@@ -191,15 +191,18 @@ export const takeActionInput = z.object({
 });
 export type TakeActionInput = z.infer<typeof takeActionInput>;
 export const addIssueInput = z.object({
-  text: z.string().trim().min(1).max(500),
+  text: z.string().trim().min(1).max(ISSUE_TEXT_MAX),
   /** A project id or name; leave it out for an issue not tied to one. */
   project: z.string().trim().min(1).max(200).optional(),
   why,
 });
 export const updateIssueInput = z.object({
   issue_id: issueRef,
-  status: z.enum(['queued', 'in_progress', 'blocked', 'done']).optional(),
-  text: z.string().trim().min(1).max(500).optional(),
+  /** The current names, or the old ones (queued is todo, blocked is needs_you) from before ACH-D41. */
+  status: z.enum(['needs_you', 'in_review', 'in_progress', 'waiting', 'todo', 'backlog', 'done', 'canceled', 'queued', 'blocked']).optional(),
+  text: z.string().trim().min(1).max(ISSUE_TEXT_MAX).optional(),
+  /** The one-line title; a new text never changes it, so set it here when the issue is reworded. */
+  title: z.string().trim().min(1).max(ISSUE_TITLE_MAX).optional(),
   /** The agent on it (id or name), and the delegation's message id; '' clears either. */
   agent_id: z.string().trim().max(100).optional(),
   delegation_id: z.string().trim().max(100).optional(),
@@ -455,7 +458,7 @@ function registerSuperTools(server: McpServer, invoke: Invoke): void {
     inputSchema: askUserInput.shape,
   }, args => invoke('ask_user', args));
   server.registerTool('list_issues', {
-    description: 'The issues backlog, in order: each issue\'s id, text, project, status (queued, in_progress, blocked, done) and the agent and delegation on it. Work it top down: when an agent is free, give it the next queued issue and mark it in_progress.',
+    description: 'The issues backlog, in order: each issue\'s id, key (ACH-25), title, text, project, status (needs_you, in_review, in_progress, waiting, todo, backlog, done, canceled) and the agent and delegation on it. Work it top down: when an agent is free, give it the next todo issue and mark it in_progress.',
     inputSchema: {}, annotations: { readOnlyHint: true },
   }, args => invoke('list_issues', args));
   server.registerTool('add_issue', {
@@ -463,7 +466,7 @@ function registerSuperTools(server: McpServer, invoke: Invoke): void {
     inputSchema: addIssueInput.shape,
   }, args => invoke('add_issue', args));
   server.registerTool('update_issue', {
-    description: `Change an issue: its status (in_progress when an agent starts it, blocked when it waits for the user, queued to put it back), text, the agent and delegation on it, or notes. ${note}`,
+    description: `Change an issue: its status (in_progress when an agent starts it, needs_you when it waits for the user, waiting when it waits on someone else, in_review, todo to put it back, canceled to drop it; the old names queued and blocked still work), text, title (a new text keeps the old title, so set it when the issue is reworded), the agent and delegation on it, or notes. ${note}`,
     inputSchema: updateIssueInput.shape,
   }, args => invoke('update_issue', args));
   server.registerTool('complete_issue', {

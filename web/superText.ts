@@ -1,5 +1,6 @@
 /** The SuperAgent's words for the page. Pure, so it is tested directly. */
 import type { Agent, IssueStatus, RoutineSchedule, SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../shared/types.ts';
+import { ISSUE_STATUS_LABEL, isOpenIssue } from '../shared/issues.ts';
 
 /** Questions the SuperAgent asked that wait for the user, newest first. */
 export function openAsks(asks: readonly SuperAsk[] | undefined): SuperAsk[] {
@@ -30,14 +31,14 @@ export function decisionRows(log: readonly SuperAction[] | undefined): DecisionR
     .map(a => ({ id: a.id, summary: a.summary, why: a.why, at: a.at, undoable: Boolean(a.undo) && !a.undoneAt, ...(a.undoneAt ? { undoneAt: a.undoneAt } : {}) }));
 }
 
-export const ISSUE_STATUS_LABEL: Record<IssueStatus, string> = { queued: 'Queued', in_progress: 'In progress', blocked: 'Needs you', done: 'Done' };
+export { ISSUE_STATUS_LABEL };
 
 /** The backlog as the Issues tab shows it: open issues in order, then done ones, newest first. */
 export function issueSections(issues: readonly SuperIssue[] | undefined): { open: SuperIssue[]; done: SuperIssue[] } {
   const all = issues ?? [];
   return {
-    open: all.filter(g => g.status !== 'done').sort((a, b) => a.order - b.order),
-    done: all.filter(g => g.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)),
+    open: all.filter(isOpenIssue).sort((a, b) => a.order - b.order),
+    done: all.filter(g => !isOpenIssue(g)).sort((a, b) => (b.doneAt ?? b.canceledAt ?? 0) - (a.doneAt ?? a.canceledAt ?? 0)),
   };
 }
 

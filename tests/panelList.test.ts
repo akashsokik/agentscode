@@ -57,12 +57,12 @@ test('Decisions: actions or answers by filter, searched over summary and why; co
   assert.deepEqual(['delegate_task', 'send_message', 'nudge_agent', 'update_issue', 'create_agent', 'create_channel', 'other'].map(decisionKind), ['delegate', 'message', 'message', 'issue', 'agent', 'channel', 'other']);
 });
 
-test('Issues: open issues by status (needs you, in progress, queued) in backlog order; done newest first; search and filter', () => {
+test('Issues: open issues by status (needs you, in progress, todo) in backlog order; done newest first; search and filter', () => {
   const g = (id: string, status: SuperIssue['status'], order: number, extra: Partial<SuperIssue> = {}) => ({ id, text: `issue ${id}`, status, order, updatedAt: order, ...extra }) as SuperIssue;
-  const issues = [g('q2', 'queued', 3), g('p', 'in_progress', 1), g('q1', 'queued', 2), g('b', 'blocked', 4, { notes: 'needs a key' }), g('d1', 'done', 0, { doneAt: 10 }), g('d2', 'done', 5, { doneAt: 20 })];
+  const issues = [g('q2', 'todo', 3), g('p', 'in_progress', 1), g('q1', 'todo', 2), g('b', 'needs_you', 4, { notes: 'needs a key' }), g('d1', 'done', 0, { doneAt: 10 }), g('d2', 'done', 5, { doneAt: 20 })];
   const open = issueGroups(issues, 'open', '');
   assert.deepEqual(open.counts, { open: 4, done: 2 });
-  assert.deepEqual(open.open.map(s => [s.label, s.items.map(i => i.id)]), [['Needs you', ['b']], ['In progress', ['p']], ['Queued', ['q1', 'q2']]]);
+  assert.deepEqual(open.open.map(s => [s.label, s.items.map(i => i.id)]), [['Needs you', ['b']], ['In progress', ['p']], ['Todo', ['q1', 'q2']]]);
   assert.deepEqual(open.done.map(i => i.id), ['d2', 'd1'], 'done issues stay listed (folded) under open');
   const done = issueGroups(issues, 'done', '');
   assert.deepEqual(done.open, [], 'the Done filter shows only done issues');
@@ -108,7 +108,7 @@ test('the row menu opens from the keyboard with ⇧F10 or the menu key, not with
   assert.equal(isMenuKey({ key: 'Enter', shiftKey: true }), false);
 });
 
-test('Up and Down move within the section (Rhea\'s probe: A, B, C queued, then C in progress); off at section ends', async () => {
+test('Up and Down move within the section (Rhea\'s probe: A, B, C in Todo, then C in progress); off at section ends', async () => {
   const { SuperStore } = await import('../server/superAgent.ts');
   const { tempDir } = await import('./helpers.ts');
   const store = new SuperStore(tempDir('moves'));
@@ -123,21 +123,21 @@ test('Up and Down move within the section (Rhea\'s probe: A, B, C queued, then C
     return { open, moves: issueMoves(open, backlog), shown: open.map(s => `${s.label}: ${s.items.map(i => i.text).join(', ')}`).join(' | ') };
   };
   let v = view();
-  assert.equal(v.shown, 'In progress: C | Queued: A, B');
+  assert.equal(v.shown, 'In progress: C | Todo: A, B');
   assert.deepEqual(v.moves.get(c.id), { up: null, down: null }, 'C is alone in its section: both off');
-  assert.equal(v.moves.get(b.id)!.down, null, 'B is last in Queued: Down off');
-  assert.equal(v.moves.get(a.id)!.up, null, 'A is first in Queued: Up off');
+  assert.equal(v.moves.get(b.id)!.down, null, 'B is last in Todo: Down off');
+  assert.equal(v.moves.get(a.id)!.up, null, 'A is first in Todo: Up off');
   // Every enabled move changes what the section shows.
   store.moveIssue(b.id, v.moves.get(b.id)!.up!);
   v = view();
-  assert.equal(v.shown, 'In progress: C | Queued: B, A');
+  assert.equal(v.shown, 'In progress: C | Todo: B, A');
   store.moveIssue(b.id, v.moves.get(b.id)!.down!);
-  assert.equal(view().shown, 'In progress: C | Queued: A, B');
+  assert.equal(view().shown, 'In progress: C | Todo: A, B');
   // With another status between them in the backlog, the move still lands next to the neighbour.
   store.moveIssue(c.id, 1);
   v = view();
   store.moveIssue(a.id, v.moves.get(a.id)!.down!);
-  assert.equal(view().shown, 'In progress: C | Queued: B, A');
+  assert.equal(view().shown, 'In progress: C | Todo: B, A');
 });
 
 test('after a row is removed, focus goes to the next row, else the one before, else nowhere', () => {

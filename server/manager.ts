@@ -273,7 +273,8 @@ export class AgentManager {
       gh: args => runGh(args, this.ghExec),
     });
     this.profile = new ProfileStore(store.dataDir);
-    this.superStore = new SuperStore(store.dataDir);
+    // Issue keys use the project's code (ACH-25; ACH-D41).
+    this.superStore = new SuperStore(store.dataDir, id => this.store.projects.get(id)?.code);
     this.watcher = new SuperWatcher({
       superId: () => this.superId(),
       idle: () => {
@@ -1937,10 +1938,10 @@ export class AgentManager {
     }
     if (tool === 'update_issue' || tool === 'complete_issue') {
       const parsed = tool === 'update_issue' ? updateIssueInput.safeParse(args) : completeIssueInput.safeParse(args);
-      if (!parsed.success) return fail('Give the issue id, what to change (status, text, agent_id, delegation_id or notes), and a why.');
-      const input = parsed.data as { issue_id: string; status?: SuperIssue['status']; text?: string; agent_id?: string; delegation_id?: string; notes?: string; why: string };
-      if (tool === 'update_issue' && [input.status, input.text, input.agent_id, input.delegation_id, input.notes].every(v => v === undefined)) {
-        return fail('Say what to change: status, text, agent_id, delegation_id or notes.');
+      if (!parsed.success) return fail('Give the issue id, what to change (status, text, title, agent_id, delegation_id or notes), and a why.');
+      const input = parsed.data as { issue_id: string; status?: SuperIssue['status']; text?: string; title?: string; agent_id?: string; delegation_id?: string; notes?: string; why: string };
+      if (tool === 'update_issue' && [input.status, input.text, input.title, input.agent_id, input.delegation_id, input.notes].every(v => v === undefined)) {
+        return fail('Say what to change: status, text, title, agent_id, delegation_id or notes.');
       }
       // Issues are handed out only in update turns. Mail about work you asked for skips the wake limits,
       // so an issue started from it would skip them too: starting one (in progress, or given to an agent) there is refused.
@@ -1956,13 +1957,15 @@ export class AgentManager {
       const issue = this.superStore.updateIssue(before.id, {
         ...(tool === 'complete_issue' ? { status: 'done' as const } : input.status ? { status: input.status } : {}),
         ...(input.text !== undefined ? { text: input.text } : {}),
+        ...(input.title !== undefined ? { title: input.title } : {}),
         ...(agentId !== undefined ? { agentId } : {}),
         ...(input.delegation_id !== undefined ? { delegationId: input.delegation_id } : {}),
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
       });
       const who = issue.agentId ? this.store.agents.get(issue.agentId)?.name : undefined;
-      const summary = tool === 'complete_issue' ? `Completed the issue "${clip(issue.text, 120)}"`
-        : `Issue "${clip(issue.text, 100)}": ${[issue.status !== before.status && issue.status.replace('_', ' '), who && issue.agentId !== before.agentId && `given to ${who}`, input.text !== undefined && 'reworded', input.notes !== undefined && 'notes'].filter(Boolean).join(', ') || 'updated'}`;
+      // The title, one line, names it in the Decisions log (the text may run to several lines).
+      const summary = tool === 'complete_issue' ? `Completed the issue "${clip(issue.title, 120)}"`
+        : `Issue "${clip(issue.title, 100)}": ${[issue.status !== before.status && issue.status.replace('_', ' '), who && issue.agentId !== before.agentId && `given to ${who}`, input.text !== undefined && 'reworded', input.title !== undefined && 'retitled', input.notes !== undefined && 'notes'].filter(Boolean).join(', ') || 'updated'}`;
       this.recordSuper({ tool, why: input.why, undo: { kind: 'issue', issueId: issue.id, before }, summary });
       return { updated: issue };
     }
@@ -2094,14 +2097,19 @@ export class AgentManager {
     return this.publishSuper();
   }
 
-  updateIssue(id: string, body: { text?: unknown; projectId?: unknown; status?: unknown }): SuperState {
+  /** The user's change to an issue from the app; the store checks each field, and its activity says you did it. */
+  updateIssue(id: string, body: { text?: unknown; title?: unknown; projectId?: unknown; status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown }): SuperState {
     if (body?.text !== undefined && typeof body.text !== 'string') throw new HttpError(400, 'An issue is text.');
-    if (body?.status !== undefined && typeof body.status !== 'string') throw new HttpError(400, 'An issue is queued, in_progress, blocked or done.');
+    if (body?.title !== undefined && typeof body.title !== 'string') throw new HttpError(400, 'A title is text.');
     this.superStore.updateIssue(id, {
       ...(typeof body?.text === 'string' ? { text: body.text } : {}),
+      ...(typeof body?.title === 'string' ? { title: body.title } : {}),
       ...(body?.projectId !== undefined ? { projectId: this.issueProject(body.projectId) } : {}),
-      ...(typeof body?.status === 'string' ? { status: body.status as SuperIssue['status'] } : {}),
-    });
+      ...(body?.status !== undefined ? { status: body.status } : {}),
+      ...(body?.priority !== undefined ? { priority: body.priority } : {}),
+      ...(body?.dueDate !== undefined ? { dueDate: body.dueDate } : {}),
+      ...(body?.labels !== undefined ? { labels: body.labels } : {}),
+    }, Date.now(), { kind: 'user' });
     return this.publishSuper();
   }
 
@@ -2213,8 +2221,8 @@ export class AgentManager {
     // Not after a turn you started, which is yours, and only through the watcher, so the wake switch,
     // quiet hours, budgets and the idle check all apply.
     const free = (result.pending ?? 0) === 0 && this.mailbox.pending(agent.id) === 0;
-    const queued = this.superStore.issues().filter(g => g.status === 'queued').length;
-    if (queued && free && task?.source !== 'user') this.watcher.note({ agentId: agent.id, key: 'issues', text: `${agent.name} is free and ${queued} queued ${queued === 1 ? 'issue waits' : 'issues wait'}` });
+    const queued = this.superStore.issues().filter(g => g.status === 'todo').length;
+    if (queued && free && task?.source !== 'user') this.watcher.note({ agentId: agent.id, key: 'issues', text: `${agent.name} is free and ${queued} ${queued === 1 ? 'issue waits in Todo' : 'issues wait in Todo'}` });
     const asked = task?.summary ? `Task: ${clip(task.summary, 160).replace(/\.$/, '')}. ` : '';
     if (result.ok) this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} finished a turn`, untrusted: `${asked}Result: ${clip(summarize(result.summary) || 'Finished.', 400)}` });
     else this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} hit a problem`, untrusted: `${asked}Error: ${clip(result.error ?? 'Something went wrong.', 400)}` });

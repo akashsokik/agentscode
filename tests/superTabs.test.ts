@@ -54,7 +54,7 @@ test('tab counts: decisions made today that can still be undone, open issues, ro
       { id: 'c', at: today, tool: 'delegate_task', summary: '', why: '' },
       { id: 'd', at: yesterday, tool: 'create_channel', summary: '', why: '', undo },
     ],
-    issues: [issue('g1', 'queued', 1), issue('g2', 'blocked', 2), issue('g3', 'done', 3)],
+    issues: [issue('g1', 'todo', 1), issue('g2', 'needs_you', 2), issue('g3', 'done', 3)],
     routines: [routine('r1', 1, true), routine('r2', 2, false)],
   }, now);
   assert.deepEqual(counts, { decisions: 1, issues: 2, routines: 1 });
@@ -64,7 +64,7 @@ test('tab counts: decisions made today that can still be undone, open issues, ro
 test('a dot shows on a tab with something newer than you last saw there, never on the open tab', () => {
   const latest = superTabLatest({
     log: [{ id: 'a', at: 50, tool: 'create_channel', summary: '', why: '' }, { id: 'b', at: 70, tool: 'nudge', summary: '', why: '' }],
-    issues: [issue('g1', 'queued', 30)],
+    issues: [issue('g1', 'todo', 30)],
     routines: [],
   });
   assert.deepEqual(latest, { decisions: 70, issues: 30, routines: 0 });
@@ -89,7 +89,7 @@ test('opening the SuperAgent shows the right panel the first time only, on Decis
 });
 
 function issue(id: string, status: SuperIssue['status'], createdAt: number): SuperIssue {
-  return { id, text: id, projectId: null, status, order: createdAt, createdAt, updatedAt: createdAt, by: 'user' };
+  return { id, key: `ACH-${createdAt}`, title: id, text: id, projectId: null, status, priority: 'none', labels: [], relations: [], activity: [], order: createdAt, createdAt, updatedAt: createdAt, by: 'user' };
 }
 
 function routine(id: string, createdAt: number, proposed: boolean): SuperRoutine {
