@@ -252,7 +252,8 @@ export class AgentManager {
       knownRef: id => this.refs.get(id) !== null,
     });
     this.profile = new ProfileStore(store.dataDir);
-    this.superStore = new SuperStore(store.dataDir);
+    // Issue keys use the project's code (ACH-25; ACH-D41).
+    this.superStore = new SuperStore(store.dataDir, id => this.store.projects.get(id)?.code);
     this.watcher = new SuperWatcher({
       superId: () => this.superId(),
       idle: () => {
@@ -1875,14 +1876,19 @@ export class AgentManager {
     return this.publishSuper();
   }
 
-  updateIssue(id: string, body: { text?: unknown; projectId?: unknown; status?: unknown }): SuperState {
+  /** The user's change to an issue from the app; the store checks each field, and its activity says you did it. */
+  updateIssue(id: string, body: { text?: unknown; title?: unknown; projectId?: unknown; status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown }): SuperState {
     if (body?.text !== undefined && typeof body.text !== 'string') throw new HttpError(400, 'An issue is text.');
-    if (body?.status !== undefined && typeof body.status !== 'string') throw new HttpError(400, 'An issue is queued, in_progress, blocked or done.');
+    if (body?.title !== undefined && typeof body.title !== 'string') throw new HttpError(400, 'A title is text.');
     this.superStore.updateIssue(id, {
       ...(typeof body?.text === 'string' ? { text: body.text } : {}),
+      ...(typeof body?.title === 'string' ? { title: body.title } : {}),
       ...(body?.projectId !== undefined ? { projectId: this.issueProject(body.projectId) } : {}),
-      ...(typeof body?.status === 'string' ? { status: body.status as SuperIssue['status'] } : {}),
-    });
+      ...(body?.status !== undefined ? { status: body.status } : {}),
+      ...(body?.priority !== undefined ? { priority: body.priority } : {}),
+      ...(body?.dueDate !== undefined ? { dueDate: body.dueDate } : {}),
+      ...(body?.labels !== undefined ? { labels: body.labels } : {}),
+    }, Date.now(), { kind: 'user' });
     return this.publishSuper();
   }
 
@@ -1988,8 +1994,8 @@ export class AgentManager {
     // Not after a turn you started, which is yours, and only through the watcher, so the wake switch,
     // quiet hours, budgets and the idle check all apply.
     const free = (result.pending ?? 0) === 0 && this.mailbox.pending(agent.id) === 0;
-    const queued = this.superStore.issues().filter(g => g.status === 'queued').length;
-    if (queued && free && task?.source !== 'user') this.watcher.note({ agentId: agent.id, key: 'issues', text: `${agent.name} is free and ${queued} queued ${queued === 1 ? 'issue waits' : 'issues wait'}` });
+    const queued = this.superStore.issues().filter(g => g.status === 'todo').length;
+    if (queued && free && task?.source !== 'user') this.watcher.note({ agentId: agent.id, key: 'issues', text: `${agent.name} is free and ${queued} ${queued === 1 ? 'issue waits in Todo' : 'issues wait in Todo'}` });
     const asked = task?.summary ? `Task: ${clip(task.summary, 160).replace(/\.$/, '')}. ` : '';
     if (result.ok) this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} finished a turn`, untrusted: `${asked}Result: ${clip(summarize(result.summary) || 'Finished.', 400)}` });
     else this.watcher.note({ agentId: agent.id, key: `turn:${agent.id}`, text: `${agent.name} hit a problem`, untrusted: `${asked}Error: ${clip(result.error ?? 'Something went wrong.', 400)}` });

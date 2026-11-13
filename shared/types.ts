@@ -255,16 +255,49 @@ export interface SuperAction {
   forUser?: boolean;
 }
 
-/** queued: waiting its turn; in_progress: an agent is on it; blocked: waiting for the user; done. */
-export type IssueStatus = 'queued' | 'in_progress' | 'blocked' | 'done';
+/**
+ * An issue's status (ACH-D41), in the order the Issues views group them: needs_you (waiting for
+ * the user), in_review, in_progress, waiting (on another agent or something outside), todo,
+ * backlog, then the closed ones, done and canceled. Before ACH-D41: queued (now todo), blocked
+ * (now needs_you), in_progress and done (shared/issues.ts maps them).
+ */
+export type IssueStatus = 'needs_you' | 'in_review' | 'in_progress' | 'waiting' | 'todo' | 'backlog' | 'done' | 'canceled';
+export type IssuePriority = 'none' | 'urgent' | 'high' | 'normal' | 'low';
+/** Who did something to an issue, or is assigned it: the user, the SuperAgent, another agent, or PodCode itself. */
+export type IssueActor = { kind: 'user' } | { kind: 'super' } | { kind: 'agent'; id: string } | { kind: 'podcode' };
+export type IssueRelationType = 'blocks' | 'related' | 'duplicate_of';
 
-/** One issue in the SuperAgent's backlog, which it works through on its own, in order. */
+/** One entry in an issue's activity, oldest first. */
+export interface IssueEvent {
+  at: number;
+  by: IssueActor;
+  kind: 'created' | 'status' | 'assignee' | 'priority' | 'comment' | 'migrated';
+  /** The value before and after a change (a status, a priority, an agent id). */
+  from?: string;
+  to?: string;
+  /** A comment's text, or a note on the change. */
+  text?: string;
+}
+
+/** One issue in the backlog, which the SuperAgent works through on its own, in order (ACH-D41). */
 export interface SuperIssue {
   id: string;
+  /** The project code and a number, given once and never reused: ACH-25 (shared/issueKeys.ts). */
+  key: string;
+  /** One line, from the start of the text unless set. */
+  title: string;
+  /** The issue in full (its description); the title is its start. */
   text: string;
   /** The project it is about; null for none in particular. */
   projectId: string | null;
   status: IssueStatus;
+  priority: IssuePriority;
+  /** A calendar day, "2026-11-20". */
+  dueDate?: string;
+  labels: string[];
+  /** The issue this is a sub-issue of. */
+  parentId?: string;
+  relations: { type: IssueRelationType; issueId: string }[];
   /** Position in the backlog, 0 first. */
   order: number;
   createdAt: number;
@@ -274,8 +307,12 @@ export interface SuperIssue {
   /** The agent working on it, and the delegation (peer message id) it was given. */
   agentId?: string;
   delegationId?: string;
+  /** Assigned to the user rather than an agent. */
+  forUser?: true;
   notes?: string;
   doneAt?: number;
+  canceledAt?: number;
+  activity: IssueEvent[];
 }
 
 /** When a routine runs: every day at a local time ("HH:MM"), or every N hours. */

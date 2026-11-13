@@ -2,6 +2,7 @@
 // Notes read the same way, one line per item, grouped under sentence-case headers. The rules are
 // pure, so they are tested without a DOM; web/ui/PanelList.tsx draws them.
 import type { IssueStatus, SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../shared/types.ts';
+import { CLOSED_STATUSES, ISSUE_STATUS_LABEL, ISSUE_STATUSES, isOpenIssue } from '../shared/issues.ts';
 
 export interface Group<T> { key: string; label: string; items: T[] }
 
@@ -87,20 +88,18 @@ export function decisionGroups(log: readonly SuperAction[] | undefined, asks: re
 // ---- Issues -------------------------------------------------------------------------------------
 
 export type IssuesFilter = 'open' | 'done';
-/** Open issues in sections, in the order the SuperAgent needs you first; done issues last. */
-const OPEN_SECTIONS: { status: Exclude<IssueStatus, 'done'>; label: string }[] = [
-  { status: 'blocked', label: 'Needs you' },
-  { status: 'in_progress', label: 'In progress' },
-  { status: 'queued', label: 'Queued' },
-];
+/** Open issues in sections, in the order the Issues views group them (ACH-D41); done and canceled last. */
+const OPEN_SECTIONS: { status: IssueStatus; label: string }[] = ISSUE_STATUSES.filter(s => !CLOSED_STATUSES.includes(s)).map(status => ({ status, label: ISSUE_STATUS_LABEL[status] }));
 
 export function issueGroups(issues: readonly SuperIssue[] | undefined, filter: IssuesFilter, query: string): { counts: { open: number; done: number }; open: Group<SuperIssue>[]; done: SuperIssue[] } {
   const all = issues ?? [];
   const found = all.filter(g => matches(query, g.text, g.notes));
-  const open = found.filter(g => g.status !== 'done').sort((a, b) => a.order - b.order);
-  const done = found.filter(g => g.status === 'done').sort((a, b) => (b.doneAt ?? b.updatedAt) - (a.doneAt ?? a.updatedAt));
+  const closedAt = (g: SuperIssue) => g.doneAt ?? g.canceledAt ?? g.updatedAt;
+  const open = found.filter(isOpenIssue).sort((a, b) => a.order - b.order);
+  // Done and canceled together, newest first.
+  const done = found.filter(g => !isOpenIssue(g)).sort((a, b) => closedAt(b) - closedAt(a));
   return {
-    counts: { open: all.filter(g => g.status !== 'done').length, done: all.filter(g => g.status === 'done').length },
+    counts: { open: all.filter(isOpenIssue).length, done: all.filter(g => !isOpenIssue(g)).length },
     open: filter === 'open' ? OPEN_SECTIONS.map(s => ({ key: s.status, label: s.label, items: open.filter(g => g.status === s.status) })).filter(s => s.items.length) : [],
     done,
   };

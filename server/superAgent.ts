@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
+import type { IssueActor, IssueEvent, IssuePriority, IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
+import { ISSUE_PRIORITIES, ISSUE_STATUSES, isLegacyIssue, isOpenIssue, issueStatusFrom, issueTitle, legacyIssue, migrateIssue, reconcileIssues, type LegacyIssue } from '../shared/issues.ts';
+import { nextIssueKey, NO_PROJECT_CODE } from '../shared/issueKeys.ts';
 import { HttpError } from './errors.ts';
 import { inQuietHours, validQuietTime } from '../shared/superAgent.ts';
 
@@ -22,7 +24,7 @@ const LOG_KEPT = 200;
 /** Issues kept: open ones always, then the latest done. */
 const DONE_ISSUES_KEPT = 50;
 export const MAX_OPEN_ISSUES = 50;
-export const ISSUE_STATUSES: IssueStatus[] = ['queued', 'in_progress', 'blocked', 'done'];
+export { ISSUE_STATUSES };
 /** Open asks at once: past this it must wait for answers. */
 export const MAX_OPEN_ASKS = 5;
 /** Updates wait this long for more to batch with. */
@@ -48,14 +50,35 @@ interface Stored {
   /** The local day of the last morning brief. */
   briefDay?: string;
   issues: SuperIssue[];
+  /** The highest issue number each project code has given, so a key is never reused (ACH-D41). */
+  issueKeys: Record<string, number>;
   routines: SuperRoutine[];
 }
 
 export class SuperStore {
   private file: string;
-  constructor(dataDir: string) { this.file = path.join(dataDir, FILE); }
+  /**
+   * @param codeFor a project's code for issue keys (ACH, OBX); issues with no project, or a
+   *   project it does not know, use ALL.
+   */
+  private codeFor: (projectId: string) => string | null | undefined;
+  constructor(dataDir: string, codeFor: (projectId: string) => string | null | undefined = () => null) {
+    this.file = path.join(dataDir, FILE);
+    this.codeFor = codeFor;
+  }
+
+  private code(projectId: string | null): string {
+    return (projectId && this.codeFor(projectId)) || NO_PROJECT_CODE;
+  }
 
   private read(): Stored {
+    const stored = this.readFile();
+    // Migrated or reconciled issues are written back at once, so it happens once.
+    if (this.pendingWrite) { this.pendingWrite = false; this.write(stored); }
+    return stored;
+  }
+
+  private readFile(): Stored {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<Stored> & LegacyStored;
       return {
@@ -64,25 +87,56 @@ export class SuperStore {
         wakes: Array.isArray(raw.wakes) ? raw.wakes.filter(n => typeof n === 'number') : [],
         ...(raw.autoSpend && typeof raw.autoSpend.usd === 'number' && typeof raw.autoSpend.day === 'string' ? { autoSpend: raw.autoSpend } : {}),
         ...(typeof raw.briefDay === 'string' ? { briefDay: raw.briefDay } : {}),
-        issues: storedIssues(raw).filter(validIssue),
+        ...this.readIssues(raw),
         routines: Array.isArray(raw.routines) ? raw.routines.filter(validRoutine) : [],
       };
     } catch {
-      return { asks: [], log: [], wakes: [], issues: [], routines: [] };
+      return { asks: [], log: [], wakes: [], issues: [], issueKeys: {}, routines: [] };
     }
   }
+
+  /**
+   * The issues (ACH-D41): the current list ("issues2"), reconciled with the old-format copy
+   * ("issues", or "goals" before ACH-D38) that older builds read and may have changed after a
+   * downgrade (shared/issues.ts reconcileIssues). The first start of this build migrates the old
+   * list, giving keys in the order the issues were made; that is written back once, so the move
+   * happens once and loses nothing.
+   */
+  private readIssues(raw: Partial<Stored> & LegacyStored & { issues2?: unknown }): { issues: SuperIssue[]; issueKeys: Record<string, number> } {
+    const current = Array.isArray(raw.issues2) ? raw.issues2.filter(validIssue) : null;
+    const hasLegacy = Array.isArray(raw.issues) || Array.isArray(raw.goals);
+    const legacy = hasLegacy ? storedIssues(raw).filter(isLegacyIssue).sort((a, b) => a.createdAt - b.createdAt) : null;
+    let counters: Record<string, number> = raw.issueKeys && typeof raw.issueKeys === 'object' ? { ...raw.issueKeys } : {};
+    const inUse = (current ?? []).map(i => i.key);
+    const keyFor = (old: LegacyIssue) => {
+      const next = nextIssueKey(this.code(old.projectId), counters, inUse);
+      counters = next.counters;
+      inUse.push(next.key);
+      return next.key;
+    };
+    // In backlog order, as the file keeps them: open by order, then the latest closed.
+    const issues = orderIssues(reconcileIssues(current, legacy, keyFor, Date.now()));
+    const changed = current === null ? issues.length > 0 : JSON.stringify(issues) !== JSON.stringify(current);
+    if (changed) this.pendingWrite = true;
+    return { issues, issueKeys: counters };
+  }
+
+  /** Set by a read that migrated or reconciled issues: the next read writes the result back. */
+  private pendingWrite = false;
 
   private write(stored: Stored): void {
     const open = stored.asks.filter(isOpen);
     const closed = stored.asks.filter(a => !isOpen(a)).slice(0, Math.max(0, ASKS_KEPT - open.length));
-    const next: Stored & { goals: SuperIssue[] } = {
+    const next: Omit<Stored, 'issues'> & { issues2: SuperIssue[]; issues: LegacyIssue[]; goals: LegacyIssue[] } = {
       asks: [...open, ...closed].sort((a, b) => b.createdAt - a.createdAt), log: stored.log.slice(0, LOG_KEPT), wakes: stored.wakes.slice(-100),
       ...(stored.autoSpend ? { autoSpend: stored.autoSpend } : {}),
       ...(stored.briefDay ? { briefDay: stored.briefDay } : {}),
-      issues: orderIssues(stored.issues),
-      // For one release, the same list under its old name too, so a build from before the rename
-      // (a manual downgrade) still finds the backlog (ACH-D38). Read ignores it while "issues" has any.
-      goals: orderIssues(stored.issues),
+      issues2: orderIssues(stored.issues),
+      issueKeys: stored.issueKeys,
+      // For older builds (a manual downgrade): the same issues in the old format, under "issues"
+      // and, from before ACH-D38, "goals". What they change there is read back (readIssues).
+      issues: orderIssues(stored.issues).map(legacyIssue),
+      goals: orderIssues(stored.issues).map(legacyIssue),
       routines: stored.routines,
     };
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
@@ -173,47 +227,84 @@ export class SuperStore {
     return found;
   }
 
-  /** A new issue at the end of the backlog, queued. */
-  addIssue(input: { text: string; projectId: string | null; by: SuperIssue['by'] }, now = Date.now()): SuperIssue {
+  /** A new issue at the end of the backlog, Todo unless said, with its key (ACH-25) and a "created" event. */
+  addIssue(input: { text: string; projectId: string | null; by: SuperIssue['by']; title?: string; status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown; parentId?: string }, now = Date.now()): SuperIssue {
     const stored = this.read();
     const text = issueText(input.text);
-    if (stored.issues.filter(g => g.status !== 'done').length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already. Finish or remove some first.`);
-    if (stored.issues.some(g => g.status !== 'done' && g.text === text)) throw new HttpError(409, 'That issue is already in the backlog.');
+    const open = stored.issues.filter(isOpenIssue);
+    if (open.length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already. Finish or remove some first.`);
+    if (open.some(g => g.text === text)) throw new HttpError(409, 'That issue is already in the backlog.');
+    const status = input.status === undefined ? 'todo' : issueStatusFrom(input.status);
+    if (!status) throw new HttpError(400, `An issue's status is one of: ${ISSUE_STATUSES.join(', ')}.`);
+    if (input.parentId !== undefined && !stored.issues.some(g => g.id === input.parentId)) throw new HttpError(404, 'No parent issue with that id.');
+    const { key, counters } = nextIssueKey(this.code(input.projectId), stored.issueKeys, stored.issues.map(g => g.key));
+    const creator: IssueActor = input.by === 'user' ? { kind: 'user' } : { kind: 'super' };
     const issue: SuperIssue = {
-      id: randomUUID().slice(0, 8), text, projectId: input.projectId, status: 'queued',
-      order: stored.issues.filter(g => g.status !== 'done').length, createdAt: now, updatedAt: now, by: input.by,
+      id: randomUUID().slice(0, 8), key, title: input.title !== undefined ? titleText(input.title) : issueTitle(text), text, projectId: input.projectId,
+      status, priority: input.priority === undefined ? 'none' : priorityFrom(input.priority), labels: input.labels === undefined ? [] : labelsFrom(input.labels), relations: [],
+      ...(input.dueDate !== undefined && input.dueDate !== null ? { dueDate: dueDateFrom(input.dueDate) } : {}),
+      ...(input.parentId ? { parentId: input.parentId } : {}),
+      order: open.length, createdAt: now, updatedAt: now, by: input.by,
+      ...(status === 'done' ? { doneAt: now } : status === 'canceled' ? { canceledAt: now } : {}),
+      activity: [{ at: now, by: creator, kind: 'created' }],
     };
-    this.write({ ...stored, issues: [...stored.issues, issue] });
+    this.write({ ...stored, issueKeys: counters, issues: [...stored.issues, issue] });
     return issue;
   }
 
   /**
-   * Change an issue's text, project, status, links or notes. Done stamps doneAt; leaving done clears
-   * it. A link set to '' is removed.
+   * Change an issue: text, title, project, status (by its current or old name), priority, due date,
+   * labels, the agent and delegation on it, or notes. Status, priority and assignee changes go in
+   * its activity, by `by`. Done stamps doneAt and canceled canceledAt; reopening clears them and puts
+   * it at the end of the backlog.
    */
-  updateIssue(id: string, patch: Partial<Pick<SuperIssue, 'text' | 'projectId' | 'status' | 'agentId' | 'delegationId' | 'notes'>>, now = Date.now()): SuperIssue {
+  updateIssue(id: string, patch: Partial<Pick<SuperIssue, 'text' | 'title' | 'projectId' | 'agentId' | 'delegationId' | 'notes'>> & { status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown }, now = Date.now(), by: IssueActor = { kind: 'super' }): SuperIssue {
     const stored = this.read();
     const old = stored.issues.find(g => g.id === id);
     if (!old) throw new HttpError(404, 'No issue with that id.');
-    if (patch.status !== undefined && !ISSUE_STATUSES.includes(patch.status)) throw new HttpError(400, 'An issue is queued, in_progress, blocked or done.');
+    const status = patch.status === undefined ? undefined : issueStatusFrom(patch.status);
+    if (status === null) throw new HttpError(400, `An issue's status is one of: ${ISSUE_STATUSES.join(', ')}.`);
     const next: SuperIssue = { ...old, updatedAt: now };
-    if (patch.text !== undefined) next.text = issueText(patch.text);
+    const events: IssueEvent[] = [];
+    if (patch.text !== undefined) {
+      next.text = issueText(patch.text);
+      // The title follows the text unless it was set on its own.
+      if (old.title === issueTitle(old.text)) next.title = issueTitle(next.text);
+    }
+    if (patch.title !== undefined) next.title = titleText(patch.title);
     if (patch.projectId !== undefined) next.projectId = patch.projectId;
+    if (patch.priority !== undefined) {
+      next.priority = priorityFrom(patch.priority);
+      if (next.priority !== old.priority) events.push({ at: now, by, kind: 'priority', from: old.priority, to: next.priority });
+    }
+    if (patch.dueDate !== undefined) {
+      if (patch.dueDate === null || patch.dueDate === '') delete next.dueDate; else next.dueDate = dueDateFrom(patch.dueDate);
+    }
+    if (patch.labels !== undefined) next.labels = labelsFrom(patch.labels);
     if (patch.notes !== undefined) {
       const notes = String(patch.notes).replace(/\s+/g, ' ').trim().slice(0, 1000);
       if (notes) next.notes = notes; else delete next.notes;
+      if (notes && notes !== old.notes) events.push({ at: now, by, kind: 'comment', text: notes });
     }
     for (const key of ['agentId', 'delegationId'] as const) {
       if (patch[key] === undefined) continue;
       if (patch[key]) next[key] = patch[key]; else delete next[key];
     }
-    if (patch.status !== undefined) {
-      next.status = patch.status;
-      if (patch.status === 'done') next.doneAt = old.doneAt ?? now;
-      else delete next.doneAt;
-      // Reopened, it joins the end of the backlog.
-      if (old.status === 'done' && patch.status !== 'done') next.order = stored.issues.filter(g => g.status !== 'done').length;
+    if (next.agentId !== old.agentId) {
+      if (next.agentId) delete next.forUser;
+      events.push({ at: now, by, kind: 'assignee', ...(old.agentId ? { from: old.agentId } : {}), ...(next.agentId ? { to: next.agentId } : {}) });
     }
+    if (status !== undefined && status !== old.status) {
+      next.status = status;
+      events.push({ at: now, by, kind: 'status', from: old.status, to: status });
+      delete next.doneAt;
+      delete next.canceledAt;
+      if (status === 'done') next.doneAt = now;
+      if (status === 'canceled') next.canceledAt = now;
+      // Reopened, it joins the end of the backlog.
+      if (!isOpenIssue(old) && isOpenIssue(next)) next.order = stored.issues.filter(isOpenIssue).length;
+    }
+    next.activity = [...old.activity, ...events];
     this.write({ ...stored, issues: stored.issues.map(g => (g.id === id ? next : g)) });
     return next;
   }
@@ -229,7 +320,7 @@ export class SuperStore {
   /** Move an open issue to a place in the open backlog (0 first). */
   moveIssue(id: string, to: number): SuperIssue[] {
     const stored = this.read();
-    const open = orderIssues(stored.issues).filter(g => g.status !== 'done');
+    const open = orderIssues(stored.issues).filter(isOpenIssue);
     const from = open.findIndex(g => g.id === id);
     if (from < 0) throw new HttpError(404, 'No open issue with that id.');
     const [issue] = open.splice(from, 1);
@@ -243,27 +334,31 @@ export class SuperStore {
    * Put an issue back as it was (undo); null removes it. Refused (409) when the issue is gone since, or
    * when putting it back would break the open-issue cap or repeat another open issue.
    */
-  restoreIssue(id: string, before: SuperIssue | null, removed = false): void {
+  restoreIssue(id: string, recorded: SuperIssue | LegacyIssue | null, removed = false): void {
     const stored = this.read();
     const current = stored.issues.find(g => g.id === id);
+    // An undo record written before ACH-D41 holds the old format: read it as a current issue, keeping the key it has now.
+    const before = recorded && !validIssue(recorded) && isLegacyIssue(recorded) ? migrateIssue(recorded, current?.key ?? nextIssueKey(this.code(recorded.projectId), stored.issueKeys, stored.issues.map(g => g.key)).key, Date.now()) : recorded as SuperIssue | null;
+    const openCount = (list: SuperIssue[]) => list.filter(isOpenIssue).length;
     // A removal undone: the issue comes back as it was, once, and only if it fits the backlog now.
     if (removed && before) {
       if (current) throw new HttpError(409, 'That issue is back already.');
-      if (before.status !== 'done') {
-        if (stored.issues.filter(g => g.status !== 'done').length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already.`);
-        if (stored.issues.some(g => g.status !== 'done' && g.text === before.text)) throw new HttpError(409, 'Another open issue says the same thing now.');
+      if (isOpenIssue(before)) {
+        if (openCount(stored.issues) >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already.`);
+        if (stored.issues.some(g => isOpenIssue(g) && g.text === before.text)) throw new HttpError(409, 'Another open issue says the same thing now.');
       }
-      this.write({ ...stored, issues: [...stored.issues, { ...before, order: before.status === 'done' ? before.order : Math.min(before.order, stored.issues.filter(g => g.status !== 'done').length) }] });
+      this.write({ ...stored, issues: [...stored.issues, { ...before, order: isOpenIssue(before) ? Math.min(before.order, openCount(stored.issues)) : before.order }] });
       return;
     }
     if (!current) throw new HttpError(409, 'That issue was removed since, so there is nothing to undo.');
     const rest = stored.issues.filter(g => g.id !== id);
-    if (before && before.status !== 'done') {
-      if (current.status === 'done' && rest.filter(g => g.status !== 'done').length >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already.`);
-      if (rest.some(g => g.status !== 'done' && g.text === before.text)) throw new HttpError(409, 'Another open issue says the same thing now.');
+    if (before && isOpenIssue(before)) {
+      if (!isOpenIssue(current) && openCount(rest) >= MAX_OPEN_ISSUES) throw new HttpError(409, `${MAX_OPEN_ISSUES} issues are open already.`);
+      if (rest.some(g => isOpenIssue(g) && g.text === before.text)) throw new HttpError(409, 'Another open issue says the same thing now.');
     }
     this.write({ ...stored, issues: before ? [...rest, before] : rest });
   }
+
 
   openAsks(): SuperAsk[] {
     return this.read().asks.filter(isOpen);
@@ -387,8 +482,9 @@ export function issueWording(summary: string): string {
 /** An issue as super.json must hold it; anything else (a hand edit gone wrong) is left out. */
 function validIssue(raw: unknown): raw is SuperIssue {
   const g = raw as Partial<SuperIssue> | null;
-  return Boolean(g) && typeof g!.id === 'string' && typeof g!.text === 'string' && g!.text.trim() !== ''
+  return Boolean(g) && typeof g!.id === 'string' && typeof g!.key === 'string' && typeof g!.title === 'string' && typeof g!.text === 'string' && g!.text.trim() !== ''
     && (g!.projectId === null || typeof g!.projectId === 'string') && ISSUE_STATUSES.includes(g!.status as IssueStatus)
+    && ISSUE_PRIORITIES.includes(g!.priority as IssuePriority) && Array.isArray(g!.labels) && Array.isArray(g!.relations) && Array.isArray(g!.activity)
     && typeof g!.order === 'number' && Number.isFinite(g!.order) && typeof g!.createdAt === 'number' && typeof g!.updatedAt === 'number'
     && (g!.by === 'user' || g!.by === 'super')
     && (g!.agentId === undefined || typeof g!.agentId === 'string') && (g!.delegationId === undefined || typeof g!.delegationId === 'string')
@@ -444,6 +540,35 @@ export function routineDue(routine: SuperRoutine, now: Date): number | null {
   return now.getTime() >= slot && last < slot ? slot : null;
 }
 
+function titleText(raw: unknown): string {
+  const title = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!title) throw new HttpError(400, 'Give the issue a title.');
+  if (title.length > 120) throw new HttpError(400, 'Keep a title under 120 characters.');
+  return title;
+}
+
+function priorityFrom(raw: unknown): IssuePriority {
+  if ((ISSUE_PRIORITIES as readonly unknown[]).includes(raw)) return raw as IssuePriority;
+  throw new HttpError(400, `An issue's priority is one of: ${ISSUE_PRIORITIES.join(', ')}.`);
+}
+
+/** A calendar day, "2026-11-20", that exists. */
+function dueDateFrom(raw: unknown): string {
+  const day = String(raw ?? '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  const date = m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) : null;
+  if (!date || date.toISOString().slice(0, 10) !== day) throw new HttpError(400, 'A due date is a day like 2026-11-20.');
+  return day;
+}
+
+/** Labels: short words, each once, at most 10. */
+function labelsFrom(raw: unknown): string[] {
+  if (!Array.isArray(raw)) throw new HttpError(400, 'Labels are a list of words.');
+  const labels = [...new Set(raw.map(l => String(l ?? '').trim().toLowerCase()).filter(Boolean))];
+  if (labels.length > 10 || labels.some(l => l.length > 30)) throw new HttpError(400, 'Up to 10 labels, each under 30 characters.');
+  return labels;
+}
+
 function issueText(raw: unknown): string {
   const text = String(raw ?? '').replace(/\s+/g, ' ').trim();
   if (!text) throw new HttpError(400, 'Say what the issue is.');
@@ -451,11 +576,13 @@ function issueText(raw: unknown): string {
   return text;
 }
 
-/** Open issues by their order (renumbered 0, 1, 2, ...), then the latest done ones, newest first. */
+const closedAt = (g: SuperIssue) => g.doneAt ?? g.canceledAt ?? g.updatedAt;
+
+/** Open issues by their order (renumbered 0, 1, 2, ...), then the latest done or canceled ones, newest first. */
 export function orderIssues(issues: readonly SuperIssue[]): SuperIssue[] {
-  const open = issues.filter(g => g.status !== 'done').sort((a, b) => a.order - b.order || a.createdAt - b.createdAt).map((g, i) => ({ ...g, order: i }));
-  const done = issues.filter(g => g.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)).slice(0, DONE_ISSUES_KEPT);
-  return [...open, ...done];
+  const open = issues.filter(isOpenIssue).sort((a, b) => a.order - b.order || a.createdAt - b.createdAt).map((g, i) => ({ ...g, order: i }));
+  const closed = issues.filter(g => !isOpenIssue(g)).sort((a, b) => closedAt(b) - closedAt(a)).slice(0, DONE_ISSUES_KEPT);
+  return [...open, ...closed];
 }
 const localDay = (now: Date) => `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
 
@@ -479,12 +606,12 @@ export function updatePrompt(events: SuperEvent[], openAsks: SuperAsk[], now: nu
   const lines = shown.map(e => `- ${time(e.at)} ${e.text}${e.untrusted ? `: <untrusted>${e.untrusted.replace(/<\/?untrusted>/gi, '')}</untrusted>` : ''}`);
   const more = events.length > shown.length ? [`- (${events.length - shown.length} earlier updates left out)`] : [];
   const waiting = openAsks.length ? [``, `Still waiting for the user: ${openAsks.map(a => `"${a.question}"`).join('; ')}. Do not ask these again.`] : [];
-  const open = issues.filter(g => g.status !== 'done');
+  const open = issues.filter(isOpenIssue);
   const shownIssues = open.slice(0, 8);
   const backlog = open.length ? [
     '',
-    'Open issues, in order (work them top down: give the next queued one to a free agent and mark it in_progress with update_issue):',
-    ...shownIssues.map((g, i) => `${i + 1}. [${g.id}] ${g.status}: ${g.text}`),
+    'Open issues, in order (work them top down: give the next todo one to a free agent and mark it in_progress with update_issue):',
+    ...shownIssues.map((g, i) => `${i + 1}. [${g.id}] ${g.key} ${g.status}${g.priority !== 'none' ? `, ${g.priority}` : ''}${g.dueDate ? `, due ${g.dueDate}` : ''}: ${g.text}`),
     ...(open.length > shownIssues.length ? [`(${open.length - shownIssues.length} more; list_issues has them all)`] : []),
   ] : [];
   const waited = held ? ['', `While you could not take a turn (${held.reasons.join('; ')}), ${held.count} ${held.count === 1 ? 'message to you waited' : 'messages to you waited'}. ${held.count === 1 ? 'It comes' : 'They come'} as ${held.count === 1 ? 'its own turn' : 'their own turns'} after this update.`] : [];

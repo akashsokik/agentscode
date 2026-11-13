@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
-import type { SuperState } from '../shared/types.ts';
+import type { SuperIssue, SuperState } from '../shared/types.ts';
 import { createApp } from '../server/app.ts';
 import { HttpError } from '../server/errors.ts';
 import { SuperStore, updatePrompt, type SuperWatcher } from '../server/superAgent.ts';
@@ -22,7 +22,7 @@ test('the issue store: add in order, update with links and done times, reorder, 
   const b = store.addIssue({ text: 'Write release notes', projectId: null, by: 'super' });
   const c = store.addIssue({ text: 'Fix the flaky test', projectId: null, by: 'user' });
   assert.equal(a.text, 'Ship dark mode');
-  assert.deepEqual(store.issues().map(g => [g.text, g.order, g.status]), [['Ship dark mode', 0, 'queued'], ['Write release notes', 1, 'queued'], ['Fix the flaky test', 2, 'queued']]);
+  assert.deepEqual(store.issues().map(g => [g.text, g.order, g.status]), [['Ship dark mode', 0, 'todo'], ['Write release notes', 1, 'todo'], ['Fix the flaky test', 2, 'todo']]);
   assert.throws(() => store.addIssue({ text: 'Ship dark mode', projectId: null, by: 'user' }), e => status(e) === 409);
   assert.throws(() => store.addIssue({ text: '   ', projectId: null, by: 'user' }), e => status(e) === 400);
 
@@ -31,7 +31,8 @@ test('the issue store: add in order, update with links and done times, reorder, 
   assert.equal(started.delegationId, 'm1');
   const finished = store.updateIssue(a.id, { status: 'done' });
   assert.ok(finished.doneAt);
-  assert.equal(store.updateIssue(a.id, { status: 'queued', agentId: '' }).doneAt, undefined, 'reopening clears the done time');
+  assert.equal(store.updateIssue(a.id, { status: 'queued', agentId: '' }).doneAt, undefined, 'reopening clears the done time (the old name queued is still accepted, as todo)');
+  assert.equal(store.issue(a.id).status, 'todo');
   assert.equal(store.issue(a.id).agentId, undefined, 'an empty link is removed');
   assert.throws(() => store.updateIssue(a.id, { status: 'later' as never }), e => status(e) === 400);
 
@@ -94,7 +95,7 @@ test('the issue tools: add, list, start with links, complete; each in the decisi
   await t.manager.undoSuper(completed.id);
   assert.equal(t.manager.superView().issues[0].status, 'in_progress');
   await t.manager.undoSuper(started.id);
-  assert.equal(t.manager.superView().issues[0].status, 'queued');
+  assert.equal(t.manager.superView().issues[0].status, 'todo');
   await t.manager.undoSuper(add.id);
   assert.equal(t.manager.superView().issues.length, 0);
 
@@ -104,7 +105,7 @@ test('the issue tools: add, list, start with links, complete; each in the decisi
   await assert.rejects(t.manager.commsTool(t.runners.get(t.ada.id)!.at(-1)!.ctx.commsToken!, 'add_issue', { text: 'Mine', why: 'x' }), e => status(e) === 403);
 });
 
-test('an agent coming free with queued issues wakes the SuperAgent, but only through the wake checks', async () => {
+test('an agent coming free with issues in Todo wakes the SuperAgent, but only through the wake checks', async () => {
   const t = await team();
   t.runner.complete();
   t.manager.addIssue({ text: 'Write the release notes', projectId: t.web.id });
@@ -140,11 +141,11 @@ test('an agent coming free with queued issues wakes the SuperAgent, but only thr
   await settle();
   const sent = t.runner.sent.at(-1)!;
   assert.equal(sent.task?.source, 'system');
-  assert.match(sent.text, /Ada is free and 1 queued issue waits/);
-  assert.match(sent.text, /Open issues, in order[^\n]*\n1\. \[\w+\] queued: Write the release notes/);
+  assert.match(sent.text, /Ada is free and 1 issue waits in Todo/);
+  assert.match(sent.text, /Open issues, in order[^\n]*\n1\. \[\w+\] WEB-1 todo: Write the release notes/, 'keyed by its project\'s code');
   assert.match(sent.text, /The user added an issue: "Write the release notes"/);
 
-  // With no queued issues, a free agent is ordinary news, with no issue line.
+  // With nothing in Todo, a free agent is ordinary news, with no issue line.
   t.runner.complete();
   t.manager.updateIssue(t.manager.superView().issues[0].id, { status: 'done' });
   const bo = t.runners.get(t.bo.id)!.at(-1)!;
@@ -152,15 +153,15 @@ test('an agent coming free with queued issues wakes the SuperAgent, but only thr
   await settle();
   assert.ok(t.watcher.flush());
   await settle();
-  assert.doesNotMatch(t.runner.sent.at(-1)!.text, /queued issue|Open issues/);
+  assert.doesNotMatch(t.runner.sent.at(-1)!.text, /issue waits|Open issues/);
 });
 
 test('the update prompt lists open issues briefly, top down, and leaves done ones out', () => {
-  const issue = (id: string, order: number, status: 'queued' | 'in_progress' | 'done') => ({ id, text: `Issue ${id}`, projectId: null, status, order, createdAt: 0, updatedAt: 0, by: 'user' as const });
-  const issues = [issue('a', 1, 'queued'), issue('b', 0, 'in_progress'), issue('c', 2, 'done'), ...Array.from({ length: 9 }, (_, i) => issue(`x${i}`, 3 + i, 'queued'))];
+  const issue = (id: string, order: number, status: 'todo' | 'in_progress' | 'done', extra: Partial<SuperIssue> = {}): SuperIssue => ({ id, key: `ACH-${order + 1}`, title: `Issue ${id}`, text: `Issue ${id}`, projectId: null, status, priority: 'none', labels: [], relations: [], activity: [], order, createdAt: 0, updatedAt: 0, by: 'user', ...extra });
+  const issues = [issue('a', 1, 'todo', { priority: 'high', dueDate: '2026-11-20' }), issue('b', 0, 'in_progress'), issue('c', 2, 'done'), ...Array.from({ length: 9 }, (_, i) => issue(`x${i}`, 3 + i, 'todo'))];
   const prompt = updatePrompt([], [], 0, issues);
-  assert.match(prompt, /1\. \[a\] queued: Issue a/);
-  assert.match(prompt, /2\. \[b\] in_progress: Issue b/);
+  assert.match(prompt, /1\. \[a\] ACH-2 todo, high, due 2026-11-20: Issue a/);
+  assert.match(prompt, /2\. \[b\] ACH-1 in_progress: Issue b/);
   assert.doesNotMatch(prompt, /Issue c/);
   assert.match(prompt, /\(3 more; list_issues has them all\)/);
   assert.doesNotMatch(updatePrompt([], [], 0, []), /Open issues/);
@@ -220,7 +221,11 @@ test('the user manages issues over HTTP: add, edit, reorder, remove', async () =
     assert.deepEqual(moved.issues.map(g => g.text), ['Second', 'First']);
     const edited = await (await send(`${base}/${second.id}`, 'PATCH', { text: 'Second, reworded', status: 'blocked' })).json() as SuperState;
     assert.equal(edited.issues[0].text, 'Second, reworded');
-    assert.equal(edited.issues[0].status, 'blocked');
+    assert.equal(edited.issues[0].status, 'needs_you', 'the old name blocked is read as Needs you');
+    const prioritized = await (await send(`${base}/${second.id}`, 'PATCH', { priority: 'urgent', dueDate: '2026-11-20', labels: ['UI', 'ui', 'issues'] })).json() as SuperState;
+    assert.deepEqual([prioritized.issues[0].priority, prioritized.issues[0].dueDate, prioritized.issues[0].labels], ['urgent', '2026-11-20', ['ui', 'issues']]);
+    assert.deepEqual(prioritized.issues[0].activity.filter(e => e.kind === 'priority').map(e => [e.by.kind, e.to]), [['user', 'urgent']], 'your change, in its activity');
+    for (const bad of [{ priority: 'asap' }, { dueDate: '2026-02-30' }, { labels: 'ui' }]) assert.equal((await send(`${base}/${second.id}`, 'PATCH', bad)).status, 400, JSON.stringify(bad));
     assert.equal((await send(`${base}/${second.id}`, 'PATCH', { status: 'someday' })).status, 400);
     const left = await (await send(`${base}/${second.id}`, 'DELETE')).json() as SuperState;
     assert.deepEqual(left.issues.map(g => g.text), ['First']);

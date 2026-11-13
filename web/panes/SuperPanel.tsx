@@ -8,6 +8,7 @@ import type { IssueStatus, RoutineSchedule, SuperAction, SuperAsk, SuperIssue, S
 import { api } from '../api.ts';
 import { openAsks } from '../super.ts';
 import { ISSUE_STATUS_LABEL, heldText, migrateSeen, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type SuperTab } from '../superText.ts';
+import { isOpenIssue } from '../../shared/issues.ts';
 import { armRemove, cleanSummary, decisionGroups, keepArmed, decisionKind, focusAfterRemoval, issueGroups, issueMoves, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
@@ -16,7 +17,7 @@ import { Kbd } from '../ui/Kbd.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar, RowAction, RowIcon } from '../ui/PanelList.tsx';
-import { Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleAlert, CircleDashed, CircleDot, Clock, Copy, CornerDownRight, ListBullet, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
+import { Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleAlert, CircleDashed, CircleDot, CircleX, Clock, Copy, CornerDownRight, Eye, ListBullet, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
@@ -209,11 +210,16 @@ function AnswerItem({ ask, now, expanded, onToggle }: { ask: SuperAsk; now: numb
 /** Issues are one line; line breaks typed or pasted become spaces. */
 const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ');
 
+/** Existing mono icons until the status glyphs from the approved demo land (ACH-D41, phase 3). */
 const ISSUE_ICON: Record<IssueStatus, { icon: typeof ListBullet; cls: string }> = {
-  queued: { icon: CircleDashed, cls: '' },
+  needs_you: { icon: CircleAlert, cls: 'text-warning' },
+  in_review: { icon: Eye, cls: 'text-content/75' },
   in_progress: { icon: CircleDot, cls: 'text-content/75' },
-  blocked: { icon: CircleAlert, cls: 'text-warning' },
+  waiting: { icon: Pause, cls: '' },
+  todo: { icon: CircleDashed, cls: '' },
+  backlog: { icon: CircleDashed, cls: 'text-content/40' },
   done: { icon: CheckCircle, cls: '' },
+  canceled: { icon: CircleX, cls: 'text-content/40' },
 };
 
 /** A one-line composer: Enter adds, Escape closes. Opened by +. */
@@ -268,7 +274,7 @@ export function IssuesView() {
   const { counts, open: sections, done } = issueGroups(issues, filter, query);
   const ordered = sections.flatMap(s => s.items);
   // The backlog's own order, for moving: positions are among all open issues, not a search's.
-  const backlog = (issues ?? []).filter(g => g.status !== 'done').sort((a, b) => a.order - b.order);
+  const backlog = (issues ?? []).filter(isOpenIssue).sort((a, b) => a.order - b.order);
   const moves = issueMoves(sections, backlog);
   const root = useRef<HTMLDivElement>(null);
   const toggle = (id: string) => setOpen(o => (o === id ? null : id));
@@ -351,7 +357,7 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: {
   const named = `"${issue.text.length > 60 ? `${issue.text.slice(0, 59)}…` : issue.text}"`;
   const run = async (action: () => Promise<unknown>) => { setBusy(true); const ok = await attempt(action); setBusy(false); return ok; };
   const save = async () => { if (!busy && text.trim() && await run(() => api.updateIssue(issue.id, { text: text.trim() }))) { setEditing(false); onSettled(); } };
-  const done = issue.status === 'done';
+  const done = !isOpenIssue(issue);
   // A status change moves the row to another section: focus follows it (or goes to + if it folded away).
   const status = (s: IssueStatus) => { if (!busy) void run(() => api.updateIssue(issue.id, { status: s })).then(onSettled); };
   const edit = () => { setText(issue.text); setEditing(true); if (!expanded) onToggle(); };
