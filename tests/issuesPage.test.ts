@@ -4,7 +4,7 @@ import type { SuperIssue } from '../shared/types.ts';
 import {
   activeFilters, chipText, clearFilter, DEFAULT_DISPLAY, displayedIssues, displayFrom, dueBucket, filterOptions, groupIssues, inView, issuesPage, localDay,
   matchesFilters, matchesQuery, NONE, readDisplay, saveDisplay, sortIssues, toggleFilter, YOU, type IssuesDisplay,
-  neighbourAfterLeaving, revealIssue, shownIssueId,
+  neighbourAfterLeaving, revealIssue, issueToShow,
 } from '../web/issues/issuesView.ts';
 import { isPageKey } from '../web/issues/pageKeys.ts';
 import { knownTabs, tabKey, TAB_KINDS } from '../web/layout.ts';
@@ -238,6 +238,7 @@ test('the Issues page is the shared inbox layout: a card click selects the issue
   assert.match(inbox, /const select = onSelect;/, 'a click selects through the page');
   assert.match(inbox, /isMenuKey\(e\)[\s\S]*?setMenu\(e\.target as HTMLElement\)/, 'the card menu opens from the keyboard (ACH-23)');
   assert.match(inbox, /<InboxBarButton\b[\s\S]*?label=\{copied \? 'Copied' : 'Copy key'\}/, 'Copy key sits in the bar, as Comms\' Stop (ACH-23)');
+  assert.match(inbox, /heading=\{<IssueTitle id=\{issue\.id\} title=\{issue\.title\} size="text-\[18px\]" \/>\}/, 'the title edits in place in the hero (Cy\'s heading slot, ACH-23)');
   assert.match(inbox, /copyKey=\{false\}/, 'and not twice: the properties leave their Copy key row out here');
   assert.match(inbox, /if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); onBack\(\); return; \}/, 'Esc in the detail goes back to the list (MonoCode closes its detail on Esc)');
   assert.match(inbox, /<InboxDetail\b/);
@@ -289,10 +290,10 @@ test('the right panel keeps the SuperAgent\'s tabs while the Issues page, an iss
 });
 
 test('the detail keeps its issue: the asked one while it exists, else the last shown while listed, else the first (ACH-23)', () => {
-  assert.equal(shownIssueId(['a', 'b'], 'x', true, 'a'), 'x', 'asked for, even if a filter hides it');
-  assert.equal(shownIssueId(['b', 'a'], undefined, false, 'a'), 'a', 'a live update reorders the list: the detail stays');
-  assert.equal(shownIssueId(['b', 'c'], 'gone', false, 'a'), 'b', 'the last shown left: the first listed');
-  assert.equal(shownIssueId([], undefined, false, 'a'), undefined);
+  assert.equal(issueToShow(['a', 'b'], 'x', true, 'a'), 'x', 'asked for, even if a filter hides it');
+  assert.equal(issueToShow(['b', 'a'], undefined, false, 'a'), 'a', 'a live update reorders the list: the detail stays');
+  assert.equal(issueToShow(['b', 'c'], 'gone', false, 'a'), 'b', 'the last shown left: the first listed');
+  assert.equal(issueToShow([], undefined, false, 'a'), undefined);
 });
 
 test('when the shown issue leaves the list, the selection goes to its neighbour as the list stood (ACH-23)', () => {

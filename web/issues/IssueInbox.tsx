@@ -13,7 +13,7 @@ import { assigneeName, DueDate, IssueMenu, PriorityMark, StatusIcon } from './is
 import { type RowProperty } from './issuesView.ts';
 import { isPageKey } from './pageKeys.ts';
 import { Activity } from './view/Activity.tsx';
-import { IssueDescription } from './view/EditableText.tsx';
+import { IssueDescription, IssueTitle } from './view/EditableText.tsx';
 import { propertyKey } from './view/issueViewModel.ts';
 import { PropertySidebar, type PropertySidebarHandle } from './view/PropertySidebar.tsx';
 import { Decisions, InGit, Relations, SubIssues, useIssueLinks } from './view/Sections.tsx';
@@ -138,7 +138,8 @@ export function IssueInboxDetail({ issue, issues, now, sidebar, onBack }: {
           sidebar.current?.open(property);
         }}
       >
-        <InboxHero title={issue.title}>
+        {/* The title edits in place (Cy's heading slot): Enter saves, Esc puts it back. */}
+        <InboxHero title={issue.title} heading={<IssueTitle id={issue.id} title={issue.title} size="text-[18px]" />}>
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             {who && agentId ? (
               <button type="button" onClick={() => open({ kind: 'agent', agentId })} title={`Open ${who}`} className={`${PILL} text-content/70 transition-colors duration-150 hover:bg-content/10 hover:text-content`}>

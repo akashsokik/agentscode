@@ -339,7 +339,7 @@ export function revealIssue(issue: SuperIssue, choice: { view: IssuesViewName; f
  * else the one shown last while it is still listed, so a live update that reorders the list never
  * swaps the detail by itself; else the first listed, as Comms does.
  */
-export function shownIssueId(listed: readonly string[], asked: string | undefined, askedExists: boolean, last: string | undefined): string | undefined {
+export function issueToShow(listed: readonly string[], asked: string | undefined, askedExists: boolean, last: string | undefined): string | undefined {
   if (asked && askedExists) return asked;
   if (last && listed.includes(last)) return last;
   return listed[0];

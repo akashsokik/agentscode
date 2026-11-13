@@ -1,7 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { isOpenIssue } from '../../shared/issues.ts';
 import { api } from '../api.ts';
-import { open } from '../layout.ts';
 import { CircleDashed, ListFilter, Plus, SlidersHorizontal } from '../mono/icons.tsx';
 import type { PopoverAnchor } from '../mono/Popover.tsx';
 import { PaneFrame, type PaneChrome } from '../panes/PaneFrame.tsx';
@@ -19,7 +18,7 @@ import type { PropertySidebarHandle } from './view/PropertySidebar.tsx';
 import { showIssueInList } from './openIssue.ts';
 import { isPageKey } from './pageKeys.ts';
 import {
-  activeFilters, displayedIssues, inView, ISSUE_VIEWS, issuesPage, localDay, neighbourAfterLeaving, readDisplay, revealIssue, saveDisplay, shownIssueId,
+  activeFilters, displayedIssues, inView, ISSUE_VIEWS, issuesPage, localDay, neighbourAfterLeaving, readDisplay, revealIssue, saveDisplay, issueToShow,
   type IssueFilters, type IssueNames, type IssueProperty, type IssuesDisplay, type IssuesViewName,
 } from './issuesView.ts';
 
@@ -65,9 +64,9 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
   const listedIds = listed.map(g => g.id);
   const asked = issueId ? issues?.find(g => g.id === issueId) : undefined;
   // The issue the detail shows stays put while it is listed (ACH-23): a live update that reorders
-  // the list never swaps it by itself (issuesView.ts shownIssueId).
+  // the list never swaps it by itself (issuesView.ts issueToShow).
   const lastShown = useRef<string | undefined>(undefined);
-  const shownId = shownIssueId(listedIds, issueId, Boolean(asked), lastShown.current);
+  const shownId = issueToShow(listedIds, issueId, Boolean(asked), lastShown.current);
   const selected = shownId ? issues?.find(g => g.id === shownId) : undefined;
   const sidebar = useRef<PropertySidebarHandle>(null);
   // In a narrow pane, moving with the keyboard only highlights (the list stays); a click, Enter, or
@@ -82,12 +81,10 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
   /** Select without opening a narrow pane's detail (the arrows, J/K, a neighbour after a removal). */
   const highlight = (id: string) => { movedTo.current = id; showIssueInList(id); };
   /** Esc in the detail, or its Back: to the list, on the issue it showed. */
+  // The issue stays selected (the right panel keeps marking it); only a narrow pane swaps back.
   const back = () => {
-    const id = selected?.id;
-    movedTo.current = undefined;
-    setPeek(false);
-    open({ kind: 'issues' });
-    if (id) focusCard(id);
+    setPeek(true);
+    if (selected) focusCard(selected.id);
   };
   useEffect(() => { if (issueId && issueId !== movedTo.current) setPeek(false); }, [issueId]);
   // When the shown issue leaves the list on its own (removed, canceled out of the view), select its
