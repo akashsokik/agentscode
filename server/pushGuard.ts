@@ -315,15 +315,16 @@ export async function pushRemotes(cwd: string): Promise<string[]> {
 
 /**
  * The project's main lines, which no token is ever for: main, master, develop and trunk, the
- * remote's HEAD (origin/HEAD) when git has it, the branch the project's own checkout is on, and
+ * remote's HEAD (origin/HEAD, "origin/production" read as "production") when git has it, and
  * init.defaultBranch. A repo pushed without a clone has no origin/HEAD, so the names stand in.
+ * The branch the project's own checkout is on is not one: it is often a feature branch.
  */
 export async function mainLines(cwd: string): Promise<Set<string>> {
   const lines = new Set(['main', 'master', 'develop', 'trunk']);
-  for (const args of [['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], ['symbolic-ref', '--quiet', '--short', 'HEAD'], ['config', '--get', 'init.defaultBranch']]) {
-    const out = (await gitOut(args, cwd))?.trim();
-    if (out) lines.add(args[2] === 'refs/remotes/origin/HEAD' ? out.replace(/^[^/]+\//, '') : out);
-  }
+  const head = (await gitOut(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], cwd))?.trim();
+  if (head) lines.add(head.replace(/^[^/]+\//, ''));
+  const configured = (await gitOut(['config', '--get', 'init.defaultBranch'], cwd))?.trim();
+  if (configured) lines.add(configured);
   return lines;
 }
 

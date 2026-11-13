@@ -253,13 +253,19 @@ test('the text check (Claude\'s Bash) catches the ways around it, and not everyd
   for (const cmd of ['git push origin main', 'git commit -m "x"', 'npm test', 'git push -u origin fix/x', 'cat ~/.podcode/git-hooks/pre-push']) assert.equal(disablesPushGuard(cmd), null, cmd);
 });
 
-test('main lines without origin/HEAD: develop, trunk, the checked-out branch and init.defaultBranch are never force-push targets (Rhea round 5, L6)', async () => {
+test('main lines: origin/HEAD read without its remote, init.defaultBranch, and the usual names; never the checked-out feature branch (Rhea follow-ups M1, L1)', async () => {
   const dir = tempDir('main-lines');
   const git = (args: string) => { const r = spawnSync('sh', ['-c', `git ${args}`], { cwd: dir, env: BASE, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
   git('-c init.defaultBranch=stable init -q && git commit -q --allow-empty -m a && git config init.defaultBranch release');
-  const lines = await mainLines(dir);
-  for (const name of ['main', 'master', 'develop', 'trunk', 'stable', 'release']) assert.ok(lines.has(name), name);
-  assert.ok(!lines.has('feat/x'));
+  git('checkout -q -b feature/brainy-orca');
+  let lines = await mainLines(dir);
+  for (const name of ['main', 'master', 'develop', 'trunk', 'release']) assert.ok(lines.has(name), name);
+  assert.ok(!lines.has('feature/brainy-orca'), 'the checkout\'s own branch is a feature branch');
+  // A clone whose remote's HEAD is a name of its own: "origin/production" is "production".
+  git('update-ref refs/remotes/origin/production HEAD && git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/production');
+  lines = await mainLines(dir);
+  assert.ok(lines.has('production'), [...lines].join(' '));
+  assert.ok(!lines.has('origin/production'));
 });
 
 test('push remotes are what git pushes to (insteadOf applied, Rhea L7); a refusal never shows credentials (L8)', async () => {
