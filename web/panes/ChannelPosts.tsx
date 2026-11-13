@@ -13,7 +13,8 @@ import { open, openToSide } from '../layout.ts';
 import { continuesGroup, seenBaseline, type Thread } from '../threads.ts';
 import { Markdown } from '../ui/Markdown.tsx';
 import { ChipButton, cx } from '../ui/common.tsx';
-import { Bot, Chatting, ChevronDown, CircleAlert, Clock, Loader, MessageSquare } from '../mono/icons.tsx';
+import { Bot, Chatting, ChevronDown, CircleAlert, Clock, MessageSquare } from '../mono/icons.tsx';
+import { StatusMark } from '../ui/StatusMark.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
@@ -190,7 +191,7 @@ function ThreadCard({ thread, agents, now, open: isOpen, onOpen }: { thread: Thr
   const state = waiting.length
     ? { label: `${someNames(waiting.map(a => a.name))} ${waiting.length > 1 ? 'need' : 'needs'} you`, icon: <Clock className="size-4 shrink-0 text-warning" strokeWidth={1.75} /> }
     : working.length
-      ? { label: `${someNames(working.map(a => a.name))} working`, icon: <Loader className="size-4 shrink-0 animate-spin text-content/55 motion-reduce:animate-none" strokeWidth={1.75} /> }
+      ? { label: `${someNames(working.map(a => a.name))} working`, icon: <StatusMark state="pending" /> }
       : undefined;
   const title = `${count} ${count === 1 ? 'reply' : 'replies'}`;
   return (
