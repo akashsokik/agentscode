@@ -156,7 +156,7 @@ test('one key matcher: known codes only when given, the project-code grammar, le
   assert.deepEqual(issueKeysIn('UTF-8 and ACH-9'), ['UTF-8', 'ACH-9'], 'without codes, any code (your own text only)');
   assert.deepEqual(issueKeysIn('feat/OBX2-3 and ABCDEF-4', ['OBX2', 'ABCDEF']), ['OBX2-3', 'ABCDEF-4'], 'codes like server/projectRefs.ts allows: [A-Z][A-Z0-9]{1,5}');
   assert.deepEqual(issueKeysIn('2AB-1, ABCDEFG-1'), [], 'a code starts with a letter and is at most 6 long');
-  assert.deepEqual(issueKeysIn('ACH-012 and ACH-12, ACH-0'), ['ACH-12', 'ACH-0']);
+  assert.deepEqual(issueKeysIn('ACH-012 and ACH-12, ACH-0, ACH-000'), ['ACH-12'], 'ACH-012 is ACH-12; keys start at 1, so ACH-0 is none');
   assert.deepEqual(findIssueKeys('see ALL-3', ['ACH', 'ALL']), [{ key: 'ALL-3', code: 'ALL', num: 3, index: 4 }]);
   assert.equal(firstIssueKey(['main', 'Title with OSI-2', 'Body with ACH-1'], ['ACH', 'OSI']), 'OSI-2', 'branch, then title, then body');
   assert.equal(firstIssueKey(['feat/ACH-25-x', 'OSI-2'], ['ACH', 'OSI']), 'ACH-25');
