@@ -10,10 +10,22 @@ import { TEXTAREA, TextButton } from '../../ui/common.tsx';
 import { commitEdit, descriptionToSave, TEXT_MAX, TITLE_MAX, titleToSave } from './issueViewModel.ts';
 import { writeIssue } from './issueWrites.ts';
 
-export function IssueTitle({ id, title }: { id: string; title: string }) {
+export function IssueTitle({ id, title, size = 'text-[20px]' }: {
+  id: string;
+  title: string;
+  /** Its type size: the issue view's 20px, or the Issues page hero's 18px (InboxHero heading). */
+  size?: string;
+}) {
   const [draft, setDraft] = useState(title);
   const [busy, setBusy] = useState(false);
   useEffect(() => setDraft(title), [title]);
+  // Leaving mid-edit (another issue picked) saves the typed title too: blur does not fire then.
+  const pending = useRef({ draft, title });
+  pending.current = { draft, title };
+  useEffect(() => () => {
+    const next = titleToSave(pending.current.draft, pending.current.title);
+    if (next) void writeIssue(id, { title: next });
+  }, [id]);
   const save = async () => {
     if (busy) return;
     setBusy(true);
@@ -40,7 +52,7 @@ export function IssueTitle({ id, title }: { id: string; title: string }) {
           requestAnimationFrame(() => el.blur());
         }
       }}
-      className="-mx-1 w-full resize-none overflow-hidden rounded-md bg-transparent px-1 font-sans text-[20px] font-semibold leading-tight text-content outline-none [field-sizing:content] hover:bg-content/4 focus:bg-content/5"
+      className={`-mx-1 block w-full resize-none overflow-hidden rounded-md bg-transparent px-1 font-sans ${size} font-semibold leading-tight text-content outline-none [field-sizing:content] hover:bg-content/4 focus:bg-content/5`}
     />
   );
 }
@@ -52,6 +64,15 @@ export function IssueDescription({ id, text }: { id: string; text: string }) {
   const shown = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!editing) setDraft(text); }, [text, editing]);
   const close = () => { setEditing(false); requestAnimationFrame(() => shown.current?.focus()); };
+  // Leaving with the editor open (another issue picked, the tab closed) saves the draft rather than
+  // dropping what was typed (ACH-23); an unchanged or empty draft saves nothing.
+  const pending = useRef({ editing, draft, text });
+  pending.current = { editing, draft, text };
+  useEffect(() => () => {
+    const { editing: open, draft: typed, text: saved } = pending.current;
+    const next = open ? descriptionToSave(typed, saved) : null;
+    if (next) void writeIssue(id, { text: next });
+  }, [id]);
   const save = async () => {
     if (busy) return;
     setBusy(true);

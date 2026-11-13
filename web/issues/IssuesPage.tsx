@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { isOpenIssue } from '../../shared/issues.ts';
 import { api } from '../api.ts';
 import { CircleDashed, ListFilter, Plus, SlidersHorizontal } from '../mono/icons.tsx';
@@ -6,17 +6,19 @@ import type { PopoverAnchor } from '../mono/Popover.tsx';
 import { PaneFrame, type PaneChrome } from '../panes/PaneFrame.tsx';
 import { Composer } from '../panes/SuperPanel.tsx';
 import { attempt, useApp } from '../store.ts';
-import { Empty, HeaderButton } from '../ui/common.tsx';
+import { Empty, HeaderButton, Loading } from '../ui/common.tsx';
 import { InboxFilterTabs, InboxGroup, InboxLayout, InboxList, InboxSearch } from '../ui/Inbox.tsx';
 import { DetailButton } from '../ui/PanelList.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { DisplayMenu, FilterChips, FilterMenu } from './IssueFilters.tsx';
 import { IssueCard, IssueInboxDetail } from './IssueInbox.tsx';
 import { restoreFocus } from './issueParts.tsx';
+import { propertyKey } from './view/issueViewModel.ts';
+import type { PropertySidebarHandle } from './view/PropertySidebar.tsx';
 import { showIssueInList } from './openIssue.ts';
 import { isPageKey } from './pageKeys.ts';
 import {
-  activeFilters, displayedIssues, inView, ISSUE_VIEWS, issuesPage, localDay, readDisplay, revealIssue, saveDisplay,
+  activeFilters, displayedIssues, inView, ISSUE_VIEWS, issuesPage, localDay, neighbourAfterLeaving, readDisplay, revealIssue, saveDisplay, issueToShow,
   type IssueFilters, type IssueNames, type IssueProperty, type IssuesDisplay, type IssuesViewName,
 } from './issuesView.ts';
 
@@ -59,9 +61,57 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
   const page = issuesPage(issues, { view, filters, query, display }, names, today);
   // The list in order, for the keyboard and for the first-issue fallback, as Comms does.
   const listed = page.groups.flatMap(g => g.items);
+  const listedIds = listed.map(g => g.id);
   const asked = issueId ? issues?.find(g => g.id === issueId) : undefined;
-  const selected = asked ?? listed[0];
+  // The issue the detail shows stays put while it is listed (ACH-23): a live update that reorders
+  // the list never swaps it by itself (issuesView.ts issueToShow).
+  const lastShown = useRef<string | undefined>(undefined);
+  const shownId = issueToShow(listedIds, issueId, Boolean(asked), lastShown.current);
+  const selected = shownId ? issues?.find(g => g.id === shownId) : undefined;
+  const sidebar = useRef<PropertySidebarHandle>(null);
+  // In a narrow pane, moving with the keyboard only highlights (the list stays); a click, Enter, or
+  // an issue asked for from elsewhere opens the detail, as picking on purpose does in Comms.
+  const [peek, setPeek] = useState(false);
+  const movedTo = useRef<string | undefined>(undefined);
+  const detailOpen = Boolean(asked) && !peek;
+  const lastFocusedCard = useRef<string | undefined>(undefined);
   const focusCard = (id: string) => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: false }));
+  /** Select an issue on purpose (a click, Enter): the detail opens, in a narrow pane too. */
+  const select = (id: string) => { movedTo.current = undefined; setPeek(false); showIssueInList(id); };
+  /** Select without opening a narrow pane's detail (the arrows, J/K, a neighbour after a removal). */
+  const highlight = (id: string) => { movedTo.current = id; showIssueInList(id); };
+  /** Esc in the detail, or its Back: to the list, on the issue it showed. */
+  // The issue stays selected (the right panel keeps marking it); only a narrow pane swaps back.
+  const back = () => {
+    setPeek(true);
+    if (selected) focusCard(selected.id);
+  };
+  useEffect(() => { if (issueId && issueId !== movedTo.current) setPeek(false); }, [issueId]);
+  // When the shown issue leaves the list on its own (removed, canceled out of the view), select its
+  // neighbour; when the card that had focus left, focus its neighbour. Not when the view, filters or
+  // search changed: that is the user narrowing the list.
+  const listKey = JSON.stringify([view, filters, query, display]);
+  const before = useRef<{ ids: string[]; key: string } | null>(null);
+  useLayoutEffect(() => {
+    const prev = before.current;
+    before.current = { ids: listedIds, key: listKey };
+    if (!prev || prev.key !== listKey) return;
+    const was = lastShown.current;
+    const next = was ? neighbourAfterLeaving(prev.ids, listedIds, was) : null;
+    if (next) highlight(next);
+    const focused = lastFocusedCard.current;
+    const lost = !document.activeElement || document.activeElement === document.body;
+    const nextFocus = focused && lost ? neighbourAfterLeaving(prev.ids, listedIds, focused) : null;
+    if (nextFocus) focusCard(nextFocus);
+    // Only when the list itself changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listedIds.join(' '), listKey]);
+  useLayoutEffect(() => { lastShown.current = selected?.id; });
+  // A new view, filter or search starts the list at its top, as MonoCode's inbox does.
+  useEffect(() => {
+    const scroller = root.current?.querySelector('ul[aria-label="Issues"]')?.parentElement;
+    if (scroller) scroller.scrollTop = 0;
+  }, [view, filters, query]);
   // An issue asked for (from the right panel, say): make sure its card shows, then focus it.
   useEffect(() => {
     if (!asked) return;
@@ -86,7 +136,7 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
   const move = (step: -1 | 1) => {
     const at = listed.findIndex(g => g.id === selected?.id);
     const next = listed[Math.max(0, Math.min(listed.length - 1, at + step))];
-    if (next) showIssueInList(next.id);
+    if (next) { setPeek(true); highlight(next.id); }
     return next?.id;
   };
 
@@ -97,9 +147,21 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
   };
   // J and K move the selection in the rail, as the arrow keys do (InboxLayout's onRailKeyDown).
   const onRailKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!isPageKey(e) || e.shiftKey || (e.key !== 'j' && e.key !== 'k')) return;
-    const id = move(e.key === 'j' ? 1 : -1);
-    if (id) { e.preventDefault(); focusCard(id); }
+    if (!isPageKey(e) || e.shiftKey) return;
+    if (e.key === 'j' || e.key === 'k') {
+      const id = move(e.key === 'j' ? 1 : -1);
+      if (id) { e.preventDefault(); focusCard(id); }
+      return;
+    }
+    // S, P, D and L work on the selected issue from the list too, as in its detail (ACH-23).
+    const property = propertyKey(e, e.target);
+    if (!property || !selected) return;
+    e.preventDefault();
+    // A narrow pane shows the detail first, so the picker opens on its row.
+    if (!detailOpen) {
+      select(selected.id);
+      requestAnimationFrame(() => requestAnimationFrame(() => sidebar.current?.open(property)));
+    } else sidebar.current?.open(property);
   };
 
   const title = (
@@ -123,14 +185,19 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
 
   return (
     <PaneFrame chrome={chrome} title={title} actions={actions}>
-      <div ref={root} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col font-sans">
-        {issues && !issues.length && !adding ? (
+      <div
+        ref={root}
+        onKeyDown={onKeyDown}
+        onFocus={e => { const id = (e.target as HTMLElement).dataset?.inboxId; if (id) lastFocusedCard.current = id; }}
+        className="flex min-h-0 flex-1 flex-col font-sans"
+      >
+        {!issues ? <Loading /> : !issues.length && !adding ? (
           <Empty icon={CircleDashed} title="No issues yet" action={<DetailButton onClick={() => setAdding(true)}>Add issue</DetailButton>}>
             Issues are what you want done. The SuperAgent works through them top down, giving each to a free agent.
           </Empty>
         ) : (
           <InboxLayout
-            detailOpen={Boolean(asked)}
+            detailOpen={detailOpen}
             onRailKeyDown={onRailKeyDown}
             toolbar={<>
               {/* Counts only where they need you (Mine), as the Pull requests rail: four labels fit the rail's width then. */}
@@ -151,12 +218,12 @@ export function IssuesPage({ chrome, issueId }: { chrome: PaneChrome; /** The se
                 {page.groups.map(g => (
                   <Fragment key={g.key}>
                     {display.groupBy !== 'none' ? <InboxGroup label={g.label} count={g.items.length} /> : null}
-                    {g.items.map(issue => <IssueCard key={issue.id} issue={issue} active={selected?.id === issue.id} properties={display.properties} today={today} now={now} />)}
+                    {g.items.map(issue => <IssueCard key={issue.id} issue={issue} active={selected?.id === issue.id} onSelect={() => select(issue.id)} properties={display.properties} today={today} now={now} />)}
                   </Fragment>
                 ))}
               </InboxList>
             )}
-            detail={selected && issues ? <IssueInboxDetail key={selected.id} issue={selected} issues={issues} now={now} /> : null}
+            detail={selected && issues ? <IssueInboxDetail key={selected.id} issue={selected} issues={issues} now={now} sidebar={sidebar} onBack={back} /> : null}
           />
         )}
       </div>

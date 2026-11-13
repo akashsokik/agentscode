@@ -4,7 +4,7 @@ import type { SuperIssue } from '../shared/types.ts';
 import {
   activeFilters, chipText, clearFilter, DEFAULT_DISPLAY, displayedIssues, displayFrom, dueBucket, filterOptions, groupIssues, inView, issuesPage, localDay,
   matchesFilters, matchesQuery, NONE, readDisplay, saveDisplay, sortIssues, toggleFilter, YOU, type IssuesDisplay,
-  revealIssue,
+  neighbourAfterLeaving, revealIssue, issueToShow,
 } from '../web/issues/issuesView.ts';
 import { isPageKey } from '../web/issues/pageKeys.ts';
 import { knownTabs, tabKey, TAB_KINDS } from '../web/layout.ts';
@@ -227,11 +227,20 @@ test('the Issues page is the shared inbox layout: a card click selects the issue
   assert.match(page, /<InboxList label="Issues" onMove=\{move\}/, 'the arrow keys move the selection');
   assert.match(page, /onRailKeyDown=\{onRailKeyDown\}/, 'J and K move it too, only from the rail (Cy\'s onRailKeyDown), not from the detail');
   assert.match(page, /detail=\{selected && issues \? <IssueInboxDetail key=\{selected\.id\}/, 'the selected issue (or the first, as Comms) shows on the right');
-  assert.match(page, /detailOpen=\{Boolean\(asked\)\}/, 'in a narrow pane, the detail replaces the list once one is picked');
+  assert.match(page, /detailOpen=\{detailOpen\}/);
+  assert.match(page, /const detailOpen = Boolean\(asked\) && !peek;/, 'in a narrow pane, the detail replaces the list once one is picked on purpose, not while the arrows move (ACH-23)');
+  assert.match(page, /const select = \(id: string\) => \{ movedTo\.current = undefined; setPeek\(false\); showIssueInList\(id\); \};/, 'a click selects the issue in the page and opens its detail');
+  assert.match(page, /onSelect=\{\(\) => select\(issue\.id\)\}/);
+  assert.match(page, /\{!issues \? <Loading \/>/, 'while the issues load, Loading, not "Nothing is active" (ACH-23)');
   assert.doesNotMatch(page, /PanelRow|IssueRow|openIssue\(/, 'no inline rows, no jump to a tab');
   const inbox = read('../web/issues/IssueInbox.tsx');
   assert.match(inbox, /<InboxCard\b[\s\S]*?onSelect=\{select\}/);
-  assert.match(inbox, /const select = \(\) => showIssueInList\(issue\.id\);/, 'a click selects the issue in the page');
+  assert.match(inbox, /const select = onSelect;/, 'a click selects through the page');
+  assert.match(inbox, /isMenuKey\(e\)[\s\S]*?setMenu\(e\.target as HTMLElement\)/, 'the card menu opens from the keyboard (ACH-23)');
+  assert.match(inbox, /<InboxBarButton\b[\s\S]*?label=\{copied \? 'Copied' : 'Copy key'\}/, 'Copy key sits in the bar, as Comms\' Stop (ACH-23)');
+  assert.match(inbox, /heading=\{<IssueTitle id=\{issue\.id\} title=\{issue\.title\} size="text-\[18px\]" \/>\}/, 'the title edits in place in the hero (Cy\'s heading slot, ACH-23)');
+  assert.match(inbox, /copyKey=\{false\}/, 'and not twice: the properties leave their Copy key row out here');
+  assert.match(inbox, /if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); onBack\(\); return; \}/, 'Esc in the detail goes back to the list (MonoCode closes its detail on Esc)');
   assert.match(inbox, /<InboxDetail\b/);
   // Only CommsPane's own parts (the user, via Cy): stacked sections, no tabs, no MonoCode action buttons.
   assert.doesNotMatch(inbox, /InboxTabs|ACTION_(FILLED|OUTLINE|GHOST)/, 'nothing Comms does not use');
@@ -278,4 +287,20 @@ test('the right panel keeps the SuperAgent\'s tabs while the Issues page, an iss
   const panel = readFileSync(new URL('../web/right/RightPanel.tsx', import.meta.url), 'utf8');
   assert.match(panel, /const followsSuper = keepsSuperPanel\(focusedKind\(layout\)\);/);
   assert.match(panel, /followsSuper \? s\.snapshot\?\.agents\.find\(a => a\.role === 'super'\)/, 'the panel takes the SuperAgent as its agent then');
+});
+
+test('the detail keeps its issue: the asked one while it exists, else the last shown while listed, else the first (ACH-23)', () => {
+  assert.equal(issueToShow(['a', 'b'], 'x', true, 'a'), 'x', 'asked for, even if a filter hides it');
+  assert.equal(issueToShow(['b', 'a'], undefined, false, 'a'), 'a', 'a live update reorders the list: the detail stays');
+  assert.equal(issueToShow(['b', 'c'], 'gone', false, 'a'), 'b', 'the last shown left: the first listed');
+  assert.equal(issueToShow([], undefined, false, 'a'), undefined);
+});
+
+test('when the shown issue leaves the list, the selection goes to its neighbour as the list stood (ACH-23)', () => {
+  assert.equal(neighbourAfterLeaving(['a', 'b', 'c'], ['a', 'c'], 'b'), 'c', 'the next one');
+  assert.equal(neighbourAfterLeaving(['a', 'b', 'c'], ['a', 'b'], 'c'), 'b', 'the last: the one before');
+  assert.equal(neighbourAfterLeaving(['a', 'b', 'c'], ['a'], 'b'), 'a', 'the next left too: the nearest before');
+  assert.equal(neighbourAfterLeaving(['a', 'b'], ['a', 'b'], 'b'), null, 'still listed');
+  assert.equal(neighbourAfterLeaving(['a'], [], 'a'), null, 'nothing left');
+  assert.equal(neighbourAfterLeaving(['a'], ['a'], 'z'), null, 'was not listed');
 });

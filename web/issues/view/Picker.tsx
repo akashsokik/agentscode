@@ -3,7 +3,7 @@
  * never a check (ACH-D46 option B). ↑ ↓ move, ⏎ picks, ⎋ closes. MenuRow's `active` and
  * `current` draw the keyboard row and the value in force (ACH-D49).
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Popover } from '../../mono/Popover.tsx';
 import { MenuRow, MenuRowRole } from '../../ui/common.tsx';
 import { matchesQuery } from './issueViewModel.ts';
@@ -16,11 +16,13 @@ export function Picker({ anchor, label, options, current, onPick, onClose, heade
   const shown = useMemo(() => options.filter(o => matchesQuery(o.label, query)), [options, query]);
   const [at, setAt] = useState(() => Math.max(0, options.findIndex(o => o.value === current)));
   useEffect(() => setAt(i => Math.min(i, Math.max(0, shown.length - 1))), [shown.length]);
+  const field = useRef<HTMLInputElement>(null);
+  useFocusWhenPlaced(field);
   return (
     <Popover anchor={anchor} side="bottom" align="start" width={width} onDismiss={onClose} className="p-1.5">
       {header}
       <input
-        autoFocus
+        ref={field}
         aria-label={`Find a ${label.toLowerCase()}`}
         placeholder={`${label}…`}
         value={query}
@@ -53,3 +55,21 @@ export function Picker({ anchor, label, options, current, onPick, onClose, heade
   );
 }
 
+
+/**
+ * Focus a field in a Popover once it is placed. The Popover measures its first pass hidden
+ * (visibility: hidden), and a hidden field cannot take focus, so autoFocus never landed: the
+ * picker opened with the keys still on the row behind it (ACH-23).
+ */
+export function useFocusWhenPlaced(field: { current: HTMLElement | null }) {
+  useEffect(() => {
+    // Placing can take a frame or two (the surface is measured, then moved): try until it lands.
+    let frame = 0;
+    const attempt = (left: number) => {
+      field.current?.focus({ preventScroll: true });
+      if (document.activeElement !== field.current && left > 0) frame = requestAnimationFrame(() => attempt(left - 1));
+    };
+    frame = requestAnimationFrame(() => attempt(5));
+    return () => cancelAnimationFrame(frame);
+  }, [field]);
+}
