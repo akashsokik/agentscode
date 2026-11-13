@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ChannelPost, Entry, PeerMessage } from '../shared/types.ts';
+import { issueKeysIn } from '../shared/issueKeys.ts';
+import type { SuperIssue, ChannelPost, Entry, PeerMessage } from '../shared/types.ts';
 import { findRefIds, type RefCitation } from '../shared/refs.ts';
 import type { Store } from './store.ts';
 
@@ -26,6 +27,8 @@ import type { Store } from './store.ts';
 
 interface Cited {
   ids: string[];
+  issueKeys?: string[];
+  replyTo?: string;
   ts: number;
   /** The author: an agent id, or "user". */
   author: string;
@@ -34,6 +37,24 @@ interface Cited {
   /** For a peer entry: the message it copies. */
   messageId?: string;
 }
+
+/** A branch commit supplied by IssueLinks' bounded read-only branch scan. */
+export interface RefCommit {
+  projectId: string;
+  hash: string;
+  branch: string;
+  text: string;
+  author: string;
+  at: number;
+  issueKeys: string[];
+}
+
+/** Commit sources are exposed on the issue links API, without changing Notes' chat targets. */
+export type IssueDecisionCitation = RefCitation | {
+  key: string; ts: number; source: 'commit'; who: string;
+  projectId: string; hash: string; branch: string; subject: string;
+};
+export interface IssueDecisionLink { id: string; citations: IssueDecisionCitation[] }
 
 interface FileState {
   offset: number;
@@ -71,12 +92,17 @@ function messageWhere(message: PeerMessage): string {
 
 export class RefMentions {
   private files = new Map<string, FileState>();
+  private commits = new Map<string, RefCommit[]>();
   private readonly dir: string;
   private store: Store;
 
   constructor(store: Store, transcriptsDir = path.join(store.dataDir, 'transcripts')) {
     this.store = store;
     this.dir = transcriptsDir;
+  }
+
+  private issueKeys(text: string): string[] {
+    return issueKeysIn(text, ['ALL', ...[...this.store.projects.values()].flatMap(p => p.code ? [p.code] : [])]);
   }
 
   private agentName(agentId: string): string {
@@ -154,7 +180,11 @@ export class RefMentions {
       const ids = this.ids(text);
       if (ids.length) cited = { ids, ts: message.ts, author: message.fromAgentId, hash: hashText(text), messageId: message.id, citation: { source: 'message', agentId: message.fromAgentId, who: message.fromName, where: messageWhere(message), open: { kind: 'comms', conversationId: message.conversationId } } };
     }
-    if (cited) state.cited.set(id, cited);
+    if (cited) {
+      cited.issueKeys = this.issueKeys(entry.peer ? messageText(entry.peer) : entry.text ?? '');
+      if (entry.peer?.replyTo) cited.replyTo = entry.peer.replyTo;
+      state.cited.set(id, cited);
+    }
     else state.cited.delete(id);
   }
 
@@ -163,11 +193,13 @@ export class RefMentions {
   }
 
   /** Every citation of any id, deduplicated, newest first. */
-  private all(): (Cited & { key: string })[] {
+  private all(issue?: Pick<SuperIssue, 'key' | 'delegationId'>): (Cited & { key: string })[] {
     this.refresh();
     const out: (Cited & { key: string })[] = [];
     const seen = new Set<string>();
     const add = (key: string, cited: Cited) => {
+      // Bind before deduplication: identical reports for different handoffs have different targets.
+      if (issue && !cited.issueKeys?.includes(issue.key) && !(issue.delegationId && (cited.messageId === issue.delegationId || cited.replyTo === issue.delegationId))) return;
       const same = `${cited.author}|${cited.hash}`;
       if (seen.has(same)) return;
       seen.add(same);
@@ -181,7 +213,7 @@ export class RefMentions {
       const text = messageText(message);
       const ids = this.ids(text);
       if (!ids.length) continue;
-      add(`message:${message.id}`, { ids, ts: message.ts, author: message.fromAgentId, hash: hashText(text), citation: { source: 'message', agentId: message.fromAgentId, who: message.fromName, where: messageWhere(message), open: { kind: 'comms', conversationId: message.conversationId } } });
+      add(`message:${message.id}`, { ids, issueKeys: this.issueKeys(text), messageId: message.id, replyTo: message.replyTo, ts: message.ts, author: message.fromAgentId, hash: hashText(text), citation: { source: 'message', agentId: message.fromAgentId, who: message.fromName, where: messageWhere(message), open: { kind: 'comms', conversationId: message.conversationId } } });
     }
     for (const [channelId, posts] of this.store.posts) {
       const channel = this.store.channels.get(channelId);
@@ -204,10 +236,44 @@ export class RefMentions {
     const author = post.from === 'user' ? 'user' : post.agentId ?? post.fromName;
     add(`post:${post.channelId}:${post.id}`, {
       ids,
+      issueKeys: this.issueKeys(post.text),
       ts: post.ts,
       author,
       hash: hashText(post.text),
       citation: { source: 'channel', agentId: post.from === 'agent' ? post.agentId : undefined, who: post.from === 'user' ? 'You' : post.fromName, where: `in #${channelName}`, open: { kind: 'channel', channelId: post.channelId } },
+    });
+  }
+
+  /** Replace one project's commit sources after a successful fresh branch scan. */
+  setCommits(projectId: string, commits: RefCommit[]): void {
+    this.commits.set(projectId, commits.filter(c => c.projectId === projectId));
+  }
+
+  /** Decisions in an issue's handoffs, reports, chats and branch commits (notes are excluded). */
+  issueDecisions(issue: Pick<SuperIssue, 'key' | 'projectId' | 'delegationId'>): IssueDecisionLink[] {
+    const links = new Map<string, IssueDecisionCitation[]>();
+    const add = (ids: string[], citation: IssueDecisionCitation) => {
+      for (const id of ids.filter(id => /-D[1-9]\d*$/.test(id))) {
+        const sources = links.get(id) ?? [];
+        if (!sources.some(c => c.key === citation.key)) sources.push(citation);
+        links.set(id, sources);
+      }
+    };
+    for (const c of this.all(issue)) {
+      add(c.ids, { key: c.key, ts: c.ts, ...c.citation });
+    }
+    for (const c of this.commits.get(issue.projectId ?? '') ?? []) {
+      if (!c.issueKeys.includes(issue.key)) continue;
+      add(this.ids(c.text), { key: `commit:${c.projectId}:${c.hash}`, ts: c.at, source: 'commit', who: c.author, projectId: c.projectId, hash: c.hash, branch: c.branch, subject: c.text.split('\n', 1)[0].trim() });
+    }
+    return [...links].sort(([a], [b]) => a.localeCompare(b)).map(([id, citations]) => ({ id, citations: citations.sort((a, b) => b.ts - a.ts) }));
+  }
+
+  /** The reverse lookup for the Notes tab, carrying the same evidence as the issue view. */
+  decisionIssues(id: string, issues: readonly SuperIssue[]): { issueId: string; key: string; title: string; citations: IssueDecisionCitation[] }[] {
+    return issues.flatMap(issue => {
+      const link = this.issueDecisions(issue).find(link => link.id === id);
+      return link ? [{ issueId: issue.id, key: issue.key, title: issue.title, citations: link.citations }] : [];
     });
   }
 
