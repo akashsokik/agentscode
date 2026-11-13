@@ -1,3 +1,4 @@
+import { pushGuardEnv } from '../pushGuard.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -276,7 +277,8 @@ export class OrcacodeRunner implements Runner {
 
     const child = spawn(this.ctx.binPath, args, {
       cwd: this.ctx.cwd,
-      env: { ...process.env, NO_COLOR: '1' },
+      // git in the agent's shell runs PodCode's push check (server/pushGuard.ts, ALL-D9).
+      env: { ...pushGuardEnv(process.env), NO_COLOR: '1' },
       stdio: [asks ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     });
     this.child = child;

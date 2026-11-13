@@ -473,12 +473,17 @@ export class SuperStore {
     this.write({ ...stored, issues: before ? [...rest, before] : rest });
   }
 
+  /** An approval used by a step: never again. */
+  consumeAsk(id: string, by: string, now = Date.now()): void {
+    const stored = this.read();
+    this.write({ ...stored, asks: stored.asks.map(a => (a.id === id ? { ...a, consumedAt: now, consumedBy: by } : a)) });
+  }
 
   openAsks(): SuperAsk[] {
     return this.read().asks.filter(isOpen);
   }
 
-  ask(input: { question: string; detail?: string; options: string[] }, now = Date.now()): SuperAsk {
+  ask(input: { question: string; detail?: string; options: string[]; forAction?: SuperAsk['forAction'] }, now = Date.now()): SuperAsk {
     const stored = this.read();
     const open = stored.asks.filter(isOpen);
     if (open.length >= MAX_OPEN_ASKS) throw new HttpError(409, `${MAX_OPEN_ASKS} questions already wait for the user. Wait for answers before asking more.`);
@@ -487,6 +492,7 @@ export class SuperStore {
     const ask: SuperAsk = {
       id: randomUUID().slice(0, 8), question, ...(input.detail?.trim() ? { detail: input.detail.trim() } : {}),
       options: [...new Set(input.options.map(o => o.trim()).filter(Boolean))], createdAt: now,
+      ...(input.forAction ? { forAction: { ...input.forAction, target: input.forAction.target.trim() } } : {}),
     };
     this.write({ ...stored, asks: [ask, ...stored.asks] });
     return ask;
@@ -771,7 +777,7 @@ export function updatePrompt(events: SuperEvent[], openAsks: SuperAsk[], now: nu
     ...waited,
     ...backlog,
     '',
-    'Decide the next actions by the user\'s preferences: act on your own where you may, use ask_user for the rest. If nothing needs doing, reply in one line.',
+    'Decide the next actions by the user\'s preferences: act on your own as your Autonomy section allows (take_action), and use ask_user only for what it says to ask first. If nothing needs doing, reply in one line.',
   ].join('\n');
 }
 
@@ -837,6 +843,8 @@ export class SuperWatcher {
    * hours, or a budget used up. Updates, and agent mail about work it started on its own, wait on this.
    */
   held(): string | null {
+    // Paused by the user (ALL-D9): nothing it would start on its own, whatever the other limits say.
+    if (this.host.settings().superPaused) return 'you paused it';
     return this.wakeHeld() ?? this.dailyHeld();
   }
 

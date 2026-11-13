@@ -1,3 +1,4 @@
+import { disablesPushGuard, pushGuardEnv } from '../pushGuard.ts';
 import { ISSUE_TOOL_ALIASES } from '../../shared/issues.ts';
 import {
   query,
@@ -103,6 +104,10 @@ export function ownFileProblem(home: string | undefined, cwd: string, toolName: 
   const own = homes.some(h => inside(h, file) && reservedHomeFile(path.relative(h, file)));
   if (!own && homes.some(h => PROFILE_FILE.test(path.relative(path.dirname(path.dirname(h)), file)))) {
     return 'That is the user profile, which every agent shares: change it with remember and forget (scope "user"), or ask the user to edit it in PodCode.';
+  }
+  // PodCode's push check (data dir git-hooks/, ALL-D9): only PodCode writes it.
+  if (homes.some(h => inside(path.join(path.dirname(path.dirname(h)), 'git-hooks'), file))) {
+    return 'That is PodCode\'s push check, which only PodCode writes. Pushes that overwrite or delete pushed history need the user\'s approval; push a new commit instead.';
   }
   return own
     ? 'That file is in your PodCode home, which only PodCode and the user edit: soul.md is the user\'s standing instructions, and memory changes go through the remember and forget tools. Ask the user if soul.md should change.'
@@ -337,7 +342,9 @@ export class ClaudeRunner implements Runner {
         allowDangerouslySkipPermissions: this.startedWithBypass || undefined,
         canUseTool: this.canUseTool,
         // soul.md, memory.md and the dream records are off limits to edit tools in every mode.
-        hooks: { PreToolUse: [{ matcher: Object.keys(EDIT_TOOLS).join('|'), hooks: [this.guardOwnFiles] }] },
+        hooks: { PreToolUse: [{ matcher: Object.keys(EDIT_TOOLS).join('|'), hooks: [this.guardOwnFiles] }, { matcher: 'Bash', hooks: [this.guardPushCheck] }] },
+        // git in the agent's shell runs PodCode's push check (server/pushGuard.ts, ALL-D9).
+        env: pushGuardEnv(process.env) as Record<string, string>,
         // Load CLAUDE.md, settings and plugins like a normal Claude Code session...
         settingSources: ['user', 'project', 'local'],
         // ...but skip MCP servers unless asked: they can add ~200k tokens of tool definitions.
@@ -491,6 +498,16 @@ export class ClaudeRunner implements Runner {
     if (input.hook_event_name !== 'PreToolUse') return {};
     const problem = ownFileProblem(this.ctx.agent().home, this.ctx.cwd, input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>);
     return problem ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: problem } } : {};
+  };
+
+  /** A shell command that would turn the push check off is refused, in every mode, and logged (ALL-D9). */
+  private guardPushCheck: HookCallback = async input => {
+    if (input.hook_event_name !== 'PreToolUse' || input.tool_name !== 'Bash') return {};
+    const command = String((input.tool_input as { command?: unknown } | undefined)?.command ?? '');
+    const problem = disablesPushGuard(command);
+    if (!problem) return {};
+    console.warn(`[push-guard] refused for ${this.ctx.agent().name}: ${problem}: ${command.slice(0, 200)}`);
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `PodCode refused this: ${problem}. Pushes that overwrite or delete pushed history need the user's approval; push a new commit instead.` } };
   };
 
   private canUseTool: CanUseTool = async (toolName, input, options) => {

@@ -98,7 +98,7 @@ test('its commands are its alone, and it only looks at pages', async () => {
 test('create_agent: the role\'s own permissions, a project by name, a daily cap, logged with an undo', async () => {
   const t = await team();
   const MAX_CREATES_PER_DAY = 3;
-  t.manager.updateSettings({ superMaxCreatesPerDay: MAX_CREATES_PER_DAY });
+  t.manager.updateSettings({ superMaxCreatesPerDay: MAX_CREATES_PER_DAY, superAutonomy: 'standard' }); // the cap holds on Ask and Standard
   const result = await t.call('create_agent', { name: 'Tess', role: 'tester', project: 'WEB', task: 'Run the tests.', why: 'The user wants tests before merging.' }) as { created: { id: string; autonomy: string; projectIds: string[] | null } };
   assert.equal(result.created.autonomy, 'edits', 'a tester\'s default, never Full access');
   assert.deepEqual(result.created.projectIds, [t.web.id]);
