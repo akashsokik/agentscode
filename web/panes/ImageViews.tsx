@@ -1,43 +1,15 @@
 /**
  * Attached images, after MonoCode's AttachmentChip and ImageLightbox (https://github.com/hardbeat920/monocode,
  * src/features/sessions/ui/AttachmentChip.tsx, MIT License): a small thumbnail with a remove button
- * in the composer, a larger photo in the transcript, and either opens full screen.
+ * in the composer, a larger photo in the transcript, and either opens in the shared image viewer
+ * (ImageViewer on ZoomViewer, ACH-D39): zoom, pan, fit, Escape (ACH-38).
  */
-import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useState } from 'react';
 import type { ImageAttachment } from '../../shared/types.ts';
 import { attachmentUrl } from '../api.ts';
 import { AlertCircle, File, X } from '../mono/icons.tsx';
-import { LAYER } from '../mono/layers.ts';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
-
-/** The image on its own over a dimmed app. Escape or a click anywhere closes it. */
-export function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      // Handled here, so an open thread or dialog underneath does not also close.
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={alt}
-      onClick={onClose}
-      style={{ zIndex: LAYER.dialog }}
-      className="fixed inset-0 grid cursor-zoom-out place-items-center bg-black/80 p-8"
-    >
-      <img src={src} alt={alt} className="max-h-full max-w-full rounded-lg object-contain" />
-    </div>,
-    document.body,
-  );
-}
+import { ImageViewer } from '../ui/ImageViewer.tsx';
 
 /** An image in the composer, before it is sent: uploading, ready or failed, with a way to remove it. */
 export function AttachmentChip({ name, preview, uploading, error, onRemove }: {
@@ -76,7 +48,7 @@ export function AttachmentChip({ name, preview, uploading, error, onRemove }: {
       >
         <X className="size-3" strokeWidth={2} />
       </button>
-      {open ? <ImageLightbox src={preview} alt={name} onClose={() => setOpen(false)} /> : null}
+      {open ? <ImageViewer src={preview} title={name} onClose={() => setOpen(false)} /> : null}
     </div>
   );
 }
@@ -132,7 +104,7 @@ export function MessageImages({ agentId, url, images, align = 'end' }: {
   return (
     <div className={`flex max-w-full flex-wrap items-end gap-1.5 pb-1.5 ${align === 'start' ? 'justify-start' : 'justify-end'}`}>
       {images.map(image => <SentPhoto key={image.id} image={image} src={src(image)} small={images.length > 1} onOpen={shown => setOpen({ image, src: shown })} />)}
-      {open ? <ImageLightbox src={open.src} alt={open.image.name} onClose={() => setOpen(null)} /> : null}
+      {open ? <ImageViewer src={open.src} title={open.image.name} onClose={() => setOpen(null)} /> : null}
     </div>
   );
 }
