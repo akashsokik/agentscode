@@ -10,9 +10,10 @@ import { openUiLive } from '../openuiTrust.ts';
 import { rehypeRefChips } from './rehypeRefChips.ts';
 import { RefChip } from '../notes/RefChip.tsx';
 import { isKnownRef, useNotes } from '../notes/refsState.ts';
+import { IssueKeyChip, isKnownIssueKey, useIssueKeysKey } from './IssueKeyChip.tsx';
 
 const remarkPlugins = [remarkGfm];
-const refChips = [rehypeRefChips, { known: isKnownRef }];
+const refChips = [rehypeRefChips, { known: isKnownRef, issue: isKnownIssueKey }];
 const rehypePlugins = [[rehypeHighlight, { detect: false }], refChips] as never;
 // Chips first, so word fading treats each chip as one word.
 const wordRehypePlugins = [[rehypeHighlight, { detect: false }], refChips, rehypeWordFade] as never;
@@ -32,6 +33,8 @@ function componentsFor(fromAnotherAgent: boolean): Components {
     span: ({ node, ...props }) => {
       const ref = node?.properties?.dataRef;
       if (typeof ref === 'string') return <RefChip id={ref} fade={node?.properties?.dataWordFade !== undefined} />;
+      const issueKey = node?.properties?.dataIssueKey;
+      if (typeof issueKey === 'string') return <IssueKeyChip issueKey={issueKey} fade={node?.properties?.dataWordFade !== undefined} />;
       return <span {...props} />;
     },
     pre: ({ node, ...props }) => {
@@ -76,7 +79,9 @@ export const Markdown = memo(function Markdown({ text, className = '', words = f
 }) {
   // Text is parsed again when an id is added or removed, so new ids become chips in old messages.
   const ids = useNotes(s => s.idsKey);
-  const rehype = useMemo(() => (words ? [...(wordRehypePlugins as unknown[])] : [...(rehypePlugins as unknown[])]) as never, [words, ids]);
+  // And when an issue is added or removed, so its key becomes a chip, or text again.
+  const issueKeys = useIssueKeysKey();
+  const rehype = useMemo(() => (words ? [...(wordRehypePlugins as unknown[])] : [...(rehypePlugins as unknown[])]) as never, [words, ids, issueKeys]);
   return (
     <div className={`agent-markdown min-w-0 font-sans text-sm leading-6 ${className}`}>
       <ReactMarkdown

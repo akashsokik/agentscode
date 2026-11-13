@@ -1,4 +1,4 @@
-import { open, type TabContent } from '../layout.ts';
+import { open, type Layout, type TabContent } from '../layout.ts';
 
 // Opening an issue (ACH-D43 section C): the full issue view in a tab, with its properties sidebar
 // (web/issues/IssueView.tsx). Both issue lists, the Issues page and the right panel's tab, open
@@ -20,4 +20,16 @@ export function openIssue(issueId: string): void {
  */
 export function showIssueInList(issueId: string): void {
   open({ kind: 'issues', issueId });
+}
+
+/**
+ * The issue in front: the one selected on the Issues page, or open in its own tab, in the focused
+ * pane. The right panel's list marks its row, so you can see where you are (Phase 6, ACH-23).
+ */
+export function shownIssueId(layout: Layout): string | null {
+  const pane = layout.panes.find(p => p.id === layout.focused);
+  const content = layout.tabs.find(t => t.id === pane?.tabId)?.content;
+  if (content?.kind === 'issues') return content.issueId ?? null;
+  if (content?.kind === 'issue') return content.issueId;
+  return null;
 }
