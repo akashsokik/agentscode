@@ -47,8 +47,12 @@ export function useHoverCard() {
 }
 
 /** The card itself, portalled to the page; `deps` re-measure it when its content changes. */
-export function HoverCard({ id, anchor, onEnter, onLeave, onClose, deps, children }: {
+export function HoverCard({ id, anchor, onEnter, onLeave, onClose, deps, width = CARD_WIDTH, padding = 'p-3.5', children }: {
   id: string;
+  /** The card's width in px (360, a chip's); a list card such as an agent's projects is narrower. */
+  width?: number;
+  /** Its inner padding: a chip's card is padded all round, a list card pads its rows. */
+  padding?: string;
   anchor: HTMLElement | null;
   onEnter: () => void;
   onLeave: () => void;
@@ -64,12 +68,12 @@ export function HoverCard({ id, anchor, onEnter, onLeave, onClose, deps, childre
     const rect = anchor.getBoundingClientRect();
     if (!anchor.isConnected || rect.bottom < 0 || rect.top > window.innerHeight) { onClose(); return; }
     const height = card.current.offsetHeight;
-    const width = Math.min(CARD_WIDTH, window.innerWidth - MARGIN * 2);
-    const left = Math.max(MARGIN, Math.min(rect.left, window.innerWidth - width - MARGIN));
+    const w = Math.min(width, window.innerWidth - MARGIN * 2);
+    const left = Math.max(MARGIN, Math.min(rect.left, window.innerWidth - w - MARGIN));
     const below = rect.bottom + GAP;
     const top = below + height > window.innerHeight - MARGIN && rect.top - GAP - height > MARGIN ? rect.top - GAP - height : below;
     setPlace(p => (p && p.left === left && p.top === top ? p : { left, top }));
-  }, [anchor, onClose]);
+  }, [anchor, onClose, width]);
   useLayoutEffect(measure, [measure, deps]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
@@ -91,8 +95,8 @@ export function HoverCard({ id, anchor, onEnter, onLeave, onClose, deps, childre
       role="tooltip"
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      style={{ position: 'fixed', left: place?.left ?? -9999, top: place?.top ?? -9999, width: Math.min(CARD_WIDTH, window.innerWidth - MARGIN * 2), zIndex: LAYER.popover }}
-      className="rounded-[10px] border border-content/10 bg-background-base p-3.5 font-sans text-content"
+      style={{ position: 'fixed', left: place?.left ?? -9999, top: place?.top ?? -9999, width: Math.min(width, window.innerWidth - MARGIN * 2), zIndex: LAYER.popover }}
+      className={`rounded-[10px] border border-content/10 bg-background-base font-sans text-content ${padding}`}
     >
       {children}
     </div>,
