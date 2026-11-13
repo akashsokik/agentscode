@@ -9,6 +9,7 @@ import { HttpError } from '../server/errors.ts';
 import { SuperStore, updatePrompt, type SuperWatcher } from '../server/superAgent.ts';
 import { issueSections } from '../web/superText.ts';
 import { harness, projectDir, settle, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 function status(error: unknown): number {
   assert.ok(error instanceof HttpError, `expected HttpError, got ${String(error)}`);
@@ -205,7 +206,7 @@ test('the daily creation cap is a setting: 25 by default, checked', () => {
 
 test('the user manages issues over HTTP: add, edit, reorder, remove', async () => {
   const t = await team();
-  const server = createApp(t.manager).listen(0, '127.0.0.1');
+  const server = createApp(t.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/super/issues`;
   const send = (url: string, method: string, body?: unknown) => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });

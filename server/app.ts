@@ -1,4 +1,5 @@
 import { ensurePushGuard, redeemOverride } from './pushGuard.ts';
+import { isOpenRoute, USER_COOKIE, UserKey, type UserAuth } from './userAuth.ts';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -48,6 +49,22 @@ export function isLocalOrigin(origin: string | undefined, ports: readonly number
   }
 }
 
+/**
+ * Every /api route needs the user's key, reads included, but for the few with their own check
+ * (OPEN_ROUTES: agents' tool calls, the git push check, health and sign-in). Pages and assets
+ * carry no data and stay open (issue 4fc2ba28).
+ */
+function userOnly(auth: UserAuth) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const pathname = req.path;
+    if ((pathname !== '/api' && !pathname.startsWith('/api/')) || isOpenRoute(req.method, pathname) || auth.allows(req.headers)) {
+      next();
+      return;
+    }
+    res.status(401).setHeader('WWW-Authenticate', 'PodCode-User').json({ error: 'Only the PodCode window can do that.' });
+  };
+}
+
 function localOnly(req: Request, res: Response, next: NextFunction): void {
   if (!isLocalHost(req.headers.host)) {
     res.status(403).json({ error: 'PodCode only answers on localhost.' });
@@ -79,11 +96,30 @@ export function createApp(
   manager: AgentManager,
   terminals = new Terminals(id => manager.project(id)),
   usage = new UsageTracker(() => manager.engineInfo()),
+  // The user's key (server/userAuth.ts). The default is a key nobody holds, so a caller that
+  // forgets to pass one gets an API that refuses everything rather than one that is open.
+  auth: UserAuth = new UserKey(),
 ): Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(localOnly);
+  app.use(userOnly(auth));
   app.use(express.json({ limit: '2mb' }));
+
+  // For scripts (scripts/restart-desktop.sh): that the server answers, and how many agents are busy; nothing else.
+  app.get('/api/health', (_req, res) => {
+    const agents = manager.snapshot().agents;
+    res.json({ ok: true, busyAgents: agents.filter(a => a.status === 'working' || a.status === 'waiting').length });
+  });
+  // The one-time sign-in link the server prints when no desktop app holds the key (npm run dev).
+  app.get('/login', (req, res) => {
+    if (!(auth instanceof UserKey) || !auth.redeemLoginCode(req.query.code)) {
+      res.status(403).type('text').send('That sign-in link was used already or is not this run\'s. Look in the PodCode server\'s terminal for a new one.');
+      return;
+    }
+    res.setHeader('Set-Cookie', `${USER_COOKIE}=${auth.token}; HttpOnly; SameSite=Strict; Path=/`);
+    res.redirect(303, typeof req.query.to === 'string' && /^\/(?!\/)/.test(req.query.to) ? req.query.to : '/');
+  });
 
   const param = (req: Request, name: string): string => String(req.params[name]);
   const query = (req: Request, name: string): string => (typeof req.query[name] === 'string' ? String(req.query[name]) : '');
@@ -454,10 +490,11 @@ export function createApp(
  * snapshot on connect and live events after, and one socket per terminal. The caller decides
  * where to listen. Closing the server ends its terminals.
  */
-export function createServer(manager: AgentManager, hub: Hub, options: { distDir?: string; terminals?: Terminals; bridgeToken?: string } = {}): http.Server {
+export function createServer(manager: AgentManager, hub: Hub, options: { distDir?: string; terminals?: Terminals; bridgeToken?: string; auth?: UserAuth } = {}): http.Server {
   const terminals = options.terminals ?? new Terminals(id => manager.project(id));
   terminals.onChange(list => hub.broadcast({ type: 'terminals', terminals: list }));
-  const app = createApp(manager, terminals);
+  const auth = options.auth ?? new UserKey();
+  const app = createApp(manager, terminals, undefined, auth);
   const dist = options.distDir;
   if (dist && fs.existsSync(path.join(dist, 'index.html'))) {
     app.use(express.static(dist, { index: false }));
@@ -498,7 +535,8 @@ export function createServer(manager: AgentManager, hub: Hub, options: { distDir
       return;
     }
     const terminalId = /^\/ws\/terminal\/([\w-]{1,64})$/.exec(pathname)?.[1];
-    if ((pathname !== '/ws' && !terminalId) || !isLocalHost(req.headers.host) || !isLocalOrigin(req.headers.origin)) {
+    // The app's sockets carry its whole state and terminals' keystrokes: the user's key too.
+    if ((pathname !== '/ws' && !terminalId) || !isLocalHost(req.headers.host) || !isLocalOrigin(req.headers.origin) || !auth.allows(req.headers)) {
       socket.destroy();
       return;
     }

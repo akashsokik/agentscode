@@ -46,7 +46,8 @@ say() { echo "$(date '+%H:%M:%S') $*"; }
 wait_ticks() { sleep "$(awk "BEGIN { print $1 * $TICK }")"; }
 running() { [ "$(osascript -e "application id \"$BID\" is running" 2>/dev/null)" = "true" ]; }
 app_pid() { lsappinfo info -only pid -app "$BID" 2>/dev/null | sed -n 's/.*"pid"=\([0-9][0-9]*\).*/\1/p'; }
-server_answers() { curl -s --max-time 3 -o /dev/null "http://127.0.0.1:$PORT/api/state"; }
+# Any answer counts (the health route needs no key; an older server answers it with 404).
+server_answers() { curl -s --max-time 3 -o /dev/null "http://127.0.0.1:$PORT/api/health"; }
 # The server is gone only when three probes, two steps apart, all go unanswered: one slow answer
 # is not enough to end the app.
 server_gone() {
@@ -58,11 +59,14 @@ server_gone() {
 }
 # Agents working or waiting on the user, from the app's own state; -1 when it does not answer.
 # Node, as this repo always has it (python3 can be a shim that asks to install developer tools).
+# /api/health (no key needed) gives busyAgents; a server from before it is asked /api/state.
 busy_agents() {
-  curl -s --max-time 5 "http://127.0.0.1:$PORT/api/state" | node -e "
+  { curl -s --max-time 5 "http://127.0.0.1:$PORT/api/health"; printf '\n'; curl -s --max-time 5 "http://127.0.0.1:$PORT/api/state"; } | node -e "
 let raw = '';
 process.stdin.on('data', d => { raw += d; }).on('end', () => {
-  try { console.log((JSON.parse(raw).agents ?? []).filter(a => a.status === 'working' || a.status === 'waiting').length); }
+  const [health, ...rest] = raw.split('\\n');
+  try { const h = JSON.parse(health); if (typeof h.busyAgents === 'number') { console.log(h.busyAgents); return; } } catch {}
+  try { console.log((JSON.parse(rest.join('\\n')).agents ?? []).filter(a => a.status === 'working' || a.status === 'waiting').length); }
   catch { console.log(-1); }
 });
 " 2>/dev/null || echo -1

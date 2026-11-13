@@ -16,6 +16,7 @@ import { HttpError } from '../server/errors.ts';
 import { AgentManager } from '../server/manager.ts';
 import { Store } from '../server/store.ts';
 import { harness, projectDir, settle, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 function status(error: unknown): number {
   assert.ok(error instanceof HttpError, `expected HttpError, got ${String(error)}`);
@@ -401,7 +402,7 @@ test('the app reads, edits and deletes memory over HTTP', async () => {
   const runner = await turn(h, h.ada.id);
   const { remembered } = await h.manager.commsTool(runner.ctx.commsToken!, 'remember', { text: 'Run npm test before reporting.' }) as { remembered: MemoryEntry };
   await h.manager.commsTool(runner.ctx.commsToken!, 'remember', { text: 'Branches are named after the feature.' });
-  const server = createApp(h.manager).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/agents/${h.ada.id}/memory`;
   const json = { 'Content-Type': 'application/json' };

@@ -11,6 +11,7 @@ import { AgentManager } from '../server/manager.ts';
 import { Store } from '../server/store.ts';
 import { shellEnv, Terminals } from '../server/terminals.ts';
 import { projectDir, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 // A plain shell keeps the tests quick and independent of the user's own rc files.
 process.env.SHELL = '/bin/sh';
@@ -26,7 +27,7 @@ async function boot() {
   const manager = new AgentManager(store, hub, { claude: engine, codex: engine, orcacode: engine });
   manager.init();
   const terminals = new Terminals(id => manager.project(id));
-  const server = createServer(manager, hub, { terminals });
+  const server = createServer(manager, hub, { terminals, auth: OPEN_AUTH });
   server.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const port = (server.address() as AddressInfo).port;

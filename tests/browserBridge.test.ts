@@ -6,6 +6,7 @@ import { BROWSER_UNAVAILABLE, BrowserBridge, attachParentPort, bridgeTokenMatche
 import { browserSummary } from '../server/agents/describe.ts';
 import { browserScreenshot, presentTool } from '../web/toolPresentation.ts';
 import { harness, projectDir, settle, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 /** A stand-in for the desktop app's main process: records requests, answers when told. */
 function fakeMain() {
@@ -200,7 +201,7 @@ test('the bridge socket takes main only: right token, no Origin; then requests f
   const { default: WebSocket } = await import('ws');
   const h = harness();
   const token = 'a'.repeat(64);
-  const server = createServer(h.manager, new Hub(), { bridgeToken: token });
+  const server = createServer(h.manager, new Hub(), { bridgeToken: token, auth: OPEN_AUTH });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as import('node:net').AddressInfo).port;
   const url = `ws://127.0.0.1:${port}/browser-bridge`;

@@ -14,6 +14,7 @@ import { Store } from '../server/store.ts';
 import { staleAction, typedOutsideComposers } from '../shared/staleBuild.ts';
 import { draftsHaveText, registerDraftStore, stashDrafts } from '../web/draftStore.ts';
 import { tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 // A page left open from an older build reloads (issue ad10ed8e): the server says which build it
 // serves, the page compares, and reloads on its own only when nobody is using it, once.
@@ -82,7 +83,7 @@ test('every new connection is told the build the server serves now, read afresh 
   const engine = { available: false, path: null, version: null };
   const manager = new AgentManager(store, hub, { claude: engine, codex: engine, orcacode: engine });
   manager.init();
-  const server = createServer(manager, hub, { distDir: dist });
+  const server = createServer(manager, hub, { distDir: dist, auth: OPEN_AUTH });
   server.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const port = (server.address() as AddressInfo).port;

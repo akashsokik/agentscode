@@ -14,6 +14,7 @@ import type { Element, Root } from 'hast';
 import { rehypeRefChips } from '../web/ui/rehypeRefChips.ts';
 import { rehypeWordFade } from '../web/ui/rehypeWordFade.ts';
 import { harness, projectDir, settle, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 const KNOWN = new Set(['ACH-D7', 'ACH-D12', 'ACH-N1', 'XYZ-D2']);
 const known = (id: string) => KNOWN.has(id);
@@ -293,7 +294,7 @@ test('the HTTP routes read the notes and never change them', async () => {
   const root = path.join(h.store.dataDir, 'projects');
   writeRefs(root);
   const before = fs.readFileSync(path.join(root, 'ACH', 'decisions.md'), 'utf8');
-  const server = createApp(h.manager).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const url = (p: string) => `http://127.0.0.1:${(server.address() as AddressInfo).port}${p}`;
   try {

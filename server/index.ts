@@ -1,12 +1,15 @@
 // First: move the data folder to ~/.podcode if this is the first PodCode start (server/boot.ts).
 import './boot.ts';
-import { DATA_DIR, DIST_DIR, HOST, PORT, detectEngine } from './config.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import { DATA_DIR, DEV_WEB_PORT, DIST_DIR, HOST, PORT, detectEngine } from './config.ts';
 import { attachParentPort, writeBridgeToken } from './browserBridge.ts';
 import { createServer } from './app.ts';
 import { Hub } from './hub.ts';
 import { AgentManager } from './manager.ts';
 import { Store } from './store.ts';
 import { Terminals } from './terminals.ts';
+import { USER_TOKEN_MESSAGE, UserKey } from './userAuth.ts';
 
 const [claude, codex, orcacode] = await Promise.all([detectEngine('claude'), detectEngine('codex'), detectEngine('orcacode')]);
 const store = new Store();
@@ -21,8 +24,19 @@ void manager.refreshModels(); // fills in the model pickers a few seconds after 
 attachParentPort(manager.browser);
 const bridgeToken = writeBridgeToken(DATA_DIR);
 
+// The user's key to the API (server/userAuth.ts): to the desktop app's main process over
+// parentPort, which adds it to its windows' requests; never to a file or the agents' env. Main
+// can ask again (after a reload, say). Without the desktop app, a one-time sign-in link instead.
+const userKey = new UserKey();
+const parentPort = (process as unknown as { parentPort?: { postMessage(message: unknown): void; on(event: 'message', listener: (event: { data?: { type?: string } }) => void): void } }).parentPort;
+if (parentPort) {
+  const sendKey = () => parentPort.postMessage({ type: USER_TOKEN_MESSAGE, token: userKey.token });
+  sendKey();
+  parentPort.on('message', event => { if (event?.data?.type === `${USER_TOKEN_MESSAGE}?`) sendKey(); });
+}
+
 const terminals = new Terminals(id => manager.project(id));
-const server = createServer(manager, hub, { distDir: DIST_DIR, terminals, bridgeToken });
+const server = createServer(manager, hub, { distDir: DIST_DIR, terminals, bridgeToken, auth: userKey });
 
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
@@ -39,6 +53,12 @@ server.listen(PORT, HOST, () => {
     `OrcaCode ${orcacode.available ? `v${orcacode.version}` : 'not found'}`,
   ].join(', ');
   console.log(`PodCode is open at http://localhost:${PORT}  (${engines})`);
+  if (!parentPort) {
+    // No desktop app to hold the key: this browser signs in once with a link only this terminal shows.
+    const code = userKey.newLoginCode();
+    const page = DIST_DIR && fs.existsSync(path.join(DIST_DIR, 'index.html')) ? PORT : DEV_WEB_PORT;
+    console.log(`Sign in your browser (once per server run): http://127.0.0.1:${page}/login?code=${code}`);
+  }
 });
 
 async function shutdown(): Promise<void> {

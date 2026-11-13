@@ -6,9 +6,10 @@
  */
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { app, autoUpdater as nativeUpdater, BrowserWindow, dialog, ipcMain, Menu, shell, utilityProcess, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
+import { app, autoUpdater as nativeUpdater, BrowserWindow, dialog, ipcMain, Menu, session, shell, utilityProcess, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type UtilityProcess } from 'electron';
 import { isLocalUrl } from '../shared/browser.ts';
 import { withoutScriptOverrides } from '../server/envHygiene.ts';
+import { USER_HEADER, USER_TOKEN_MESSAGE } from '../server/userAuth.ts';
 import { BrowserError, BrowserHost, type Rect } from './browser.ts';
 import { BrowserBridge } from './bridge.ts';
 import { checkForUpdates, installUpdate, onUpdateChange, startUpdater, updateSnapshot } from './updater.ts';
@@ -66,9 +67,13 @@ function useLoginShellPath(): void {
 /** True when a PodCode server already answers on the port. */
 async function serverAnswers(): Promise<boolean> {
   try {
-    const res = await fetch(`${ORIGIN}/api/state`, { signal: AbortSignal.timeout(1500) });
-    if (!res.ok) return false;
-    const state = (await res.json()) as { agents?: unknown };
+    // /api/health needs no key; a server from before it (404) still answers /api/state.
+    const res = await fetch(`${ORIGIN}/api/health`, { signal: AbortSignal.timeout(1500) });
+    if (res.ok) return ((await res.json()) as { ok?: unknown }).ok === true;
+    if (res.status !== 404) return false;
+    const old = await fetch(`${ORIGIN}/api/state`, { signal: AbortSignal.timeout(1500) });
+    if (!old.ok) return false;
+    const state = (await old.json()) as { agents?: unknown };
     return Array.isArray(state.agents);
   } catch {
     return false;
@@ -81,6 +86,20 @@ function markReady(): void {
   showWindow();
   // Its page needs the server, which answers now.
   quick?.prepare();
+}
+
+/**
+ * The user's key to the server's API (server/userAuth.ts), added to every request the app's own
+ * windows make to it: pages, fetches, images and the sockets. In main only: the page's scripts,
+ * the disk and the agents' env never hold it. PodCode's browser tabs use their own session
+ * (electron/browser.ts), so a page an agent opens there never gets it.
+ */
+function useUserKey(token: string): void {
+  const hosts = ['127.0.0.1', 'localhost'];
+  const urls = hosts.flatMap(host => [`http://${host}:${PORT}/*`, `ws://${host}:${PORT}/*`]);
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (details, callback) => {
+    callback({ requestHeaders: { ...details.requestHeaders, [USER_HEADER]: token } });
+  });
 }
 
 function startServer(): void {
@@ -101,6 +120,11 @@ function startServer(): void {
     });
   }
   server.on('exit', onServerExit);
+  // The server sends its key as soon as it starts; ask too, in case that came before this listener.
+  server.on('message', (message: { type?: unknown; token?: unknown }) => {
+    if (message?.type === USER_TOKEN_MESSAGE && typeof message.token === 'string' && /^[a-f0-9]{64}$/.test(message.token)) useUserKey(message.token);
+  });
+  server.postMessage({ type: `${USER_TOKEN_MESSAGE}?` });
   bridge.useUtility(server);
   // In case the ready line is missed, ask the server itself.
   const started = Date.now();

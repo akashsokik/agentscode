@@ -10,6 +10,7 @@ import { migrateStorage } from '../web/storageMigration.ts';
 import { commsMcpConfig } from '../server/comms/tools.ts';
 import { COMMS_SERVER } from '../server/config.ts';
 import { tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 // PodCode was AgentsCode (ALL-D4, ALL-D5, ALL-D6). Every test here works in a temp home: the real
 // ~/.agentscode (where the running app and its agents live) is never touched.
@@ -216,7 +217,7 @@ test('an agent process started before the rename (AGENTSCODE_* env) still reache
   const { harness, projectDir } = await import('./helpers.ts');
   const h = harness();
   const project = h.manager.addProject({ path: projectDir(h.dir, 'site') });
-  const server = createApp(h.manager).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const port = (server.address() as { port: number }).port;
   try {

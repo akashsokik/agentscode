@@ -42,6 +42,8 @@ export default defineConfig({
     proxy: {
       '/api': api,
       '/ws': { target: api, ws: true },
+      // The one-time sign-in link the server prints (server/userAuth.ts): its cookie is set on this page's host.
+      '/login': api,
     },
   },
   optimizeDeps: { entries: ['index.html', 'quick.html'] },

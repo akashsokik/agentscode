@@ -8,6 +8,7 @@ import { createApp } from '../server/app.ts';
 import { HttpError } from '../server/errors.ts';
 import { routineDue, SuperStore, type SuperWatcher } from '../server/superAgent.ts';
 import { harness, settle, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 function status(error: unknown): number {
   assert.ok(error instanceof HttpError, `expected HttpError, got ${String(error)}`);
@@ -118,7 +119,7 @@ test('the SuperAgent can list routines and only propose one; a proposal never ru
 
 test('the app manages routines over HTTP', async () => {
   const t = await team();
-  const server = createApp(t.manager).listen(0, '127.0.0.1');
+  const server = createApp(t.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/super/routines`;
   const send = (url: string, method: string, body?: unknown) => fetch(url, { method, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });

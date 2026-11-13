@@ -8,6 +8,7 @@ import { createApp } from '../server/app.ts';
 import { resolveInside } from '../server/workspace.ts';
 import { HttpError } from '../server/errors.ts';
 import { harness, projectDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 /** fetch() ignores a custom Host header, so DNS-rebinding checks need a raw request. */
 function statusWithHost(port: number, host: string): Promise<number> {
@@ -27,7 +28,7 @@ async function serve() {
   fs.writeFileSync(path.join(root, 'index.ts'), 'export const x = 1;\n');
   fs.writeFileSync(path.join(h.dir, 'secret.txt'), 'top secret');
   const project = h.manager.addProject({ path: root });
-  const server = createApp(h.manager).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const port = (server.address() as AddressInfo).port;
   const url = (p: string) => `http://127.0.0.1:${port}${p}`;

@@ -10,6 +10,7 @@ import { mentionsBranch, namesInMergeSubject, parseDecorations } from '../shared
 import { edgePath, layoutGraph } from '../shared/graph.ts';
 import type { Agent, PeerMessage, Project } from '../shared/types.ts';
 import { harness, tempDir } from './helpers.ts';
+import { OPEN_AUTH } from '../server/userAuth.ts';
 
 const ENV = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'init.defaultBranch=main', '-c', 'core.hooksPath=/dev/null', ...args], { cwd, env: ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -425,7 +426,7 @@ test('reading the view changes nothing in the repository, and every git call it 
 
 test('the cleanup route refuses a cross-origin write', async () => {
   const h = harness();
-  const server = createApp(h.manager).listen(0, '127.0.0.1');
+  const server = createApp(h.manager, undefined, undefined, OPEN_AUTH).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/work/cleanup`;
   try {
