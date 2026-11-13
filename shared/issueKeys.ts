@@ -37,6 +37,8 @@ export function findIssueKeys(text: string, codes?: Iterable<string>): IssueKeyM
     const code = m[1];
     if (known && !known.has(code)) continue;
     const num = Number(m[2]);
+    // Keys start at 1 (nextIssueKey), so ACH-0 or ACH-000 is never an issue.
+    if (num === 0) continue;
     const key = `${code}-${num}`;
     if (seen.has(key)) continue;
     seen.add(key);

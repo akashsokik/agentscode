@@ -1,4 +1,4 @@
-import { currentToolName } from '../../shared/issues.ts';
+import { currentToolName, ISSUE_TEXT_MAX } from '../../shared/issues.ts';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { PRESSABLE_KEYS } from '../../shared/browser.ts';
@@ -162,7 +162,7 @@ export const proposeRoutineInput = z.object({
   why,
 });
 export const addIssueInput = z.object({
-  text: z.string().trim().min(1).max(500),
+  text: z.string().trim().min(1).max(ISSUE_TEXT_MAX),
   /** A project id or name; leave it out for an issue not tied to one. */
   project: z.string().trim().min(1).max(200).optional(),
   why,
@@ -171,7 +171,7 @@ export const updateIssueInput = z.object({
   issue_id: issueRef,
   /** The current names, or the old ones (queued is todo, blocked is needs_you) from before ACH-D41. */
   status: z.enum(['needs_you', 'in_review', 'in_progress', 'waiting', 'todo', 'backlog', 'done', 'canceled', 'queued', 'blocked']).optional(),
-  text: z.string().trim().min(1).max(500).optional(),
+  text: z.string().trim().min(1).max(ISSUE_TEXT_MAX).optional(),
   /** The agent on it (id or name), and the delegation's message id; '' clears either. */
   agent_id: z.string().trim().max(100).optional(),
   delegation_id: z.string().trim().max(100).optional(),

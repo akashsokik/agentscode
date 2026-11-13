@@ -44,11 +44,29 @@ export function legacyIssueStatus(status: IssueStatus): LegacyIssueStatus {
   return TO_LEGACY[status];
 }
 
+/** The longest title, and the longest description (Markdown), in characters. The app's inputs use them too. */
+export const ISSUE_TITLE_MAX = 120;
+export const ISSUE_TEXT_MAX = 4000;
+
+/**
+ * A description as stored: Markdown, so line breaks, indentation and spacing inside a line are
+ * kept (code blocks and lists depend on them). Only line endings are made \n, trailing spaces
+ * are dropped, runs of blank lines become one, and the whole is trimmed. '' when nothing is left.
+ */
+export function issueDescription(raw: unknown): string {
+  return String(raw ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n').map(line => line.replace(/[ \t]+$/, '')).join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /** An issue's title: its first sentence or line, at most 120 characters. */
 export function issueTitle(text: string): string {
-  const flat = String(text ?? '').replace(/\s+/g, ' ').trim();
+  const line = String(text ?? '').split(/\r?\n/).map(l => l.trim()).find(Boolean) ?? '';
+  const flat = line.replace(/\s+/g, ' ');
   const first = flat.split(/(?<=[.!?])\s/)[0] ?? flat;
-  return first.length > 120 ? `${first.slice(0, 117).trimEnd()}…` : first;
+  return first.length > ISSUE_TITLE_MAX ? `${first.slice(0, ISSUE_TITLE_MAX - 3).trimEnd()}…` : first;
 }
 
 /** A record as builds before ACH-D41 stored it. */
@@ -101,7 +119,7 @@ export function legacyIssue(issue: SuperIssue): LegacyIssue {
  * The issues to use, from issues.json's current list and super.json's old-format copy ("issues").
  * PodCode always writes both together, so where they differ an older build changed the old copy
  * after a downgrade, and that change wins:
- * - in both, the old copy newer: its text, project, links, notes and dates; its status by the new
+ * - in both, the old copy newer: its text (never the title), project, links, notes and dates; its status by the new
  *   name unless it is still what the current status reads as (in_review stays in_review);
  * - only in the old copy: added, migrated;
  * - only in the current list: removed by the older build.
@@ -121,9 +139,8 @@ export function reconcileIssues(current: SuperIssue[] | null, legacy: LegacyIssu
     const status = legacyIssueStatus(mine.status) === old.status ? mine.status : FROM_LEGACY[old.status];
     const next: SuperIssue = {
       ...mine, text: old.text, projectId: old.projectId, status, order: old.order, updatedAt: old.updatedAt,
-      // The title follows a changed text only while it was the text's own start, as updateIssue does:
-      // an older build never sees a title, so one set by hand stays.
-      title: old.text !== mine.text && mine.title === issueTitle(mine.text) ? issueTitle(old.text) : mine.title,
+      // The title is its own field: an older build never sees it, and a new text never re-titles an issue.
+      title: mine.title,
     };
     for (const k of ['agentId', 'delegationId', 'notes', 'doneAt'] as const) {
       if (old[k] !== undefined) (next as unknown as Record<string, unknown>)[k] = old[k]; else delete next[k];
