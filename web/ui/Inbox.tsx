@@ -9,7 +9,7 @@
  * Below 40rem of pane width it shows one side at a time: the list, or the item picked (with a way
  * back in its InboxBar). Flat: no shadows, theme tones only.
  */
-import { useRef, type KeyboardEvent, type ReactNode, type RefObject, type UIEvent } from 'react';
+import { useEffect, useRef, type KeyboardEvent, type ReactNode, type RefObject, type UIEvent } from 'react';
 import { ArrowLeft, Search, X } from '../mono/icons.tsx';
 import { cx, HeaderButton } from './common.tsx';
 
@@ -18,6 +18,23 @@ const ACTION = 'inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 font
 export const ACTION_FILLED = `${ACTION} h-6.5 bg-content text-background-base hover:bg-content/80`;
 export const ACTION_OUTLINE = `${ACTION} h-7 border border-content/15 text-content/80 hover:bg-content/5`;
 export const ACTION_GHOST = `${ACTION} h-7 text-content/70 hover:bg-content/10 hover:text-content`;
+
+/**
+ * ARIA tablist keys: Left/Right (and Home/End) move between tabs and select, as MonoCode's tab rows;
+ * only the selected tab is in the Tab order (roving tabindex).
+ */
+function onTablistKey<T extends string>(e: KeyboardEvent<HTMLElement>, values: T[], value: T, onChange: (value: T) => void): void {
+  const at = values.indexOf(value);
+  const next = e.key === 'ArrowRight' ? values[(at + 1) % values.length]
+    : e.key === 'ArrowLeft' ? values[(at - 1 + values.length) % values.length]
+    : e.key === 'Home' ? values[0] : e.key === 'End' ? values[values.length - 1] : undefined;
+  if (next === undefined) return;
+  e.preventDefault();
+  onChange(next);
+  // Focus follows the selection, on the next frame (after the tabs re-render).
+  const list = e.currentTarget;
+  requestAnimationFrame(() => list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus());
+}
 
 /** The split: the list rail on the left, the selected item's detail on the right. */
 export function InboxLayout({ toolbar, list, detail, detailOpen, onRailKeyDown }: {
@@ -61,18 +78,19 @@ export function InboxFilterTabs<T extends string>({ label = 'Show', options, val
   fit?: boolean;
 }) {
   return (
-    <div role="tablist" aria-label={label} className="flex h-9 shrink-0 items-center gap-px border-b border-stroke px-2">
+    <div role="tablist" aria-label={label} onKeyDown={e => onTablistKey(e, options.map(o => o.value), value, onChange)} className="flex h-9 shrink-0 items-center gap-px border-b border-stroke px-2">
       {options.map(option => (
         <button
           key={option.value}
           type="button"
           role="tab"
           aria-selected={value === option.value}
+          tabIndex={value === option.value ? 0 : -1}
           onClick={() => onChange(option.value)}
           className={cx(
             'flex h-6 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 font-sans text-[12px] leading-none transition-colors duration-150',
             fit ? 'flex-auto' : 'flex-1',
-            value === option.value ? 'bg-selection text-content' : 'text-content/50 hover:bg-content/5 hover:text-content',
+            value === option.value ? 'bg-selection text-content' : 'text-content/50 hover:bg-content/5 hover:text-content focus-visible:bg-content/8',
           )}
         >
           <span className="truncate">{option.label}</span>
@@ -115,8 +133,10 @@ export function InboxSearch({ value, onChange, placeholder }: { value: string; o
  * The scrolling list of cards. `onMove(-1 | 1)` runs on ArrowUp/ArrowDown and returns the id of
  * the card to focus (its data-inbox-id), so the keyboard walks the list as the selection moves.
  */
-export function InboxList({ label, onMove, empty, children, footer }: {
+export function InboxList({ label, onMove, empty, children, footer, activeId }: {
   label: string;
+  /** The selected card: kept in view when it changes (a link from elsewhere, a refresh), never scrolling more than needed. */
+  activeId?: string;
   onMove?: (step: -1 | 1) => string | undefined;
   /** Pass only when there are no cards: shown instead of the list. */
   empty?: ReactNode;
@@ -125,6 +145,9 @@ export function InboxList({ label, onMove, empty, children, footer }: {
   footer?: ReactNode;
 }) {
   const ref = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (activeId) ref.current?.querySelector<HTMLElement>(`[data-inbox-id="${CSS.escape(activeId)}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [activeId]);
   const onKey = (e: KeyboardEvent<HTMLUListElement>) => {
     if (!onMove || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
     e.preventDefault();
@@ -178,7 +201,8 @@ export function InboxCard({ id, active, unseen = false, onSelect, label, title, 
       title={title}
       className={cx(
         'flex w-full flex-col rounded-md px-2.5 py-2 text-left font-sans transition-colors duration-100',
-        active ? 'bg-selection text-content' : 'text-content/80 hover:bg-content/5 hover:text-content',
+        // Keyboard focus on another card: the hover fill, quieter than the selected card's, so the two never look alike.
+        active ? 'bg-selection text-content' : 'text-content/80 hover:bg-content/5 hover:text-content focus-visible:bg-content/5 focus-visible:text-content',
       )}
     >
       <span className="flex items-center gap-2">{top}</span>
@@ -189,7 +213,9 @@ export function InboxCard({ id, active, unseen = false, onSelect, label, title, 
 }
 
 /** The detail side: an InboxBar on top, then the scrolling body (hero, tabs, activity). */
-export function InboxDetail({ bar, children, rootRef, scrollRef, onScroll, overlay }: {
+export function InboxDetail({ bar, children, rootRef, scrollRef, onScroll, overlay, onKeyDown }: {
+  /** Keys inside the detail (Escape back to the list). */
+  onKeyDown?: (e: KeyboardEvent<HTMLDivElement>) => void;
   bar: ReactNode;
   children: ReactNode;
   rootRef?: RefObject<HTMLDivElement | null>;
@@ -199,7 +225,7 @@ export function InboxDetail({ bar, children, rootRef, scrollRef, onScroll, overl
   overlay?: ReactNode;
 }) {
   return (
-    <div ref={rootRef} className="@container/detail flex min-w-0 flex-1 flex-col">
+    <div ref={rootRef} onKeyDown={onKeyDown} className="@container/detail flex min-w-0 flex-1 flex-col">
       {bar}
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div ref={scrollRef} onScroll={onScroll} className="agent-transcript min-h-0 flex-1 overflow-y-auto">{children}</div>
@@ -253,15 +279,16 @@ export function InboxHero({ title, children, tabs }: { title: string; children?:
 /** MonoCode's InboxDetailTab row: the item's sections (Summary, Code, Checks). */
 export function InboxTabs<T extends string>({ label, tabs, value, onChange }: { label: string; tabs: { value: T; label: string; count?: number; mark?: ReactNode }[]; value: T; onChange: (value: T) => void }) {
   return (
-    <div role="tablist" aria-label={label} className="flex h-9 items-stretch gap-4">
+    <div role="tablist" aria-label={label} onKeyDown={e => onTablistKey(e, tabs.map(t => t.value), value, onChange)} className="flex h-9 items-stretch gap-4">
       {tabs.map(tab => (
         <button
           key={tab.value}
           type="button"
           role="tab"
           aria-selected={value === tab.value}
+          tabIndex={value === tab.value ? 0 : -1}
           onClick={() => onChange(tab.value)}
-          className={cx('relative flex h-9 items-center gap-1.5 font-sans text-[12px] leading-none', value === tab.value ? 'text-content' : 'text-content/50 hover:text-content')}
+          className={cx('relative flex h-9 items-center gap-1.5 rounded-sm font-sans text-[12px] leading-none focus-visible:bg-content/8', value === tab.value ? 'text-content' : 'text-content/50 hover:text-content')}
         >
           {tab.mark}
           {tab.label}
