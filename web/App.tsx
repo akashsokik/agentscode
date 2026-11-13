@@ -18,6 +18,8 @@ import { AgentPane } from './panes/AgentPane.tsx';
 import { BrowserPane } from './panes/BrowserPane.tsx';
 import { ChannelPane } from './panes/ChannelPane.tsx';
 import { CommsPane } from './panes/CommsPane.tsx';
+import { IssueView } from './issues/IssueView.tsx';
+import { StatusGlyph } from './issues/view/glyphs.tsx';
 import { WorkPane } from './work/WorkView.tsx';
 import { DiffPane, FilePane } from './panes/FilePane.tsx';
 import { HomePane } from './panes/HomePane.tsx';
@@ -37,7 +39,7 @@ import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
 import { UsageFooter } from './ui/UsageFooter.tsx';
 import { HeaderButton, MenuDivider, MenuRow, StatusLabel } from './ui/common.tsx';
-import { AlertCircle, CheckCircle, ChevronRight, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X } from './mono/icons.tsx';
+import { CircleDashed, AlertCircle, CheckCircle, ChevronRight, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X } from './mono/icons.tsx';
 import { LAYER } from './mono/layers.ts';
 import { Shimmer } from './mono/Shimmer.tsx';
 import { TabLabel } from './mono/TabLabel.tsx';
@@ -98,6 +100,10 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
       // not a URL yet
     }
     return { icon: <Globe className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: c.title || host || 'New tab', meta: agent ? `Browser, ${agent.name}` : host || 'Browser' };
+  }
+  if (c.kind === 'issue') {
+    const issue = snapshot?.super.issues.find(i => i.id === c.issueId);
+    return { icon: issue ? <StatusGlyph status={issue.status} /> : <CircleDashed className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: issue ? `${issue.key} ${issue.title}` : 'Issue', meta: issue ? 'Issue' : 'Removed' };
   }
   if (c.kind === 'work') {
     return { icon: <GitBranch className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: 'Work', meta: 'Branches, merges and cleanup' };
@@ -394,6 +400,7 @@ function PaneView({ pane, tab, chrome, actions }: { pane: Pane; tab: Tab | undef
     case 'file': return <FilePane key={pane.id + tab.id} root={c.root} path={c.path} chrome={chrome} />;
     case 'diff': return <DiffPane key={pane.id + tab.id} root={c.root} path={c.path} chrome={chrome} />;
     case 'comms': return <CommsPane conversationId={c.conversationId} chrome={chrome} />;
+    case 'issue': return <IssueView issueId={c.issueId} chrome={chrome} />;
     case 'work': return <WorkPane chrome={chrome} />;
     case 'channel': return <ChannelPane key={pane.id + c.channelId} channelId={c.channelId} chrome={chrome} />;
     case 'walkthrough': return <WalkthroughPane key={pane.id + tab.id} agentId={c.agentId} id={c.id} chrome={chrome} />;

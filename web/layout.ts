@@ -10,6 +10,8 @@ export type TabContent =
   | { kind: 'file'; root: Root; path: string }
   | { kind: 'diff'; root: Root; path: string }
   | { kind: 'comms'; conversationId?: string }
+  /** One issue in the full pane (web/issues/IssueView.tsx, ACH-D43 phase 4). */
+  | { kind: 'issue'; issueId: string }
   /** The Work view as a pane (web/work/WorkView.tsx). */
   | { kind: 'work' }
   | { kind: 'channel'; channelId: string }
@@ -94,6 +96,7 @@ export function tabKey(content: TabContent): string {
     case 'file': return `file:${rootKey(content.root)}:${content.path}`;
     case 'diff': return `diff:${rootKey(content.root)}:${content.path}`;
     case 'comms': return 'comms';
+    case 'issue': return `issue:${content.issueId}`;
     case 'work': return 'work';
     case 'channel': return `channel:${content.channelId}`;
     case 'walkthrough': return `walkthrough:${content.agentId}:${content.id}`;
