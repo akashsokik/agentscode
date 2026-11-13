@@ -5,8 +5,7 @@ import type { Exec } from '../server/github.ts';
 import { GhError, ghAllowed, ghArgs } from '../server/github.ts';
 import { agentForBranch, PRS_CACHE_MS, PullRequests } from '../server/githubPrs.ts';
 import { createApp } from '../server/app.ts';
-import { findIssueKeys, firstIssueKey } from '../shared/issueKeys.ts';
-import { checksLabel, inView, latestReviews, normalizeCheck, normalizePr, prsInView, viewCounts, type PullRequest } from '../shared/prs.ts';
+import { checksLabel, findIssueKeys, firstIssueKey, inView, latestReviews, normalizeCheck, normalizePr, prsInView, viewCounts, type PullRequest } from '../shared/prs.ts';
 import { harness, projectDir } from './helpers.ts';
 
 // ---- issue keys -------------------------------------------------------------------------------
@@ -206,4 +205,14 @@ test('a GitHub App author reads as the app (dependabot), and is a bot', () => {
   const pr = normalizePr(raw({ author: { login: 'app/dependabot', is_bot: true } }), 'o/r');
   assert.equal(pr.author, 'dependabot');
   assert.equal(pr.authorIsBot, true);
+});
+
+test('navigation: the Issues count leaves out done and canceled; both pages are one tab each', async () => {
+  const { openIssueCount } = await import('../web/sidebar/navCounts.ts');
+  const issue = (status: string) => ({ status }) as never;
+  assert.equal(openIssueCount([issue('queued'), issue('in_progress'), issue('blocked'), issue('done'), issue('canceled')]), 3);
+  assert.equal(openIssueCount(undefined), 0);
+  const { tabKey } = await import('../web/layout.ts');
+  assert.equal(tabKey({ kind: 'issues' }), 'issues');
+  assert.equal(tabKey({ kind: 'pullRequests', prId: 'o/r#1' }), tabKey({ kind: 'pullRequests' }), 'one Pull requests tab, whichever PR is selected');
 });

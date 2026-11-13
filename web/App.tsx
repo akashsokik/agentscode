@@ -18,6 +18,8 @@ import { AgentPane } from './panes/AgentPane.tsx';
 import { BrowserPane } from './panes/BrowserPane.tsx';
 import { ChannelPane } from './panes/ChannelPane.tsx';
 import { PullRequestsPane } from './prs/PullRequestsPane.tsx';
+import { IssuesPage } from './issues/IssuesPage.tsx';
+import { openIssueCount } from './sidebar/navCounts.ts';
 import { prsOpenCount } from './prs/prsData.ts';
 import { CommsPane } from './panes/CommsPane.tsx';
 import { WorkPane } from './work/WorkView.tsx';
@@ -39,7 +41,7 @@ import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
 import { UsageFooter } from './ui/UsageFooter.tsx';
 import { HeaderButton, MenuDivider, MenuRow, StatusLabel } from './ui/common.tsx';
-import { AlertCircle, CheckCircle, ChevronRight, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X, GitPullRequest } from './mono/icons.tsx';
+import { AlertCircle, CheckCircle, ChevronRight, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X, GitPullRequest, CircleDashed } from './mono/icons.tsx';
 import { LAYER } from './mono/layers.ts';
 import { Shimmer } from './mono/Shimmer.tsx';
 import { TabLabel } from './mono/TabLabel.tsx';
@@ -103,6 +105,10 @@ function describeTab(tab: Tab, snapshot: Snapshot | null): { icon: ReactNode; he
   }
   if (c.kind === 'work') {
     return { icon: <GitBranch className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: 'Work', meta: 'Branches, merges and cleanup' };
+  }
+  if (c.kind === 'issues') {
+    const count = openIssueCount(snapshot?.super.issues);
+    return { icon: <CircleDashed className="size-3.5 shrink-0" strokeWidth={1.75} />, headline: 'Issues', meta: count ? `${count} open` : 'The issues backlog' };
   }
   if (c.kind === 'pullRequests') {
     const openCount = prsOpenCount();
@@ -400,6 +406,7 @@ function PaneView({ pane, tab, chrome, actions }: { pane: Pane; tab: Tab | undef
     case 'file': return <FilePane key={pane.id + tab.id} root={c.root} path={c.path} chrome={chrome} />;
     case 'diff': return <DiffPane key={pane.id + tab.id} root={c.root} path={c.path} chrome={chrome} />;
     case 'comms': return <CommsPane conversationId={c.conversationId} chrome={chrome} />;
+    case 'issues': return <IssuesPage chrome={chrome} />;
     case 'pullRequests': return <PullRequestsPane prId={c.prId} chrome={chrome} />;
     case 'work': return <WorkPane chrome={chrome} />;
     case 'channel': return <ChannelPane key={pane.id + c.channelId} channelId={c.channelId} chrome={chrome} />;
