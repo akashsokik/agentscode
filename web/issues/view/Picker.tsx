@@ -1,7 +1,7 @@
 /**
  * A property picker: a search field over its options, the current one shown by its fill only,
- * never a check (ACH-D46 option B). ↑ ↓ move, ⏎ picks, ⎋ closes. The keyboard row gets the hover
- * fill until MenuRow's \`active\` and \`current\` land (Cy, ACH-D49).
+ * never a check (ACH-D46 option B). ↑ ↓ move, ⏎ picks, ⎋ closes. MenuRow's `active` and
+ * `current` draw the keyboard row and the value in force (ACH-D49).
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Popover } from '../../mono/Popover.tsx';
@@ -36,15 +36,15 @@ export function Picker({ anchor, label, options, current, onPick, onClose, heade
       <div role="listbox" aria-label={label} className="max-h-[320px] overflow-y-auto">
         <MenuRowRole.Provider value="option">
           {shown.map((o, i) => (
-            <div key={o.value} data-keyboard={i === at || undefined} className={i === at && o.value !== current ? '[&>button]:bg-content/5' : undefined}>
             <MenuRow
+              key={o.value}
               title={<span className="flex items-center gap-2">{o.icon}<span className="truncate">{o.label}</span></span>}
-              // The current value by its fill only (ACH-D46 B, no check). The keyboard row gets the
-              // hover fill (from the wrapper below), so the two never look alike (Rhea L3).
-              highlighted={o.value === current}
+              // The keyboard row by MonoCode's focus fill, the value in force by the quiet one, no
+              // check (ACH-D49, ACH-D46 B); `current` also sets aria-selected.
+              active={i === at}
+              current={o.value === current}
               onSelect={() => onPick(o.value)}
             />
-            </div>
           ))}
           {!shown.length ? <p className="px-2 py-2 font-sans text-[12px] text-content/45">No matches</p> : null}
         </MenuRowRole.Provider>

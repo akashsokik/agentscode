@@ -10,6 +10,8 @@ import { Modal } from '../mono/Modal.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Group, Row, Segmented, Toggle } from '../mono/settings.tsx';
 import { AboutGroup } from './AboutGroup.tsx';
+import { AutonomySettings } from './AutonomySettings.tsx';
+import { createCapText } from '../../shared/autonomy.ts';
 
 function save(change: Partial<Settings>) {
   return attempt(() => api.updateSettings(change));
@@ -72,6 +74,7 @@ export function SettingsDialog({ onClose, group }: { onClose: () => void; group?
         </Group>
 
         <Group id="settings-super" title="SuperAgent" description="It runs your team across every project. It never edits code; agents do the work. The limits below stop only what it starts on its own: your own messages to it, and the work you asked it for, always go.">
+          <AutonomySettings settings={settings} save={save} />
           <Row label="Wake it when agents finish, fail or get stuck" description="Updates are batched into one turn, and only sent while it is idle.">
             <Toggle label="Wake the SuperAgent" on={settings.superWake} onChange={superWake => void save({ superWake })} />
           </Row>
@@ -97,15 +100,17 @@ export function SettingsDialog({ onClose, group }: { onClose: () => void; group?
               className={`${INPUT} w-20`}
             />
           </Row>
-          <Row label="Agents it may create a day" description="Past this, it asks you before creating more.">
+          <Row label="Agents it may create a day" description={createCapText(settings.superAutonomy)}>
             <input
               type="number"
               min={0}
               max={200}
+              disabled={settings.superAutonomy === 'full'}
+              title={settings.superAutonomy === 'full' ? 'Not used on Full' : undefined}
               value={creates}
               onChange={e => setCreates(e.target.value)}
               onBlur={() => { const value = Number(creates); if (Number.isInteger(value) && value >= 0 && value <= 200 && value !== settings.superMaxCreatesPerDay) void save({ superMaxCreatesPerDay: value }); }}
-              className={`${INPUT} w-20`}
+              className={`${INPUT} w-20 ${settings.superAutonomy === 'full' ? 'text-content/35' : ''}`}
             />
           </Row>
           <Row label="Quiet hours" description="No wake-ups and no notifications between these times. The same time twice turns them off.">

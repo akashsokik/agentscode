@@ -27,10 +27,10 @@ export const COMMS_TOOLS: CommsTool[] = [
 ];
 /** The SuperAgent's own commands: its MCP server registers them, and the IDE refuses them from anyone else. */
 export type SuperTool = 'create_agent' | 'update_agent' | 'new_session' | 'stop_agent' | 'create_channel' | 'update_channel' | 'ask_user' | 'read_transcript'
-  | 'list_issues' | 'add_issue' | 'update_issue' | 'complete_issue' | 'list_routines' | 'propose_routine';
+  | 'list_issues' | 'add_issue' | 'update_issue' | 'complete_issue' | 'list_routines' | 'propose_routine' | 'take_action';
 export const SUPER_TOOLS: SuperTool[] = [
   'create_agent', 'update_agent', 'new_session', 'stop_agent', 'create_channel', 'update_channel', 'ask_user', 'read_transcript',
-  'list_issues', 'add_issue', 'update_issue', 'complete_issue', 'list_routines', 'propose_routine',
+  'list_issues', 'add_issue', 'update_issue', 'complete_issue', 'list_routines', 'propose_routine', 'take_action',
 ];
 /**
  * Goals became Issues (ACH-D38). The old commands still run, for SuperAgent sessions started
@@ -151,6 +151,8 @@ export const askUserInput = z.object({
   question: z.string().trim().min(1).max(300),
   detail: z.string().trim().max(1500).optional(),
   options: z.array(z.string().trim().min(1).max(80)).min(1).max(4),
+  /** The take_action step this asks to approve; the first option is the yes. Needed for ask-first steps. */
+  for_action: z.object({ kind: z.enum(['merge', 'restart', 'push', 'release', 'deploy', 'cleanup', 'project', 'costly', 'delete_data', 'outside_account', 'remove_user_agent', 'force_push', 'rewrite_history']), target: z.string().trim().min(1).max(200), task: z.string().trim().min(1).max(3000).optional() }).optional(),
 });
 const issueRef = z.string().trim().min(1).max(40);
 export const proposeRoutineInput = z.object({
@@ -161,6 +163,33 @@ export const proposeRoutineInput = z.object({
   instruction: z.string().trim().min(1).max(1000),
   why,
 });
+/** A step the SuperAgent takes under its Autonomy setting (ALL-D9): checked, handed to an agent, logged with how to undo it. */
+export const takeActionInput = z.object({
+  kind: z.enum(['merge', 'restart', 'push', 'release', 'deploy', 'cleanup', 'project', 'costly', 'delete_data', 'outside_account', 'remove_user_agent', 'force_push', 'rewrite_history']),
+  /** One line: what is done, e.g. "Merge fix/x into main". */
+  summary: z.string().trim().min(1).max(300),
+  why,
+  /** The agent (id or name) that does it; for remove_user_agent, the agent to remove. */
+  agent: z.string().trim().min(1).max(100),
+  /** What the agent should do, step by step; not for remove_user_agent. */
+  task: z.string().trim().min(1).max(3000).optional(),
+  /** How to undo it, as an instruction an agent can follow (a revert, a backup ref, the previous build). */
+  undo: z.string().trim().min(1).max(1000).optional(),
+  /** What it acts on, matched against an approval's for_action.target (defaults to branch, else agent). */
+  target: z.string().trim().min(1).max(200).optional(),
+  /** merge: the branch, and the exact commit a reviewer passed. */
+  branch: z.string().trim().min(1).max(200).optional(),
+  commit: z.string().trim().regex(/^[0-9a-f]{7,40}$/i).optional(),
+  /** merge, cleanup, delete_data: the project (id, code or name) whose repository is checked. */
+  project: z.string().trim().min(1).max(200).optional(),
+  /** cleanup, delete_data: the backup, a ref in the project (checked with git) or an existing path. */
+  backup: z.string().trim().min(1).max(500).optional(),
+  /** When a step it takes on its own has no undo (a deploy with no rollback): why. */
+  no_undo: z.string().trim().min(1).max(300).optional(),
+  /** The id of the user's answered ask_user question, for what the Autonomy setting asks about first. */
+  approved_ask_id: z.string().trim().min(1).max(100).optional(),
+});
+export type TakeActionInput = z.infer<typeof takeActionInput>;
 export const addIssueInput = z.object({
   text: z.string().trim().min(1).max(ISSUE_TEXT_MAX),
   /** A project id or name; leave it out for an issue not tied to one. */
@@ -425,7 +454,7 @@ function registerSuperTools(server: McpServer, invoke: Invoke): void {
     inputSchema: updateChannelInput.shape,
   }, args => invoke('update_channel', args));
   server.registerTool('ask_user', {
-    description: 'Ask the user to decide something, with 1 to 4 short options they click (they may also type an answer). Use it before merging, pushing, deploying, deleting, removing agents, adding projects or costly work. Returns at once; the answer arrives as a later turn. Ask one thing at a time and do not ask again while it is open. When the answer is an approval or a rule worth keeping, record it with decision_add (decided_by "You", links ["ask:<question id>"]); not every answer is a decision.',
+    description: 'Ask the user to decide something, with 1 to 4 short options they click (they may also type an answer). Use it for what your Autonomy section lists as ask-first, and for anything you are unsure the user wants. Returns at once; the answer arrives as a later turn. Ask one thing at a time and do not ask again while it is open. When the answer is an approval or a rule worth keeping, record it with decision_add (decided_by "You", links ["ask:<question id>"]); not every answer is a decision.',
     inputSchema: askUserInput.shape,
   }, args => invoke('ask_user', args));
   server.registerTool('list_issues', {
@@ -444,6 +473,10 @@ function registerSuperTools(server: McpServer, invoke: Invoke): void {
     description: `Mark an issue done once the work is verified (a report with evidence, or the user said so), with a short note. ${note}`,
     inputSchema: completeIssueInput.shape,
   }, args => invoke('complete_issue', args));
+  server.registerTool('take_action', {
+    description: `Take a step your Autonomy setting covers: merge (needs branch and a reviewer's pass), restart, push (fast-forward only), release, deploy, cleanup (needs backup), project, costly, or an ask-first one (delete_data, outside_account, remove_user_agent, force_push), which needs approved_ask_id from an answered ask_user. rewrite_history is always refused. The IDE checks the setting, hands the task to the agent (or removes the agent), and logs it in Decisions with your undo instruction. Use it instead of delegate_task for these. ${note}`,
+    inputSchema: takeActionInput.shape,
+  }, args => invoke('take_action', args));
   // The old names (ACH-D38): same schemas with goal_id, mapped to the issue commands by the IDE.
   const deprecated = (name: string) => `Deprecated: Goals are now Issues; use ${name}, which does the same.`;
   server.registerTool('list_goals', { description: deprecated('list_issues'), inputSchema: {}, annotations: { readOnlyHint: true } }, args => invoke('list_goals' as SuperTool, args));

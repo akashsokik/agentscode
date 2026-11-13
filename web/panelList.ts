@@ -63,8 +63,9 @@ export function isMenuKey(e: { key: string; shiftKey: boolean }): boolean {
 
 // ---- Decisions ---------------------------------------------------------------------------------
 
-export type DecisionKind = 'delegate' | 'message' | 'issue' | 'agent' | 'channel' | 'other';
+export type DecisionKind = 'delegate' | 'message' | 'issue' | 'agent' | 'channel' | 'action' | 'other';
 export function decisionKind(tool: string): DecisionKind {
+  if (tool === 'take_action') return 'action';
   if (/^delegate/.test(tool)) return 'delegate';
   if (/message|nudge/.test(tool)) return 'message';
   if (/issue|goal/.test(tool)) return 'issue';
@@ -93,7 +94,7 @@ const OPEN_SECTIONS: { status: IssueStatus; label: string }[] = ISSUE_STATUSES.f
 
 export function issueGroups(issues: readonly SuperIssue[] | undefined, filter: IssuesFilter, query: string): { counts: { open: number; done: number }; open: Group<SuperIssue>[]; done: SuperIssue[] } {
   const all = issues ?? [];
-  const found = all.filter(g => matches(query, g.text, g.notes));
+  const found = all.filter(g => matches(query, g.key, g.title, g.text, g.notes, ...(g.labels ?? [])));
   const closedAt = (g: SuperIssue) => g.doneAt ?? g.canceledAt ?? g.updatedAt;
   const open = found.filter(isOpenIssue).sort((a, b) => a.order - b.order);
   // Done and canceled together, newest first.

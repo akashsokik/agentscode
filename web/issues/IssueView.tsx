@@ -14,13 +14,13 @@ import { useApp } from '../store.ts';
 import { Empty } from '../ui/common.tsx';
 import { Activity } from './view/Activity.tsx';
 import { IssueDescription, IssueTitle } from './view/EditableText.tsx';
-import { StatusGlyph } from './view/glyphs.tsx';
 import { parentOf, propertyKey } from './view/issueViewModel.ts';
 import { PropertySidebar, type PropertySidebarHandle } from './view/PropertySidebar.tsx';
 import { Decisions, InGit, Relations, SubIssues, useIssueLinks } from './view/Sections.tsx';
 import { open } from '../layout.ts';
 import type { SuperIssue } from '../../shared/types.ts';
 import { CircleDashed } from '../mono/icons.tsx';
+import { StatusIcon } from './issueParts.tsx';
 
 export function IssueView({ issueId, chrome }: { issueId: string; chrome: PaneChrome }) {
   const issues = useApp(s => s.snapshot?.super.issues) ?? [];
@@ -42,7 +42,7 @@ function IssueBody({ issue, issues, projectName, chrome, sidebar }: { issue: Sup
   const parent = parentOf(issues, issue);
   const title = (
     <span className="flex min-w-0 items-center gap-2 font-sans text-[12.5px]">
-      <StatusGlyph status={issue.status} />
+      <StatusIcon status={issue.status} />
       <span className="shrink-0 font-mono text-[12px] text-content/55">{issue.key}</span>
       <span className="truncate text-content">{issue.title}</span>
     </span>

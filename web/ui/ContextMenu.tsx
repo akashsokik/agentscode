@@ -63,6 +63,8 @@ export function ContextMenu({ anchor, onClose, label, width = 232, children }: {
       width={width}
       constrainHeight={false}
       onDismiss={onClose}
+      // A flyout off this menu (a submenu, ACH-D46) is its own popover: a click there is not outside.
+      ignore="[data-submenu]"
       role="menu"
       aria-label={label}
       onKeyDown={onKeyDown}

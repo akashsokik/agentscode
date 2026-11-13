@@ -11,11 +11,11 @@ import { useNotes } from '../../notes/refsState.ts';
 import { RefChip } from '../../notes/RefChip.tsx';
 import { useApp } from '../../store.ts';
 import { AgentAvatar } from '../../ui/Avatar.tsx';
-import { PriorityGlyph, StatusGlyph } from './glyphs.tsx';
 import { issueLinksSource, type IssueLinks } from './issueLinks.ts';
 import { dueTone, RELATION_TYPES, relationRemoval, relationsOf, subIssues, withRelation } from './issueViewModel.ts';
 import { writeIssue } from './issueWrites.ts';
 import { Picker } from './Picker.tsx';
+import { StatusIcon, PriorityIcon } from '../issueParts.tsx';
 
 type Icon = typeof GitBranch;
 
@@ -46,8 +46,8 @@ export function IssueLine({ issue, lead }: { issue: SuperIssue; lead?: ReactNode
       className="flex h-[30px] w-full min-w-0 items-center gap-2 rounded-[7px] px-1.5 text-left font-sans text-[12.5px] outline-none transition-colors hover:bg-content/5 focus-visible:bg-content/7"
     >
       {lead}
-      <StatusGlyph status={issue.status} />
-      <PriorityGlyph priority={issue.priority} />
+      <StatusIcon status={issue.status} />
+      <PriorityIcon priority={issue.priority} />
       <span className="shrink-0 font-mono text-[11.5px] text-content/45">{issue.key}</span>
       <span className={`min-w-0 flex-1 truncate ${issue.status === 'done' || issue.status === 'canceled' ? 'text-content/50' : 'text-content/85'}`}>{issue.title}</span>
       {due ? <span className={`shrink-0 text-[11.5px] ${due.tone === 'danger' ? 'text-danger' : due.tone === 'warning' ? 'text-warning' : 'text-content/45'}`}>{due.text.replace(/^(Today|Tomorrow|Yesterday), /, '')}</span> : null}
@@ -111,7 +111,7 @@ export function Relations({ issue, issues }: { issue: SuperIssue; issues: SuperI
               ))}
             </div>
           )}
-          options={issues.filter(i => i.id !== issue.id && !issue.relations.some(r => r.type === type && r.issueId === i.id)).map(i => ({ value: i.id, label: `${i.key} ${i.title}`, icon: <StatusGlyph status={i.status} /> }))} />
+          options={issues.filter(i => i.id !== issue.id && !issue.relations.some(r => r.type === type && r.issueId === i.id)).map(i => ({ value: i.id, label: `${i.key} ${i.title}`, icon: <StatusIcon status={i.status} /> }))} />
       ) : null}
     </Section>
   );
@@ -158,7 +158,7 @@ export function Decisions({ links }: { links: IssueLinks | null }) {
       <div className="flex flex-col">
         {ids.map(id => (
           <div key={id} className="flex h-[30px] min-w-0 items-center gap-2 px-1.5 font-sans text-[12.5px]">
-            <RefChip id={id} />
+            <RefChip id={id} glyph={false} />
             <span className="truncate text-content/80">{byId.get(id)?.title ?? ''}</span>
           </div>
         ))}

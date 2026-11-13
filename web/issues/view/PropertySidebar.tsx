@@ -14,9 +14,9 @@ import { AgentAvatar } from '../../ui/Avatar.tsx';
 import { Kbd } from '../../ui/Kbd.tsx';
 import { CalendarGlyph } from './CalendarGlyph.tsx';
 import { Picker } from './Picker.tsx';
-import { PriorityGlyph, StatusGlyph } from './glyphs.tsx';
 import { actorName, assigneeOf, commitEdit, parentCandidates, dueToSave, dueTone, parseLabels, PRIORITY_OPTIONS, STATUS_OPTIONS } from './issueViewModel.ts';
 import { writeIssue } from './issueWrites.ts';
+import { StatusIcon, PriorityIcon } from '../issueParts.tsx';
 
 export interface PropertySidebarHandle { open(property: 'status' | 'priority' | 'due' | 'labels'): void }
 
@@ -66,12 +66,12 @@ export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperI
     <aside aria-label="Properties" className="flex flex-col gap-0.5 font-sans">
       <Row label="Status" shortcut="S">
         <button ref={statusRef} type="button" className={VALUE} aria-haspopup="listbox" onClick={e => setMenu({ kind: 'status', anchor: e.currentTarget })}>
-          <StatusGlyph status={issue.status} /><span className="truncate">{ISSUE_STATUS_LABEL[issue.status]}</span>
+          <StatusIcon status={issue.status} /><span className="truncate">{ISSUE_STATUS_LABEL[issue.status]}</span>
         </button>
       </Row>
       <Row label="Priority" shortcut="P">
         <button ref={priorityRef} type="button" className={VALUE} aria-haspopup="listbox" onClick={e => setMenu({ kind: 'priority', anchor: e.currentTarget })}>
-          <PriorityGlyph priority={issue.priority} /><span className="truncate">{ISSUE_PRIORITY_LABEL[issue.priority]}</span>
+          <PriorityIcon priority={issue.priority} /><span className="truncate">{ISSUE_PRIORITY_LABEL[issue.priority]}</span>
         </button>
       </Row>
       <Row label="Assignee">
@@ -116,7 +116,7 @@ export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperI
       </Row>
       <Row label="Parent">
         <button type="button" className={VALUE} aria-haspopup="listbox" title={parent?.title} onClick={e => setMenu({ kind: 'parent', anchor: e.currentTarget })}>
-          {parent ? <><StatusGlyph status={parent.status} /><span className="shrink-0 text-content/45">{parent.key}</span><span className="truncate">{parent.title}</span></> : <span className="text-content/45">None</span>}
+          {parent ? <><StatusIcon status={parent.status} /><span className="shrink-0 text-content/45">{parent.key}</span><span className="truncate">{parent.title}</span></> : <span className="text-content/45">None</span>}
         </button>
       </Row>
       <Row label="Pull request">
@@ -131,9 +131,9 @@ export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperI
         </button>
       </Row>
       {menu?.kind === 'status' ? <Picker anchor={menu.anchor} label="Status" current={issue.status} onClose={() => setMenu(null)}
-        options={STATUS_OPTIONS.map(s => ({ value: s, label: ISSUE_STATUS_LABEL[s], icon: <StatusGlyph status={s} /> }))} onPick={v => save({ status: v as IssueStatus })} /> : null}
+        options={STATUS_OPTIONS.map(s => ({ value: s, label: ISSUE_STATUS_LABEL[s], icon: <StatusIcon status={s} /> }))} onPick={v => save({ status: v as IssueStatus })} /> : null}
       {menu?.kind === 'priority' ? <Picker anchor={menu.anchor} label="Priority" current={issue.priority} onClose={() => setMenu(null)}
-        options={PRIORITY_OPTIONS.map(p => ({ value: p, label: ISSUE_PRIORITY_LABEL[p], icon: <PriorityGlyph priority={p} /> }))} onPick={v => save({ priority: v as IssuePriority })} /> : null}
+        options={PRIORITY_OPTIONS.map(p => ({ value: p, label: ISSUE_PRIORITY_LABEL[p], icon: <PriorityIcon priority={p} /> }))} onPick={v => save({ priority: v as IssuePriority })} /> : null}
       {menu?.kind === 'project' ? <Picker anchor={menu.anchor} label="Project" current={issue.projectId ?? ''} onClose={() => setMenu(null)}
         options={[{ value: '', label: 'No project' }, ...projects.map(p => ({ value: p.id, label: p.name }))]} onPick={v => save({ projectId: v || null })} /> : null}
       {menu?.kind === 'assignee' ? <Picker anchor={menu.anchor} label="Assignee" current={assigneeOf(issue)} onClose={() => setMenu(null)}
@@ -144,7 +144,7 @@ export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperI
         ]}
         onPick={v => save({ assignee: v === 'none' ? null : v })} /> : null}
       {menu?.kind === 'parent' ? <Picker anchor={menu.anchor} label="Parent" width={320} current={issue.parentId ?? 'none'} onClose={() => setMenu(null)}
-        options={[{ value: 'none', label: 'No parent' }, ...parentCandidates(issues, issue).map(i => ({ value: i.id, label: `${i.key} ${i.title}`, icon: <StatusGlyph status={i.status} /> }))]}
+        options={[{ value: 'none', label: 'No parent' }, ...parentCandidates(issues, issue).map(i => ({ value: i.id, label: `${i.key} ${i.title}`, icon: <StatusIcon status={i.status} /> }))]}
         onPick={v => save({ parentId: v === 'none' ? null : v })} /> : null}
       {menu?.kind === 'labels' ? <LabelsEditor anchor={menu.anchor} labels={issue.labels} onClose={() => setMenu(null)} onSave={labels => save({ labels })} /> : null}
     </aside>

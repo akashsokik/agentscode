@@ -7,7 +7,6 @@ import { Clock, GitBranch } from '../../mono/icons.tsx';
 import { useApp } from '../../store.ts';
 import { AgentAvatar } from '../../ui/Avatar.tsx';
 import { Markdown } from '../../ui/Markdown.tsx';
-import { StatusGlyph } from './glyphs.tsx';
 import { activityLine, activityOf, actorName, commentToPost, commitEdit, TEXT_MAX } from './issueViewModel.ts';
 import { writeIssue } from './issueWrites.ts';
 import { useState } from 'react';
@@ -16,6 +15,7 @@ import { TEXTAREA, TextButton } from '../../ui/common.tsx';
 import { Section } from './Sections.tsx';
 import type { IssueStatus } from '../../../shared/types.ts';
 import { ISSUE_STATUS_LABEL } from '../../../shared/issues.ts';
+import { StatusIcon } from '../issueParts.tsx';
 
 function when(at: number): string {
   const d = new Date(at);
@@ -40,7 +40,7 @@ function EventRow({ event }: { event: IssueEvent }) {
   return (
     <li className="font-sans">
       <div className="flex min-h-[30px] items-center gap-2 text-[12.5px]">
-        {status ? <StatusGlyph status={status} /> : <Who actor={event.by} />}
+        {status ? <StatusIcon status={status} /> : <Who actor={event.by} />}
         <p className="min-w-0 flex-1 truncate text-content/60"><span className="font-medium text-content/85">{actorName(event.by, name)}</span> {activityLine(event, name, issueKey)}</p>
         <time dateTime={new Date(event.at).toISOString()} title={new Date(event.at).toLocaleString()} className="shrink-0 text-[11.5px] tabular-nums text-content/40">{when(event.at)}</time>
       </div>
