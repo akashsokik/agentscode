@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { IssueEvent, SuperIssue } from '../shared/types.ts';
 import { tabKey } from '../web/layout.ts';
 import { citedDecisions, fromServerDecisions, issueLinksSource, localIssueLinks, setIssueLinksSource } from '../web/issues/view/issueLinks.ts';
-import { activityLine, actorName, commitEdit, descriptionToSave, dueToSave, dueTone, TEXT_MAX, TITLE_MAX, titleToSave, matchesQuery, parentOf, parseLabels, PRIORITY_OPTIONS, propertyKey, relationsOf, STATUS_OPTIONS, subIssues } from '../web/issues/view/issueViewModel.ts';
+import { activityLine, actorName, assigneeOf, commentToPost, commitEdit, parentCandidates, relationRemoval, withRelation, descriptionToSave, dueToSave, dueTone, TEXT_MAX, TITLE_MAX, titleToSave, matchesQuery, parentOf, parseLabels, PRIORITY_OPTIONS, propertyKey, relationsOf, STATUS_OPTIONS, subIssues } from '../web/issues/view/issueViewModel.ts';
 import fs from 'node:fs';
 import { ISSUE_TEXT_MAX, ISSUE_TITLE_MAX } from '../shared/issues.ts';
 import { WRITABLE } from '../web/issues/view/issueWritable.ts';
@@ -107,9 +107,8 @@ test('Hal\'s decisions route: its decisions first, then ones only the text cites
   assert.deepEqual(fromServerDecisions(i, { issueId: i.id, key: i.key, decisions: [] }).git, { commits: [] });
 });
 
-test('writes: only what the issue route takes is editable; an issue opens as its own tab', () => {
-  assert.deepEqual(Object.entries(WRITABLE).filter(([, v]) => v).map(([k]) => k).sort(), ['dueDate', 'labels', 'priority', 'projectId', 'status', 'text', 'title']);
-  assert.deepEqual(Object.entries(WRITABLE).filter(([, v]) => !v).map(([k]) => k).sort(), ['assignee', 'comment', 'parent', 'relations']);
+test('writes: every field the issue route takes is editable (Fen\'s feat/issues-api); an issue opens as its own tab', () => {
+  assert.deepEqual(Object.entries(WRITABLE).filter(([, v]) => !v).map(([k]) => k), []);
   assert.equal(tabKey({ kind: 'issue', issueId: 'abc' }), 'issue:abc');
 });
 
@@ -150,4 +149,33 @@ test('an edit saves through one write; a refusal reverts; nothing to save writes
   assert.equal(await commitEdit(null, write(true)), 'saved', 'null is a value (a cleared due date)');
   assert.equal(await commitEdit(undefined, write(true)), 'unchanged');
   assert.deepEqual(writes, ['New', 'Bad', null]);
+});
+
+test('relations: removing one writes the issue that holds it; adding one is the own list plus it, once, never itself', () => {
+  const a = issue(); const b = issue(); const c = issue();
+  a.relations = [{ type: 'blocks', issueId: b.id }];
+  c.relations = [{ type: 'blocks', issueId: a.id }, { type: 'related', issueId: b.id }];
+  const all = [a, b, c];
+  const rows = relationsOf(all, a);
+  const blocks = rows.find(r => r.label === 'Blocks')!;
+  const blockedBy = rows.find(r => r.label === 'Blocked by')!;
+  assert.deepEqual(relationRemoval(all, blocks, a.id), { id: a.id, relations: [] }, 'its own: this issue\'s list');
+  assert.deepEqual(relationRemoval(all, blockedBy, a.id), { id: c.id, relations: [{ type: 'related', issueId: b.id }] }, 'from the other side: that issue\'s list, the rest kept');
+  assert.deepEqual(withRelation(a, 'related', c.id), [{ type: 'blocks', issueId: b.id }, { type: 'related', issueId: c.id }]);
+  assert.equal(withRelation(a, 'blocks', b.id), null, 'already there');
+  assert.equal(withRelation(a, 'blocks', a.id), null, 'itself');
+});
+
+test('parent: any other issue, open ones first, never itself or one below it; assignee and comments as the API takes them', () => {
+  const top = issue(); const mid = issue({ parentId: top.id }); const leaf = issue({ parentId: mid.id }); const done = issue({ status: 'done' }); const other = issue();
+  const all = [top, mid, leaf, done, other];
+  assert.deepEqual(parentCandidates(all, mid).map(i => i.id), [top.id, other.id, done.id]);
+  assert.deepEqual(parentCandidates(all, top).map(i => i.id), [other.id, done.id], 'not its sub-issues or theirs');
+  assert.equal(assigneeOf({ agentId: 'fen' }), 'fen');
+  assert.equal(assigneeOf({ forUser: true }), 'user');
+  assert.equal(assigneeOf({}), 'none');
+  const name = (id: string) => (id === 'fen' ? 'Fen' : undefined);
+  assert.equal(activityLine({ at: 1, by: { kind: 'user' }, kind: 'assignee', to: 'user' }, name), 'assigned it to you');
+  assert.equal(commentToPost('  Looks good.\n\n- one\n- two  \n'), 'Looks good.\n\n- one\n- two');
+  assert.equal(commentToPost('   \n '), undefined);
 });

@@ -1,8 +1,7 @@
-// Every change the issue view makes goes through the existing issue API (api.updateIssue, the
-// user's PATCH /api/super/issues/:id). A field that route does not take yet is listed as not
-// writable, and its control stays read-only rather than doing nothing silently. The assignee,
-// parent, relations and comments become writable when the route takes them (Fen's issue API).
-import type { IssuePriority, IssueStatus } from '../../../shared/types.ts';
+// Every change the issue view makes goes through the issue API (api.updateIssue, the user's
+// PATCH /api/super/issues/:id). A field that route does not take is listed as not writable, and
+// its control stays read-only rather than doing nothing silently.
+import type { IssuePriority, IssueRelationType, IssueStatus } from '../../../shared/types.ts';
 import { api } from '../../api.ts';
 import { attempt } from '../../store.ts';
 
@@ -16,6 +15,13 @@ export interface IssuePatch {
   dueDate?: string | null;
   labels?: string[];
   projectId?: string | null;
+  /** An agent's id, 'user' for you, or null for nobody. */
+  assignee?: string | null;
+  parentId?: string | null;
+  /** The issue's own relations, whole: the list replaces the old one. */
+  relations?: { type: IssueRelationType; issueId: string }[];
+  /** A comment added to its activity (Markdown). */
+  comment?: string;
 }
 
 /** Save a change; true when it went through (an error shows as a toast through `attempt`). */

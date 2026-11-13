@@ -5,5 +5,7 @@ export type IssueField = 'title' | 'text' | 'status' | 'priority' | 'dueDate' | 
 /** What the user's issue route takes today. */
 export const WRITABLE: Readonly<Record<IssueField, boolean>> = {
   title: true, text: true, status: true, priority: true, dueDate: true, labels: true, projectId: true,
-  assignee: false, parent: false, relations: false, comment: false,
+  // Fen's feat/issues-api (68f9969): the assignee (an agent, you or nobody), the parent, the
+  // relations and comments too.
+  assignee: true, parent: true, relations: true, comment: true,
 };

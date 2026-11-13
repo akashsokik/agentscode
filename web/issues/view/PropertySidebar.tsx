@@ -4,66 +4,21 @@
  * with a search field; the current value shows by its selected fill only, never a check
  * (ACH-D46 option B). ↑ ↓ move, ⏎ picks, ⎋ closes. S, P, D and L open them from the view.
  */
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import { ISSUE_PRIORITY_LABEL, ISSUE_STATUS_LABEL } from '../../../shared/issues.ts';
 import type { IssuePriority, IssueStatus, SuperIssue } from '../../../shared/types.ts';
-import { open } from '../../layout.ts';
 import { Copy, Check, Folder } from '../../mono/icons.tsx';
 import { Popover } from '../../mono/Popover.tsx';
 import { useApp } from '../../store.ts';
 import { AgentAvatar } from '../../ui/Avatar.tsx';
 import { Kbd } from '../../ui/Kbd.tsx';
-import { MenuRow, MenuRowRole } from '../../ui/common.tsx';
 import { CalendarGlyph } from './CalendarGlyph.tsx';
+import { Picker } from './Picker.tsx';
 import { PriorityGlyph, StatusGlyph } from './glyphs.tsx';
-import { actorName, commitEdit, dueToSave, dueTone, matchesQuery, parseLabels, PRIORITY_OPTIONS, STATUS_OPTIONS } from './issueViewModel.ts';
-import { WRITABLE, writeIssue } from './issueWrites.ts';
+import { actorName, assigneeOf, commitEdit, parentCandidates, dueToSave, dueTone, parseLabels, PRIORITY_OPTIONS, STATUS_OPTIONS } from './issueViewModel.ts';
+import { writeIssue } from './issueWrites.ts';
 
 export interface PropertySidebarHandle { open(property: 'status' | 'priority' | 'due' | 'labels'): void }
-
-interface Option { value: string; label: string; icon?: ReactNode }
-
-/** A picker: a search field over its options, the current one filled. */
-function Picker({ anchor, label, options, current, onPick, onClose }: { anchor: HTMLElement; label: string; options: Option[]; current: string; onPick: (value: string) => void; onClose: () => void }) {
-  const [query, setQuery] = useState('');
-  const shown = useMemo(() => options.filter(o => matchesQuery(o.label, query)), [options, query]);
-  const [at, setAt] = useState(() => Math.max(0, options.findIndex(o => o.value === current)));
-  useEffect(() => setAt(i => Math.min(i, Math.max(0, shown.length - 1))), [shown.length]);
-  return (
-    <Popover anchor={anchor} side="bottom" align="start" width={240} onDismiss={onClose} className="p-1.5">
-      <input
-        autoFocus
-        aria-label={`Find a ${label.toLowerCase()}`}
-        placeholder={`${label}…`}
-        value={query}
-        onChange={e => setQuery(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'ArrowDown') { e.preventDefault(); setAt(i => (i + 1) % Math.max(1, shown.length)); }
-          if (e.key === 'ArrowUp') { e.preventDefault(); setAt(i => (i - 1 + shown.length) % Math.max(1, shown.length)); }
-          if (e.key === 'Enter' && shown[at]) { e.preventDefault(); onPick(shown[at].value); }
-          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); }
-        }}
-        className="mb-1 h-7 w-full rounded-md bg-content/5 px-2 font-sans text-[12px] text-content outline-none placeholder:text-content/40"
-      />
-      <div role="listbox" aria-label={label}>
-        <MenuRowRole.Provider value="option">
-          {shown.map((o, i) => (
-            <div key={o.value} data-keyboard={i === at || undefined} className={i === at && o.value !== current ? '[&>button]:bg-content/5' : undefined}>
-            <MenuRow
-              title={<span className="flex items-center gap-2">{o.icon}<span className="truncate">{o.label}</span></span>}
-              // The current value by its fill only (ACH-D46 B, no check). The keyboard row gets the
-              // hover fill (from the wrapper below), so the two never look alike (Rhea L3).
-              highlighted={o.value === current}
-              onSelect={() => onPick(o.value)}
-            />
-            </div>
-          ))}
-          {!shown.length ? <p className="px-2 py-2 font-sans text-[12px] text-content/45">No matches</p> : null}
-        </MenuRowRole.Provider>
-      </div>
-    </Popover>
-  );
-}
 
 function Row({ label, shortcut, children }: { label: string; shortcut?: string; children: ReactNode }) {
   return (
@@ -80,7 +35,7 @@ const VALUE = 'flex h-7 min-w-0 items-center gap-1.5 rounded-md px-1.5 -mx-1.5 t
 export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperIssue; issues: SuperIssue[] }>(function PropertySidebar({ issue, issues }, ref) {
   const agents = useApp(s => s.snapshot?.agents) ?? [];
   const projects = useApp(s => s.snapshot?.projects) ?? [];
-  const [menu, setMenu] = useState<{ kind: 'status' | 'priority' | 'project' | 'labels'; anchor: HTMLElement } | null>(null);
+  const [menu, setMenu] = useState<{ kind: 'status' | 'priority' | 'project' | 'labels' | 'assignee' | 'parent'; anchor: HTMLElement } | null>(null);
   const statusRef = useRef<HTMLButtonElement>(null);
   const priorityRef = useRef<HTMLButtonElement>(null);
   const labelsRef = useRef<HTMLButtonElement>(null);
@@ -107,7 +62,6 @@ export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperI
   const shownDue = dueDraft === '' ? undefined : /^2\d{3}-\d{2}-\d{2}$/.test(dueDraft) ? dueDraft : issue.dueDate;
   const due = dueTone(shownDue, issue.status, new Date());
   const save = (patch: Parameters<typeof writeIssue>[1]) => { setMenu(null); void writeIssue(issue.id, patch); };
-  const notYet = 'Changed from here once the issue API takes it; agents and the SuperAgent set it today.';
   return (
     <aside aria-label="Properties" className="flex flex-col gap-0.5 font-sans">
       <Row label="Status" shortcut="S">
@@ -121,7 +75,7 @@ export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperI
         </button>
       </Row>
       <Row label="Assignee">
-        <button type="button" className={VALUE} disabled={!WRITABLE.assignee} title={WRITABLE.assignee ? undefined : notYet}>
+        <button type="button" className={VALUE} aria-haspopup="listbox" onClick={e => setMenu({ kind: 'assignee', anchor: e.currentTarget })}>
           {agent ? <><AgentAvatar agent={agent} animate={false} className="size-4" /><span className="truncate">{agent.name}</span></>
             : issue.forUser ? <span className="truncate">You</span> : <span className="text-content/45">Unassigned</span>}
         </button>
@@ -161,11 +115,9 @@ export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperI
         </button>
       </Row>
       <Row label="Parent">
-        {parent ? (
-          <button type="button" className={VALUE} onClick={() => open({ kind: 'issue', issueId: parent.id })} title={parent.title}>
-            <StatusGlyph status={parent.status} /><span className="shrink-0 text-content/45">{parent.key}</span><span className="truncate">{parent.title}</span>
-          </button>
-        ) : <span className="px-0 text-content/45" title={WRITABLE.parent ? undefined : notYet}>None</span>}
+        <button type="button" className={VALUE} aria-haspopup="listbox" title={parent?.title} onClick={e => setMenu({ kind: 'parent', anchor: e.currentTarget })}>
+          {parent ? <><StatusGlyph status={parent.status} /><span className="shrink-0 text-content/45">{parent.key}</span><span className="truncate">{parent.title}</span></> : <span className="text-content/45">None</span>}
+        </button>
       </Row>
       <Row label="Pull request">
         <span className="truncate text-content/45" title={`A pull request whose branch, title or body names ${issue.key} links here.`}>None yet</span>
@@ -184,6 +136,16 @@ export const PropertySidebar = forwardRef<PropertySidebarHandle, { issue: SuperI
         options={PRIORITY_OPTIONS.map(p => ({ value: p, label: ISSUE_PRIORITY_LABEL[p], icon: <PriorityGlyph priority={p} /> }))} onPick={v => save({ priority: v as IssuePriority })} /> : null}
       {menu?.kind === 'project' ? <Picker anchor={menu.anchor} label="Project" current={issue.projectId ?? ''} onClose={() => setMenu(null)}
         options={[{ value: '', label: 'No project' }, ...projects.map(p => ({ value: p.id, label: p.name }))]} onPick={v => save({ projectId: v || null })} /> : null}
+      {menu?.kind === 'assignee' ? <Picker anchor={menu.anchor} label="Assignee" current={assigneeOf(issue)} onClose={() => setMenu(null)}
+        options={[
+          { value: 'none', label: 'Unassigned' },
+          { value: 'user', label: 'You' },
+          ...agents.filter(a => a.role !== 'super').map(a => ({ value: a.id, label: a.name, icon: <AgentAvatar agent={a} animate={false} className="size-4" /> })),
+        ]}
+        onPick={v => save({ assignee: v === 'none' ? null : v })} /> : null}
+      {menu?.kind === 'parent' ? <Picker anchor={menu.anchor} label="Parent" width={320} current={issue.parentId ?? 'none'} onClose={() => setMenu(null)}
+        options={[{ value: 'none', label: 'No parent' }, ...parentCandidates(issues, issue).map(i => ({ value: i.id, label: `${i.key} ${i.title}`, icon: <StatusGlyph status={i.status} /> }))]}
+        onPick={v => save({ parentId: v === 'none' ? null : v })} /> : null}
       {menu?.kind === 'labels' ? <LabelsEditor anchor={menu.anchor} labels={issue.labels} onClose={() => setMenu(null)} onSave={labels => save({ labels })} /> : null}
     </aside>
   );

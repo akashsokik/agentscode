@@ -1,7 +1,6 @@
 /**
  * The issue's activity, oldest first: who did what (a quiet line with their avatar and the time),
- * and comments as their own text. The comment box under it posts through the issue API once that
- * takes comments (issueWrites.ts); until then it says so instead of pretending.
+ * and comments as their own text. The comment box under it posts through the issue API.
  */
 import type { IssueActor, IssueEvent, SuperIssue } from '../../../shared/types.ts';
 import { Clock, GitBranch } from '../../mono/icons.tsx';
@@ -9,8 +8,11 @@ import { useApp } from '../../store.ts';
 import { AgentAvatar } from '../../ui/Avatar.tsx';
 import { Markdown } from '../../ui/Markdown.tsx';
 import { StatusGlyph } from './glyphs.tsx';
-import { activityLine, activityOf, actorName } from './issueViewModel.ts';
-import { WRITABLE } from './issueWrites.ts';
+import { activityLine, activityOf, actorName, commentToPost, commitEdit, TEXT_MAX } from './issueViewModel.ts';
+import { writeIssue } from './issueWrites.ts';
+import { useState } from 'react';
+import { Kbd } from '../../ui/Kbd.tsx';
+import { TEXTAREA, TextButton } from '../../ui/common.tsx';
 import { Section } from './Sections.tsx';
 import type { IssueStatus } from '../../../shared/types.ts';
 import { ISSUE_STATUS_LABEL } from '../../../shared/issues.ts';
@@ -54,11 +56,42 @@ export function Activity({ issue }: { issue: SuperIssue }) {
   return (
     <Section icon={Clock} title="Activity">
       <ol aria-label="Activity">{events.map((e, i) => <EventRow key={`${e.at}:${i}`} event={e} />)}</ol>
-      <div className="mt-2 rounded-lg border border-content/10 px-3 py-2.5 font-sans">
-        {WRITABLE.comment ? null : (
-          <p className="text-[12px] text-content/45">Comments from here come with the issue API's next step. Agents and the SuperAgent add notes to its activity today.</p>
-        )}
-      </div>
+      <CommentBox issueId={issue.id} />
     </Section>
+  );
+}
+
+/** A comment on the issue: Markdown, line breaks kept. ⌘⏎ posts; it clears once posted, and stays on a refusal. */
+function CommentBox({ issueId }: { issueId: string }) {
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const post = async () => {
+    if (busy) return;
+    setBusy(true);
+    const result = await commitEdit(commentToPost(draft), comment => writeIssue(issueId, { comment }));
+    setBusy(false);
+    if (result === 'saved') setDraft('');
+  };
+  return (
+    <div className="mt-2 flex flex-col gap-1.5 font-sans">
+      <textarea
+        aria-label="Comment"
+        placeholder="Leave a comment…"
+        value={draft}
+        rows={Math.min(12, Math.max(2, draft.split('\n').length + 1))}
+        maxLength={TEXT_MAX}
+        aria-busy={busy || undefined}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); }
+          if (e.key === 'Escape' && draft) { e.preventDefault(); e.stopPropagation(); setDraft(''); }
+        }}
+        className={`${TEXTAREA} text-[12.5px] leading-relaxed`}
+      />
+      <div className="flex items-center justify-end gap-2 text-[11px] text-content/45">
+        <span className="mr-auto inline-flex items-center gap-1"><Kbd spec="Mod+Enter" quiet /> comment</span>
+        <TextButton onClick={() => void post()} disabled={busy || !commentToPost(draft)}>Comment</TextButton>
+      </div>
+    </div>
   );
 }

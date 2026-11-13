@@ -21,17 +21,25 @@ export type RelationLabel = 'Blocks' | 'Blocked by' | 'Related to' | 'Duplicate 
  * others say about it (blocked by, related to, duplicated by), grouped in that order. Missing
  * issues are dropped (removed since).
  */
-export function relationsOf<T extends Issue>(issues: readonly T[], issue: Issue): { label: RelationLabel; issue: T }[] {
+export interface RelationRow<T> {
+  label: RelationLabel;
+  issue: T;
+  /** Where the relation is stored, for removing it: this issue's own list, or the other's. */
+  holderId: string;
+  type: IssueRelationType;
+}
+
+export function relationsOf<T extends Issue>(issues: readonly T[], issue: Issue): RelationRow<T>[] {
   const byId = new Map(issues.map(i => [i.id, i]));
-  const out: { label: RelationLabel; issue: T }[] = [];
-  const add = (label: RelationLabel, id: string) => {
+  const out: RelationRow<T>[] = [];
+  const add = (label: RelationLabel, id: string, holderId: string, type: IssueRelationType) => {
     const other = byId.get(id);
-    if (other && other.id !== issue.id && !out.some(r => r.label === label && r.issue.id === id)) out.push({ label, issue: other });
+    if (other && other.id !== issue.id && !out.some(r => r.label === label && r.issue.id === id)) out.push({ label, issue: other, holderId, type });
   };
   const OWN: Record<IssueRelationType, RelationLabel> = { blocks: 'Blocks', related: 'Related to', duplicate_of: 'Duplicate of' };
   const THEIRS: Record<IssueRelationType, RelationLabel> = { blocks: 'Blocked by', related: 'Related to', duplicate_of: 'Duplicated by' };
-  for (const r of issue.relations) add(OWN[r.type], r.issueId);
-  for (const other of issues) for (const r of other.relations) if (r.issueId === issue.id) add(THEIRS[r.type], other.id);
+  for (const r of issue.relations) add(OWN[r.type], r.issueId, issue.id, r.type);
+  for (const other of issues) for (const r of other.relations) if (r.issueId === issue.id) add(THEIRS[r.type], other.id, other.id, r.type);
   const order: RelationLabel[] = ['Blocked by', 'Blocks', 'Related to', 'Duplicate of', 'Duplicated by'];
   return out.sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label));
 }
@@ -73,7 +81,7 @@ export function activityLine(event: IssueEvent, agentName: (id: string) => strin
     case 'comment': return 'commented';
     case 'status': return `moved it ${event.from ? `from ${statusWord(event.from)} ` : ''}to ${statusWord(event.to)}${event.text ? ` (${event.text})` : ''}`;
     case 'priority': return `set priority ${event.to && event.to in ISSUE_PRIORITY_LABEL ? ISSUE_PRIORITY_LABEL[event.to as IssuePriority] : event.to}`;
-    case 'assignee': return event.to ? `assigned it to ${agentName(event.to) ?? 'an agent'}` : 'unassigned it';
+    case 'assignee': return event.to === 'user' ? 'assigned it to you' : event.to ? `assigned it to ${agentName(event.to) ?? 'an agent'}` : 'unassigned it';
     case 'migrated': return event.text ? `updated it to the new issue model: ${event.text}` : 'updated it to the new issue model';
     default: return 'changed it';
   }
@@ -150,4 +158,47 @@ export function dueToSave(draft: string, current: string | undefined): string | 
 export async function commitEdit<T>(next: T | undefined, write: (value: T) => Promise<boolean>): Promise<'unchanged' | 'saved' | 'reverted'> {
   if (next === undefined) return 'unchanged';
   return (await write(next)) ? 'saved' : 'reverted';
+}
+
+/**
+ * Removing a relation row: the write that drops it from the issue that stores it (this one for
+ * Blocks, Related to, Duplicate of; the other for Blocked by and Duplicated by).
+ */
+export function relationRemoval<T extends Pick<SuperIssue, 'id' | 'relations'>>(issues: readonly T[], row: { holderId: string; type: IssueRelationType; issue: { id: string } }, selfId: string): { id: string; relations: SuperIssue['relations'] } | null {
+  const holder = issues.find(i => i.id === row.holderId);
+  if (!holder) return null;
+  const otherId = row.holderId === selfId ? row.issue.id : selfId;
+  const relations = holder.relations.filter(r => !(r.type === row.type && r.issueId === otherId));
+  return relations.length === holder.relations.length ? null : { id: holder.id, relations };
+}
+
+/** Adding a relation: the issue's own list with it, or null when it is already there or is itself. */
+export function withRelation(issue: Pick<SuperIssue, 'id' | 'relations'>, type: IssueRelationType, otherId: string): SuperIssue['relations'] | null {
+  if (otherId === issue.id || issue.relations.some(r => r.type === type && r.issueId === otherId)) return null;
+  return [...issue.relations, { type, issueId: otherId }];
+}
+
+/** Issues that may be the parent: any other, but never one below this issue (that would loop). */
+export function parentCandidates<T extends Pick<SuperIssue, 'id' | 'parentId' | 'status'>>(issues: readonly T[], issue: { id: string }): T[] {
+  const below = new Set<string>([issue.id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const i of issues) if (i.parentId && below.has(i.parentId) && !below.has(i.id)) { below.add(i.id); grew = true; }
+  }
+  return issues.filter(i => !below.has(i.id)).sort((a, b) => Number(CLOSED_STATUSES.includes(a.status)) - Number(CLOSED_STATUSES.includes(b.status)));
+}
+
+/** The assignee as the picker holds it: an agent's id, 'user' for you, or 'none'. */
+export function assigneeOf(issue: Pick<SuperIssue, 'agentId' | 'forUser'>): string {
+  return issue.agentId ?? (issue.forUser ? 'user' : 'none');
+}
+
+export const RELATION_TYPES: readonly { type: IssueRelationType; label: string }[] = [
+  { type: 'blocks', label: 'Blocks' }, { type: 'related', label: 'Related to' }, { type: 'duplicate_of', label: 'Duplicate of' },
+];
+
+/** A comment to post: the text as the model keeps it (line breaks kept), or undefined when empty. */
+export function commentToPost(draft: string): string | undefined {
+  const text = issueDescription(draft.slice(0, TEXT_MAX));
+  return text || undefined;
 }

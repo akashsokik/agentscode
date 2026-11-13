@@ -4,26 +4,29 @@
  * in the full pane. In git and Decisions read through issueLinks.ts (Hal's API once it lands).
  */
 import { useEffect, useState, type ReactNode } from 'react';
-import type { SuperIssue } from '../../../shared/types.ts';
+import type { IssueRelationType, SuperIssue } from '../../../shared/types.ts';
 import { open } from '../../layout.ts';
-import { CornerDownRight, GitBranch, Route, StickyNote } from '../../mono/icons.tsx';
+import { CornerDownRight, GitBranch, Plus, Route, StickyNote, X } from '../../mono/icons.tsx';
 import { useNotes } from '../../notes/refsState.ts';
 import { RefChip } from '../../notes/RefChip.tsx';
 import { useApp } from '../../store.ts';
 import { AgentAvatar } from '../../ui/Avatar.tsx';
 import { PriorityGlyph, StatusGlyph } from './glyphs.tsx';
 import { issueLinksSource, type IssueLinks } from './issueLinks.ts';
-import { dueTone, relationsOf, subIssues } from './issueViewModel.ts';
+import { dueTone, RELATION_TYPES, relationRemoval, relationsOf, subIssues, withRelation } from './issueViewModel.ts';
+import { writeIssue } from './issueWrites.ts';
+import { Picker } from './Picker.tsx';
 
 type Icon = typeof GitBranch;
 
-export function Section({ icon: IconC, title, meta, children }: { icon: Icon; title: string; meta?: ReactNode; children: ReactNode }) {
+export function Section({ icon: IconC, title, meta, action, children }: { icon: Icon; title: string; meta?: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
     <section aria-label={title} className="font-sans">
       <h3 className="mb-1 flex h-7 items-center gap-2 text-[12px] font-medium text-content/60">
         <IconC aria-hidden className="size-3.5 text-content/45" strokeWidth={1.75} />
         {title}
         {meta ? <span className="font-normal text-content/45">{meta}</span> : null}
+        {action}
       </h3>
       {children}
     </section>
@@ -65,17 +68,52 @@ export function SubIssues({ issue, issues }: { issue: SuperIssue; issues: SuperI
 
 export function Relations({ issue, issues }: { issue: SuperIssue; issues: SuperIssue[] }) {
   const rows = relationsOf(issues, issue);
-  if (!rows.length) return null;
+  const [adding, setAdding] = useState<HTMLElement | null>(null);
+  const [type, setType] = useState<IssueRelationType>('blocks');
+  const remove = (row: (typeof rows)[number]) => {
+    const write = relationRemoval(issues, row, issue.id);
+    if (write) void writeIssue(write.id, { relations: write.relations });
+  };
+  const add = (otherId: string) => {
+    const relations = withRelation(issue, type, otherId);
+    setAdding(null);
+    if (relations) void writeIssue(issue.id, { relations });
+  };
+  const addButton = (
+    <button type="button" aria-label="Add a relation" title="Add a relation" onClick={e => setAdding(e.currentTarget)} className="ml-auto grid size-6 place-items-center rounded-md text-content/45 outline-none hover:bg-content/5 hover:text-content/80 focus-visible:bg-content/7">
+      <Plus className="size-3.5" strokeWidth={1.75} />
+    </button>
+  );
   return (
-    <Section icon={Route} title="Relations">
-      <div>
-        {rows.map(r => (
-          <div key={`${r.label}:${r.issue.id}`} className="flex min-w-0 items-center">
-            <span className="w-24 shrink-0 font-sans text-[12px] text-content/45">{r.label}</span>
-            <div className="min-w-0 flex-1"><IssueLine issue={r.issue} /></div>
-          </div>
-        ))}
-      </div>
+    <Section icon={Route} title="Relations" action={addButton}>
+      {rows.length ? (
+        <div>
+          {rows.map(r => (
+            <div key={`${r.label}:${r.issue.id}`} className="group/rel flex min-w-0 items-center">
+              <span className="w-24 shrink-0 font-sans text-[12px] text-content/45">{r.label}</span>
+              <div className="min-w-0 flex-1"><IssueLine issue={r.issue} /></div>
+              <button type="button" aria-label={`Remove: ${r.label} ${r.issue.key}`} title="Remove" onClick={() => remove(r)}
+                className="ml-1 grid size-6 shrink-0 place-items-center rounded-md text-content/40 opacity-0 outline-none hover:bg-content/5 hover:text-content/80 focus-visible:opacity-100 group-hover/rel:opacity-100">
+                <X className="size-3" strokeWidth={1.75} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : <p className="font-sans text-[12.5px] text-content/45">None. Blocks, related or duplicate issues show here.</p>}
+      {adding ? (
+        <Picker anchor={adding} label="Issue" width={340} current="" onClose={() => setAdding(null)} onPick={add}
+          header={(
+            <div role="radiogroup" aria-label="Relation" className="mb-1 flex gap-1">
+              {RELATION_TYPES.map(t => (
+                <button key={t.type} type="button" role="radio" aria-checked={type === t.type} onClick={() => setType(t.type)}
+                  className={`h-6 flex-1 rounded-md font-sans text-[11.5px] outline-none ${type === t.type ? 'bg-selection text-content' : 'text-content/60 hover:bg-content/5'}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
+          options={issues.filter(i => i.id !== issue.id && !issue.relations.some(r => r.type === type && r.issueId === i.id)).map(i => ({ value: i.id, label: `${i.key} ${i.title}`, icon: <StatusGlyph status={i.status} /> }))} />
+      ) : null}
     </Section>
   );
 }
