@@ -38,6 +38,7 @@ import type {
 import type { ComposerCommand, ProjectFileList } from '../shared/composer.ts';
 import type { MentionHint } from '../shared/mentions.ts';
 import type { RefDetail, RefSearchHit, RefsIndex } from '../shared/refs.ts';
+import type { PrPageData } from '../shared/prs.ts';
 import type { CleanupRequest, CleanupResult, WorkChanges, WorkDiff, WorkTarget, WorkView } from '../shared/work.ts';
 
 /** Where files and git commands run: an agent's workspace, or a project folder. */
@@ -106,6 +107,8 @@ function rootQuery(root: Root, extra: Record<string, string> = {}): string {
 export const api = {
   state: () => request<Snapshot>('GET', '/api/state'),
   refs: () => request<RefsIndex>('GET', '/api/refs'),
+  /** The Pull requests page (read only); `fresh` reads GitHub again instead of the minute-long cache. */
+  prs: (fresh = false) => request<PrPageData>('GET', `/api/github/prs${fresh ? '?refresh=1' : ''}`),
   work: (fresh = false) => request<WorkView>('GET', `/api/work${fresh ? '?fresh=1' : ''}`),
   workCleanup: (body: CleanupRequest) => request<CleanupResult>('POST', '/api/work/cleanup', body),
   workChanges: (project: string, target: WorkTarget) => request<WorkChanges>('GET', `/api/work/changes?${new URLSearchParams({ project, ...target })}`),

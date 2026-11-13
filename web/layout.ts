@@ -10,6 +10,10 @@ export type TabContent =
   | { kind: 'file'; root: Root; path: string }
   | { kind: 'diff'; root: Root; path: string }
   | { kind: 'comms'; conversationId?: string }
+  /** The Issues page (web/issues/IssuesPage.tsx, Fen's). */
+  | { kind: 'issues' }
+  /** The Pull requests page (web/prs/PullRequestsPane.tsx); `prId` is the selected PR, owner/name#n. */
+  | { kind: 'pullRequests'; prId?: string }
   /** The Work view as a pane (web/work/WorkView.tsx). */
   | { kind: 'work' }
   | { kind: 'channel'; channelId: string }
@@ -94,6 +98,8 @@ export function tabKey(content: TabContent): string {
     case 'file': return `file:${rootKey(content.root)}:${content.path}`;
     case 'diff': return `diff:${rootKey(content.root)}:${content.path}`;
     case 'comms': return 'comms';
+    case 'issues': return 'issues';
+    case 'pullRequests': return 'pullRequests';
     case 'work': return 'work';
     case 'channel': return `channel:${content.channelId}`;
     case 'walkthrough': return `walkthrough:${content.agentId}:${content.id}`;
@@ -164,8 +170,8 @@ function ensureTab(tabs: Tab[], content: TabContent): { tabs: Tab[]; tab: Tab } 
   const key = tabKey(content);
   const existing = tabs.find(t => tabKey(t.content) === key);
   if (existing) {
-    // Comms tabs carry the selected conversation; keep the newest selection.
-    if (content.kind === 'comms') {
+    // Comms and Pull requests tabs carry the selected item; keep the newest selection.
+    if (content.kind === 'comms' || content.kind === 'pullRequests') {
       const tab = { ...existing, content };
       return { tabs: tabs.map(t => (t.id === existing.id ? tab : t)), tab };
     }
@@ -173,6 +179,12 @@ function ensureTab(tabs: Tab[], content: TabContent): { tabs: Tab[]; tab: Tab } 
   }
   const tab = { id: newId('t'), content };
   return { tabs: [...tabs, tab], tab };
+}
+
+/** What the focused pane shows, by kind: the sidebar marks its Comms, Issues and Pull requests rows. */
+export function focusedKind(l: Layout): TabContent['kind'] | null {
+  const pane = l.panes.find(p => p.id === l.focused);
+  return l.tabs.find(t => t.id === pane?.tabId)?.content.kind ?? null;
 }
 
 /** Show content in the focused pane, or in the pane that already shows it. */
