@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type KeyboardEvent } from 'react';
 import type { IssuePriority, IssueStatus, SuperIssue } from '../../shared/types.ts';
 import { Search, X } from '../mono/icons.tsx';
 import { Popover, type PopoverAnchor } from '../mono/Popover.tsx';
@@ -36,7 +36,8 @@ function FilterValues({ property, issues, filters, onChange, names, today }: {
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Escape' && query) { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); setQuery(''); } }}
+          // Escape clears the search first; with nothing typed it goes on up and closes the menu.
+          onKeyDown={e => { if (e.key === 'Escape' && query) { e.preventDefault(); e.stopPropagation(); setQuery(''); } }}
           placeholder={`Search ${label.toLowerCase()}`}
           aria-label={`Search ${label.toLowerCase()}`}
           className="min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-content/40"
@@ -78,6 +79,17 @@ type FilterProps = {
 };
 
 /**
+ * Escape for the Filter menus, which handle it themselves rather than through Popover's window
+ * listener: that one runs before a search field could clear itself, so one Escape closed everything.
+ * Now a field with text clears first (FilterValues), and an Escape that reaches here closes the menu;
+ * a submenu's Escape bubbles here through React. Other keys move between rows.
+ */
+function escapeCloses(e: KeyboardEvent<HTMLElement>, onClose: () => void) {
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); return; }
+  moveMenuFocus(e);
+}
+
+/**
  * The Filter menu (F): the properties, each opening its values in a submenu beside it (ACH-D46,
  * option B). A chip opens its property's values on their own, under the chip.
  */
@@ -87,13 +99,13 @@ export function FilterMenu({ anchor, issues, filters, onChange, names, today, on
   if (start) {
     const label = ISSUE_PROPERTIES.find(p => p.property === start)!.label;
     return (
-      <Popover anchor={anchor} side="bottom" align="start" width={248} onDismiss={onClose} ignore="[data-issues-filter]" role="dialog" aria-label={`Filter by ${label.toLowerCase()}`} onKeyDown={moveMenuFocus} className="p-1.5 font-sans">
+      <Popover anchor={anchor} side="bottom" align="start" width={248} onDismiss={onClose} dismissOnEscape={false} ignore="[data-issues-filter]" role="dialog" aria-label={`Filter by ${label.toLowerCase()}`} onKeyDown={e => escapeCloses(e, onClose)} className="p-1.5 font-sans">
         <MenuPage page={start}>{values(start)}</MenuPage>
       </Popover>
     );
   }
   return (
-    <Popover anchor={anchor} side="bottom" align="start" width={216} onDismiss={onClose} ignore="[data-issues-filter], [data-submenu]" role="menu" aria-label="Filter by" onKeyDown={moveMenuFocus} className="p-1.5 font-sans">
+    <Popover anchor={anchor} side="bottom" align="start" width={216} onDismiss={onClose} dismissOnEscape={false} ignore="[data-issues-filter], [data-submenu]" role="menu" aria-label="Filter by" onKeyDown={e => escapeCloses(e, onClose)} className="p-1.5 font-sans">
       <MenuRowRole.Provider value="menuitem">
         <MenuPage page="properties">
           {ISSUE_PROPERTIES.map(p => (
