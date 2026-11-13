@@ -550,7 +550,7 @@ export class WorkService {
       if (!parts.ok) continue; // the commit is gone: nothing to record
       const [tree, parents, subject] = parts.out.trim().split('\x1f');
       const fastForward = /Fast-forward/i.test(what ?? '');
-      const tip = parents?.split(' ')[1] ?? (fastForward ? hash : undefined);
+      const tip = fastForward ? hash : parents?.split(' ')[1];
       if (!tree || !tip) continue;
       const refs = [...new Set([...info.refs, ...findRefIds(subject ?? '', this.ctx.knownRef).map(r => r.id)])].filter(this.ctx.knownRef);
       // A fast-forward's previous main is already in the next reflog entry.

@@ -23,12 +23,14 @@ export interface MergedIssuePr {
 
 export interface IssueLinkStore {
   issues(): SuperIssue[];
-  updateIssue(id: string, patch: { status: 'done'; activityText: string }, now: number, by: { kind: 'git' }): SuperIssue;
+  updateIssue(id: string, patch: { status?: 'done'; activityText: string }, now: number, by: { kind: 'git' }): SuperIssue;
 }
 
 /** A newer merge can finish reopened work; a past merge (even after restarting) cannot. */
 function openSince(issue: SuperIssue): number {
-  return Math.max(issue.createdAt, ...issue.activity.filter(e => e.kind === 'status' && e.to && !['done', 'canceled'].includes(e.to)).map(e => e.at));
+  // Both reflog and GitHub timestamps are whole seconds; compare in the same precision.
+  const at = Math.max(issue.createdAt, ...issue.activity.filter(e => e.kind === 'status' && e.to && !['done', 'canceled'].includes(e.to)).map(e => e.at));
+  return Math.floor(at / 1000) * 1000;
 }
 
 function alreadyLogged(issue: SuperIssue, identity: string): boolean {
@@ -103,39 +105,45 @@ export class IssueLinks {
   /** Called with Work's verified records, before its UI's 30-merge limit. No new git reads. */
   localMerges(project: Project, records: MergeRecord[]): number {
     this.records.set(project.id, records);
-    let changed = 0;
+    let changed = 0, observed = 0;
     for (const record of [...records].sort((a, b) => a.at - b.at)) {
       // A revert must never act like a merge, even if someone names a merge branch that way.
       if (/^revert\b/i.test(record.subject) || !/^[a-f0-9]{40}$/.test(record.hash)) continue;
       const keys = this.keys(record.branch);
       for (const issue of this.store.issues()) {
-        if (issue.projectId !== project.id || !isOpenIssue(issue)) continue;
+        if (issue.projectId !== project.id) continue;
         if (!keys.includes(issue.key) && issue.branch !== record.branch) continue;
-        if (record.at < openSince(issue) || alreadyLogged(issue, record.hash)) continue;
-        this.store.updateIssue(issue.id, { status: 'done', activityText: `Merged ${record.hash} from ${record.branch}.` }, this.now(), { kind: 'git' });
-        changed++;
+        if (record.at < Math.floor(issue.createdAt / 1000) * 1000 || alreadyLogged(issue, record.hash)) continue;
+        // Consume even while closed: replaying an observed second merge after reopen must be inert.
+        const closes = isOpenIssue(issue) && record.at >= openSince(issue);
+        this.store.updateIssue(issue.id, { ...(closes ? { status: 'done' as const } : {}), activityText: `Merged ${record.hash} from ${record.branch}.` }, this.now(), { kind: 'git' });
+        observed++;
+        if (closes) changed++;
       }
     }
-    if (changed) this.changed();
+    if (observed) this.changed();
     return changed;
   }
 
   githubMerges(prs: readonly MergedIssuePr[]): number {
-    let changed = 0;
+    let changed = 0, observed = 0;
     for (const pr of prs) {
       const at = pr.mergedAt ? Date.parse(pr.mergedAt) : NaN;
       if (pr.state.toLowerCase() !== 'merged' || !Number.isFinite(at) || !pr.mergeCommit || !/^[a-f0-9]{40}$/.test(pr.mergeCommit)) continue;
       if (/^revert\b/i.test(pr.title)) continue;
       const keys = this.keys([pr.branch, pr.title, pr.body].join('\n'));
       for (const issue of this.store.issues()) {
-        if (!pr.projects.some(p => p.id === issue.projectId) || !isOpenIssue(issue)) continue;
+        if (!pr.projects.some(p => p.id === issue.projectId)) continue;
         if (!keys.includes(issue.key) && issue.branch !== pr.branch) continue;
-        if (at < openSince(issue) || alreadyLogged(issue, pr.mergeCommit)) continue;
-        this.store.updateIssue(issue.id, { status: 'done', activityText: `Merged ${pr.mergeCommit} in ${pr.repo}#${pr.number} from ${pr.branch}.` }, this.now(), { kind: 'git' });
-        changed++;
+        const identity = `${pr.repo}#${pr.number} (${pr.mergeCommit})`;
+        if (at < Math.floor(issue.createdAt / 1000) * 1000 || alreadyLogged(issue, identity)) continue;
+        const closes = isOpenIssue(issue) && at >= openSince(issue);
+        this.store.updateIssue(issue.id, { ...(closes ? { status: 'done' as const } : {}), activityText: `Merged ${identity} from ${pr.branch}.` }, this.now(), { kind: 'git' });
+        observed++;
+        if (closes) changed++;
       }
     }
-    if (changed) this.changed();
+    if (observed) this.changed();
     return changed;
   }
 

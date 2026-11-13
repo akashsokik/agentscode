@@ -193,11 +193,13 @@ export class RefMentions {
   }
 
   /** Every citation of any id, deduplicated, newest first. */
-  private all(): (Cited & { key: string })[] {
+  private all(issue?: Pick<SuperIssue, 'key' | 'delegationId'>): (Cited & { key: string })[] {
     this.refresh();
     const out: (Cited & { key: string })[] = [];
     const seen = new Set<string>();
     const add = (key: string, cited: Cited) => {
+      // Bind before deduplication: identical reports for different handoffs have different targets.
+      if (issue && !cited.issueKeys?.includes(issue.key) && !(issue.delegationId && (cited.messageId === issue.delegationId || cited.replyTo === issue.delegationId))) return;
       const same = `${cited.author}|${cited.hash}`;
       if (seen.has(same)) return;
       seen.add(same);
@@ -257,8 +259,7 @@ export class RefMentions {
         links.set(id, sources);
       }
     };
-    for (const c of this.all()) {
-      if (!c.issueKeys?.includes(issue.key) && !(issue.delegationId && (c.messageId === issue.delegationId || c.replyTo === issue.delegationId))) continue;
+    for (const c of this.all(issue)) {
       add(c.ids, { key: c.key, ts: c.ts, ...c.citation });
     }
     for (const c of this.commits.get(issue.projectId ?? '') ?? []) {

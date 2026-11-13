@@ -8,7 +8,7 @@ import test from 'node:test';
 import type { Project } from '../shared/types.ts';
 import { SuperStore } from '../server/superAgent.ts';
 import { IssueLinks, type MergedIssuePr } from '../server/issueLinks.ts';
-import { MergeRecords, WorkService, readGit, type GitRunner } from '../server/work.ts';
+import { MergeRecords, WorkService, readGit, type GitRunner, type MergeRecord } from '../server/work.ts';
 import { RefMentions } from '../server/refMentions.ts';
 import { Store } from '../server/store.ts';
 import { harness, tempDir } from './helpers.ts';
@@ -18,7 +18,7 @@ const env = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example
 function git(cwd: string, ...args: string[]) {
   return execFileSync('git', ['-c', 'init.defaultBranch=main', '-c', 'core.hooksPath=/dev/null', ...args], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
-function setup() {
+function setup(createdAt = 1000) {
   const dir = tempDir('issue-links');
   const repo = path.join(dir, 'repo');
   fs.mkdirSync(repo);
@@ -26,7 +26,7 @@ function setup() {
   git(repo, 'commit', '--allow-empty', '-m', 'base');
   const project = { id: 'p1', code: 'ACH', name: 'app', path: repo, exists: true, isGit: true } as Project;
   const store = new SuperStore(path.join(dir, 'data'), () => 'ACH');
-  const issue = store.addIssue({ text: 'Ship the issue', projectId: 'p1', by: 'user' }, 1000);
+  const issue = store.addIssue({ text: 'Ship the issue', projectId: 'p1', by: 'user' }, createdAt);
   const links = new IssueLinks(store);
   const records = new MergeRecords(path.join(dir, 'work'));
   const work = new WorkService(records, { agents: () => [], messages: () => [], agentsDir: path.join(dir, 'agents'), dataDir: dir, knownRef: () => true, onMerges: (p, r) => { links.localMerges(p, r); } });
@@ -58,14 +58,13 @@ test('local merges close through the store with git activity; restarting and rev
   restarted.localMerges(t.project, t.records.list(fs.realpathSync(t.repo)));
   await t.work.view([t.project], true);
   assert.equal(t.store.issue(t.issue.id).status, 'todo');
-  // A different merge after the reopen, at a deterministic time (git reflog uses whole seconds).
+  // A different merge after the reopen, including when it happens in the same whole second.
   git(t.repo, 'checkout', 'feat/ACH-1-ship');
   fs.writeFileSync(path.join(t.repo, 'followup.txt'), 'follow-up');
   git(t.repo, 'add', 'followup.txt');
   git(t.repo, 'commit', '-m', 'follow-up');
   git(t.repo, 'checkout', 'main');
-  const future = new Date(Date.now() + 2000).toISOString();
-  execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'merge', '--no-ff', 'feat/ACH-1-ship', '-m', 'Merge feat/ACH-1-ship again'], { cwd: t.repo, env: { ...env, GIT_COMMITTER_DATE: future }, stdio: 'pipe' });
+  git(t.repo, 'merge', '--no-ff', 'feat/ACH-1-ship', '-m', 'Merge feat/ACH-1-ship again');
   await t.work.view([t.project], true);
   assert.equal(t.store.issue(t.issue.id).status, 'done');
   assert.match(t.store.issue(t.issue.id).activity.at(-1)?.text ?? '', new RegExp(git(t.repo, 'rev-parse', 'HEAD')));
@@ -201,4 +200,99 @@ test('commit scans cache immutable branch ranges and invalidate when either end 
   await t.links.indexCommits(t.project, 'main', [], mentions, runner);
   assert.equal(logs, 4, 'branch moved');
   assert.deepEqual(mentions.issueDecisions(t.issue).map(d => d.id), ['ACH-D41', 'ALL-D1']);
+});
+
+test('whole-second merge timestamps close same-second creation/reopen; logged merges stay consumed across restart', () => {
+  const t = setup(1001);
+  const hash = branch(t.repo, 'feat/ACH-1-time');
+  const record: MergeRecord = { hash, branch: 'feat/ACH-1-time', at: 1000, tree: git(t.repo, 'rev-parse', 'HEAD^{tree}'), tip: git(t.repo, 'rev-parse', 'HEAD^2'), parent: git(t.repo, 'rev-parse', 'HEAD^1'), subject: 'Merge feat/ACH-1-time', names: [], refs: [] };
+  const first = new IssueLinks(t.store, () => 1500);
+  assert.equal(first.localMerges(t.project, [record]), 1);
+  t.store.updateIssue(t.issue.id, { status: 'todo' }, 2001);
+  const restarted = new IssueLinks(new SuperStore(path.join(t.dir, 'data'), () => 'ACH'), () => 2500);
+  assert.equal(restarted.localMerges(t.project, [record]), 0);
+  git(t.repo, 'checkout', 'feat/ACH-1-time');
+  git(t.repo, 'commit', '--allow-empty', '-m', 'more work');
+  git(t.repo, 'checkout', 'main');
+  git(t.repo, 'merge', '--no-ff', 'feat/ACH-1-time', '-m', 'Merge feat/ACH-1-time again');
+  const next = { ...record, hash: git(t.repo, 'rev-parse', 'HEAD'), at: 2000 };
+  assert.equal(restarted.localMerges(t.project, [record, next]), 1);
+  assert.equal(t.store.issue(t.issue.id).status, 'done');
+  assert.equal(restarted.localMerges(t.project, [record, next]), 0);
+});
+
+test('identical reports keep separate issue bindings and the correct conversation, including transcript copies', () => {
+  const t = setup();
+  const second = t.store.addIssue({ text: 'Second issue', projectId: 'p1', by: 'user' }, 1002);
+  t.store.updateIssue(t.issue.id, { delegationId: 'd1' });
+  t.store.updateIssue(second.id, { delegationId: 'd2' });
+  const state = new Store(path.join(t.dir, 'state')); state.load(); state.projects.set(t.project.id, t.project);
+  for (const [n, replyTo] of ['d1', 'd2'].entries()) {
+    const message = { id: `r${n}`, replyTo, fromAgentId: 'dev', fromName: 'Dev', toAgentId: 'lead', toName: 'Lead', conversationId: `c${n}`, ts: 1000 + n, text: 'Done under ACH-D43.', status: 'delivered' } as typeof state.messages[number];
+    state.messages.push(message);
+    state.appendEntry({ id: `peer:r${n}`, agentId: 'lead', kind: 'peer', ts: message.ts, text: message.text, peer: message });
+  }
+  const check = (mentions: RefMentions) => {
+    const issues = t.store.issues();
+    const first = mentions.issueDecisions(issues[0])[0].citations[0];
+    const second = mentions.issueDecisions(issues[1])[0].citations[0];
+    assert.ok(first.source !== 'commit' && second.source !== 'commit');
+    assert.deepEqual(first.open, { kind: 'comms', conversationId: 'c0' });
+    assert.deepEqual(second.open, { kind: 'comms', conversationId: 'c1' });
+    assert.equal(mentions.decisionIssues('ACH-D43', issues).length, 2);
+    assert.equal(mentions.counts().get('ACH-D43'), 1, 'Notes still deduplicates identical text');
+  };
+  check(new RefMentions(state));
+  state.messages.length = 0;
+  check(new RefMentions(state));
+});
+
+test('fast-forward to a merge commit records its actual tip and includes both sides in citation scans', async () => {
+  const t = setup();
+  git(t.repo, 'checkout', '-b', 'feat/ACH-1-stack');
+  git(t.repo, 'commit', '--allow-empty', '-m', 'First-parent work under ACH-D43');
+  git(t.repo, 'checkout', '-b', 'helper');
+  git(t.repo, 'commit', '--allow-empty', '-m', 'Helper under ALL-D1');
+  git(t.repo, 'checkout', 'feat/ACH-1-stack');
+  git(t.repo, 'merge', '--no-ff', 'helper', '-m', 'Combine helper under ALL-D7');
+  const tip = git(t.repo, 'rev-parse', 'HEAD');
+  git(t.repo, 'checkout', 'main');
+  git(t.repo, 'merge', '--ff-only', 'feat/ACH-1-stack');
+  await t.work.view([t.project], true);
+  assert.equal(t.records.list(fs.realpathSync(t.repo)).find(r => r.branch === 'feat/ACH-1-stack')?.tip, tip);
+  const state = new Store(path.join(t.dir, 'state')); state.load(); state.projects.set(t.project.id, t.project);
+  const mentions = new RefMentions(state);
+  await t.links.indexCommits(t.project, 'main', [], mentions);
+  assert.deepEqual(mentions.issueDecisions(t.issue).map(d => d.id), ['ACH-D43', 'ALL-D1', 'ALL-D7']);
+});
+
+test('all observed local merge identities are consumed while closed, durably across reopen and restart', () => {
+  const t = setup(1001);
+  const template: MergeRecord = { hash: 'a'.repeat(40), branch: 'feat/ACH-1-consumed', at: 2000, tree: '', tip: '', subject: 'Merge the issue branch', names: [], refs: [] };
+  const links = new IssueLinks(t.store, () => 2100);
+  assert.equal(links.localMerges(t.project, [template]), 1);
+  const second = { ...template, hash: 'b'.repeat(40) };
+  assert.equal(links.localMerges(t.project, [template, second]), 0);
+  assert.equal(t.store.issue(t.issue.id).status, 'done');
+  assert.match(t.store.issue(t.issue.id).activity.at(-1)?.text ?? '', /b{40}/);
+  assert.equal(t.store.issue(t.issue.id).activity.at(-1)?.kind, 'comment');
+  t.store.updateIssue(t.issue.id, { status: 'todo' }, 2500);
+  const restarted = new IssueLinks(new SuperStore(path.join(t.dir, 'data'), () => 'ACH'), () => 2900);
+  assert.equal(restarted.localMerges(t.project, [template, second]), 0);
+  assert.equal(t.store.issue(t.issue.id).status, 'todo');
+  assert.equal(restarted.localMerges(t.project, [template, second, { ...template, hash: 'c'.repeat(40) }]), 1);
+});
+
+test('all observed GitHub PR merges are consumed while closed and keyed by PR identity and merge hash', () => {
+  const t = setup(1001);
+  const links = new IssueLinks(t.store, () => 2100);
+  const first: MergedIssuePr = { repo: 'a/b', number: 1, projects: [{ id: 'p1' }], state: 'merged', branch: 'feat/ACH-1-work', title: 'Ship', mergedAt: new Date(2000).toISOString(), mergeCommit: 'a'.repeat(40) };
+  assert.equal(links.githubMerges([first]), 1);
+  const second = { ...first, number: 2, mergeCommit: 'b'.repeat(40) };
+  assert.equal(links.githubMerges([first, second]), 0);
+  t.store.updateIssue(t.issue.id, { status: 'todo' }, 2500);
+  const restarted = new IssueLinks(new SuperStore(path.join(t.dir, 'data'), () => 'ACH'), () => 2900);
+  assert.equal(restarted.githubMerges([first, second]), 0);
+  assert.equal(t.store.issue(t.issue.id).status, 'todo');
+  assert.equal(restarted.githubMerges([{ ...first, number: 3 }]), 1, 'another actual PR merge is a new event even with the same commit');
 });
