@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react';
-import { isOpen, type PrPageData } from '../../shared/prs.ts';
+import { isDue, isOpen, pollInterval, type PrPageData } from '../../shared/prs.ts';
 import { api } from '../api.ts';
 
 // The Pull requests page's data (GET /api/github/prs, read only, ACH-D43). Loaded while the page or
@@ -34,29 +34,43 @@ export function loadPrs(fresh = false): Promise<void> {
   return inFlight;
 }
 
-const POLL_MS = 5 * 60_000;
-let watchers = 0;
-let timer: ReturnType<typeof setInterval> | null = null;
-const onVisible = () => { if (document.visibilityState === 'visible') void loadPrs(); };
+/** Only read GitHub while someone can see it: the window is visible and has focus. */
+const watching = () => document.visibilityState === 'visible' && document.hasFocus();
 
-/** Keep the data fresh while something that shows it is mounted. */
-export function usePrsData(): void {
+let pages = 0;
+let counts = 0;
+let timer: ReturnType<typeof setInterval> | null = null;
+function check(): void {
+  if (watching() && isDue(state.data?.fetchedAt, pollInterval(pages, counts))) void loadPrs();
+}
+function attach(): void {
+  if (timer) return;
+  // A minute's tick only checks whether a read is due; it reads at the interval above.
+  timer = setInterval(check, 60_000);
+  window.addEventListener('focus', check);
+  document.addEventListener('visibilitychange', check);
+}
+function detach(): void {
+  if (pages + counts > 0 || !timer) return;
+  clearInterval(timer);
+  timer = null;
+  window.removeEventListener('focus', check);
+  document.removeEventListener('visibilitychange', check);
+}
+
+/** Keep the data fresh while it is shown: `page` for the Pull requests page, otherwise the sidebar's count. */
+export function usePrsData(page = false): void {
   useEffect(() => {
-    watchers++;
+    if (page) pages++; else counts++;
+    attach();
+    // Opening the page reads now if the data is older than the page's interval.
     if (!state.data && !inFlight) void loadPrs();
-    if (watchers === 1) {
-      timer = setInterval(() => { if (document.visibilityState === 'visible') void loadPrs(); }, POLL_MS);
-      document.addEventListener('visibilitychange', onVisible);
-    }
+    else check();
     return () => {
-      watchers--;
-      if (watchers === 0) {
-        if (timer) clearInterval(timer);
-        timer = null;
-        document.removeEventListener('visibilitychange', onVisible);
-      }
+      if (page) pages--; else counts--;
+      detach();
     };
-  }, []);
+  }, [page]);
 }
 
 /** Open PRs (drafts included) across the projects, or null before the first load. */

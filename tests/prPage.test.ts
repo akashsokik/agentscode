@@ -3,9 +3,9 @@ import test from 'node:test';
 import type { Agent, Project } from '../shared/types.ts';
 import type { Exec } from '../server/github.ts';
 import { GhError, ghAllowed, ghArgs } from '../server/github.ts';
-import { agentForBranch, PRS_CACHE_MS, PullRequests } from '../server/githubPrs.ts';
+import { agentForBranch, PRS_CACHE_MS, PRS_REFRESH_FLOOR_MS, PullRequests } from '../server/githubPrs.ts';
 import { createApp } from '../server/app.ts';
-import { checksLabel, findIssueKeys, firstIssueKey, inView, latestReviews, normalizeCheck, normalizePr, prsInView, viewCounts, type PullRequest } from '../shared/prs.ts';
+import { checksLabel, findIssueKeys, firstIssueKey, inView, isHttpUrl, latestReviews, normalizeCheck, normalizePr, prsInView, viewCounts, type PullRequest } from '../shared/prs.ts';
 import { harness, projectDir } from './helpers.ts';
 
 // ---- issue keys -------------------------------------------------------------------------------
@@ -14,7 +14,9 @@ test('issue keys: code-hyphen-number, never a decision or note id, and only know
   assert.deepEqual(findIssueKeys('feat/ACH-12-short-title').map(k => k.key), ['ACH-12']);
   assert.deepEqual(findIssueKeys('Fixes ACH-12 and OSI-3; see ACH-12 again').map(k => k.key), ['ACH-12', 'OSI-3']);
   assert.deepEqual(findIssueKeys('Per ACH-D7 and ACH-N3, no key here').map(k => k.key), [], 'decision and note ids are not keys');
-  assert.deepEqual(findIssueKeys('ACH-012, xACH-4, ACH-4b, ach-4').map(k => k.key), [], 'no leading zero, not inside a word, upper case only');
+  assert.deepEqual(findIssueKeys('xACH-4, ACH-4b, ach-4, ACH-0, ACHIEV-3').map(k => k.key), [], 'not inside a word, upper case, never 0, a 2-5 letter code (Fen\'s ISSUE_KEY)');
+  assert.deepEqual(findIssueKeys('ACH-012 and ACH-12').map(k => k.key), ['ACH-12'], 'a leading zero is the same issue');
+  assert.deepEqual(findIssueKeys('feat/ALL-12-x', ['ACH', 'ALL']).map(k => k.key), ['ALL-12'], 'ALL keys link when ALL is known');
   assert.deepEqual(findIssueKeys('UTF-8 and ISO-9001 and ACH-9', ['ACH']).map(k => k.key), ['ACH-9'], 'unknown codes are ignored when codes are given');
   assert.equal(firstIssueKey(['main', 'Title with OSI-2', 'Body with ACH-1'], ['ACH', 'OSI']), 'OSI-2', 'branch, then title, then body');
   assert.equal(firstIssueKey(['feat/ACH-25-x', 'OSI-2'], ['ACH', 'OSI']), 'ACH-25');
@@ -150,7 +152,12 @@ test('the service caches for a minute, shares a read in flight, and reads again 
   await prs.list();
   assert.equal(calls.length, 4, 'stale after a minute');
   await prs.list(true);
-  assert.equal(calls.length, 6, 'refresh reads again');
+  assert.equal(calls.length, 4, 'a refresh right after a read gets that read');
+  for (let i = 0; i < 5; i++) await prs.list(true);
+  assert.equal(calls.length, 4, 'repeated refreshes never stack up gh calls');
+  clock += PRS_REFRESH_FLOOR_MS;
+  await prs.list(true);
+  assert.equal(calls.length, 6, 'a refresh after the floor reads again');
 });
 
 test('gh missing or logged out is one error for the page; a repo that fails is skipped with its reason', async () => {
@@ -178,7 +185,7 @@ test('ghArgs.prsPage asks only for what the page shows, through a read-only comm
 
 // ---- the route --------------------------------------------------------------------------------
 
-test('GET /api/github/prs serves the page data, and ?refresh=1 reads GitHub again', async () => {
+test('GET /api/github/prs serves the page data; ?refresh=1 is honoured, past the 10 s floor', async () => {
   const h = harness();
   h.manager.addProject({ path: projectDir(h.dir, 'web') });
   const calls: string[][] = [];
@@ -195,7 +202,7 @@ test('GET /api/github/prs serves the page data, and ?refresh=1 reads GitHub agai
     await fetch(`http://127.0.0.1:${port}/api/github/prs`);
     assert.equal(calls.length, 2, 'the second call is cached');
     await fetch(`http://127.0.0.1:${port}/api/github/prs?refresh=1`);
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 2, 'a refresh within 10 s of the last read gets that read (the floor is tested on the service)');
   } finally {
     server.close();
   }
@@ -215,4 +222,30 @@ test('navigation: the Issues count leaves out done and canceled; both pages are 
   const { tabKey } = await import('../web/layout.ts');
   assert.equal(tabKey({ kind: 'issues' }), 'issues');
   assert.equal(tabKey({ kind: 'pullRequests', prId: 'o/r#1' }), tabKey({ kind: 'pullRequests' }), 'one Pull requests tab, whichever PR is selected');
+});
+
+test('ALL is among the codes a PR key may name, so issues with no project link too', async () => {
+  const { prs } = service({ repos: { 'agent-comms-harness': 'o/r' }, projects: [project('p1', 'agent-comms-harness', 'ACH')], gh: async args => JSON.stringify(args.includes('merged') ? [] : [raw({ headRefName: 'feat/ALL-12-shared' })]) });
+  const data = await prs.list();
+  assert.equal(data.pullRequests[0].issueKey, 'ALL-12');
+});
+
+test('only http and https links from GitHub data become hrefs', () => {
+  assert.ok(isHttpUrl('https://github.com/o/r/actions/runs/1'));
+  assert.ok(isHttpUrl('http://ci.example.test/job/2'));
+  for (const bad of ['javascript:alert(1)', 'data:text/html,x', 'file:///etc/passwd', 'vbscript:x', '//host/path', 'not a url', '', undefined]) {
+    assert.equal(isHttpUrl(bad), false, String(bad));
+  }
+});
+
+test('polling: every 5 minutes with the page open, every 30 for the sidebar count, never with nothing showing', async () => {
+  const { pollInterval, isDue, PAGE_POLL_MS, COUNT_POLL_MS } = await import('../shared/prs.ts');
+  assert.equal(pollInterval(1, 1), PAGE_POLL_MS);
+  assert.equal(pollInterval(0, 2), COUNT_POLL_MS);
+  assert.equal(pollInterval(0, 0), null);
+  assert.equal(isDue(undefined, PAGE_POLL_MS), true, 'never read');
+  assert.equal(isDue(1_000, PAGE_POLL_MS, 1_000 + PAGE_POLL_MS - 1), false);
+  assert.equal(isDue(1_000, PAGE_POLL_MS, 1_000 + PAGE_POLL_MS), true);
+  assert.equal(isDue(1_000, COUNT_POLL_MS, 1_000 + PAGE_POLL_MS), false, 'the count alone waits 30 minutes');
+  assert.equal(isDue(0, null, 10 ** 12), false, 'nothing showing: no read');
 });

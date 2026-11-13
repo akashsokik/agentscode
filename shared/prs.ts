@@ -8,7 +8,9 @@
 // note id (ACH-D7, ACH-N3) is never a key. Swap these for his issueKeysIn once it is on main.
 
 /** A key anywhere in text: not inside a longer word, and never followed by more letters or digits. */
-const KEY = /(?<![A-Za-z0-9])([A-Z][A-Z0-9]{1,5})-([1-9]\d{0,5})(?![A-Za-z0-9])/g;
+// Fen's ISSUE_KEY (2-5 letter code, 1-6 digits), with guards so "xACH-4" and "ACH-4b" are not keys.
+// A leading zero is the same issue (ACH-012 is ACH-12); no issue is number 0.
+const KEY = /(?<![A-Za-z0-9])([A-Z]{2,5})-(\d{1,6})(?![A-Za-z0-9])/g;
 
 interface IssueKeyMatch {
   key: string;
@@ -29,6 +31,7 @@ export function findIssueKeys(text: string, codes?: Iterable<string>): IssueKeyM
   for (const m of String(text ?? '').matchAll(KEY)) {
     const code = m[1];
     if (known && !known.has(code)) continue;
+    if (Number(m[2]) === 0) continue;
     const key = `${code}-${Number(m[2])}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -46,6 +49,17 @@ export function firstIssueKey(texts: (string | undefined)[], codes?: Iterable<st
   return null;
 }
 
+
+/** Whether a link from GitHub data may be used as an href: http and https only. */
+export function isHttpUrl(url: string | undefined): url is string {
+  if (!url) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 export type PrState = 'open' | 'draft' | 'merged' | 'closed';
 export type CheckState = 'success' | 'failure' | 'pending' | 'skipped' | 'neutral';
@@ -212,4 +226,19 @@ export function checksLabel(s: PullRequest['checksSummary']): { text: string; to
   if (s.failed) return { text: `${s.failed} of ${s.total} failing`, tone: 'danger' };
   if (s.pending) return { text: `${s.pending} running`, tone: 'pending' };
   return { text: `${s.passed} passed`, tone: 'success' };
+}
+
+// ---- how often the page's data is read (web/prs/prsData.ts) ----------------------------------------
+
+/** With the Pull requests page open: every 5 minutes. With only the sidebar's count: every 30. */
+export const PAGE_POLL_MS = 5 * 60_000;
+export const COUNT_POLL_MS = 30 * 60_000;
+/** How often the data should be read now, or null when nothing shows it. */
+export function pollInterval(pages: number, counts: number): number | null {
+  if (pages > 0) return PAGE_POLL_MS;
+  return counts > 0 ? COUNT_POLL_MS : null;
+}
+/** Whether data read at `fetchedAt` is due again. */
+export function isDue(fetchedAt: number | undefined, interval: number | null, now = Date.now()): boolean {
+  return interval !== null && (fetchedAt === undefined || now - fetchedAt >= interval);
 }

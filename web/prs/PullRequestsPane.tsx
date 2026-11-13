@@ -1,11 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { checksLabel, isOpen, PR_VIEWS, prsInView, viewCounts, type PrCheck, type PrReview, type PrView, type PullRequest } from '../../shared/prs.ts';
+import { checksLabel, isHttpUrl, isOpen, PR_VIEWS, prsInView, viewCounts, type PrCheck, type PrReview, type PrView, type PullRequest } from '../../shared/prs.ts';
 import { relativeTime } from '../format.ts';
 import { open } from '../layout.ts';
 import { Check, ExternalLink, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, LoaderCircle, Minus, RefreshCw, X } from '../mono/icons.tsx';
 import { WhoAvatar } from '../notes/parts.tsx';
 import { PaneFrame, type PaneChrome } from '../panes/PaneFrame.tsx';
 import { cx, Empty, HeaderButton, Loading, StatusLabel, type Tone } from '../ui/common.tsx';
+import { KeyValueList } from '../ui/KeyValueList.tsx';
 import { PanelList, PanelRow, PanelSection, PanelToolbar } from '../ui/PanelList.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { loadPrs, usePrs, usePrsData } from './prsData.ts';
@@ -40,7 +41,7 @@ function matches(pr: PullRequest, query: string): boolean {
 }
 
 export function PullRequestsPane({ prId, chrome }: { prId?: string; chrome: PaneChrome }) {
-  usePrsData();
+  usePrsData(true);
   const data = usePrs(s => s.data);
   const error = usePrs(s => s.error);
   const loading = usePrs(s => s.loading);
@@ -196,19 +197,12 @@ function PrDetail({ pr, now }: { pr: PullRequest; now: number }) {
         <span className="truncate">{pr.repo}</span>
         <span aria-hidden>›</span>
         <span className="tabular-nums">#{pr.number}</span>
-        <a href={pr.url} target="_blank" rel="noreferrer" aria-label="Open on GitHub" title="Open on GitHub" className="ml-auto grid size-6 shrink-0 place-items-center rounded-md hover:bg-content/10 hover:text-content">
+        {isHttpUrl(pr.url) ? <a href={pr.url} target="_blank" rel="noreferrer" aria-label="Open on GitHub" title="Open on GitHub" className="ml-auto grid size-6 shrink-0 place-items-center rounded-md hover:bg-content/10 hover:text-content">
           <ExternalLink className="size-3.5" strokeWidth={1.75} />
-        </a>
+        </a> : null}
       </div>
       <h3 className="mt-1.5 text-[14px] font-semibold leading-snug text-content">{pr.title}</h3>
-      <dl className="mt-3 grid grid-cols-[6.5rem_minmax(0,1fr)] text-[12px]">
-        {rows.map(([label, value]) => (
-          <div key={label} className="contents">
-            <dt className="flex min-h-7 items-center text-content/45">{label}</dt>
-            <dd className="flex min-h-7 min-w-0 items-center gap-1.5 text-content/85">{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <div className="mt-3"><KeyValueList rows={rows} /></div>
       {pr.issueKey ? (
         <p className="mt-1 text-[11.5px] leading-relaxed text-content/45">Found by the key in the {pr.branch.includes(pr.issueKey) ? 'branch name' : 'title or description'}.</p>
       ) : null}
@@ -230,7 +224,7 @@ function PrDetail({ pr, now }: { pr: PullRequest; now: number }) {
             );
             return (
               <li key={`${c.name}-${i}`}>
-                {c.url
+                {isHttpUrl(c.url)
                   ? <a href={c.url} target="_blank" rel="noreferrer" className="flex h-7 items-center gap-2 rounded-md px-1 hover:bg-content/5">{body}</a>
                   : <span className="flex h-7 items-center gap-2 px-1">{body}</span>}
               </li>
