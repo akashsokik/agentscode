@@ -129,6 +129,8 @@ export class SuperStore {
     const file = this.readIssuesFile();
     // Counters from both files, the higher of each: super.json keeps a copy, so losing issues.json
     // (or a crash in the one-time move) never hands a key out again.
+    // Known limit (Ivy, deb4af9 review): a double fault, an older build's write (which drops super.json's
+    // copy) and then losing issues.json, leaves only the keys still in use, so a removed top key can be reissued.
     let counters = maxCounters(file?.issueKeys, raw.issueKeys && typeof raw.issueKeys === 'object' ? sanitizeCounters(raw.issueKeys as Record<string, unknown>) : undefined);
     const current = file ? file.issues : Array.isArray(raw.issues2) ? raw.issues2.filter(validIssue) : null;
     const hasLegacy = Array.isArray(raw.issues) || Array.isArray(raw.goals);
