@@ -191,9 +191,10 @@ test('activity reads parent and relation changes with the issues\' keys (Fen\'s 
   const e = (over: Partial<IssueEvent>): IssueEvent => ({ at: 1, by: { kind: 'user' }, kind: 'parent', ...over });
   assert.equal(activityLine(e({ to: 'p1' }), agent, keys), 'set the parent to ACH-3');
   assert.equal(activityLine(e({ from: 'p1' }), agent, keys), 'removed the parent');
-  assert.equal(activityLine(e({ kind: 'relation', to: 'blocks:o7' }), agent, keys), 'added: blocks ACH-7');
-  assert.equal(activityLine(e({ kind: 'relation', from: 'related:o2' }), agent, keys), 'removed: related to ACH-2');
-  assert.equal(activityLine(e({ kind: 'relation', to: 'duplicate_of:gone' }), agent, keys), 'added: duplicate of a removed issue');
+  assert.equal(activityLine(e({ kind: 'relation', to: 'blocks:o7' }), agent, keys), 'added a relation: blocks ACH-7');
+  assert.equal(activityLine(e({ kind: 'relation', from: 'related:o2' }), agent, keys), 'removed a relation: related to ACH-2');
+  assert.equal(activityLine(e({ kind: 'relation', to: 'duplicate_of:gone' }), agent, keys), 'added a relation: duplicate of a removed issue');
+  assert.equal(activityLine(e({ kind: 'relation', to: 'o7' }), agent, keys), 'added a relation: ACH-7', 'a value with no type');
 });
 
 test('issue text renders inert: an openui-lang block in a description or comment never draws live UI (Ivy L1)', () => {
