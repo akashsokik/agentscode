@@ -5,7 +5,7 @@
 import type { KeySpec } from '../keys.ts';
 import { Kbd } from './Kbd.tsx';
 import { menuRowTone } from './menuRowTone.ts';
-import { createContext, useContext, type ComponentPropsWithoutRef, type ReactNode } from 'react';
+import { createContext, useContext, type ComponentPropsWithoutRef, type ReactNode, type Ref } from 'react';
 import { Check, type IconComponent } from '../mono/icons.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
@@ -181,8 +181,12 @@ export function MenuDivider() {
 /** Rows inside a ContextMenu are menu items; elsewhere (pickers) they are options. */
 export const MenuRowRole = createContext<'option' | 'menuitem'>('option');
 
-export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, current, highlighted, active, onSelect, disabled, danger, role: roleProp }: {
+export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, current, highlighted, active, onSelect, disabled, danger, role: roleProp, density = 'default', leading, ref, ...buttonProps }: Pick<ComponentPropsWithoutRef<'button'>, 'id' | 'tabIndex' | 'aria-selected' | 'aria-disabled' | 'onMouseEnter' | 'onMouseMove' | 'onMouseDown'> & {
   icon?: IconComponent;
+  /** Existing compact select and single-line quick-picker layouts, without duplicating row markup. */
+  density?: 'default' | 'compact' | 'inline';
+  leading?: ReactNode;
+  ref?: Ref<HTMLButtonElement>;
   title: ReactNode;
   hint?: ReactNode;
   /** A keyboard shortcut at the end of the row, as a quiet key chip (ACH-D26). */
@@ -208,6 +212,7 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
   const role = roleProp ?? contextRole;
   return (
     <button
+      ref={ref}
       type="button"
       role={role}
       aria-selected={role === 'option' ? selected ?? checked ?? current : undefined}
@@ -215,8 +220,17 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
       disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onSelect}
-      className={`flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-40 ${menuRowTone({ danger, keyboard: highlighted || active, quiet: current || selected })}`}
+      {...buttonProps}
+      className={cx('flex w-full px-2 text-left transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-40',
+        density === 'default' ? 'items-start gap-2.5 rounded-lg py-2' : density === 'inline' ? 'h-8 items-center gap-2 rounded-md text-[13px]' : 'items-center gap-2 rounded-lg py-1.5 text-[12px]',
+        menuRowTone({ danger, keyboard: highlighted || active, quiet: current || selected }))}
     >
+      {density !== 'default' ? <>
+        {leading || Icon ? <span className="grid size-4 shrink-0 place-items-center text-content/60">{leading ?? (Icon ? <Icon className="size-3.5" /> : null)}</span> : null}
+        <span className={density === 'inline' ? 'min-w-0 shrink-0 truncate' : 'min-w-0 flex-1 truncate'}>{title}</span>
+        {density === 'inline' ? <span className="min-w-0 flex-1 truncate text-[11px] text-content/40">{hint}</span> : hint ? <span className="text-[11px] text-content/50">{hint}</span> : null}
+        {selected || checked ? <Check className="size-3.5 shrink-0" strokeWidth={2.25} /> : null}
+      </> : <>
       {Icon ? <Icon className={`mt-0.5 size-3.5 shrink-0 ${danger ? '' : 'text-content/70'}`} strokeWidth={1.75} /> : null}
       <span className="min-w-0 flex-1">
         <span className="block text-[13px] font-medium leading-5">{title}</span>
@@ -224,6 +238,7 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
       </span>
       {shortcut ? <Kbd spec={shortcut} quiet className="mt-0.5" /> : null}
       {selected || checked ? <Check className="mt-0.5 size-3.5 shrink-0" strokeWidth={2.25} /> : null}
+      </>}
     </button>
   );
 }
