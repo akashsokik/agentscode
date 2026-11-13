@@ -441,7 +441,9 @@ function IssueItem({ issue, today, moves, expanded, onToggle, onRemoved, onSettl
             <button type="button" className={PRIMARY} disabled={!title.trim()} aria-busy={busy || undefined} onClick={() => void save()}>Save</button>
           </div>
         </div>
-      ) : <p className="whitespace-pre-wrap break-words">{issue.text}</p>}
+      ) : null}
+      {/* The description stays in view while the title is renamed: only the title changes here. */}
+      <p className={`whitespace-pre-wrap break-words ${editing ? 'mt-1.5' : ''}`}>{issue.text}</p>
       {issue.notes ? <p className="mt-1 text-content/50">{issue.notes}</p> : null}
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {agent ? <DetailButton onClick={() => open({ kind: 'agent', agentId: agent.id })}>{done ? 'Done by' : 'With'} {agent.name}</DetailButton> : null}
