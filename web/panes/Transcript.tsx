@@ -29,7 +29,8 @@ import { Markdown } from '../ui/Markdown.tsx';
 import { MentionText } from '../ui/MentionText.tsx';
 import { reducedMotion, staggerWordFades, WORD_FADE_MS } from '../ui/wordFade.ts';
 import { ChipButton, cx, Empty, INPUT, Loading, TextButton } from '../ui/common.tsx';
-import { AiIdea, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, Copy, Eraser, File, Folder, MessageSquare, Route, Search, Sparkles, X } from '../mono/icons.tsx';
+import { AiIdea, ChartBreakoutSquare, Check, ChevronDown, ChevronRight, Copy, Eraser, File, Folder, MessageSquare, Route, Search, Sparkles } from '../mono/icons.tsx';
+import { StatusMark } from '../ui/StatusMark.tsx';
 import { MarkTile, PhaseTile } from '../mono/ActivityTile.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
@@ -331,7 +332,7 @@ function ActivityToolRow({ entry, agentId }: { entry: Entry; agentId: string }) 
         className={`group flex min-h-7 min-w-0 items-center gap-1.5 py-1 ${expandable ? 'cursor-pointer' : ''}`}
       >
         <ToolCallSummary tool={tool} failed={failed} agentId={agentId} />
-        {failed ? <X className="size-3.5 shrink-0 text-danger" strokeWidth={2} /> : null}
+        {failed ? <StatusMark state="fail" className="size-3.5" label="Failed" /> : null}
         {/* The row toggles on click; this is the keyboard way in, since the row holds the file chip's own button. */}
         {expandable ? (
           <button
@@ -701,7 +702,7 @@ function TurnDuration({ elapsedMs, labelHidden, copyText, completedAt, meta, age
   const dot = <span aria-hidden className="size-[3px] shrink-0 rounded-full bg-content/25" />;
   const buttons = (
     <span className="flex shrink-0 items-center gap-1">
-      {copyText ? <CopyTurnButton text={copyText} /> : inline ? null : <Check className="size-3.5" strokeWidth={1.75} />}
+      {copyText ? <CopyTurnButton text={copyText} /> : inline ? null : <StatusMark state="pass" quiet className="size-3.5" />}
       <TurnMetricsBadge meta={meta} />
     </span>
   );

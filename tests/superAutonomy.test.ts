@@ -394,14 +394,15 @@ test('M1: one approval cannot be used by two concurrent take_action calls; an ap
   assert.equal(redeemOverride(token, 'refs/heads/fix/x(overwrite)', '/srv/web.git').ok, true, 'fix/x on its remote, after the misses (they do not use it up)');
   assert.equal(redeemOverride(token, 'refs/heads/fix/x(overwrite)', '/srv/web.git').ok, false, 'once');
   // Never main, master, the default branch or a tag; a branch and project are required (M1, L2).
-  for (const [branch, project, why] of [['main', 'web', /shared main line/], ['master', 'web', /shared main line/], ['v1', 'web', /a tag/], ['refs/tags/v1', 'web', /Tags/], ['', 'web', /names its project and the branch/], ['fix/x', '', /names its project and the branch/]] as const) {
+  for (const [branch, project, why] of [['main', 'web', /shared main line/], ['master', 'web', /shared main line/], ['develop', 'web', /shared main line/], ['v1', 'web', /a tag/], ['refs/tags/v1', 'web', /Tags/], ['', 'web', /names its project and the branch/], ['fix/x', '', /names its project and the branch/]] as const) {
     const task = `git push --force origin ${branch || 'x'}`;
     const id = await approve(t, 'force_push', branch || 'fix/x', undefined, task);
     await assert.rejects(t.call('take_action', { ...force, target: branch || 'fix/x', branch: branch || undefined, project: project || undefined, task, approved_ask_id: id }), e => [400, 403].includes(status(e)) && why.test((e as Error).message), `${branch}/${project}`);
   }
-  git(dir, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
-  const trunk = await approve(t, 'force_push', 'trunk', undefined, 'git push --force origin trunk');
-  await assert.rejects(t.call('take_action', { ...force, target: 'trunk', branch: 'trunk', task: 'git push --force origin trunk', approved_ask_id: trunk }), e => status(e) === 403 && /shared main line/.test((e as Error).message), 'the remote\'s default branch');
+  // The remote's HEAD under a name of its own (Rhea follow-ups M1: "origin/production" is "production").
+  git(dir, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/production');
+  const trunk = await approve(t, 'force_push', 'production', undefined, 'git push --force origin production');
+  await assert.rejects(t.call('take_action', { ...force, target: 'production', branch: 'production', task: 'git push --force origin production', approved_ask_id: trunk }), e => status(e) === 403 && /shared main line/.test((e as Error).message), 'the remote\'s default branch');
   // With the switch off and no approval, a force_push gets no token: the push check still refuses overwriting.
   t.manager.updateSettings({ superAskFirst: { ...ALL_ASK_FIRST, forcePush: false } });
   await t.call('take_action', { ...force, target: 'fix/new', task: 'git push -u origin fix/new', summary: 'Push fix/new' });

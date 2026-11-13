@@ -13,7 +13,7 @@ export interface AskFirst {
   outsideAccounts: boolean;
   /** Removing agents the user made (its own new agents it may remove). */
   removeUserAgents: boolean;
-  /** Force-pushing a branch that was never pushed. Shared history is never force-pushed at any level. */
+  /** Force-pushing one pushed feature branch, once, when the user approves (ALL-D13). Main, the default branch and tags are never force-pushed, at any level. */
   forcePush: boolean;
 }
 export const ASK_FIRST_KEYS: readonly (keyof AskFirst)[] = ['deleteData', 'outsideAccounts', 'removeUserAgents', 'forcePush'];
@@ -73,7 +73,7 @@ const ASK_FIRST_TEXT: Record<keyof AskFirst, string> = {
   deleteData: 'deleting files or data (unmerged branches, folders with uncommitted work, an agent\'s files, a backup)',
   outsideAccounts: 'changing outside accounts (Railway, Vercel, GitHub settings, anything with billing or other people)',
   removeUserAgents: 'removing agents the user made',
-  forcePush: 'force-pushing a branch that was never pushed',
+  forcePush: 'force-pushing one feature branch, once (never main, the default branch or a tag)',
 };
 
 /**
@@ -90,7 +90,7 @@ export function autonomyInstructions(level: SuperAutonomy, askFirst: AskFirst, p
     acts.length ? `Do these yourself, without ask_user, through take_action (it hands the step to an agent, checks the rules and logs it in Decisions with how to undo it): ${acts.join('; ')}.` : 'Ask the user with ask_user before every merge, restart, push, release, deploy, cleanup, new project or costly work; then do it with take_action and the answered question id.',
     level !== 'full' && acts.length ? 'Ask with ask_user before anything else of that kind (push, release, deploy, new projects, costly work); then use take_action with the answered question id.' : '',
     asks.length ? `Always ask first, before: ${asks.join('; ')}. Use ask_user with for_action {kind, target, task}; PodCode adds Yes and No and shows the task; the user\'s Yes is good for that one step and task text, once, within a day; then take_action with approved_ask_id and the same task.` : '',
-    'At every level, never: rewrite or force-push shared history (main, tags, any pushed branch). Every agent\'s git runs PodCode\'s push check, which refuses a push that overwrites or deletes what the remote has; only a force_push the user approved gets a one-time pass (take_action gives the agent the token). Tasks you send that ask for it are refused early too. Before cleanup or deletion, make a backup (a backup/… ref that holds the commit, or a copy in a backups folder) and name it; take_action checks it. A merge names its project, branch and the exact commit a reviewer the user made passed, in answer to a review request for that branch and commit; take_action checks the branch is still at that commit. Never restart an agent the user stopped; stay within the daily budget, which counts the work you start on your own. Push fast-forward only.',
+    'At every level, never: rewrite or force-push main, the default branch or a tag. Every agent\'s git runs PodCode\'s push check, which refuses a push that overwrites or deletes what the remote has; the one exception is a force_push the user approved, for one named feature branch of one project, once (ALL-D13: take_action gives the agent a one-time token). Tasks you send that ask for it are refused early too. Before cleanup or deletion, make a backup (a backup/… ref that holds the commit, or a copy in a backups folder) and name it; take_action checks it. A merge names its project, branch and the exact commit a reviewer the user made passed, in answer to a review request for that branch and commit; take_action checks the branch is still at that commit. Never restart an agent the user stopped; stay within the daily budget, which counts the work you start on your own. Push fast-forward only.',
     'Log nothing yourself: take_action records each step in Decisions, with why and how to undo it, and the user can undo it or pause you there.',
   ].filter(Boolean).join('\n');
 }

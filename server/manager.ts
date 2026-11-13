@@ -82,7 +82,9 @@ import { openuiGuide } from './openuiGuide.ts';
 import { ALL_CODE, ALL_INDEXES_LIMIT, decisionHint, deriveCode, isActive, isCode, isCurrent, matchDecisions, ProjectRefs, type RefEntry } from './projectRefs.ts';
 import { NotesApi } from './notesApi.ts';
 import { MergeRecords, WorkService } from './work.ts';
+import { PullRequests } from './githubPrs.ts';
 import { RefMentions } from './refMentions.ts';
+import { IssueLinks } from './issueLinks.ts';
 import { BrowserBridge, BROWSER_WRITE_OPS, compactConsole, type BrowserOp } from './browserBridge.ts';
 import { blockedReason, normalizeAddress } from '../shared/browser.ts';
 import { createWalkthrough, deleteWalkthrough, listWalkthroughs, readWalkthrough, summaryOf, walkthroughImage, walkthroughMarkdown, type StepRoot } from './walkthroughs.ts';
@@ -93,7 +95,7 @@ import { WorkOwners } from './workOwners.ts';
 import { listArchive, type ArchivedAgent } from './agentArchive.ts';
 import { mentionsBranch } from '../shared/work.ts';
 import { forbiddenGit, gatedVerbs } from '../shared/gitGuard.ts';
-import { ensurePushGuard, installPushGuard, issueOverride, pushRemotes } from './pushGuard.ts';
+import { ensurePushGuard, installPushGuard, issueOverride, mainLines, pushRemotes } from './pushGuard.ts';
 import { readGit } from './work.ts';
 import { actionVerdict, ASK_FIRST_KEYS, autonomyInstructions, FULL_ACTIONS, NEEDS_BACKUP, SUPER_AUTONOMY, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
 import { isOpenIssue, issueStatusFrom } from '../shared/issues.ts';
@@ -212,8 +214,13 @@ export class AgentManager {
   private refs: ProjectRefs;
   /** The Notes tab's read API over the notes and where each id is cited. */
   readonly notes: NotesApi;
+  private readonly refMentions: RefMentions;
+  /** Git/PR completion and decision citations for issues (ACH-D43). */
+  readonly issueLinks: IssueLinks;
   /** The Work view: branches in progress, merges into main, the graph and cleanup (server/work.ts). */
   readonly work: WorkService;
+  /** The Pull requests page: read-only PRs across the projects (ACH-D43). */
+  readonly prs: PullRequests;
   /** The memory each agent's app view was last sent, to notice memory.md changing on disk. */
   private memoryVersions = new Map<string, string>();
   /** Dreaming: the gate, triggers, records, undo, soul proposals and the numbers. */
@@ -254,7 +261,8 @@ export class AgentManager {
     this.channelAttachments = new Attachments(path.join(store.dataDir, 'channel-attachments'));
     this.homes = new AgentHomes(path.join(store.dataDir, 'agents'));
     this.refs = new ProjectRefs(path.join(store.dataDir, 'projects'));
-    this.notes = new NotesApi({ refs: this.refs, mentions: new RefMentions(store), projects: () => this.store.projects.values() });
+    this.refMentions = new RefMentions(store);
+    this.notes = new NotesApi({ refs: this.refs, mentions: this.refMentions, projects: () => this.store.projects.values() });
     // The force-push check every agent's git runs (ALL-D9); rewritten if a file was changed.
     try { installPushGuard(path.join(store.dataDir, 'git-hooks'), { url: `http://127.0.0.1:${PORT}` }); } catch (err) { console.error('[push-guard] could not install:', (err as Error).message); }
     this.work = new WorkService(new MergeRecords(path.join(store.dataDir, 'work')), {
@@ -264,10 +272,21 @@ export class AgentManager {
       agentsDir: path.join(store.dataDir, 'agents'),
       dataDir: store.dataDir,
       knownRef: id => this.refs.get(id) !== null,
+      onMerges: (project, records) => { this.issueLinks.localMerges(project, records); },
+    });
+    this.prs = new PullRequests({
+      projects: () => this.store.projects.values(),
+      agents: () => this.store.agents.values(),
+      repoOf: project => this.projectRepo(project),
+      gh: args => runGh(args, this.ghExec),
+      onRead: data => { this.issueLinks.githubMerges(data.pullRequests); },
     });
     this.profile = new ProfileStore(store.dataDir);
     // Issue keys use the project's code (ACH-25; ACH-D41).
     this.superStore = new SuperStore(store.dataDir, id => this.store.projects.get(id)?.code);
+    this.issueLinks = new IssueLinks(this.superStore, Date.now, () => { this.publishSuper(); }, {
+      projects: () => [...this.store.projects.values()], work: this.work, mentions: this.refMentions, refs: this.refs,
+    });
     this.watcher = new SuperWatcher({
       superId: () => this.superId(),
       idle: () => {
@@ -1793,10 +1812,8 @@ export class AgentManager {
       const raw = (input.branch ?? '').trim().replace(/^refs\/heads\//, '');
       if (!raw || !project) throw new HttpError(400, 'A force-push names its project and the branch (never main, a tag or the default branch).');
       if (/^refs\//.test(raw) || /^(tags|refs)\//.test(raw)) throw new HttpError(403, 'Tags are shared history: they are never force-pushed.');
-      const defaults = new Set(['main', 'master']);
-      const head = await readGit(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], project.path);
-      if (head.ok && head.out.trim()) defaults.add(head.out.trim().replace(/^[^/]+\//, ''));
-      if (defaults.has(raw)) throw new HttpError(403, `${raw} is the shared main line: it is never force-pushed, at any level. Push a revert instead.`);
+      const defaults = await mainLines(project.path);
+      if (defaults.has(raw)) throw new HttpError(403, `${raw} is a shared main line of ${project.name}: it is never force-pushed, at any level. Push a revert instead.`);
       const tag = await readGit(['rev-parse', '--verify', '--quiet', `refs/tags/${raw}`], project.path);
       if (tag.ok) throw new HttpError(403, `${raw} is a tag in ${project.name}: tags are never force-pushed.`);
       const urls = await pushRemotes(project.path);
@@ -2399,6 +2416,8 @@ export class AgentManager {
 
   /** Every minute: send what waits if it may go now, and report agents stuck in a turn or on the user. */
   private superTick(): void {
+    // Uses Work's existing cache; independent of whether a SuperAgent exists. No GitHub polling.
+    void this.issueLinks.refresh().catch(() => { /* A failed read is retried next tick; no closure is inferred. */ });
     const superId = this.superId();
     if (!superId) return;
     this.watcher.morning();

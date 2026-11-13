@@ -17,7 +17,8 @@ import {
 import { useApp } from '../store.ts';
 import { cx, TextButton } from '../ui/common.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
-import { AlertCircle, CheckCircle, CircleX, CornerDownRight } from '../mono/icons.tsx';
+import { CornerDownRight } from '../mono/icons.tsx';
+import { StatusMark, type StatusState } from '../ui/StatusMark.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 
@@ -27,14 +28,14 @@ export const Comms = createContext<CommsIndex>({ byId: new Map(), reportFor: new
 export const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
 const TONE_TEXT: Record<OutcomeTone, string> = { success: 'text-success', danger: 'text-danger', warning: 'text-warning' };
-const TONE_ICON = { success: CheckCircle, danger: CircleX, warning: AlertCircle } as const;
+/** An outcome's tone as the shared status mark (ACH-D45). */
+const TONE_STATE = { success: 'pass', danger: 'fail', warning: 'warn' } as const satisfies Record<OutcomeTone, StatusState>;
 
 /** An outcome in words, with the icon and colour the app uses for it. */
 export function OutcomeChip({ words, tone }: { words: string; tone: OutcomeTone }) {
-  const Icon = TONE_ICON[tone];
   return (
     <span className={cx('inline-flex shrink-0 items-center gap-1 font-medium', TONE_TEXT[tone])}>
-      <Icon aria-hidden className="size-3.5" strokeWidth={1.75} />
+      <StatusMark state={TONE_STATE[tone]} className="size-3.5" />
       {words}
     </span>
   );

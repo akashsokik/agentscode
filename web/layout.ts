@@ -10,6 +10,12 @@ export type TabContent =
   | { kind: 'file'; root: Root; path: string }
   | { kind: 'diff'; root: Root; path: string }
   | { kind: 'comms'; conversationId?: string }
+  /** One issue in the full pane (web/issues/IssueView.tsx, ACH-D43 phase 4). */
+  | { kind: 'issue'; issueId: string }
+  /** The Issues page (web/issues/IssuesPage.tsx, Fen's). */
+  | { kind: 'issues' }
+  /** The Pull requests page (web/prs/PullRequestsPane.tsx); `prId` is the selected PR, owner/name#n. */
+  | { kind: 'pullRequests'; prId?: string }
   /** The Work view as a pane (web/work/WorkView.tsx). */
   | { kind: 'work' }
   | { kind: 'channel'; channelId: string }
@@ -94,6 +100,9 @@ export function tabKey(content: TabContent): string {
     case 'file': return `file:${rootKey(content.root)}:${content.path}`;
     case 'diff': return `diff:${rootKey(content.root)}:${content.path}`;
     case 'comms': return 'comms';
+    case 'issue': return `issue:${content.issueId}`;
+    case 'issues': return 'issues';
+    case 'pullRequests': return 'pullRequests';
     case 'work': return 'work';
     case 'channel': return `channel:${content.channelId}`;
     case 'walkthrough': return `walkthrough:${content.agentId}:${content.id}`;
@@ -107,6 +116,27 @@ export function migrateSuperView(view: string | undefined): SuperView | undefine
   return (SUPER_VIEWS as readonly string[]).includes(view ?? '') ? view as SuperView : undefined;
 }
 
+/**
+ * The tab kinds this build can show. A saved layout can hold others (one from a newer or a feature
+ * build, such as a tab kind that was later renamed); such a tab would crash the tab strip, so it is
+ * dropped on load, and a pane that showed it shows nothing.
+ */
+/**
+ * Every tab kind, as a record so the typecheck fails when a kind is added to TabContent but not
+ * here: a kind missing from this list would make knownTabs drop those tabs on every reload.
+ */
+const TAB_KIND_SET: Record<TabContent['kind'], true> = {
+  agent: true, file: true, diff: true, comms: true, issue: true, issues: true, pullRequests: true, work: true, channel: true, walkthrough: true, browser: true,
+};
+export const TAB_KINDS = Object.keys(TAB_KIND_SET) as TabContent['kind'][];
+
+/** The saved tabs this build knows, and the panes with any unknown tab cleared. */
+export function knownTabs(tabs: Tab[], panes: Pane[]): { tabs: Tab[]; panes: Pane[] } {
+  const known = tabs.filter(t => Object.hasOwn(TAB_KIND_SET, String(t?.content?.kind)));
+  const ids = new Set(known.map(t => t.id));
+  return { tabs: known, panes: panes.map(p => (p.tabId && !ids.has(p.tabId) ? { ...p, tabId: null } : p)) };
+}
+
 function initial(): Layout {
   const fallback: Layout = { tabs: [], panes: [{ id: 'p1', tabId: null }], focused: 'p1', sidebar: true, sidebarView: 'agents', rightPanel: true, rightView: 'overview' };
   try {
@@ -118,6 +148,8 @@ function initial(): Layout {
     const restored: Layout = { ...fallback, ...kept, ...(kept.widths ? { widths } : {}) };
     // The Goals tab is the Issues tab now (ACH-D38).
     restored.superView = migrateSuperView(restored.superView);
+    // A tab kind this build cannot show would crash the strip: drop it (TAB_KINDS).
+    ({ tabs: restored.tabs, panes: restored.panes } = knownTabs(restored.tabs, restored.panes));
     // Pinned tabs come first; a layout saved before pins existed has none and keeps its order.
     restored.tabs = orderTabs(restored.tabs);
     const ids = restored.panes.map(p => p.id);
@@ -164,8 +196,8 @@ function ensureTab(tabs: Tab[], content: TabContent): { tabs: Tab[]; tab: Tab } 
   const key = tabKey(content);
   const existing = tabs.find(t => tabKey(t.content) === key);
   if (existing) {
-    // Comms tabs carry the selected conversation; keep the newest selection.
-    if (content.kind === 'comms') {
+    // Comms and Pull requests tabs carry the selected item; keep the newest selection.
+    if (content.kind === 'comms' || content.kind === 'pullRequests') {
       const tab = { ...existing, content };
       return { tabs: tabs.map(t => (t.id === existing.id ? tab : t)), tab };
     }
@@ -173,6 +205,12 @@ function ensureTab(tabs: Tab[], content: TabContent): { tabs: Tab[]; tab: Tab } 
   }
   const tab = { id: newId('t'), content };
   return { tabs: [...tabs, tab], tab };
+}
+
+/** What the focused pane shows, by kind: the sidebar marks its Comms, Issues and Pull requests rows. */
+export function focusedKind(l: Layout): TabContent['kind'] | null {
+  const pane = l.panes.find(p => p.id === l.focused);
+  return l.tabs.find(t => t.id === pane?.tabId)?.content.kind ?? null;
 }
 
 /** Show content in the focused pane, or in the pane that already shows it. */

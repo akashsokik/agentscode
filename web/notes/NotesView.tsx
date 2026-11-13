@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { KeyValueList } from '../ui/KeyValueList.tsx';
 import { queryWords, type RefDetail, type RefProject, type RefSearchHit, type RefSummary } from '../../shared/refs.ts';
 import type { Agent } from '../../shared/types.ts';
 import { api, ApiError } from '../api.ts';
@@ -307,14 +308,7 @@ function DetailBody({ detail }: { detail: RefDetail }) {
         </>
       ) : null}
       <SectionLabel label="Details" className="pb-0.5 pt-4" />
-      <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] text-[12px]">
-        {rows.map(([label, value]) => (
-          <div key={label} className="contents">
-            <dt className="flex min-h-7 items-center text-content/45">{label}</dt>
-            <dd className="flex min-h-7 min-w-0 items-center gap-1.5 text-content/85">{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <KeyValueList rows={rows} />
       <SectionLabel label="Mentioned in" count={detail.mentions} className="pb-0.5 pt-4" />
       {detail.citations.length ? (
         <ul>
