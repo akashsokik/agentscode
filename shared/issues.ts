@@ -73,6 +73,11 @@ export function issueTitle(text: string): string {
 export interface LegacyIssue {
   id: string; text: string; projectId: string | null; status: LegacyIssueStatus; order: number; createdAt: number; updatedAt: number;
   by: 'user' | 'super'; agentId?: string; delegationId?: string; notes?: string; doneAt?: number;
+  /**
+   * The issue's key, written for this build's own sake: older builds keep extra fields inside an
+   * issue when they write, so it survives a downgrade and is reused when issues.json is lost.
+   */
+  key?: string;
 }
 
 export function isLegacyIssue(raw: unknown): raw is LegacyIssue {
@@ -107,7 +112,7 @@ export function migrateIssue(old: LegacyIssue, key: string, now: number): SuperI
 /** A current issue as an older build can read it: the old fields only, the status by its old name. */
 export function legacyIssue(issue: SuperIssue): LegacyIssue {
   return {
-    id: issue.id, text: issue.text, projectId: issue.projectId, status: legacyIssueStatus(issue.status), order: issue.order,
+    id: issue.id, key: issue.key, text: issue.text, projectId: issue.projectId, status: legacyIssueStatus(issue.status), order: issue.order,
     createdAt: issue.createdAt, updatedAt: issue.updatedAt, by: issue.by,
     ...(issue.agentId ? { agentId: issue.agentId } : {}), ...(issue.delegationId ? { delegationId: issue.delegationId } : {}),
     ...(issue.notes ? { notes: issue.notes } : {}),
@@ -126,7 +131,9 @@ export function legacyIssue(issue: SuperIssue): LegacyIssue {
  * With no current list yet (the first start of this build), every old record is migrated; with no
  * old-format copy (null), the current list is used as it is.
  */
-export function reconcileIssues(current: SuperIssue[] | null, legacy: LegacyIssue[] | null, keyFor: (old: LegacyIssue) => string, now: number): SuperIssue[] {
+export function reconcileIssues(current: SuperIssue[] | null, legacy: LegacyIssue[] | null, keyFor: (old: LegacyIssue) => string, now: number,
+  /** Why the copies differ, for the activity: an older build by default, or a save cut short. */
+  why = 'Changed by an older PodCode build.'): SuperIssue[] {
   if (!current) return (legacy ?? []).map(old => migrateIssue(old, keyFor(old), now));
   // No old-format copy at all (not written by PodCode): nothing to reconcile with.
   if (!legacy) return current;
@@ -142,10 +149,16 @@ export function reconcileIssues(current: SuperIssue[] | null, legacy: LegacyIssu
       // The title is its own field: an older build never sees it, and a new text never re-titles an issue.
       title: mine.title,
     };
-    for (const k of ['agentId', 'delegationId', 'notes', 'doneAt'] as const) {
+    for (const k of ['agentId', 'delegationId', 'notes'] as const) {
       if (old[k] !== undefined) (next as unknown as Record<string, unknown>)[k] = old[k]; else delete next[k];
     }
-    if (status !== mine.status) next.activity = [...mine.activity, { at: old.updatedAt, by: { kind: 'podcode' }, kind: 'status', from: mine.status, to: status, text: 'Changed by an older PodCode build.' }];
+    // The old copy has one closed time (doneAt) for done and canceled alike: put it back where it
+    // belongs, so a canceled issue never gains doneAt and a reopened one keeps neither.
+    delete next.doneAt;
+    delete next.canceledAt;
+    if (status === 'done' && old.doneAt !== undefined) next.doneAt = old.doneAt;
+    if (status === 'canceled') next.canceledAt = mine.canceledAt ?? old.doneAt ?? old.updatedAt;
+    if (status !== mine.status) next.activity = [...mine.activity, { at: old.updatedAt, by: { kind: 'podcode' }, kind: 'status', from: mine.status, to: status, text: why }];
     out.push(next);
   }
   // In the current list but not the old copy: an older build removed it, so it stays removed.

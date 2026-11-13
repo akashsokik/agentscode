@@ -1,4 +1,4 @@
-import { currentToolName, ISSUE_TEXT_MAX } from '../../shared/issues.ts';
+import { currentToolName, ISSUE_TEXT_MAX, ISSUE_TITLE_MAX } from '../../shared/issues.ts';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { PRESSABLE_KEYS } from '../../shared/browser.ts';
@@ -172,6 +172,8 @@ export const updateIssueInput = z.object({
   /** The current names, or the old ones (queued is todo, blocked is needs_you) from before ACH-D41. */
   status: z.enum(['needs_you', 'in_review', 'in_progress', 'waiting', 'todo', 'backlog', 'done', 'canceled', 'queued', 'blocked']).optional(),
   text: z.string().trim().min(1).max(ISSUE_TEXT_MAX).optional(),
+  /** The one-line title; a new text never changes it, so set it here when the issue is reworded. */
+  title: z.string().trim().min(1).max(ISSUE_TITLE_MAX).optional(),
   /** The agent on it (id or name), and the delegation's message id; '' clears either. */
   agent_id: z.string().trim().max(100).optional(),
   delegation_id: z.string().trim().max(100).optional(),
@@ -435,7 +437,7 @@ function registerSuperTools(server: McpServer, invoke: Invoke): void {
     inputSchema: addIssueInput.shape,
   }, args => invoke('add_issue', args));
   server.registerTool('update_issue', {
-    description: `Change an issue: its status (in_progress when an agent starts it, needs_you when it waits for the user, waiting when it waits on someone else, in_review, todo to put it back, canceled to drop it; the old names queued and blocked still work), text, the agent and delegation on it, or notes. ${note}`,
+    description: `Change an issue: its status (in_progress when an agent starts it, needs_you when it waits for the user, waiting when it waits on someone else, in_review, todo to put it back, canceled to drop it; the old names queued and blocked still work), text, title (a new text keeps the old title, so set it when the issue is reworded), the agent and delegation on it, or notes. ${note}`,
     inputSchema: updateIssueInput.shape,
   }, args => invoke('update_issue', args));
   server.registerTool('complete_issue', {
