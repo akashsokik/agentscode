@@ -244,3 +244,18 @@ test('polling: every 5 minutes with the page open, every 30 for the sidebar coun
   assert.equal(isDue(1_000, COUNT_POLL_MS, 1_000 + PAGE_POLL_MS), false, 'the count alone waits 30 minutes');
   assert.equal(isDue(0, null, 10 ** 12), false, 'nothing showing: no read');
 });
+
+test('a saved tab of a kind this build does not know is dropped on load, and its pane shows nothing', async () => {
+  const { knownTabs, TAB_KINDS } = await import('../web/layout.ts');
+  assert.ok(TAB_KINDS.includes('pullRequests'));
+  const tabs = [
+    { id: 't1', content: { kind: 'pullRequests' } },
+    { id: 't2', content: { kind: 'issues' } },
+    { id: 't3', content: { kind: 'comms' } },
+    { id: 't4' },
+  ] as never;
+  const panes = [{ id: 'p1', tabId: 't2' }, { id: 'p2', tabId: 't3' }];
+  const out = knownTabs(tabs, panes);
+  assert.deepEqual(out.tabs.map(t => t.id), ['t1', 't3']);
+  assert.deepEqual(out.panes, [{ id: 'p1', tabId: null }, { id: 'p2', tabId: 't3' }]);
+});

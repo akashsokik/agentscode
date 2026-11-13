@@ -39,7 +39,8 @@ import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
 import { UsageFooter } from './ui/UsageFooter.tsx';
 import { HeaderButton, MenuDivider, MenuRow, StatusLabel } from './ui/common.tsx';
-import { AlertCircle, CheckCircle, ChevronRight, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X, GitPullRequest } from './mono/icons.tsx';
+import { ChevronRight, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X, GitPullRequest } from './mono/icons.tsx';
+import { StatusMark } from './ui/StatusMark.tsx';
 import { LAYER } from './mono/layers.ts';
 import { Shimmer } from './mono/Shimmer.tsx';
 import { TabLabel } from './mono/TabLabel.tsx';
@@ -418,9 +419,8 @@ function Toasts() {
           role={t.tone === 'error' ? 'alert' : 'status'}
           className={`toast-in pointer-events-auto relative isolate flex items-start gap-2 overflow-hidden rounded-xl border bg-background-base px-3 py-2.5 font-sans text-[12px] text-content ${t.tone === 'error' ? 'border-danger/25' : 'border-content/10'}`}
         >
-          {t.tone === 'error'
-            ? <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-danger" strokeWidth={1.75} />
-            : <CheckCircle className="mt-0.5 size-3.5 shrink-0 text-content/50" strokeWidth={1.75} />}
+          {/* The shared status mark (ACH-D45): a failure in danger, a success quiet. */}
+          <StatusMark state={t.tone === 'error' ? 'fail' : 'pass'} quiet={t.tone !== 'error'} className="mt-0.5 size-3.5" />
           <span className="min-w-0 flex-1 whitespace-pre-wrap break-words leading-5">{t.text}</span>
           <button type="button" aria-label="Dismiss" onClick={() => dismissToast(t.id)} className="grid size-5 shrink-0 place-items-center rounded text-content/45 transition-colors duration-150 hover:bg-content/10 hover:text-content">
             <X className="size-3" strokeWidth={1.8} />
