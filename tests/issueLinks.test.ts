@@ -8,7 +8,7 @@ import test from 'node:test';
 import type { Project } from '../shared/types.ts';
 import { SuperStore } from '../server/superAgent.ts';
 import { IssueLinks, type MergedIssuePr } from '../server/issueLinks.ts';
-import { MergeRecords, WorkService } from '../server/work.ts';
+import { MergeRecords, WorkService, readGit, type GitRunner } from '../server/work.ts';
 import { RefMentions } from '../server/refMentions.ts';
 import { Store } from '../server/store.ts';
 import { harness, tempDir } from './helpers.ts';
@@ -164,4 +164,40 @@ test('fast-forward merges use the existing reflog entries as merge evidence', as
   await t.work.view([t.project], true);
   assert.equal(t.store.issue(t.issue.id).status, 'done');
   assert.match(t.store.issue(t.issue.id).activity.at(-1)?.text ?? '', new RegExp(tip));
+});
+
+test('commit scans cache immutable branch ranges and invalidate when either end moves; failures retry', async () => {
+  const t = setup();
+  git(t.repo, 'checkout', '-b', 'feat/ACH-1-cache');
+  git(t.repo, 'commit', '--allow-empty', '-m', 'Use ACH-D41');
+  git(t.repo, 'checkout', 'main');
+  const state = new Store(path.join(t.dir, 'state')); state.load();
+  const mentions = new RefMentions(state);
+  let logs = 0;
+  let failOnce = true;
+  const runner: GitRunner = async (args, cwd) => {
+    if (args[0] === 'log') {
+      logs++;
+      assert.equal(args[1], '-500');
+      assert.match(args[3], /^[a-f0-9]{40}$/);
+      assert.match(args[5], /^[a-f0-9]{40}$/);
+      if (failOnce) { failOnce = false; return { ok: false, out: '' }; }
+    }
+    return readGit(args, cwd);
+  };
+  await t.links.indexCommits(t.project, 'main', [], mentions, runner);
+  assert.deepEqual(mentions.issueDecisions(t.issue), []);
+  await t.links.indexCommits(t.project, 'main', [], mentions, runner);
+  assert.equal(logs, 2, 'failed read retried');
+  await t.links.indexCommits(t.project, 'main', [], mentions, runner);
+  assert.equal(logs, 2, 'same branch/main pair reused');
+  git(t.repo, 'commit', '--allow-empty', '-m', 'unrelated main change');
+  await t.links.indexCommits(t.project, 'main', [], mentions, runner);
+  assert.equal(logs, 3, 'main moved');
+  git(t.repo, 'checkout', 'feat/ACH-1-cache');
+  git(t.repo, 'commit', '--allow-empty', '-m', 'Also use ALL-D1');
+  git(t.repo, 'checkout', 'main');
+  await t.links.indexCommits(t.project, 'main', [], mentions, runner);
+  assert.equal(logs, 4, 'branch moved');
+  assert.deepEqual(mentions.issueDecisions(t.issue).map(d => d.id), ['ACH-D41', 'ALL-D1']);
 });

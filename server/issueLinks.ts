@@ -49,6 +49,7 @@ export class IssueLinks {
   private prSource?: () => Promise<{ pullRequests: MergedIssuePr[] }>;
   private readonly source?: IssueLinkSource;
   private refreshing: Promise<void> | null = null;
+  private readonly commitCache = new Map<string, Pick<RefCommit, 'hash' | 'text' | 'author' | 'at'>[]>();
   private readonly records = new Map<string, MergeRecord[]>();
 
   constructor(store: IssueLinkStore, now = Date.now, changed = () => {}, source?: IssueLinkSource) {
@@ -146,22 +147,39 @@ export class IssueLinks {
     const issues = this.store.issues().filter(i => i.projectId === project.id);
     const commits = new Map<string, RefCommit>();
     const read = async (branch: string, args: string[], keys: string[]) => {
-      const result = await git(['log', '-500', '--format=%H%x1f%ct%x1f%an%x1f%B%x1e', ...args], project.path);
-      if (!result.ok) return;
-      for (const raw of result.out.split('\x1e')) {
-        const [hash, at, author, ...body] = raw.trim().split('\x1f');
-        if (!/^[a-f0-9]{40}$/.test(hash ?? '')) continue;
-        const text = body.join('\x1f');
-        const old = commits.get(hash);
-        commits.set(hash, { hash, projectId: project.id, branch, at: Number(at) * 1000, author, text, issueKeys: [...new Set([...(old?.issueKeys ?? []), ...keys, ...issueKeysIn(text)])] });
+      // Both ends are immutable hashes captured together, so a branch/main move invalidates this range.
+      const cacheKey = JSON.stringify([project.id, project.path, ...args]);
+      let rows = this.commitCache.get(cacheKey);
+      if (!rows) {
+        const result = await git(['log', '-500', '--format=%H%x1f%ct%x1f%an%x1f%B%x1e', ...args], project.path);
+        if (!result.ok) return; // Failed reads are never cached.
+        rows = [];
+        for (const raw of result.out.split('\x1e')) {
+          const [hash, at, author, ...body] = raw.trim().split('\x1f');
+          if (!/^[a-f0-9]{40}$/.test(hash ?? '') || !Number.isFinite(Number(at))) continue;
+          rows.push({ hash, at: Number(at) * 1000, author, text: body.join('\x1f') });
+        }
+        this.commitCache.set(cacheKey, rows);
+        // Old branch heads do not grow the cache indefinitely.
+        if (this.commitCache.size > 128) this.commitCache.delete(this.commitCache.keys().next().value!);
+      }
+      for (const row of rows) {
+        const old = commits.get(row.hash);
+        commits.set(row.hash, { ...row, projectId: project.id, branch, issueKeys: [...new Set([...(old?.issueKeys ?? []), ...keys, ...issueKeysIn(row.text)])] });
       }
     };
     // A keyed branch need not be checked out in a worktree (so it may be absent from Work's active list).
-    const heads = await git(['for-each-ref', '--format=%(refname:strip=2)', 'refs/heads/'], project.path);
-    const selected = [...new Set([...branches, ...(heads.ok ? heads.out.split('\n').filter(Boolean) : []), ...issues.flatMap(i => i.branch ? [i.branch] : [])])];
+    const heads = await git(['for-each-ref', '--format=%(refname:strip=2)%1f%(objectname)', 'refs/heads/'], project.path);
+    if (!heads.ok) return;
+    const tips = new Map(heads.out.split('\n').flatMap(line => {
+      const [name, hash] = line.split('\x1f');
+      return name && /^[a-f0-9]{40}$/.test(hash ?? '') ? [[name, hash] as const] : [];
+    }));
+    const selected = [...new Set([...branches, ...tips.keys(), ...issues.flatMap(i => i.branch ? [i.branch] : [])])];
     for (const branch of selected) {
       const keys = issues.filter(i => i.branch === branch || issueKeysIn(branch).includes(i.key)).map(i => i.key);
-      if (keys.length) await read(branch, [`refs/heads/${branch}`, '--not', `refs/heads/${defaultBranch}`], keys);
+      const tip = tips.get(branch), base = tips.get(defaultBranch);
+      if (keys.length && tip && base) await read(branch, [tip, '--not', base], keys);
     }
     for (const record of this.records.get(project.id) ?? []) {
       const keys = issues.filter(i => i.branch === record.branch || issueKeysIn(record.branch).includes(i.key)).map(i => i.key);
