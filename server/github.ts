@@ -88,6 +88,8 @@ export const ghArgs = {
   run: (r: string, id: string) => ['run', 'view', runId(id), '--repo', repo(r), '--json', 'databaseId,workflowName,displayTitle,headBranch,event,status,conclusion,jobs,url'],
   runLog: (r: string, id: string) => ['run', 'view', runId(id), '--repo', repo(r), '--log-failed'],
   /** The Pull requests page: open or recently merged PRs with checks, reviews and body (for issue keys). */
+  /** One PR's changed files and commits, for its detail (ACH-D52). */
+  prDetail: (r: string, n: number) => ['pr', 'view', String(Math.trunc(n)), '--repo', repo(r), '--json', 'files,commits,createdAt,baseRefName,additions,deletions,changedFiles'],
   prsPage: (r: string, state: 'open' | 'merged') => ['pr', 'list', '--repo', repo(r), '--state', state, '--limit', state === 'open' ? '40' : '20', '--json', 'number,title,author,headRefName,isDraft,state,reviewDecision,updatedAt,mergedAt,mergeCommit,url,statusCheckRollup,reviews,body'],
   issues: (r: string) => ['issue', 'list', '--repo', repo(r), '--state', 'open', '--limit', '30', '--json', 'number,title,author,labels,updatedAt,url'],
 };

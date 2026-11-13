@@ -251,3 +251,44 @@ export function pollInterval(pages: number, counts: number): number | null {
 export function isDue(fetchedAt: number | undefined, interval: number | null, now = Date.now()): boolean {
   return interval !== null && (fetchedAt === undefined || now - fetchedAt >= interval);
 }
+
+// ---- one PR's detail (ACH-D52): its changed files and commits, read when it is selected ----------
+
+export interface PrFile { path: string; additions: number; deletions: number }
+export interface PrCommit { oid: string; headline: string; author: string; at: string }
+export interface PrDetail {
+  /** "owner/name#57", as PullRequest.id. */
+  id: string;
+  createdAt: string;
+  baseRef: string;
+  additions: number;
+  deletions: number;
+  files: PrFile[];
+  /** More files than are listed (GitHub's own count). */
+  filesTotal: number;
+  commits: PrCommit[];
+  commitsTotal: number;
+  fetchedAt: number;
+}
+
+/** At most this many files and commits are kept; the totals say how many there were. */
+export const PR_DETAIL_FILES = 300;
+export const PR_DETAIL_COMMITS = 250;
+
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+
+/** `gh pr view --json files,commits,...` as the detail shows it. */
+export function normalizePrDetail(raw: Raw, repo: string, number: number, fetchedAt: number): PrDetail {
+  const files = (Array.isArray(raw.files) ? raw.files as Raw[] : []).map(f => ({ path: str(f.path), additions: num(f.additions), deletions: num(f.deletions) })).filter(f => f.path);
+  const commits = (Array.isArray(raw.commits) ? raw.commits as Raw[] : []).map(c => {
+    const authors = Array.isArray(c.authors) ? c.authors as Raw[] : [];
+    return { oid: str(c.oid), headline: str(c.messageHeadline), author: str(authors[0]?.login) || str(authors[0]?.name) || 'unknown', at: str(c.committedDate) || str(c.authoredDate) };
+  }).filter(c => c.oid);
+  return {
+    id: `${repo}#${number}`, createdAt: str(raw.createdAt), baseRef: str(raw.baseRefName),
+    additions: num(raw.additions), deletions: num(raw.deletions),
+    files: files.slice(0, PR_DETAIL_FILES), filesTotal: Math.max(num(raw.changedFiles), files.length),
+    commits: commits.slice(-PR_DETAIL_COMMITS), commitsTotal: commits.length,
+    fetchedAt,
+  };
+}

@@ -5,7 +5,7 @@ import type { Exec } from '../server/github.ts';
 import { GhError, ghAllowed, ghArgs } from '../server/github.ts';
 import { agentForBranch, PRS_CACHE_MS, PRS_REFRESH_FLOOR_MS, PullRequests } from '../server/githubPrs.ts';
 import { createApp } from '../server/app.ts';
-import { checksLabel, findIssueKeys, firstIssueKey, inView, isHttpUrl, latestReviews, normalizeCheck, normalizePr, prsInView, viewCounts, type PullRequest } from '../shared/prs.ts';
+import { checksLabel, normalizePrDetail, PR_DETAIL_FILES, findIssueKeys, firstIssueKey, inView, isHttpUrl, latestReviews, normalizeCheck, normalizePr, prsInView, viewCounts, type PullRequest } from '../shared/prs.ts';
 import { harness, projectDir } from './helpers.ts';
 import { OPEN_AUTH } from '../server/userAuth.ts';
 
@@ -315,4 +315,44 @@ test('a saved tab of a kind this build does not know is dropped on load, and its
   // Every kind must be listed, or its tabs vanish on reload: the list is a Record over TabContent['kind'], so a missing kind fails the typecheck.
   const fs = await import('node:fs');
   assert.match(fs.readFileSync(new URL('../web/layout.ts', import.meta.url), 'utf8'), /const TAB_KIND_SET: Record<TabContent\['kind'\], true> = \{/);
+});
+
+// ---- one PR's detail (ACH-D52) ----------------------------------------------------------------
+
+test('a PR\'s detail: files with their counts, commits oldest first, capped with totals', () => {
+  const d = normalizePrDetail({
+    createdAt: '2026-11-10T00:00:00Z', baseRefName: 'main', additions: 12, deletions: 3, changedFiles: 2,
+    files: [{ path: 'web/a.tsx', additions: 10, deletions: 1 }, { path: 'web/b.ts', additions: 2, deletions: 2 }, { path: '' }],
+    commits: [{ oid: 'abc', messageHeadline: 'First', authors: [{ login: 'ada' }], committedDate: '2026-11-10T01:00:00Z' }, { oid: 'def', messageHeadline: 'Second', authors: [{ name: 'Fen' }] }],
+  }, 'o/r', 57, 1000);
+  assert.deepEqual([d.id, d.baseRef, d.additions, d.deletions, d.filesTotal, d.commitsTotal], ['o/r#57', 'main', 12, 3, 2, 2]);
+  assert.deepEqual(d.files.map(f => f.path), ['web/a.tsx', 'web/b.ts']);
+  assert.deepEqual(d.commits.map(c => [c.oid, c.headline, c.author]), [['abc', 'First', 'ada'], ['def', 'Second', 'Fen']]);
+  const many = normalizePrDetail({ files: Array.from({ length: PR_DETAIL_FILES + 5 }, (_, i) => ({ path: `f${i}` })), changedFiles: PR_DETAIL_FILES + 5 }, 'o/r', 1, 0);
+  assert.deepEqual([many.files.length, many.filesTotal], [PR_DETAIL_FILES, PR_DETAIL_FILES + 5]);
+  assert.deepEqual(normalizePrDetail({}, 'o/r', 1, 0).files, [], 'nothing from gh is nothing shown');
+});
+
+test('the detail is read read-only, only for a PR the list holds, cached and shared', async () => {
+  const args = ghArgs.prDetail('o/r', 57);
+  assert.ok(ghAllowed(args));
+  assert.deepEqual(args.slice(0, 5), ['pr', 'view', '57', '--repo', 'o/r']);
+  assert.throws(() => ghArgs.prDetail('not a repo; rm', 1), GhError);
+  let clock = 1_000_000;
+  const { prs, calls } = service({
+    repos: { 'agent-comms-harness': 'o/r' }, projects: [project('p1', 'agent-comms-harness', 'ACH')], now: () => clock,
+    gh: async a => a[1] === 'view' ? JSON.stringify({ files: [{ path: 'x.ts', additions: 1, deletions: 0 }], commits: [] }) : JSON.stringify(a.includes('merged') ? [] : [raw()]),
+  });
+  await assert.rejects(prs.detail('o/r', 57), /No such pull request/, 'not before the list has it');
+  await prs.list();
+  await assert.rejects(prs.detail('someone/else', 1), /No such pull request/, 'never a repo outside your projects');
+  const [a, b] = await Promise.all([prs.detail('o/r', 57), prs.detail('o/r', 57)]);
+  assert.equal(a, b);
+  const views = () => calls.filter(c => c[1] === 'view').length;
+  assert.equal(views(), 1, 'two at once share one read');
+  await prs.detail('o/r', 57, true);
+  assert.equal(views(), 1, 'a refresh inside the 10 s floor gets the cached read');
+  clock += PRS_REFRESH_FLOOR_MS;
+  await prs.detail('o/r', 57, true);
+  assert.equal(views(), 2);
 });

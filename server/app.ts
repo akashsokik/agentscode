@@ -335,6 +335,13 @@ export function createApp(
   app.get('/api/github/prs', async (req, res) => {
     res.json(await manager.prs.list(query(req, 'refresh') === '1'));
   });
+  // One PR's changed files and commits (ACH-D52), read only for the PR on screen.
+  app.get('/api/github/prs/detail', async (req, res) => {
+    const repo = query(req, 'repo') ?? '';
+    const number = Number(query(req, 'number'));
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isInteger(number) || number < 1) throw new HttpError(400, 'Give a repo (owner/name) and a pull request number.');
+    res.json(await manager.prs.detail(repo, number, query(req, 'refresh') === '1'));
+  });
   app.get('/api/dream-stats', (_req, res) => {
     res.json(manager.dreamStats());
   });
