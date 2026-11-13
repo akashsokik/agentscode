@@ -226,6 +226,9 @@ export function Submenu({ anchor, label, onClose, focus = true, width = 216, rol
       layer={LAYER.submenu}
       constrainHeight={false}
       onDismiss={reason => { if (reason === 'outside') onClose(); }}
+      // Escape is the menu's: it reaches the menu this hangs off through React (after a search field
+      // here has had its turn), and that menu closes, taking this with it.
+      dismissOnEscape={false}
       // Clicks on the menu it hangs off are that menu's own (they open another submenu or run a row).
       ignore="[role='menu'], [role='dialog']"
       data-submenu

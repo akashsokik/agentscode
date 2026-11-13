@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IssueActor, IssueEvent, IssuePriority, IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
-import { ISSUE_PRIORITIES, ISSUE_STATUSES, isLegacyIssue, isOpenIssue, issueStatusFrom, issueTitle, legacyIssue, migrateIssue, reconcileIssues, type LegacyIssue } from '../shared/issues.ts';
+import { ISSUE_PRIORITIES, ISSUE_STATUSES, ISSUE_TEXT_MAX, ISSUE_TITLE_MAX, issueDescription, isLegacyIssue, isOpenIssue, issueStatusFrom, issueTitle, legacyIssue, migrateIssue, reconcileIssues, type LegacyIssue } from '../shared/issues.ts';
 import { nextIssueKey, NO_PROJECT_CODE } from '../shared/issueKeys.ts';
 import { HttpError } from './errors.ts';
 import { inQuietHours, validQuietTime } from '../shared/superAgent.ts';
@@ -320,9 +320,9 @@ export class SuperStore {
     const next: SuperIssue = { ...old, updatedAt: now };
     const events: IssueEvent[] = [];
     if (patch.text !== undefined) {
+      // The title stays: it is set when the issue is made (from the text's start unless given) and
+      // changes only on its own, so editing the description never re-titles an issue.
       next.text = issueText(patch.text);
-      // The title follows the text unless it was set on its own.
-      if (old.title === issueTitle(old.text)) next.title = issueTitle(next.text);
     }
     if (patch.title !== undefined) next.title = titleText(patch.title);
     if (patch.projectId !== undefined) next.projectId = patch.projectId;
@@ -606,7 +606,7 @@ export function routineDue(routine: SuperRoutine, now: Date): number | null {
 function titleText(raw: unknown): string {
   const title = String(raw ?? '').replace(/\s+/g, ' ').trim();
   if (!title) throw new HttpError(400, 'Give the issue a title.');
-  if (title.length > 120) throw new HttpError(400, 'Keep a title under 120 characters.');
+  if (title.length > ISSUE_TITLE_MAX) throw new HttpError(400, `Keep a title under ${ISSUE_TITLE_MAX} characters.`);
   return title;
 }
 
@@ -633,9 +633,9 @@ function labelsFrom(raw: unknown): string[] {
 }
 
 function issueText(raw: unknown): string {
-  const text = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  const text = issueDescription(raw);
   if (!text) throw new HttpError(400, 'Say what the issue is.');
-  if (text.length > 500) throw new HttpError(400, 'Keep an issue under 500 characters.');
+  if (text.length > ISSUE_TEXT_MAX) throw new HttpError(400, `Keep an issue's description under ${ISSUE_TEXT_MAX} characters.`);
   return text;
 }
 
