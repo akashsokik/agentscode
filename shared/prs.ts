@@ -9,7 +9,7 @@
 
 /** A key anywhere in text: not inside a longer word, and never followed by more letters or digits. */
 // Fen's ISSUE_KEY (2-5 letter code, 1-6 digits), with guards so "xACH-4" and "ACH-4b" are not keys.
-// A leading zero is the same issue (ACH-012 is ACH-12); no issue is number 0.
+// A leading zero is the same issue (ACH-012 is ACH-12), as in Fen's issueKeysIn.
 const KEY = /(?<![A-Za-z0-9])([A-Z]{2,5})-(\d{1,6})(?![A-Za-z0-9])/g;
 
 interface IssueKeyMatch {
@@ -31,7 +31,6 @@ export function findIssueKeys(text: string, codes?: Iterable<string>): IssueKeyM
   for (const m of String(text ?? '').matchAll(KEY)) {
     const code = m[1];
     if (known && !known.has(code)) continue;
-    if (Number(m[2]) === 0) continue;
     const key = `${code}-${Number(m[2])}`;
     if (seen.has(key)) continue;
     seen.add(key);

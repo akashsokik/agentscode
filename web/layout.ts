@@ -10,8 +10,6 @@ export type TabContent =
   | { kind: 'file'; root: Root; path: string }
   | { kind: 'diff'; root: Root; path: string }
   | { kind: 'comms'; conversationId?: string }
-  /** The Issues page (web/issues/IssuesPage.tsx, Fen's). */
-  | { kind: 'issues' }
   /** The Pull requests page (web/prs/PullRequestsPane.tsx); `prId` is the selected PR, owner/name#n. */
   | { kind: 'pullRequests'; prId?: string }
   /** The Work view as a pane (web/work/WorkView.tsx). */
@@ -98,7 +96,6 @@ export function tabKey(content: TabContent): string {
     case 'file': return `file:${rootKey(content.root)}:${content.path}`;
     case 'diff': return `diff:${rootKey(content.root)}:${content.path}`;
     case 'comms': return 'comms';
-    case 'issues': return 'issues';
     case 'pullRequests': return 'pullRequests';
     case 'work': return 'work';
     case 'channel': return `channel:${content.channelId}`;
@@ -181,7 +178,7 @@ function ensureTab(tabs: Tab[], content: TabContent): { tabs: Tab[]; tab: Tab } 
   return { tabs: [...tabs, tab], tab };
 }
 
-/** What the focused pane shows, by kind: the sidebar marks its Comms, Issues and Pull requests rows. */
+/** What the focused pane shows, by kind: the sidebar marks its Pull requests row with it. */
 export function focusedKind(l: Layout): TabContent['kind'] | null {
   const pane = l.panes.find(p => p.id === l.focused);
   return l.tabs.find(t => t.id === pane?.tabId)?.content.kind ?? null;

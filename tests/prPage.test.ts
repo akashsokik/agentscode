@@ -14,7 +14,7 @@ test('issue keys: code-hyphen-number, never a decision or note id, and only know
   assert.deepEqual(findIssueKeys('feat/ACH-12-short-title').map(k => k.key), ['ACH-12']);
   assert.deepEqual(findIssueKeys('Fixes ACH-12 and OSI-3; see ACH-12 again').map(k => k.key), ['ACH-12', 'OSI-3']);
   assert.deepEqual(findIssueKeys('Per ACH-D7 and ACH-N3, no key here').map(k => k.key), [], 'decision and note ids are not keys');
-  assert.deepEqual(findIssueKeys('xACH-4, ACH-4b, ach-4, ACH-0, ACHIEV-3').map(k => k.key), [], 'not inside a word, upper case, never 0, a 2-5 letter code (Fen\'s ISSUE_KEY)');
+  assert.deepEqual(findIssueKeys('xACH-4, ACH-4b, ach-4, ACHIEV-3').map(k => k.key), [], 'not inside a word, upper case, a 2-5 letter code (Fen\'s ISSUE_KEY)');
   assert.deepEqual(findIssueKeys('ACH-012 and ACH-12').map(k => k.key), ['ACH-12'], 'a leading zero is the same issue');
   assert.deepEqual(findIssueKeys('feat/ALL-12-x', ['ACH', 'ALL']).map(k => k.key), ['ALL-12'], 'ALL keys link when ALL is known');
   assert.deepEqual(findIssueKeys('UTF-8 and ISO-9001 and ACH-9', ['ACH']).map(k => k.key), ['ACH-9'], 'unknown codes are ignored when codes are given');
@@ -214,14 +214,9 @@ test('a GitHub App author reads as the app (dependabot), and is a bot', () => {
   assert.equal(pr.authorIsBot, true);
 });
 
-test('navigation: the Issues count leaves out done and canceled; both pages are one tab each', async () => {
-  const { openIssueCount } = await import('../web/sidebar/navCounts.ts');
-  const issue = (status: string) => ({ status }) as never;
-  assert.equal(openIssueCount([issue('queued'), issue('in_progress'), issue('blocked'), issue('done'), issue('canceled')]), 3);
-  assert.equal(openIssueCount(undefined), 0);
+test('navigation: one Pull requests tab, whichever PR is selected', async () => {
   const { tabKey } = await import('../web/layout.ts');
-  assert.equal(tabKey({ kind: 'issues' }), 'issues');
-  assert.equal(tabKey({ kind: 'pullRequests', prId: 'o/r#1' }), tabKey({ kind: 'pullRequests' }), 'one Pull requests tab, whichever PR is selected');
+  assert.equal(tabKey({ kind: 'pullRequests', prId: 'o/r#1' }), tabKey({ kind: 'pullRequests' }));
 });
 
 test('ALL is among the codes a PR key may name, so issues with no project link too', async () => {
