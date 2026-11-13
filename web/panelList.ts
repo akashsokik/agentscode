@@ -94,7 +94,7 @@ const OPEN_SECTIONS: { status: IssueStatus; label: string }[] = ISSUE_STATUSES.f
 
 export function issueGroups(issues: readonly SuperIssue[] | undefined, filter: IssuesFilter, query: string): { counts: { open: number; done: number }; open: Group<SuperIssue>[]; done: SuperIssue[] } {
   const all = issues ?? [];
-  const found = all.filter(g => matches(query, g.text, g.notes));
+  const found = all.filter(g => matches(query, g.key, g.title, g.text, g.notes, ...(g.labels ?? [])));
   const closedAt = (g: SuperIssue) => g.doneAt ?? g.canceledAt ?? g.updatedAt;
   const open = found.filter(isOpenIssue).sort((a, b) => a.order - b.order);
   // Done and canceled together, newest first.

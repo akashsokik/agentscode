@@ -3,13 +3,13 @@
  * with the choices to click; in the right panel, its Decisions (anything it did on its own, which you
  * can undo), Issues and Routines tabs, drawn with the shared panel list (web/ui/PanelList.tsx, ACH-D37).
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { SuperAutonomy } from '../../shared/autonomy.ts';
 import type { IssueStatus, RoutineSchedule, SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { openAsks } from '../super.ts';
 import { ISSUE_STATUS_LABEL, heldText, migrateSeen, scheduleLabel, SUPER_TABS, superTabCounts, superTabDots, superTabLatest, type SuperTab } from '../superText.ts';
-import { ISSUE_TITLE_MAX, isOpenIssue } from '../../shared/issues.ts';
+import { ISSUE_PRIORITY_LABEL, ISSUE_TITLE_MAX, isOpenIssue } from '../../shared/issues.ts';
 import { armRemove, cleanSummary, decisionGroups, keepArmed, decisionKind, focusAfterRemoval, issueGroups, issueMoves, routineGroups, shortSchedule, shortWhen, type DecisionKind, type DecisionsFilter, type IssuesFilter } from '../panelList.ts';
 import { open } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
@@ -18,8 +18,13 @@ import { Kbd } from '../ui/Kbd.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar, RowAction, RowIcon } from '../ui/PanelList.tsx';
-import { Zap, Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleAlert, CircleDashed, CircleDot, Clock, Copy, CornerDownRight, ListBullet, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X, CircleX, Eye } from '../mono/icons.tsx';
+import { Zap, Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleDot, Clock, Copy, CornerDownRight, ListBullet, ListFilter, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
+import { DueDate, PriorityMark, restoreFocus, StatusIcon, StatusPriorityRows } from '../issues/issueParts.tsx';
+import { isPageKey } from '../issues/pageKeys.ts';
+import { FilterChips, FilterMenu } from '../issues/IssueFilters.tsx';
+import { activeFilters, localDay, matchesFilters, type IssueFilters, type IssueNames, type IssueProperty } from '../issues/issuesView.ts';
+import { WhoAvatar } from '../notes/parts.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
 export function SuperInbox() {
@@ -237,20 +242,9 @@ function AnswerItem({ ask, now, expanded, onToggle }: { ask: SuperAsk; now: numb
 /** Issues are one line; line breaks typed or pasted become spaces. */
 const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ');
 
-/** Existing mono icons until the status glyphs from the approved demo land (ACH-D41, phase 3). */
-const ISSUE_ICON: Record<IssueStatus, { icon: typeof ListBullet; cls: string }> = {
-  needs_you: { icon: CircleAlert, cls: 'text-warning' },
-  in_review: { icon: Eye, cls: 'text-content/75' },
-  in_progress: { icon: CircleDot, cls: 'text-content/75' },
-  waiting: { icon: Pause, cls: '' },
-  todo: { icon: CircleDashed, cls: '' },
-  backlog: { icon: CircleDashed, cls: 'text-content/40' },
-  done: { icon: CheckCircle, cls: '' },
-  canceled: { icon: CircleX, cls: 'text-content/40' },
-};
 
 /** A one-line composer: Enter adds, Escape closes. Opened by +. */
-function Composer({ placeholder, label, onAdd, onClose, children }: { placeholder: string; label: string; onAdd: (text: string) => Promise<boolean>; onClose: () => void; children?: ReactNode }) {
+export function Composer({ placeholder, label, onAdd, onClose, children }: { placeholder: string; label: string; onAdd: (text: string) => Promise<boolean>; onClose: () => void; children?: ReactNode }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const add = async () => {
@@ -298,7 +292,15 @@ export function IssuesView() {
   const [projectId, setProjectId] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
-  const { counts, open: sections, done } = issueGroups(issues, filter, query);
+  const [filters, setFilters] = useState<IssueFilters>({});
+  const [filterMenu, setFilterMenu] = useState<{ anchor: HTMLElement | null; start?: IssueProperty; opener: Element | null } | null>(null);
+  const agents = useApp(s => s.snapshot?.agents);
+  const now = useNow();
+  const today = localDay(now);
+  const names: IssueNames = { agent: id => agents?.find(a => a.id === id)?.name, project: id => projects.find(p => p.id === id)?.name };
+  // The Filter menu's properties narrow the list first; search and the Open and Done views then apply.
+  const kept = (issues ?? []).filter(g => matchesFilters(g, filters, today));
+  const { counts, open: sections, done } = issueGroups(kept, filter, query);
   const ordered = sections.flatMap(s => s.items);
   // The backlog's own order, for moving: positions are among all open issues, not a search's.
   const backlog = (issues ?? []).filter(isOpenIssue).sort((a, b) => a.order - b.order);
@@ -309,11 +311,17 @@ export function IssuesView() {
   // The rows on screen, in order: where focus goes when one is removed.
   const shownIds = [...ordered, ...(doneShown ? done : [])].map(g => g.id);
   const item = (issue: SuperIssue) => (
-    <IssueItem key={issue.id} issue={issue} moves={moves.get(issue.id) ?? { up: null, down: null }} expanded={open === issue.id} onToggle={() => toggle(issue.id)} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, issue.id))} onSettled={() => focusRow(root.current, issue.id)} />
+    <IssueItem key={issue.id} issue={issue} today={today} moves={moves.get(issue.id) ?? { up: null, down: null }} expanded={open === issue.id} onToggle={() => toggle(issue.id)} onRemoved={() => focusRow(root.current, focusAfterRemoval(shownIds, issue.id))} onSettled={() => focusRow(root.current, issue.id)} />
   );
   const closeAdd = () => { setAdding(false); focusAdd(root.current); };
+  const filterButton = () => root.current?.querySelector<HTMLElement>('[data-issues-filter]') ?? null;
+  // Closing the Filter menu gives focus back to what had it (else the button), so F still works.
+  const closeFilter = () => { restoreFocus(filterMenu?.opener ?? null, filterButton()); setFilterMenu(null); };
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (isPageKey(e) && e.key === 'f' && !e.shiftKey) { e.preventDefault(); setFilterMenu({ anchor: filterButton(), opener: document.activeElement }); }
+  };
   return (
-    <div ref={root} className="flex min-h-0 flex-1 flex-col font-sans">
+    <div ref={root} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col font-sans">
       <PanelToolbar
         query={query}
         onQuery={setQuery}
@@ -321,7 +329,15 @@ export function IssuesView() {
         filter={{ label: 'Show', value: filter, onChange: setFilter, options: [{ value: 'open', label: 'Open', count: counts.open }, { value: 'done', label: 'Done', count: counts.done }] }}
         onAdd={() => setAdding(a => !a)}
         addLabel="Add an issue"
-      />
+      >
+        <button type="button" data-issues-filter aria-label="Filter" title="Filter (F)" aria-haspopup="dialog" aria-expanded={Boolean(filterMenu)} onClick={e => (filterMenu ? closeFilter() : setFilterMenu({ anchor: e.currentTarget, opener: document.activeElement }))} className={`relative grid size-[26px] shrink-0 place-items-center rounded-[7px] transition-colors hover:bg-content/5 hover:text-content ${activeFilters(filters).length ? 'text-content' : 'text-content/50'}`}>
+          <ListFilter className="size-3.5" strokeWidth={1.75} />
+        </button>
+      </PanelToolbar>
+      <FilterChips filters={filters} names={names} onChange={setFilters} onEdit={(property, el) => setFilterMenu({ anchor: el, start: property, opener: document.activeElement })} />
+      {filterMenu ? (
+        <FilterMenu key={filterMenu.start ?? 'all'} anchor={filterMenu.anchor} start={filterMenu.start} issues={issues ?? []} filters={filters} onChange={setFilters} names={names} today={today} onClose={closeFilter} />
+      ) : null}
       {adding ? (
         <Composer placeholder="Add an issue for the SuperAgent" label="New issue" onClose={closeAdd} onAdd={async text => Boolean(await attempt(() => api.addIssue({ text, projectId: projectId || null })))}>
           <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} className="h-5 max-w-40 truncate rounded bg-content/5 px-1 text-[11px] text-content/65 outline-none">
@@ -353,7 +369,7 @@ export function IssuesView() {
   );
 }
 
-function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: { issue: SuperIssue; moves: { up: number | null; down: number | null }; expanded: boolean; onToggle: () => void; onRemoved: () => void; /** After a change that can move the row: focus it again. */ onSettled: () => void }) {
+function IssueItem({ issue, today, moves, expanded, onToggle, onRemoved, onSettled }: { issue: SuperIssue; today: string; moves: { up: number | null; down: number | null }; expanded: boolean; onToggle: () => void; onRemoved: () => void; /** After a change that can move the row: focus it again. */ onSettled: () => void }) {
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === issue.projectId));
   const agent = useApp(s => (issue.agentId ? s.snapshot?.agents.find(a => a.id === issue.agentId) : undefined));
   const [editing, setEditing] = useState(false);
@@ -382,25 +398,31 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: {
     setConfirming(true);
     setFocusConfirm(next.focusConfirm);
   };
-  const named = `"${issue.title.length > 60 ? `${issue.title.slice(0, 59)}…` : issue.title}"`;
+  const named = `${issue.key} "${issue.title.length > 60 ? `${issue.title.slice(0, 59)}…` : issue.title}"`;
   const run = async (action: () => Promise<unknown>) => { setBusy(true); const ok = await attempt(action); setBusy(false); return ok; };
   const save = async () => { if (!busy && title.trim() && await run(() => api.updateIssue(issue.id, { title: title.trim() }))) { setEditing(false); onSettled(); } };
   const done = !isOpenIssue(issue);
   // A status change moves the row to another section: focus follows it (or goes to + if it folded away).
   const status = (s: IssueStatus) => { if (!busy) void run(() => api.updateIssue(issue.id, { status: s })).then(onSettled); };
   const edit = () => { setTitle(issue.title); setEditing(true); if (!expanded) onToggle(); };
-  const { icon: StatusIcon, cls } = ISSUE_ICON[issue.status];
   const moveTo = (to: number | null) => { if (to !== null && !busy) void run(() => api.moveIssue(issue.id, to)).then(onSettled); };
   const removeNow = async () => { if (await run(() => api.removeIssue(issue.id))) onRemoved(); };
   const remove = <RowAction label={`Confirm removing ${named}`} busy={busy} onClick={() => void removeNow()}><span className="text-danger">Remove?</span></RowAction>;
   return (
     <PanelRow
       id={issue.id}
-      lead={<StatusIcon className={`size-3.5 ${cls}`} strokeWidth={1.6} />}
-      title={issue.text}
-      label={`${ISSUE_STATUS_LABEL[issue.status]}: ${issue.text}${agent ? `, with ${agent.name}` : ''}${project ? `, ${project.name}` : ''}`}
+      lead={<StatusIcon status={issue.status} />}
+      title={issue.title}
+      label={`${issue.key} ${ISSUE_STATUS_LABEL[issue.status]}: ${issue.title}${issue.priority !== 'none' ? `, ${ISSUE_PRIORITY_LABEL[issue.priority]} priority` : ''}${issue.dueDate ? `, due ${issue.dueDate}` : ''}${agent ? `, with ${agent.name}` : issue.forUser ? ', with you' : ''}${project ? `, ${project.name}` : ''}`}
       dim={done}
-      meta={<>{agent ? <AgentAvatar agent={agent} animate={false} className="size-3.5" /> : null}{project ? <span className="font-mono text-[10.5px]">{project.code ?? project.name}</span> : null}</>}
+      meta={(
+        <>
+          {issue.priority !== 'none' ? <PriorityMark priority={issue.priority} /> : null}
+          {issue.dueDate ? <DueDate dueDate={issue.dueDate} today={today} /> : null}
+          {agent ? <AgentAvatar agent={agent} animate={false} className="size-3.5" /> : issue.forUser ? <WhoAvatar name="You" className="size-3.5" /> : null}
+          {project ? <span className="font-mono text-[10.5px]">{project.code ?? project.name}</span> : null}
+        </>
+      )}
       actions={confirming ? remove : (
         <>
           {!done ? <RowIcon icon={ChevronUp} label={`Move ${named} up`} disabled={moves.up === null} busy={busy} onClick={() => moveTo(moves.up)} /> : null}
@@ -423,9 +445,8 @@ function IssueItem({ issue, moves, expanded, onToggle, onRemoved, onSettled }: {
             </>
           ) : null}
           <MenuDivider />
-          {(Object.keys(ISSUE_STATUS_LABEL) as IssueStatus[]).map(s => (
-            <MenuRow key={s} title={s === 'done' ? 'Mark done' : ISSUE_STATUS_LABEL[s]} checked={issue.status === s} disabled={busy} onSelect={() => { close(); status(s); }} />
-          ))}
+          <StatusPriorityRows issue={issue} close={close} onChanged={onSettled} />
+          <MenuRow icon={Copy} title={`Copy ${issue.key}`} onSelect={() => { close(); void navigator.clipboard?.writeText(issue.key); }} />
           <MenuDivider />
           <MenuRow icon={Trash2} title="Remove…" danger disabled={busy} onSelect={() => { close(); armFromMenu(); }} />
         </>

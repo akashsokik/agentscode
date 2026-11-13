@@ -10,6 +10,8 @@ export type TabContent =
   | { kind: 'file'; root: Root; path: string }
   | { kind: 'diff'; root: Root; path: string }
   | { kind: 'comms'; conversationId?: string }
+  /** The Issues page (web/issues/IssuesPage.tsx, Fen's). */
+  | { kind: 'issues' }
   /** The Pull requests page (web/prs/PullRequestsPane.tsx); `prId` is the selected PR, owner/name#n. */
   | { kind: 'pullRequests'; prId?: string }
   /** The Work view as a pane (web/work/WorkView.tsx). */
@@ -96,6 +98,7 @@ export function tabKey(content: TabContent): string {
     case 'file': return `file:${rootKey(content.root)}:${content.path}`;
     case 'diff': return `diff:${rootKey(content.root)}:${content.path}`;
     case 'comms': return 'comms';
+    case 'issues': return 'issues';
     case 'pullRequests': return 'pullRequests';
     case 'work': return 'work';
     case 'channel': return `channel:${content.channelId}`;
@@ -120,7 +123,7 @@ export function migrateSuperView(view: string | undefined): SuperView | undefine
  * here: a kind missing from this list would make knownTabs drop those tabs on every reload.
  */
 const TAB_KIND_SET: Record<TabContent['kind'], true> = {
-  agent: true, file: true, diff: true, comms: true, pullRequests: true, work: true, channel: true, walkthrough: true, browser: true,
+  agent: true, file: true, diff: true, comms: true, issues: true, pullRequests: true, work: true, channel: true, walkthrough: true, browser: true,
 };
 export const TAB_KINDS = Object.keys(TAB_KIND_SET) as TabContent['kind'][];
 
@@ -201,7 +204,7 @@ function ensureTab(tabs: Tab[], content: TabContent): { tabs: Tab[]; tab: Tab } 
   return { tabs: [...tabs, tab], tab };
 }
 
-/** What the focused pane shows, by kind: the sidebar marks its Pull requests row with it. */
+/** What the focused pane shows, by kind: the sidebar marks its Comms, Issues and Pull requests rows. */
 export function focusedKind(l: Layout): TabContent['kind'] | null {
   const pane = l.panes.find(p => p.id === l.focused);
   return l.tabs.find(t => t.id === pane?.tabId)?.content.kind ?? null;
