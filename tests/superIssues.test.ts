@@ -548,3 +548,17 @@ test('the issue view edits through the app: assignee (an agent, you or nobody), 
   assert.throws(() => t.manager.updateIssue(child.id, { comment: '   ' }), e => status(e) === 400);
   assert.throws(() => t.manager.updateIssue(child.id, { comment: 7 }), e => status(e) === 400);
 });
+
+test('git links: a merge closes an issue once, its hash kept as the status entry\'s ref, by git', () => {
+  const store = new SuperStore(tempDir('issue-ref'));
+  const issue = store.addIssue({ text: 'Ship the page', projectId: null, by: 'user' }, 1);
+  const closed = store.updateIssue(issue.id, { status: 'done', activityText: 'Merged abc123 from feat/ACH-1-ship.', activityRef: 'abc123' }, 2, { kind: 'git' });
+  const entry = closed.activity.at(-1)!;
+  assert.deepEqual([entry.kind, entry.to, entry.ref, entry.text, entry.by], ['status', 'done', 'abc123', 'Merged abc123 from feat/ACH-1-ship.', { kind: 'git' }]);
+  // Reopened by you, the same merge seen again changes nothing; a new merge closes it again.
+  store.updateIssue(issue.id, { status: 'todo' }, 3, { kind: 'user' });
+  const again = store.updateIssue(issue.id, { status: 'done', activityRef: 'abc123' }, 4, { kind: 'git' });
+  assert.equal(again.status, 'todo', 'the same merge is applied once');
+  assert.equal(again.activity.length, closed.activity.length + 1);
+  assert.equal(store.updateIssue(issue.id, { status: 'done', activityRef: 'def456' }, 5, { kind: 'git' }).status, 'done');
+});

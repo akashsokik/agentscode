@@ -277,6 +277,8 @@ export interface IssueEvent {
   to?: string;
   /** A comment's text, or a note on the change. */
   text?: string;
+  /** A stable id for what made the change (a merge commit's hash, server/issueLinks.ts), so it is never applied twice. */
+  ref?: string;
 }
 
 /** One issue in the backlog, which the SuperAgent works through on its own, in order (ACH-D41). */

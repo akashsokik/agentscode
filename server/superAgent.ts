@@ -311,6 +311,11 @@ export class SuperStore {
     branch?: string | null;
     /** Why, in the activity: on the status change it makes, or as its own entry when nothing else changes. Server code only. */
     activityText?: string;
+    /**
+     * A stable id for what made this change (a merge commit's hash), stored on its activity entry.
+     * Seen before in this issue's activity, the whole update is skipped: a merge is applied once. Server code only.
+     */
+    activityRef?: string;
     /** Assigned to the user (true), which takes it off any agent; false clears it. */
     forUser?: boolean;
     /** The issue this is a sub-issue of; null makes it top level. Never itself or one of its own sub-issues. */
@@ -323,6 +328,8 @@ export class SuperStore {
     const stored = this.read();
     const old = stored.issues.find(g => g.id === id);
     if (!old) throw new HttpError(404, 'No issue with that id.');
+    const ref = patch.activityRef === undefined ? '' : String(patch.activityRef).trim().slice(0, 200);
+    if (ref && old.activity.some(e => e.ref === ref)) return old;
     const status = patch.status === undefined ? undefined : issueStatusFrom(patch.status);
     if (status === null) throw new HttpError(400, `An issue's status is one of: ${ISSUE_STATUSES.join(', ')}.`);
     const next: SuperIssue = { ...old, updatedAt: now };
@@ -389,6 +396,11 @@ export class SuperStore {
     if (why) {
       const status = events.find(e => e.kind === 'status');
       if (status) status.text = why; else events.push({ at: now, by, kind: 'comment', text: why });
+    }
+    // The ref goes on the change it explains: the status change, else the note, else the last entry made.
+    if (ref) {
+      const entry = events.find(e => e.kind === 'status') ?? events.at(-1);
+      if (entry) entry.ref = ref;
     }
     next.activity = [...old.activity, ...events];
     this.write({ ...stored, issues: stored.issues.map(g => (g.id === id ? next : g)) });
