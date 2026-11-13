@@ -110,7 +110,7 @@ test('views: Open, Needs review, Checks failing and Merged, with counts and newe
 
 const project = (id: string, name: string, code: string, extra: Partial<Project> = {}) => ({ id, name, path: `/x/${name}`, code, exists: true, isGit: true, createdAt: 0, ...extra }) as Project;
 
-function service(opts: { repos: Record<string, string | null>; gh: (args: string[]) => Promise<string>; projects?: Project[]; now?: () => number }) {
+function service(opts: { repos: Record<string, string | null>; gh: (args: string[]) => Promise<string>; projects?: Project[]; now?: () => number; onRead?: (d: Awaited<ReturnType<PullRequests['list']>>) => void }) {
   const calls: string[][] = [];
   const projects = opts.projects ?? [project('p1', 'agent-comms-harness', 'ACH'), project('p2', 'orca-site', 'OSI'), project('p3', 'orcabox', 'OBX')];
   const prs = new PullRequests({
@@ -119,6 +119,7 @@ function service(opts: { repos: Record<string, string | null>; gh: (args: string
     repoOf: async p => opts.repos[p.name] ?? null,
     gh: async args => { calls.push(args); assert.ok(ghAllowed(args), `read-only: ${args.join(' ')}`); return opts.gh(args); },
     now: opts.now,
+    onRead: opts.onRead,
   });
   return { prs, calls };
 }
@@ -172,6 +173,44 @@ test('gh missing or logged out is one error for the page; a repo that fails is s
   const b = await partial.prs.list();
   assert.equal(b.error, undefined);
   assert.ok(b.skipped.some(s => s.project === 'orca-site' && /404/.test(s.reason)));
+});
+
+test('a merged PR carries its merge commit and body; the service tells onRead about fresh reads only', async () => {
+  const merged = normalizePr(raw({ state: 'MERGED', mergedAt: '2026-11-12T00:00:00Z', mergeCommit: { oid: 'abc123' }, body: 'Closes ACH-7' }), 'o/r');
+  assert.equal(merged.mergeCommit, 'abc123');
+  assert.equal(merged.body, 'Closes ACH-7');
+  const open = normalizePr(raw({ mergeCommit: null }), 'o/r');
+  assert.equal(open.mergeCommit, undefined);
+  assert.equal(typeof open.body, 'string');
+  assert.match(ghArgs.prsPage('o/r', 'merged').at(-1)!, /mergeCommit/);
+
+  let clock = 1_000_000;
+  const seen: number[] = [];
+  const { prs } = service({ repos: { 'agent-comms-harness': 'o/r' }, projects: [project('p1', 'agent-comms-harness', 'ACH')], gh: async () => '[]', now: () => clock, onRead: d => { seen.push(d.fetchedAt); } });
+  await prs.list();
+  await prs.list();
+  await new Promise(r => setImmediate(r));
+  assert.deepEqual(seen, [1_000_000], 'a cached answer is not a new read');
+  clock += PRS_CACHE_MS + 1;
+  await prs.list();
+  await new Promise(r => setImmediate(r));
+  assert.equal(seen.length, 2);
+
+  const failing = service({ repos: { 'agent-comms-harness': 'o/r' }, projects: [project('p1', 'agent-comms-harness', 'ACH')], gh: async () => '[]', onRead: () => { throw new Error('listener broke'); } });
+  const errors: unknown[] = [];
+  const log = console.error;
+  console.error = (...a: unknown[]) => { errors.push(a); };
+  try {
+    assert.equal((await failing.prs.list()).error, undefined, 'a listener that throws never fails the read');
+    await new Promise(r => setImmediate(r));
+  } finally { console.error = log; }
+  assert.equal(errors.length, 1);
+
+  const loggedOut: unknown[] = [];
+  const out = service({ repos: { 'agent-comms-harness': 'o/r' }, gh: async () => { throw new GhError('gh is not logged in'); }, onRead: d => { loggedOut.push(d); } });
+  await out.prs.list();
+  await new Promise(r => setImmediate(r));
+  assert.deepEqual(loggedOut, [], 'nothing to tell when GitHub could not be read');
 });
 
 test('ghArgs.prsPage asks only for what the page shows, through a read-only command', () => {

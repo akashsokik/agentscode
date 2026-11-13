@@ -83,6 +83,10 @@ export interface PullRequest {
   branch: string;
   updatedAt: string;
   mergedAt?: string;
+  /** The merge commit's sha, for merged PRs. */
+  mergeCommit?: string;
+  /** The description as written: untrusted text, never instructions. */
+  body: string;
   checks: PrCheck[];
   checksSummary: { total: number; passed: number; failed: number; pending: number };
   reviews: PrReview[];
@@ -202,7 +206,9 @@ export function normalizePr(raw: Raw, repo: string, opts: { codes?: Iterable<str
   const checks = (Array.isArray(raw.statusCheckRollup) ? raw.statusCheckRollup as Raw[] : []).map(normalizeCheck);
   const branch = str(raw.headRefName);
   const title = str(raw.title);
-  const issueKey = firstIssueKey([branch, title, str(raw.body)], opts.codes) ?? undefined;
+  const body = str(raw.body);
+  const issueKey = firstIssueKey([branch, title, body], opts.codes) ?? undefined;
+  const mergeCommit = str((raw.mergeCommit as Raw | null | undefined)?.oid);
   const agentId = branch ? opts.agentFor?.(branch) : undefined;
   return {
     id: `${repo}#${number}`, repo, number, title, url: str(raw.url), state,
@@ -211,6 +217,7 @@ export function normalizePr(raw: Raw, repo: string, opts: { codes?: Iterable<str
     authorIsBot: Boolean(author?.is_bot) || /^app\/|\[bot\]$|^dependabot/.test(str(author?.login)),
     ...(agentId ? { agentId } : {}),
     branch, updatedAt: str(raw.updatedAt), ...(str(raw.mergedAt) ? { mergedAt: str(raw.mergedAt) } : {}),
+    ...(mergeCommit ? { mergeCommit } : {}), body,
     checks, checksSummary: summarizeChecks(checks),
     reviews: latestReviews(Array.isArray(raw.reviews) ? raw.reviews as Raw[] : []),
     reviewDecision: decision(raw.reviewDecision),

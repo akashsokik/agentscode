@@ -18,6 +18,11 @@ export interface PrSource {
   /** Runs gh with read-only arguments (server/github.ts runGh). */
   gh: (args: string[]) => Promise<string>;
   now?: () => number;
+  /**
+   * Called with every fresh read from GitHub (not with cached answers), after the cache holds it.
+   * For listeners such as issue auto-close; a throw here is logged and never fails the read.
+   */
+  onRead?: (data: PrPageData) => void | Promise<void>;
 }
 
 /** The PodCode agent that worked on a branch: its worktree is on it, or the branch is agent/<name>/... */
@@ -47,6 +52,7 @@ export class PullRequests {
     if (this.inflight) return this.inflight;
     this.inflight = this.read().then(data => {
       this.cache = data;
+      if (!data.error) void Promise.resolve().then(() => this.source.onRead?.(data)).catch(err => console.error('[prs] onRead failed:', (err as Error).message));
       return data;
     }).finally(() => { this.inflight = null; });
     return this.inflight;
