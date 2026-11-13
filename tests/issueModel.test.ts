@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { issueStatusFrom, issueTitle, legacyIssue, legacyIssueStatus, migrateIssue, reconcileIssues, type LegacyIssue } from '../shared/issues.ts';
-import { issueBranchName, issueKeysIn, nextIssueKey } from '../shared/issueKeys.ts';
+import { findIssueKeys, firstIssueKey, issueBranchName, issueKeysIn, nextIssueKey } from '../shared/issueKeys.ts';
 import { SuperStore } from '../server/superAgent.ts';
 import { tempDir } from './helpers.ts';
 
@@ -102,13 +102,18 @@ test('the store migrates super.json once: keys by project code in the order made
   assert.equal(byId.get('early')!.agentId, 'ada');
   assert.equal(byId.get('early')!.notes, 'Ada has it');
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.equal(raw.issues2.length, 5, 'written back once');
-  assert.deepEqual(raw.issueKeys, { ACH: 2, OBX: 1, ALL: 2 });
+  const own = JSON.parse(fs.readFileSync(path.join(dir, 'issues.json'), 'utf8'));
+  assert.equal(own.issues.length, 5, 'written back once, to issues.json');
+  assert.deepEqual(own.issueKeys, { ACH: 2, OBX: 1, ALL: 2 });
+  assert.equal(raw.issues2, undefined, 'super.json holds only what older builds know');
+  assert.equal(raw.issueKeys, undefined);
   assert.deepEqual(raw.issues.map((g: LegacyIssue) => [g.id, g.status]), [['early', 'in_progress'], ['late', 'queued'], ['other', 'blocked'], ['none', 'queued'], ['gone', 'done']], 'the old format for older builds');
   assert.deepEqual(raw.goals, raw.issues);
   const written = fs.readFileSync(file, 'utf8');
+  const writtenOwn = fs.readFileSync(path.join(dir, 'issues.json'), 'utf8');
   new SuperStore(dir, id => codes[id]).issues();
   assert.equal(fs.readFileSync(file, 'utf8'), written, 'a second read changes nothing');
+  assert.equal(fs.readFileSync(path.join(dir, 'issues.json'), 'utf8'), writtenOwn);
 });
 
 test('new issues get the next key, never a removed one; status, priority, due date and labels are checked; activity records changes', () => {
@@ -144,4 +149,101 @@ test('an undo record from before ACH-D41 (the old format) still puts the issue b
   store.restoreIssue(issue.id, { ...legacyIssue(issue), status: 'blocked' }, true);
   const back = store.issue(issue.id);
   assert.deepEqual([back.status, back.text, back.key.startsWith('ACH-')], ['needs_you', 'Keep me', true]);
+});
+
+test('one key matcher: known codes only when given, the project-code grammar, leading zeros dropped', () => {
+  assert.deepEqual(issueKeysIn('UTF-8, ISO-9001, SHA-256 and ACH-9', ['ACH', 'ALL']), ['ACH-9'], 'with codes, only known ones');
+  assert.deepEqual(issueKeysIn('UTF-8 and ACH-9'), ['UTF-8', 'ACH-9'], 'without codes, any code (your own text only)');
+  assert.deepEqual(issueKeysIn('feat/OBX2-3 and ABCDEF-4', ['OBX2', 'ABCDEF']), ['OBX2-3', 'ABCDEF-4'], 'codes like server/projectRefs.ts allows: [A-Z][A-Z0-9]{1,5}');
+  assert.deepEqual(issueKeysIn('2AB-1, ABCDEFG-1'), [], 'a code starts with a letter and is at most 6 long');
+  assert.deepEqual(issueKeysIn('ACH-012 and ACH-12, ACH-0'), ['ACH-12', 'ACH-0']);
+  assert.deepEqual(findIssueKeys('see ALL-3', ['ACH', 'ALL']), [{ key: 'ALL-3', code: 'ALL', num: 3, index: 4 }]);
+  assert.equal(firstIssueKey(['main', 'Title with OSI-2', 'Body with ACH-1'], ['ACH', 'OSI']), 'OSI-2', 'branch, then title, then body');
+  assert.equal(firstIssueKey(['feat/ACH-25-x', 'OSI-2'], ['ACH', 'OSI']), 'ACH-25');
+  assert.equal(firstIssueKey(['main', '', undefined, null]), null);
+  assert.equal(nextIssueKey('OBX2', {}, ['OBX2-7']).key, 'OBX2-8', 'keys in use are read with the same grammar');
+});
+
+/** What a build from before ACH-D41 does to super.json when it writes: it keeps only the keys it knows. */
+function olderBuildWrites(file: string, change: (issues: LegacyIssue[]) => LegacyIssue[]): void {
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const issues = change(raw.issues);
+  const kept: Record<string, unknown> = {};
+  for (const k of ['asks', 'log', 'wakes', 'autoSpend', 'briefDay', 'routines']) if (raw[k] !== undefined) kept[k] = raw[k];
+  fs.writeFileSync(file, JSON.stringify({ ...kept, issues, goals: issues }));
+}
+
+test('a downgrade loses nothing: an older build\'s edits, additions and removals come through, and every new field stays', () => {
+  const dir = tempDir('issue-downgrade');
+  const file = path.join(dir, 'super.json');
+  const store = new SuperStore(dir, () => 'ACH');
+  const a = store.addIssue({ text: 'Ship the thing. With detail.', projectId: 'p', by: 'user', title: 'Custom title', priority: 'urgent', labels: ['infra'], dueDate: '2026-12-01' }, 1000);
+  const b = store.addIssue({ text: 'Second one', projectId: 'p', by: 'user' }, 1000);
+  const c = store.addIssue({ text: 'Third one', projectId: 'p', by: 'user' }, 1000);
+  store.updateIssue(a.id, { status: 'in_review', notes: 'Looks close' }, 1100, { kind: 'agent', id: 'fen' });
+  store.updateIssue(a.id, { branch: 'feat/thing' }, 1150);
+  const d = store.addIssue({ text: 'Fourth', projectId: 'p', by: 'user' }, 1200);
+  store.removeIssue(d.id);
+  assert.equal(d.key, 'ACH-4');
+
+  // The older build: blocks a, removes b, adds one, and logs something (any write drops unknown keys).
+  olderBuildWrites(file, issues => [
+    ...issues.filter(g => g.id !== b.id).map(g => (g.id === a.id ? { ...g, status: 'blocked' as const, updatedAt: 2000 } : g)),
+    legacy('added-old', { text: 'Added by the older build', projectId: 'p', createdAt: 2100, updatedAt: 2100, order: 5 }),
+  ]);
+  assert.ok(fs.existsSync(path.join(dir, 'issues.json')), 'the older build never touches issues.json');
+
+  const after = new SuperStore(dir, () => 'ACH').issues();
+  const byId = new Map(after.map(i => [i.id, i]));
+  const back = byId.get(a.id)!;
+  assert.deepEqual([back.title, back.priority, back.labels, back.dueDate, back.branch, back.status], ['Custom title', 'urgent', ['infra'], '2026-12-01', 'feat/thing', 'needs_you'], 'its status change wins; title, priority, labels, due date and branch stay');
+  assert.deepEqual(back.activity.map(e => e.kind), ['created', 'comment', 'status', 'status'], 'activity kept, and the older build\'s change recorded');
+  assert.equal(byId.has(b.id), false, 'removed by the older build');
+  assert.equal(byId.get(c.id)!.key, 'ACH-3');
+  assert.equal(byId.get('added-old')!.key, 'ACH-5', 'never ACH-4, given before and removed');
+  assert.equal(new SuperStore(dir, () => 'ACH').addIssue({ text: 'Next', projectId: 'p', by: 'user' }).key, 'ACH-6');
+});
+
+test('issues.json: used as it is while super.json\'s copy is unchanged; a d2d597e list in super.json moves over; no super.json keeps the issues', () => {
+  const dir = tempDir('issue-file');
+  const file = path.join(dir, 'super.json');
+  const store = new SuperStore(dir, () => 'ACH');
+  const a = store.addIssue({ text: 'One', projectId: 'p', by: 'user', priority: 'high' }, 1000);
+  // A plain write of super.json that leaves the issues alone (a log entry) never reconciles.
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({ ...raw, log: [] }));
+  assert.equal(new SuperStore(dir, () => 'ACH').issue(a.id).priority, 'high');
+  // super.json gone: issues.json still has them.
+  fs.rmSync(file);
+  assert.equal(new SuperStore(dir, () => 'ACH').issue(a.id).priority, 'high');
+
+  // A data dir from a d2d597e build: issues2 and issueKeys in super.json, no issues.json.
+  const old = tempDir('issue-file-d2d');
+  const kept = JSON.parse(fs.readFileSync(path.join(dir, 'issues.json'), 'utf8'));
+  fs.writeFileSync(path.join(old, 'super.json'), JSON.stringify({ asks: [], log: [], wakes: [], issues2: kept.issues, issueKeys: { ACH: 7 }, issues: kept.issues.map(legacyIssue), goals: kept.issues.map(legacyIssue), routines: [] }));
+  const moved = new SuperStore(old, () => 'ACH');
+  assert.equal(moved.issue(a.id).priority, 'high');
+  assert.equal(moved.addIssue({ text: 'Two', projectId: 'p', by: 'user' }).key, 'ACH-8', 'its counters move too');
+  const sup = JSON.parse(fs.readFileSync(path.join(old, 'super.json'), 'utf8'));
+  assert.deepEqual([sup.issues2, sup.issueKeys], [undefined, undefined]);
+
+  // An unreadable issues.json is set aside, never overwritten.
+  const bad = tempDir('issue-file-bad');
+  fs.writeFileSync(path.join(bad, 'issues.json'), '{not json');
+  const log = console.error; console.error = () => {};
+  try { new SuperStore(bad, () => 'ACH').issues(); } finally { console.error = log; }
+  assert.ok(fs.readdirSync(bad).some(f => f.startsWith('issues.json.unreadable-')));
+});
+
+test('git closes an issue: its own actor, the reason on the status change, the branch kept', () => {
+  const dir = tempDir('issue-git');
+  const store = new SuperStore(dir, () => 'ACH');
+  const a = store.addIssue({ text: 'Work', projectId: 'p', by: 'user' }, 1000);
+  store.updateIssue(a.id, { branch: ' feat/other-name ' }, 1100);
+  const done = store.updateIssue(a.id, { status: 'done', activityText: 'Merged abc123 from feat/other-name.' }, 1200, { kind: 'git' });
+  assert.equal(done.branch, 'feat/other-name');
+  assert.deepEqual(done.activity.at(-1), { at: 1200, by: { kind: 'git' }, kind: 'status', from: 'todo', to: 'done', text: 'Merged abc123 from feat/other-name.' });
+  const again = store.updateIssue(a.id, { status: 'done', activityText: 'Merged def456 in o/r#3.' }, 1300, { kind: 'git' });
+  assert.deepEqual(again.activity.at(-1), { at: 1300, by: { kind: 'git' }, kind: 'comment', text: 'Merged def456 in o/r#3.' }, 'no status change: the reason is its own entry');
+  assert.equal(store.updateIssue(a.id, { branch: '' }).branch, undefined);
 });

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IssueActor, IssueEvent, IssuePriority, IssueStatus, RoutineSchedule, Settings, SuperAction, SuperAsk, SuperIssue, SuperRoutine, SuperState } from '../shared/types.ts';
@@ -13,7 +13,9 @@ export { inQuietHours, validQuietTime };
 // commands only (server/comms/tools.ts SUPER_TOOLS) and never edits: it has no edit tools or shell
 // on any engine (server/agents/claude.ts claudeToolPolicy; read-only autonomy for Codex and OrcaCode).
 // What it keeps lives in the data dir:
-//   super.json   its asks to the user and its decision log, newest first, capped; its issues backlog
+//   super.json   its asks to the user and its decision log, newest first, capped; the issues in the
+//                format builds before ACH-D41 read (they keep only the keys they know when they write)
+//   issues.json  the issues as they are now and the key counters (ACH-D41), which older builds never open
 // The watcher here wakes it: agents finishing, failing, getting stuck or waiting for the user are
 // batched into one update turn, only while it is idle, within a budget and outside quiet hours.
 
@@ -36,6 +38,7 @@ export const STUCK_WORKING_MS = 45 * 60_000;
 export const STUCK_WAITING_MS = 20 * 60_000;
 
 const FILE = 'super.json';
+const ISSUES_FILE = 'issues.json';
 
 interface Stored {
   asks: SuperAsk[];
@@ -55,8 +58,21 @@ interface Stored {
   routines: SuperRoutine[];
 }
 
+/**
+ * issues.json: the issues and key counters, apart from super.json so an older build, which rewrites
+ * super.json with only the keys it knows, can never drop them (ACH-N23). `legacy` is a hash of the
+ * old-format copy written to super.json alongside: while super.json still holds exactly that, no
+ * older build has changed the issues and the list here is used as it is.
+ */
+interface IssuesFile { issues: SuperIssue[]; issueKeys: Record<string, number>; legacy: string }
+
+function legacyStamp(list: unknown[]): string {
+  return createHash('sha256').update(JSON.stringify(list)).digest('hex').slice(0, 16);
+}
+
 export class SuperStore {
   private file: string;
+  private issuesFile: string;
   /**
    * @param codeFor a project's code for issue keys (ACH, OBX); issues with no project, or a
    *   project it does not know, use ALL.
@@ -64,6 +80,7 @@ export class SuperStore {
   private codeFor: (projectId: string) => string | null | undefined;
   constructor(dataDir: string, codeFor: (projectId: string) => string | null | undefined = () => null) {
     this.file = path.join(dataDir, FILE);
+    this.issuesFile = path.join(dataDir, ISSUES_FILE);
     this.codeFor = codeFor;
   }
 
@@ -91,24 +108,32 @@ export class SuperStore {
         routines: Array.isArray(raw.routines) ? raw.routines.filter(validRoutine) : [],
       };
     } catch {
-      return { asks: [], log: [], wakes: [], issues: [], issueKeys: {}, routines: [] };
+      // No super.json (or none readable): issues.json still holds the issues.
+      return { asks: [], log: [], wakes: [], ...this.readIssues({}), routines: [] };
     }
   }
 
   /**
-   * The issues (ACH-D41): the current list ("issues2"), reconciled with the old-format copy
-   * ("issues", or "goals" before ACH-D38) that older builds read and may have changed after a
-   * downgrade (shared/issues.ts reconcileIssues). The first start of this build migrates the old
-   * list, giving keys in the order the issues were made; that is written back once, so the move
-   * happens once and loses nothing.
+   * The issues (ACH-D41): issues.json's list, reconciled with the old-format copy in super.json
+   * ("issues", or "goals" before ACH-D38) when an older build has changed that copy since this build
+   * wrote it (shared/issues.ts reconcileIssues: its edits win, its additions get new keys, its
+   * removals stay removed). The first start of this build migrates the old list, giving keys in the
+   * order the issues were made; a list a d2d597e build kept in super.json ("issues2") moves over as
+   * it is. Either way the result is written back once.
    */
-  private readIssues(raw: Partial<Stored> & LegacyStored & { issues2?: unknown }): { issues: SuperIssue[]; issueKeys: Record<string, number> } {
-    const current = Array.isArray(raw.issues2) ? raw.issues2.filter(validIssue) : null;
+  private readIssues(raw: Partial<Stored> & LegacyStored & { issues2?: unknown; issueKeys?: unknown }): { issues: SuperIssue[]; issueKeys: Record<string, number> } {
+    const file = this.readIssuesFile();
+    const counterSource = file?.issueKeys ?? raw.issueKeys;
+    let counters: Record<string, number> = counterSource && typeof counterSource === 'object' ? sanitizeCounters(counterSource as Record<string, unknown>) : {};
+    const current = file ? file.issues : Array.isArray(raw.issues2) ? raw.issues2.filter(validIssue) : null;
     const hasLegacy = Array.isArray(raw.issues) || Array.isArray(raw.goals);
-    const legacy = hasLegacy ? storedIssues(raw).filter(isLegacyIssue).sort((a, b) => a.createdAt - b.createdAt) : null;
-    let counters: Record<string, number> = raw.issueKeys && typeof raw.issueKeys === 'object' ? { ...raw.issueKeys } : {};
+    const legacyRaw = hasLegacy ? storedIssues(raw) : null;
+    // Nothing older has touched super.json's copy since this build wrote it: no reconciling.
+    if (file && legacyRaw && file.legacy === legacyStamp(legacyRaw) && raw.issues2 === undefined) return { issues: file.issues, issueKeys: counters };
+    const legacy = legacyRaw ? legacyRaw.filter(isLegacyIssue).sort((a, b) => a.createdAt - b.createdAt) : null;
     const inUse = (current ?? []).map(i => i.key);
     const keyFor = (old: LegacyIssue) => {
+      // Never a key given before: past the counter and every key in use (nextIssueKey).
       const next = nextIssueKey(this.code(old.projectId), counters, inUse);
       counters = next.counters;
       inUse.push(next.key);
@@ -116,9 +141,30 @@ export class SuperStore {
     };
     // In backlog order, as the file keeps them: open by order, then the latest closed.
     const issues = orderIssues(reconcileIssues(current, legacy, keyFor, Date.now()));
-    const changed = current === null ? issues.length > 0 : JSON.stringify(issues) !== JSON.stringify(current);
-    if (changed) this.pendingWrite = true;
+    // Written back when anything moved: a first migration, a reconcile, or issues.json still to make.
+    if (!file || raw.issues2 !== undefined || JSON.stringify(issues) !== JSON.stringify(current) || (legacyRaw && file.legacy !== legacyStamp(legacyRaw))) {
+      if (file || issues.length || hasLegacy || raw.issues2 !== undefined) this.pendingWrite = true;
+    }
     return { issues, issueKeys: counters };
+  }
+
+  /** issues.json, or null when there is none yet. A file that cannot be read is set aside, never overwritten. */
+  private readIssuesFile(): IssuesFile | null {
+    let text: string;
+    try { text = fs.readFileSync(this.issuesFile, 'utf8'); } catch { return null; }
+    try {
+      const raw = JSON.parse(text) as Partial<IssuesFile>;
+      if (!Array.isArray(raw.issues)) throw new Error('no issues list');
+      return {
+        issues: raw.issues.filter(validIssue),
+        issueKeys: raw.issueKeys && typeof raw.issueKeys === 'object' ? sanitizeCounters(raw.issueKeys as Record<string, unknown>) : {},
+        legacy: typeof raw.legacy === 'string' ? raw.legacy : '',
+      };
+    } catch {
+      const aside = `${this.issuesFile}.unreadable-${Date.now()}`;
+      try { fs.renameSync(this.issuesFile, aside); console.error(`[super] ${ISSUES_FILE} could not be read; kept as ${path.basename(aside)}`); } catch { /* gone already */ }
+      return null;
+    }
   }
 
   /** Set by a read that migrated or reconciled issues: the next read writes the result back. */
@@ -127,21 +173,22 @@ export class SuperStore {
   private write(stored: Stored): void {
     const open = stored.asks.filter(isOpen);
     const closed = stored.asks.filter(a => !isOpen(a)).slice(0, Math.max(0, ASKS_KEPT - open.length));
-    const next: Omit<Stored, 'issues'> & { issues2: SuperIssue[]; issues: LegacyIssue[]; goals: LegacyIssue[] } = {
+    const issues = orderIssues(stored.issues);
+    // For older builds (a manual downgrade): the same issues in the old format, under "issues" and,
+    // from before ACH-D38, "goals". What they change there is read back (readIssues).
+    const legacy = issues.map(legacyIssue);
+    const next = {
       asks: [...open, ...closed].sort((a, b) => b.createdAt - a.createdAt), log: stored.log.slice(0, LOG_KEPT), wakes: stored.wakes.slice(-100),
       ...(stored.autoSpend ? { autoSpend: stored.autoSpend } : {}),
       ...(stored.briefDay ? { briefDay: stored.briefDay } : {}),
-      issues2: orderIssues(stored.issues),
-      issueKeys: stored.issueKeys,
-      // For older builds (a manual downgrade): the same issues in the old format, under "issues"
-      // and, from before ACH-D38, "goals". What they change there is read back (readIssues).
-      issues: orderIssues(stored.issues).map(legacyIssue),
-      goals: orderIssues(stored.issues).map(legacyIssue),
+      issues: legacy,
+      goals: legacy,
       routines: stored.routines,
     };
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    fs.writeFileSync(`${this.file}.tmp`, `${JSON.stringify(next)}\n`);
-    fs.renameSync(`${this.file}.tmp`, this.file);
+    // super.json first: if the second write never happens, its copy is newer than issues.json's
+    // stamp, and the next read reconciles it like an older build's edit (an added issue is kept).
+    writeJson(this.file, next);
+    writeJson(this.issuesFile, { issues, issueKeys: stored.issueKeys, legacy: legacyStamp(JSON.parse(JSON.stringify(legacy)) as unknown[]) } satisfies IssuesFile);
   }
 
   view(agentId: string | null): SuperState {
@@ -258,7 +305,13 @@ export class SuperStore {
    * its activity, by `by`. Done stamps doneAt and canceled canceledAt; reopening clears them and puts
    * it at the end of the backlog.
    */
-  updateIssue(id: string, patch: Partial<Pick<SuperIssue, 'text' | 'title' | 'projectId' | 'agentId' | 'delegationId' | 'notes'>> & { status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown }, now = Date.now(), by: IssueActor = { kind: 'super' }): SuperIssue {
+  updateIssue(id: string, patch: Partial<Pick<SuperIssue, 'text' | 'title' | 'projectId' | 'agentId' | 'delegationId' | 'notes'>> & {
+    status?: unknown; priority?: unknown; dueDate?: unknown; labels?: unknown;
+    /** The branch the work is on; '' or null clears it. Server code only (git links): neither the app nor the tools pass it. */
+    branch?: string | null;
+    /** Why, in the activity: on the status change it makes, or as its own entry when nothing else changes. Server code only. */
+    activityText?: string;
+  }, now = Date.now(), by: IssueActor = { kind: 'super' }): SuperIssue {
     const stored = this.read();
     const old = stored.issues.find(g => g.id === id);
     if (!old) throw new HttpError(404, 'No issue with that id.');
@@ -303,6 +356,15 @@ export class SuperStore {
       if (status === 'canceled') next.canceledAt = now;
       // Reopened, it joins the end of the backlog.
       if (!isOpenIssue(old) && isOpenIssue(next)) next.order = stored.issues.filter(isOpenIssue).length;
+    }
+    if (patch.branch !== undefined) {
+      const branch = String(patch.branch ?? '').trim().slice(0, 200);
+      if (branch) next.branch = branch; else delete next.branch;
+    }
+    const why = patch.activityText === undefined ? '' : String(patch.activityText).replace(/\s+/g, ' ').trim().slice(0, 1000);
+    if (why) {
+      const status = events.find(e => e.kind === 'status');
+      if (status) status.text = why; else events.push({ at: now, by, kind: 'comment', text: why });
     }
     next.activity = [...old.activity, ...events];
     this.write({ ...stored, issues: stored.issues.map(g => (g.id === id ? next : g)) });
@@ -479,7 +541,7 @@ export function issueWording(summary: string): string {
     .replace(/^Goal "/, 'Issue "');
 }
 
-/** An issue as super.json must hold it; anything else (a hand edit gone wrong) is left out. */
+/** An issue as issues.json must hold it; anything else (a hand edit gone wrong) is left out. */
 function validIssue(raw: unknown): raw is SuperIssue {
   const g = raw as Partial<SuperIssue> | null;
   return Boolean(g) && typeof g!.id === 'string' && typeof g!.key === 'string' && typeof g!.title === 'string' && typeof g!.text === 'string' && g!.text.trim() !== ''
@@ -488,7 +550,8 @@ function validIssue(raw: unknown): raw is SuperIssue {
     && typeof g!.order === 'number' && Number.isFinite(g!.order) && typeof g!.createdAt === 'number' && typeof g!.updatedAt === 'number'
     && (g!.by === 'user' || g!.by === 'super')
     && (g!.agentId === undefined || typeof g!.agentId === 'string') && (g!.delegationId === undefined || typeof g!.delegationId === 'string')
-    && (g!.notes === undefined || typeof g!.notes === 'string') && (g!.doneAt === undefined || typeof g!.doneAt === 'number');
+    && (g!.notes === undefined || typeof g!.notes === 'string') && (g!.doneAt === undefined || typeof g!.doneAt === 'number')
+    && (g!.branch === undefined || typeof g!.branch === 'string');
 }
 
 /** One line: an issue is a short statement, so newlines and runs of space are folded (the inputs are single-line too). */
@@ -743,4 +806,17 @@ export class SuperWatcher {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
+}
+
+function writeJson(file: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(`${file}.tmp`, `${JSON.stringify(value)}\n`);
+  fs.renameSync(`${file}.tmp`, file);
+}
+
+/** Key counters as stored: whole numbers only, so a hand edit cannot make a key go back. */
+function sanitizeCounters(raw: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [code, n] of Object.entries(raw)) if (typeof n === 'number' && Number.isFinite(n) && n >= 0) out[code] = Math.floor(n);
+  return out;
 }
