@@ -497,7 +497,7 @@ export function updatePrompt(events: SuperEvent[], openAsks: SuperAsk[], now: nu
     ...waited,
     ...backlog,
     '',
-    'Decide the next actions by the user\'s preferences: act on your own where you may, use ask_user for the rest. If nothing needs doing, reply in one line.',
+    'Decide the next actions by the user\'s preferences: act on your own as your Autonomy section allows (take_action), and use ask_user only for what it says to ask first. If nothing needs doing, reply in one line.',
   ].join('\n');
 }
 
@@ -563,6 +563,8 @@ export class SuperWatcher {
    * hours, or a budget used up. Updates, and agent mail about work it started on its own, wait on this.
    */
   held(): string | null {
+    // Paused by the user (ALL-D9): nothing it would start on its own, whatever the other limits say.
+    if (this.host.settings().superPaused) return 'you paused it';
     return this.wakeHeld() ?? this.dailyHeld();
   }
 

@@ -485,7 +485,7 @@ test('the daily budget counts only its own turns: what you start, and mail on yo
 
 test('the creation cap stops only agents it makes on its own: never in your turn or on your work', async () => {
   const t = await team();
-  t.manager.updateSettings({ superMaxCreatesPerDay: 0 });
+  t.manager.updateSettings({ superMaxCreatesPerDay: 0, superAutonomy: 'standard' }); // the cap holds on Ask and Standard; Full creates what the work needs
   // In your turn (team() leaves it running "Run the team."): created.
   const made = await t.call('create_agent', { name: 'Tess', role: 'tester', why: 'You asked for a tester.' }) as { created: { id: string } };
   assert.ok(t.store.agents.has(made.created.id));
@@ -497,7 +497,7 @@ test('the creation cap stops only agents it makes on its own: never in your turn
   assert.ok(t.watcher.flush());
   await assert.rejects(t.call('create_agent', { name: 'Auto', why: 'More hands.' }), e => status(e) === 429);
   // With a cap of 1, the agent made for you does not use it up.
-  t.manager.updateSettings({ superMaxCreatesPerDay: 1 });
+  t.manager.updateSettings({ superMaxCreatesPerDay: 1, superAutonomy: 'standard' });
   await t.call('create_agent', { name: 'Auto', why: 'More hands.' });
   await assert.rejects(t.call('create_agent', { name: 'Auto2', why: 'More hands.' }), e => status(e) === 429);
 });

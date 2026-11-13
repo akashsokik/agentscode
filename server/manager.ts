@@ -63,7 +63,7 @@ import { Channels } from './comms/channels.ts';
 import { Mailbox } from './comms/mailbox.ts';
 import {
   addIssueInput, agentCommandInput, proposeRoutineInput, askUserInput, completeIssueInput, updateIssueInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
-  SUPER_TOOLS, canonicalTool, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
+  SUPER_TOOLS, canonicalTool, takeActionInput, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
   rememberInput, replyInput, reportInput, sendInput, summaryInput, type CommsTool, type SuperTool, decisionAddInput, noteAddInput, refGetInput, refSearchInput, LESSON_LIMIT,
   appScreenshotInput, EYES_TOOLS, runCheckInput, ghIssuesInput, ghPrInput, ghPrsInput, ghRunInput, ghRunsInput, hasEyes, type EyesTool,
 } from './comms/tools.ts';
@@ -91,6 +91,8 @@ import { isAllProjects, normalizeProjectIds, startProjectId, worksOn } from '../
 import { createWorktree, removeWorktree } from './worktrees.ts';
 import { WorkOwners } from './workOwners.ts';
 import { listArchive, type ArchivedAgent } from './agentArchive.ts';
+import { mentionsBranch } from '../shared/work.ts';
+import { actionVerdict, ASK_FIRST_KEYS, autonomyInstructions, NEEDS_BACKUP, SUPER_AUTONOMY, type ActionKind, type AskFirst } from '../shared/autonomy.ts';
 
 const AUTONOMIES: Autonomy[] = ['readonly', 'ask', 'edits', 'full'];
 
@@ -1508,6 +1510,7 @@ export class AgentManager {
       profile: profile.entries,
       profileOmitted: profile.omitted,
       projects: isAllProjects(agent) ? this.projectFolders() : undefined,
+      ...(agent.role === 'super' ? { autonomy: autonomyInstructions(this.store.settings.superAutonomy, this.store.settings.superAskFirst, this.store.settings.superPaused) } : {}),
       alsoProjects: this.otherFolders(agent),
       readOnlyOthers: codexWritesOnlyStart(agent),
     };
@@ -1667,6 +1670,58 @@ export class AgentManager {
     return agent;
   }
 
+  /**
+   * take_action (ALL-D9): a step under the user's Autonomy setting, checked here rather than left to
+   * the prompt. Never rewrites shared history; ask-first steps need the user's yes to an ask_user
+   * question; a merge needs a reviewer's passing report on its branch; removals need a backup named;
+   * paused, it starts nothing on its own. Then the step goes to the agent (or the agent is removed)
+   * and Decisions logs it with how to undo it.
+   */
+  private takeAction(caller: Agent, args: Record<string, unknown>): unknown {
+    const parsed = takeActionInput.safeParse(args);
+    if (!parsed.success) throw new HttpError(400, 'Give a kind, a summary, a why, the agent, and (except for remove_user_agent) the task.');
+    const input = parsed.data;
+    const kind = input.kind as ActionKind;
+    const settings = this.store.settings;
+    const forUser = caller.currentTask?.source === 'user' || this.inUserWorkMail(caller.id);
+    if (!forUser && settings.superPaused) throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
+    const target = this.teammate(input.agent);
+    // Its own new agents it may remove at any level (the undo of its create_agent); the user's ask first.
+    const ownAgent = kind === 'remove_user_agent' && this.superView().log.some(a => a.tool === 'create_agent' && a.undo?.kind === 'removeAgent' && a.undo.agentId === target.id && !a.undoneAt);
+    const verdict = ownAgent ? 'act' : actionVerdict(kind, settings.superAutonomy, settings.superAskFirst);
+    if (verdict === 'never') throw new HttpError(403, 'Rewriting or force-pushing shared history (main, tags, a pushed branch) is never allowed, at any Autonomy level. Find another way, such as a revert commit.');
+    if (verdict === 'ask') {
+      const ask = input.approved_ask_id ? this.superStore.openAsks().concat(this.superView().asks).find(a => a.id === input.approved_ask_id) : undefined;
+      if (!ask || ask.answeredAt === undefined || ask.dismissed || /^\s*(no|don'?t|do not|cancel|not now|stop|reject)\b/i.test(ask.answer ?? '')) {
+        throw new HttpError(409, `Your Autonomy setting (${settings.superAutonomy}) asks the user first for ${kind.replace('_', ' ')}. Ask with ask_user, then call take_action again with approved_ask_id set to the answered question's id.`);
+      }
+    }
+    if (kind === 'merge') {
+      if (!input.branch) throw new HttpError(400, 'Name the branch to merge.');
+      const reviewers = new Set([...this.store.agents.values()].filter(a => a.role === 'reviewer').map(a => a.id));
+      const passed = this.store.messages.some(m => m.report && reviewers.has(m.fromAgentId) && (m.report.outcome === 'passed' || m.report.outcome === 'done') && mentionsBranch(`${m.text}\n${m.report.summary}`, input.branch!));
+      if (!passed) throw new HttpError(409, `No reviewer has passed ${input.branch} yet. Send it to a reviewer first; merge after a passing report.`);
+    }
+    if (NEEDS_BACKUP.includes(kind) && !input.backup) throw new HttpError(400, 'Say where the backup is (a backup/ ref or a copy) before anything is removed.');
+    let receipt: unknown;
+    if (kind === 'remove_user_agent') {
+      if (this.runners.get(target.id)?.busy) throw new HttpError(409, `${target.name} is working. Stop it first.`);
+      void this.remove(target.id, 'keep');
+      receipt = { removed: { id: target.id, name: target.name } };
+    } else {
+      if (!input.task) throw new HttpError(400, 'Give the task: what the agent should do, step by step.');
+      const criteria = `Do exactly this ${kind.replace('_', ' ')} step and report_result with evidence (commands and their output).${input.backup ? ` Backup: ${input.backup}.` : ''} Never rewrite or force-push shared history.`;
+      receipt = this.mailbox.delegate(caller.id, target.id, { kind: 'implementation', task: input.task, acceptanceCriteria: criteria, context: input.why });
+    }
+    this.recordSuper({
+      tool: 'take_action', why: input.why, summary: clip(input.summary, 300),
+      ...(forUser ? { forUser: true } : {}),
+      ...(verdict === 'act' ? { autonomy: settings.superAutonomy } : {}),
+      ...(input.undo && kind !== 'remove_user_agent' ? { undo: { kind: 'reverse' as const, how: input.undo, agentId: target.id } } : {}),
+    });
+    return { done: kind, by: target.name, verdict, receipt };
+  }
+
   /** An agent the SuperAgent names by id or name; never itself, for commands that act on an agent. */
   private teammate(ref: unknown): Agent {
     const key = String(ref ?? '').trim();
@@ -1764,6 +1819,7 @@ export class AgentManager {
       this.recordSuper({ tool, why: input.why, undo: { kind: 'issue', issueId: issue.id, before }, summary });
       return { updated: issue };
     }
+    if (tool === 'take_action') return this.takeAction(caller, args);
     if (tool === 'create_agent') {
       const parsed = createAgentInput.safeParse(args);
       if (!parsed.success) return fail('Give a name, engine, role, an optional project, model, worktree and first task, and a why.');
@@ -1771,8 +1827,10 @@ export class AgentManager {
       // The cap stops only agents it creates on its own: in a turn you gave it, or on mail about work
       // you asked for, it creates what the work needs.
       const forUser = caller.currentTask?.source === 'user' || this.inUserWorkMail(caller.id);
+      if (!forUser && this.store.settings.superPaused) throw new HttpError(409, 'The user paused you. Start nothing on your own until they resume.');
       const cap = this.store.settings.superMaxCreatesPerDay;
-      if (!forUser && this.superStore.createdSince(Date.now() - 86_400_000) >= cap) {
+      // On Full it creates what the work needs; on Ask and Standard the daily cap holds.
+      if (!forUser && this.store.settings.superAutonomy !== 'full' && this.superStore.createdSince(Date.now() - 86_400_000) >= cap) {
         throw new HttpError(429, `You created ${cap} agents in the last day, the most the user allows (Settings, SuperAgent). Ask the user before creating more.`);
       }
       if (input.project && input.projects) return fail('Give project or projects, not both.');
@@ -1781,7 +1839,7 @@ export class AgentManager {
       const agent = await this.create({ name: input.name, engine: input.engine, projectIds, role: input.role, model: input.model, worktree: input.worktree, task: input.task });
       const names = (projectIds ?? []).map(pid => this.store.projects.get(pid)?.name).filter(Boolean);
       this.recordSuper({
-        tool, why: input.why, undo: { kind: 'removeAgent', agentId: agent.id }, ...(forUser ? { forUser: true } : {}),
+        tool, why: input.why, undo: { kind: 'removeAgent', agentId: agent.id }, ...(forUser ? { forUser: true } : {}), ...(!forUser && this.store.settings.superAutonomy === 'full' ? { autonomy: 'full' as const } : {}),
         summary: `Created ${agent.name} (${rolePreset(agent.role).name}, ${ENGINE_LABELS[agent.engine]}) ${names.length ? `on ${names.join(' and ')}` : 'across all projects'}${input.task ? `, first task: ${clip(input.task.replace(/\s+/g, ' '), 120)}` : ''}`,
       });
       return { created: { id: agent.id, name: agent.name, role: agent.role, autonomy: agent.autonomy, projectIds: agent.projectIds } };
@@ -1961,6 +2019,12 @@ export class AgentManager {
       this.updateChannel(undo.channelId, { ...undo.before, memberIds: undo.before.memberIds.filter(m => this.store.agents.has(m)) });
     } else if (undo.kind === 'issue') {
       this.superStore.restoreIssue(undo.issueId, undo.before, undo.removed === true);
+    } else if (undo.kind === 'reverse') {
+      // The reverse step goes back to the SuperAgent as your request, so it runs whatever the caps or a pause.
+      const superId = this.superId();
+      if (!superId) throw new HttpError(409, 'There is no SuperAgent to undo it.');
+      const who = this.store.agents.get(undo.agentId)?.name ?? 'an agent';
+      this.startUserTask(superId, `Undo: ${action.summary}`, `The user pressed Undo on "${action.summary}" in Decisions. Undo it now: have ${who} (or another free agent) do this with take_action or delegate_task, and report back: ${undo.how}`, { summary: clip(`Undo: ${action.summary}`, 280), source: 'user' });
     } else if (undo.kind === 'routine') {
       // Withdraw a proposal; one the user confirmed since is theirs now.
       const routine = this.superStore.routines().find(r => r.id === undo.routineId);
@@ -2832,6 +2896,14 @@ export class AgentManager {
     for (const key of ['superQuietFrom', 'superQuietTo'] as const) {
       if (input[key] !== undefined && !validQuietTime(input[key])) throw new HttpError(400, 'Quiet hours are times like 22:00.');
     }
+    if (input.superAutonomy !== undefined && !SUPER_AUTONOMY.includes(input.superAutonomy)) throw new HttpError(400, 'Autonomy is ask, standard or full.');
+    if (input.superPaused !== undefined && typeof input.superPaused !== 'boolean') throw new HttpError(400, 'Toggles must be true or false.');
+    if (input.superAskFirst !== undefined) {
+      const given = input.superAskFirst as unknown as Record<string, unknown>;
+      if (!given || typeof given !== 'object' || Object.entries(given).some(([k, v]) => !ASK_FIRST_KEYS.includes(k as keyof AskFirst) || typeof v !== 'boolean')) {
+        throw new HttpError(400, 'Ask-first switches are deleteData, outsideAccounts, removeUserAgents and forcePush, each true or false.');
+      }
+    }
     const settings = this.store.settings;
     if (input.messageLimit !== undefined) settings.messageLimit = input.messageLimit;
     if (input.awareness !== undefined) settings.awareness = input.awareness;
@@ -2843,6 +2915,9 @@ export class AgentManager {
     if (input.superDailyBudgetUsd !== undefined) settings.superDailyBudgetUsd = input.superDailyBudgetUsd;
     if (input.superMaxCreatesPerDay !== undefined) settings.superMaxCreatesPerDay = input.superMaxCreatesPerDay;
     for (const key of ['superQuietFrom', 'superQuietTo'] as const) if (input[key] !== undefined) settings[key] = input[key]!.trim();
+    if (input.superAutonomy !== undefined) settings.superAutonomy = input.superAutonomy;
+    if (input.superAskFirst !== undefined) settings.superAskFirst = { ...settings.superAskFirst, ...input.superAskFirst };
+    if (input.superPaused !== undefined) settings.superPaused = input.superPaused;
     this.store.save();
     this.hub.broadcast({ type: 'settings', settings });
     // Mail held for the SuperAgent may go now (wake-ups back on, a bigger budget).

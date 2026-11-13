@@ -1,3 +1,4 @@
+import { ALL_ASK_FIRST, type AskFirst, type SuperAutonomy } from './autonomy.ts';
 import type { AvatarLook } from './avatar.ts';
 import type { MentionHint, MentionRef } from './mentions.ts';
 // Types shared by the server (Node, type-stripped) and the web client (Vite).
@@ -236,6 +237,8 @@ export type SuperUndo =
   /** An issue as it was before (null: the SuperAgent added it, so undo removes it). */
   /** removed: the user removed it in the Issues tab; undo puts it back as it was. */
   | { kind: 'issue'; issueId: string; before: SuperIssue | null; removed?: true }
+  /** A step an agent did (take_action): undone by handing the reverse step back, as the user's request. */
+  | { kind: 'reverse'; how: string; agentId: string }
   /** A routine the SuperAgent proposed: undo withdraws it. */
   | { kind: 'routine'; routineId: string };
 
@@ -253,6 +256,8 @@ export interface SuperAction {
   undoneAt?: number;
   /** Done for work the user asked for (a turn they gave it, or mail on such work), not on its own. */
   forUser?: boolean;
+  /** The Autonomy level it acted under, when it acted without asking (Decisions marks Full ones). */
+  autonomy?: SuperAutonomy;
 }
 
 /** queued: waiting its turn; in_progress: an agent is on it; blocked: waiting for the user; done. */
@@ -734,8 +739,14 @@ export interface Settings {
   superNotify: boolean;
   /** Dollars the SuperAgent may spend a day before wake-ups wait for tomorrow; 0 means no cap. Your own messages always go. */
   superDailyBudgetUsd: number;
-  /** Agents the SuperAgent may create in a day. */
+  /** Agents the SuperAgent may create in a day (Ask and Standard; on Full it creates what the work needs). */
   superMaxCreatesPerDay: number;
+  /** How much it does without asking (ALL-D9). */
+  superAutonomy: SuperAutonomy;
+  /** What it still asks about first, at every level. */
+  superAskFirst: AskFirst;
+  /** Paused: it starts nothing on its own until the user resumes. */
+  superPaused: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -751,6 +762,9 @@ export const DEFAULT_SETTINGS: Settings = {
   superNotify: true,
   superDailyBudgetUsd: 10,
   superMaxCreatesPerDay: 25,
+  superAutonomy: 'full',
+  superAskFirst: { ...ALL_ASK_FIRST },
+  superPaused: false,
 };
 
 export interface ModelOption {

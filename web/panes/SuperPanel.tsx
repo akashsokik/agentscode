@@ -4,6 +4,7 @@
  * can undo), Issues and Routines tabs, drawn with the shared panel list (web/ui/PanelList.tsx, ACH-D37).
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import type { SuperAutonomy } from '../../shared/autonomy.ts';
 import type { IssueStatus, RoutineSchedule, SuperAction, SuperAsk, SuperIssue, SuperRoutine } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { openAsks } from '../super.ts';
@@ -16,7 +17,7 @@ import { Kbd } from '../ui/Kbd.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 import { DetailButton, focusAdd, focusRow, PanelEmpty, PanelList, PanelRow, PanelSection, PanelToolbar, RowAction, RowIcon } from '../ui/PanelList.tsx';
-import { Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleAlert, CircleDashed, CircleDot, Clock, Copy, CornerDownRight, ListBullet, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
+import { Zap, Bot, Chatting, Check, CheckCircle, ChevronDown, ChevronUp, CircleAlert, CircleDashed, CircleDot, Clock, Copy, CornerDownRight, ListBullet, MessageMultiple, MessageSquare, Pause, Pencil, Play, Search as SearchIcon, Trash2, Undo2, X } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 
 /** Open questions above the composer; empty, it takes no room. */
@@ -96,7 +97,7 @@ export function useSuperTabs(selected: string): { counts: Record<SuperTab, numbe
 
 const fullTime = (ts: number) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-const KIND_ICON: Record<DecisionKind, typeof ListBullet> = { delegate: CornerDownRight, message: MessageSquare, issue: CircleDot, agent: Bot, channel: MessageMultiple, other: ListBullet };
+const KIND_ICON: Record<DecisionKind, typeof ListBullet> = { action: Zap, delegate: CornerDownRight, message: MessageSquare, issue: CircleDot, agent: Bot, channel: MessageMultiple, other: ListBullet };
 
 /**
  * The Decisions tab (ACH-D37): what the SuperAgent did on its own, one line each, grouped by day,
@@ -115,6 +116,7 @@ export function DecisionsView() {
   const groups = filter === 'actions' ? actions : answers;
   return (
     <div className="flex min-h-0 flex-1 flex-col font-sans">
+      <AutonomyBanner />
       <PanelToolbar
         query={query}
         onQuery={setQuery}
@@ -142,6 +144,28 @@ export function DecisionsView() {
   );
 }
 
+const BANNER: Record<SuperAutonomy, string> = {
+  full: 'Full autonomy: it merges, restarts and pushes on its own',
+  standard: 'Standard: it merges and restarts on its own, and asks before pushing',
+  ask: 'Ask: it asks you before every merge, restart and push',
+};
+
+/** Where the SuperAgent stands (ALL-D9), with Pause and Resume always at hand. */
+function AutonomyBanner() {
+  const settings = useApp(s => s.snapshot?.settings);
+  const [busy, setBusy] = useState(false);
+  if (!settings) return null;
+  const paused = settings.superPaused;
+  const toggle = async () => { if (busy) return; setBusy(true); await attempt(() => api.updateSettings({ superPaused: !paused })); setBusy(false); };
+  return (
+    <div data-autonomy-banner className="mx-2.5 mt-2 flex items-center gap-2 rounded-lg border border-content/10 px-2.5 py-1.5 text-[12px] text-content/75">
+      <span aria-hidden className={`size-[7px] shrink-0 rounded-full ${paused ? 'bg-warning' : 'bg-success'}`} />
+      <span className="min-w-0 flex-1 truncate" title={paused ? 'Paused: it starts nothing on its own until you resume' : BANNER[settings.superAutonomy]}>{paused ? 'Paused: it starts nothing on its own' : BANNER[settings.superAutonomy]}</span>
+      <DetailButton busy={busy} onClick={() => void toggle()} label={paused ? 'Resume the SuperAgent' : 'Pause the SuperAgent'}>{paused ? 'Resume' : 'Pause'}</DetailButton>
+    </div>
+  );
+}
+
 function DecisionItem({ action, now, expanded, onToggle }: { action: SuperAction; now: number; expanded: boolean; onToggle: () => void }) {
   const [busy, setBusy] = useState(false);
   const undone = action.undoneAt !== undefined;
@@ -157,7 +181,7 @@ function DecisionItem({ action, now, expanded, onToggle }: { action: SuperAction
       title={summary}
       label={`${summary}${undone ? ', undone' : ''}, ${fullTime(action.at)}`}
       dim={undone}
-      meta={<time dateTime={new Date(action.at).toISOString()}>{undone ? 'Undone · ' : ''}{shortWhen(action.at, now)}</time>}
+      meta={<>{action.autonomy === 'full' ? <span title="Done on its own under Full autonomy" className="inline-flex h-4 items-center rounded-[4px] border border-content/12 px-1 text-[9.5px] font-semibold tracking-wide text-content/50">FULL</span> : null}<time dateTime={new Date(action.at).toISOString()}>{undone ? 'Undone · ' : ''}{shortWhen(action.at, now)}</time></>}
       actions={undoable ? <RowAction label={`Undo: ${summary}`} busy={busy} onClick={() => void undo()}>{busy ? 'Undoing…' : 'Undo'}</RowAction> : undefined}
       expanded={expanded}
       onOpen={onToggle}
@@ -173,6 +197,7 @@ function DecisionItem({ action, now, expanded, onToggle }: { action: SuperAction
     >
       <p className="whitespace-pre-wrap break-words">{action.summary}</p>
       {action.why ? <p className="mt-1 text-content/50">Why: {action.why}</p> : null}
+      {action.undo?.kind === 'reverse' ? <p className="mt-1 text-content/50">Undo hands this back to an agent: {action.undo.how}</p> : null}
       <p className="mt-1 text-[11px] text-content/40">{fullTime(action.at)}{undone ? ` · undone ${fullTime(action.undoneAt!)}` : ''}</p>
       {undoable ? <div className="mt-2 flex gap-1.5"><DetailButton busy={busy} onClick={() => void undo()}>{busy ? 'Undoing…' : 'Undo'}</DetailButton></div> : null}
     </PanelRow>
