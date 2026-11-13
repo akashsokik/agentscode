@@ -8,6 +8,7 @@ import { WhoAvatar } from '../notes/parts.tsx';
 import { PaneFrame, type PaneChrome } from '../panes/PaneFrame.tsx';
 import { ChipButton, cx, Empty, HeaderButton, Loading } from '../ui/common.tsx';
 import { ACTION_GHOST, ACTION_OUTLINE, InboxBar, InboxCard, InboxDetail, InboxFilterTabs, InboxGroup, InboxHero, InboxLayout, InboxList, InboxSearch, InboxSection, InboxTabs, TimelineStop } from '../ui/Inbox.tsx';
+import { IssueKeyChip } from '../ui/IssueKeyChip.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
 import { StatusMark, StatusText, statusWord, type StatusState } from '../ui/StatusMark.tsx';
 import { useNow } from '../ui/useNow.ts';
@@ -186,7 +187,8 @@ function PrCard({ pr, now, active }: { pr: PullRequest; now: number; active: boo
       </>}
       meta={<>
         <StatusText state={SUMMARY_STATE[checks.tone]} quiet={checks.tone === 'muted'}>{checks.text}</StatusText>
-        {pr.issueKey ? <><span aria-hidden>·</span><span className="shrink-0 font-mono text-[var(--link-color)]">{pr.issueKey}</span></> : null}
+        {/* The card is a button: the chip's inert form, which still shows its card and opens the issue (ACH-D57, ACH-D58). */}
+        {pr.issueKey ? <><span aria-hidden>·</span><span className="shrink-0"><IssueKeyChip issueKey={pr.issueKey} inert /></span></> : null}
         <span aria-hidden>·</span>
         <span className="flex min-w-0 items-center gap-1"><WhoAvatar name={pr.author} agentId={pr.agentId} className="size-3.5" /><span className="truncate">{pr.author}</span></span>
       </>}
@@ -288,7 +290,8 @@ function PrInboxDetail({ pr, now, tab, onTab: setTab, fresh, onKeyDown }: { pr: 
         {pr.issueKey || pr.agentId ? (
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 font-sans text-[11px]">
             {pr.issueKey ? (
-              <span title={`Found by the key in the ${pr.branch.includes(pr.issueKey) ? 'branch name' : 'title or description'}`} className="inline-flex items-center gap-1.5 rounded-md bg-content/5 px-2 py-1 font-mono text-[var(--link-color)]">{pr.issueKey}</span>
+              // The shared issue chip: its hover card, and a click shows the issue on the Issues page (ACH-40).
+              <IssueKeyChip issueKey={pr.issueKey} />
             ) : null}
             {pr.agentId ? (
               <button type="button" onClick={() => open({ kind: 'agent', agentId: pr.agentId! })} className="inline-flex items-center gap-1.5 rounded-md bg-content/5 px-2 py-1 text-content/70 transition-colors duration-150 hover:bg-content/10 hover:text-content">

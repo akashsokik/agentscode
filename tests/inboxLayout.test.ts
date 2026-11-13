@@ -77,3 +77,12 @@ test('InboxHero can draw an editor in its heading, for the issue title (ACH-23)'
 test('a picked PR that is gone shows the list in a narrow pane, not another PR (ACH-23)', () => {
   assert.match(read('web/prs/PullRequestsPane.tsx'), /detailOpen=\{Boolean\(prId\) && selected\?\.id === prId\}/);
 });
+
+test('every issue key on the PR page is the shared IssueKeyChip (ACH-40, ACH-D57, ACH-D58)', () => {
+  const prs = read('web/prs/PullRequestsPane.tsx');
+  assert.match(prs, /import \{ IssueKeyChip \} from '\.\.\/ui\/IssueKeyChip\.tsx'/);
+  assert.match(prs, /<IssueKeyChip issueKey=\{pr\.issueKey\} inert \/>/, 'on the card, which is itself a button');
+  assert.match(prs, /<IssueKeyChip issueKey=\{pr\.issueKey\} \/>/, 'in the detail');
+  assert.doesNotMatch(prs, /text-\[var\(--link-color\)\]">\{pr\.issueKey\}/, 'no coloured span left');
+  assert.match(read('web/ui/IssueKeyChip.tsx'), /if \(!issue\) return <>\{issueKey\}<\/>/, 'an unknown key stays plain text');
+});
