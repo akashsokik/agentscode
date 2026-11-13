@@ -11,8 +11,9 @@ import {
 } from './issuesView.ts';
 
 /**
- * A property's values: a search field, then each value with its count, the chosen ones in the
- * selected fill (ACH-D46). Picking toggles a value without closing, so several can be chosen.
+ * A property's values: a search field, then each value with its count, the chosen ones checked
+ * (a multi-select list marks its choices with a check, MenuRow's `checked`; the fill stays for the
+ * keyboard row, ACH-D49). Picking toggles a value without closing, so several can be chosen.
  */
 function FilterValues({ property, issues, filters, onChange, names, today }: {
   property: IssueProperty;
@@ -49,7 +50,7 @@ function FilterValues({ property, issues, filters, onChange, names, today }: {
             key={o.value}
             role="option"
             icon={iconFor(o.value)}
-            current={chosen.includes(o.value)}
+            checked={chosen.includes(o.value)}
             title={<span className="flex items-center justify-between gap-2"><span className="truncate">{o.label}</span><span className="text-[11px] font-normal tabular-nums text-content/40">{o.count}</span></span>}
             onSelect={() => onChange(toggleFilter(filters, property, o.value))}
           />
