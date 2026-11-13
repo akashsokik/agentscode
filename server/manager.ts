@@ -1301,7 +1301,14 @@ export class AgentManager {
       const hint = this.decisionHintFor(input.to_agent_id, `${input.task}\n${input.acceptance_criteria}\n${input.context ?? ''}`, project);
       // The issue the work is for (ACH-D41): its key and the branch and commit rule go into the handoff.
       const issue = input.issue ? this.superStore.issueByRef(input.issue) : undefined;
-      if (issue && isSuper) this.issueHandOutGate(agent, undefined, input.to_agent_id);
+      // The backlog is the SuperAgent's: a lead may hand out only issues of its own projects (or none).
+      if (issue && !isSuper && issue.projectId && !worksOn(agent, issue.projectId)) {
+        throw new HttpError(403, `${issue.key} is about a project you do not work on.`);
+      }
+      // Only implementation makes the recipient the issue's assignee; review, testing and
+      // validation are logged on it without ending the implementer's handoff.
+      const assigns = input.kind === 'implementation';
+      if (issue && isSuper && assigns) this.issueHandOutGate(agent, undefined, input.to_agent_id);
       const receipt = this.mailbox.delegate(id, input.to_agent_id, {
         kind: input.kind, task: input.task, acceptanceCriteria: input.acceptance_criteria, context: input.context, ...(project ? { project } : {}),
         ...(issue ? { issue: { id: issue.id, key: issue.key, title: issue.title } } : {}),
@@ -1310,7 +1317,7 @@ export class AgentManager {
       if (issue) {
         const to = this.store.agents.get(input.to_agent_id);
         this.superStore.updateIssue(issue.id, {
-          agentId: input.to_agent_id, forUser: false, delegationId: receipt.id,
+          ...(assigns ? { agentId: input.to_agent_id, forUser: false, delegationId: receipt.id } : {}),
           activityText: `Handed to ${to?.name ?? 'an agent'} as ${input.kind}.`, activityRef: `delegation:${receipt.id}`,
         }, Date.now(), isSuper ? { kind: 'super' } : { kind: 'agent', id });
         this.publishSuper();
@@ -2177,9 +2184,9 @@ export class AgentManager {
     return sent;
   }
 
-  /** Who an agent tool assigns an issue to: an agent (id or name), "user", or nobody (''). */
+  /** Who an agent tool assigns an issue to: an agent (id or name), "user", or nobody ('' or "none", as list_issues names it). */
   private issueToolAssignee(raw: string): { agentId?: string; forUser?: boolean } {
-    if (raw === '') return { agentId: '', forUser: false };
+    if (raw === '' || raw.toLowerCase() === 'none') return { agentId: '', forUser: false };
     if (raw.toLowerCase() === 'user') return { forUser: true };
     return { agentId: this.teammate(raw).id, forUser: false };
   }

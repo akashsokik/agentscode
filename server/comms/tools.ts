@@ -198,7 +198,7 @@ const issuePriority = z.enum(['urgent', 'high', 'normal', 'low', 'none']);
 /** A calendar day, "2026-11-20"; '' clears it. */
 const issueDue = z.union([z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal('')]);
 const issueLabels = z.array(z.string().trim().min(1).max(40)).max(20);
-/** An agent (id or name), "user" for the user, or '' for nobody. */
+/** An agent (id or name), "user" for the user, or '' (or "none") for nobody. */
 const issueAssignee = z.string().trim().max(100);
 const issueRelation = z.object({ type: z.enum(['blocks', 'related', 'duplicate_of']), issue: issueRef });
 export const listIssuesInput = z.object({
@@ -410,7 +410,7 @@ export function createCommsMcpServer(call: CommsHandler, options: { executive?: 
     inputSchema: refSearchInput.shape, annotations: { readOnlyHint: true },
   }, args => invoke('ref_search', args));
   server.registerTool('delegate_task', {
-    description: 'Lead only: assign implementation, testing, validation or review to a teammate with acceptance criteria and file or commit context. Name the project (code, name or ALL) so lessons reported back are filed there, and the issue (id or key, ACH-25) when the work is one: its key goes into the handoff with the branch and commit rule, the issue records the delegation, and the report is logged on it. Returns immediately; the result report arrives later. Prefer a Tester for validation.',
+    description: 'Lead only: assign implementation, testing, validation or review to a teammate with acceptance criteria and file or commit context. Name the project (code, name or ALL) so lessons reported back are filed there, and the issue (id or key, ACH-25) when the work is one: its key goes into the handoff with the branch and commit rule, implementation makes the recipient its assignee and records the delegation, and the report is logged on it. A lead may hand out only issues of its own projects. Returns immediately; the result report arrives later. Prefer a Tester for validation.',
     inputSchema: delegationInput.shape,
   }, args => invoke('delegate_task', args));
   server.registerTool('list_delegations', {

@@ -95,6 +95,8 @@ test('add, update and list through the engine: every field, keys for refs, filte
   assert.equal(sneaky.updated.branch, undefined);
   assert.ok(!sneaky.updated.activity.some(e => e.text === 'Merged'));
   await t.mcp('update_issue', { issue_id: 'WEB-2', parent: '', why: 'top level' });
+  const cleared = await t.mcp('update_issue', { issue_id: 'WEB-1', assignee: 'none', why: 'nobody' }) as { updated: SuperIssue };
+  assert.equal(cleared.updated.agentId, undefined, '"none" clears, as list_issues names it');
 
   const list = async (args: Record<string, unknown>) => ((await t.mcp('list_issues', args)) as { issues: (SuperIssue & { activityCount: number })[] }).issues.map(i => i.key);
   assert.deepEqual(await list({}), ['WEB-1', 'WEB-2']);
@@ -139,7 +141,14 @@ test('delegate_task with an issue: the key and branch rule in the handoff, the d
   await settle();
   const leaToken = t.runners.get(t.lea.id)!.at(-1)!.ctx.commsToken!;
   await t.manager.commsTool(leaToken, 'delegate_task', { to_agent_id: t.ada.id, kind: 'review', task: 'Review it', acceptance_criteria: 'Read it', issue: added.key });
-  assert.deepEqual(t.manager.superView().issues.find(i => i.id === added.id)!.activity.at(-1)!.by, { kind: 'agent', id: t.lea.id });
+  const reviewed = t.manager.superView().issues.find(i => i.id === added.id)!;
+  assert.deepEqual(reviewed.activity.at(-1)!.by, { kind: 'agent', id: t.lea.id });
+  assert.match(reviewed.activity.at(-1)!.text!, /Handed to Ada as review/);
+  assert.deepEqual([reviewed.agentId, reviewed.delegationId], [t.ada.id, receipt.id], 'a review leaves the implementer\'s handoff alone');
+  // A lead hands out only issues of its own projects.
+  const api = t.manager.addProject({ path: projectDir(t.dir, 'api') });
+  const { added: other } = await t.mcp('add_issue', { text: 'API work', project: api.id, why: 'x' }) as { added: SuperIssue };
+  await assert.rejects(t.manager.commsTool(leaToken, 'delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'X', acceptance_criteria: 'Y', issue: other.key }), e => status(e) === 403);
   await assert.rejects(t.mcp('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'X', acceptance_criteria: 'Y', issue: 'WEB-9' }), /No issue WEB-9/);
 });
 
@@ -147,5 +156,4 @@ test('a plain delegate_task (no issue) is unchanged', async () => {
   const t = await team();
   const receipt = await t.mcp('delegate_task', { to_agent_id: t.ada.id, kind: 'implementation', task: 'Build it', acceptance_criteria: 'Tests pass' }) as { text: string };
   assert.doesNotMatch(receipt.text, /Issue:|feat\//);
-  void status;
 });
