@@ -3,6 +3,7 @@ import { ENGINE_LABELS, ENGINES, type Settings } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { attempt, useApp } from '../store.ts';
 import { setTheme, useTheme, type ThemePreference } from '../theme.ts';
+import { setAvatarStyle, useAvatarStyle, type AvatarStyle } from '../avatarStyle.ts';
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { INPUT } from '../ui/common.tsx';
 import { RefreshCw } from '../mono/icons.tsx';
@@ -28,6 +29,7 @@ export function SettingsDialog({ onClose, group }: { onClose: () => void; group?
   const engines = useApp(s => s.snapshot?.engines);
   const models = useApp(s => s.snapshot?.models);
   const theme = useTheme();
+  const avatars = useAvatarStyle();
   const [limit, setLimit] = useState(String(settings?.messageLimit ?? 12));
   const [wakes, setWakes] = useState(String(settings?.superMaxWakesPerHour ?? 6));
   const [budget, setBudget] = useState(String(settings?.superDailyBudgetUsd ?? 10));
@@ -40,6 +42,9 @@ export function SettingsDialog({ onClose, group }: { onClose: () => void; group?
         <Group title="Appearance">
           <Row label="Theme">
             <Segmented<ThemePreference> label="Theme" value={theme} onChange={setTheme} options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'system', label: 'System' }]} />
+          </Row>
+          <Row label="Avatars" description="Ink draws every agent the way the SuperAgent is drawn, in the theme's text colour.">
+            <Segmented<AvatarStyle> label="Avatars" value={avatars} onChange={setAvatarStyle} options={[{ value: 'colour', label: 'Colour' }, { value: 'ink', label: 'Ink' }]} />
           </Row>
         </Group>
 

@@ -31,13 +31,13 @@ export function AvatarPicker({ look, others, onChange }: { look: AvatarLook; oth
   return (
     <div className="flex flex-col gap-2 px-4 pb-4 pt-1">
       <div className="flex items-center gap-3">
-        <AvatarGlyph look={look} seed="preview" className="size-10" />
+        <AvatarGlyph colour look={look} seed="preview" className="size-10" />
         <SecondaryButton onClick={() => onChange(freshLook(others))}>Shuffle</SecondaryButton>
       </div>
       <div role="radiogroup" aria-label="Shape" className="flex flex-wrap gap-0.5">
         {AGENT_SHAPES.map(shape => (
           <Choice key={shape} label={isSuperPair({ shape, color: look.color }) ? `${SHAPE_NAMES[shape]} (the SuperAgent's in this colour)` : SHAPE_NAMES[shape]} disabled={isSuperPair({ shape, color: look.color })} selected={look.shape === shape} onPick={() => onChange({ ...look, shape })}>
-            <AvatarGlyph look={{ ...look, shape }} animate={false} className="size-5" />
+            <AvatarGlyph colour look={{ ...look, shape }} animate={false} className="size-5" />
           </Choice>
         ))}
       </div>
@@ -51,7 +51,7 @@ export function AvatarPicker({ look, others, onChange }: { look: AvatarLook; oth
       <div role="radiogroup" aria-label="Eyes" className="flex flex-wrap gap-0.5">
         {AVATAR_EYES.map(eyes => (
           <Choice key={eyes} label={EYE_NAMES[eyes]} selected={look.eyes === eyes} onPick={() => onChange({ ...look, eyes })}>
-            <AvatarGlyph look={{ ...look, eyes }} animate={false} className="size-5" />
+            <AvatarGlyph colour look={{ ...look, eyes }} animate={false} className="size-5" />
           </Choice>
         ))}
       </div>

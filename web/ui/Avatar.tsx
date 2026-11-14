@@ -6,6 +6,8 @@
  * Decorative: the agent's name always sits beside it.
  */
 import type { Agent } from '../../shared/types.ts';
+import { useAvatarStyle } from '../avatarStyle.ts';
+import { inkParts } from '../avatarStylePreference.ts';
 import { AVATAR_FILL, agentLook, avatarDelay, avatarEyeTransform, avatarMood, avatarParts, isSmallAvatar, type AvatarLook, type AvatarMood } from '../../shared/avatar.ts';
 
 export { AVATAR_FILL };
@@ -22,15 +24,20 @@ export function classSize(className: string): number {
   return px ? Number(px[1]) : 16;
 }
 
-export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-4', animate = true }: {
+export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-4', animate = true, colour = false }: {
   look: AvatarLook;
   mood?: AvatarMood;
   /** Spreads blinks out between avatars (the agent id). */
   seed?: string;
   className?: string;
   animate?: boolean;
+  /** Always in colour, whatever the Avatars setting: where a colour is being chosen (the avatar picker). */
+  colour?: boolean;
 }) {
-  const parts = avatarParts(look, mood, isSmallAvatar(classSize(className)));
+  // Appearance > Avatars (ACH-46): Ink draws every agent as the SuperAgent is drawn; it is ink either way.
+  const ink = useAvatarStyle() === 'ink' && !colour;
+  const drawn = avatarParts(look, mood, isSmallAvatar(classSize(className)));
+  const parts = ink ? inkParts(drawn) : drawn;
   return (
     <svg
       viewBox="0 0 32 32"
