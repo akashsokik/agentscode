@@ -1008,6 +1008,8 @@ export class AgentManager {
     this.mailbox.stop(id);
     this.cancelApprovals(id, 'The user pressed stop.');
     this.tokens.delete(id);
+    // Its side answers lose their credentials at once too, not only when they settle.
+    for (const [token, agentId] of [...this.sideTokens]) if (agentId === id) this.sideTokens.delete(token);
     await this.runners.get(id)?.interrupt();
     agent.queued = this.mailbox.pending(id);
     this.emitAgent(agent);
