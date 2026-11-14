@@ -103,7 +103,7 @@ export function NewAgentDialog({ projectId, onClose, onAddProject }: { projectId
         <Group title="Agent">
           <Row label="Name" description="Teammates address each other by name.">
             <span className="flex items-center gap-2">
-              <AvatarGlyph look={look} seed="new-agent" className="size-7" />
+              <AvatarGlyph colour look={look} seed="new-agent" className="size-7" />
               <input autoFocus value={name} maxLength={24} onChange={e => setName(e.target.value)} onKeyDown={onSubmitKey} className={`${INPUT} w-44`} />
             </span>
           </Row>
