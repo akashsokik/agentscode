@@ -349,7 +349,7 @@ test('SuperAgent main reads are pre-approved only in its scoped roots; writes st
     for (const [tool, input] of [
       ['Read', { file_path: `${root}/nested/report.md` }],
       ['Grep', { path: `${root}/nested`, pattern: 'status' }],
-      ['Glob', { path: root, pattern: '**/*.md' }],
+      ['Glob', { path: `${root}/nested`, pattern: '**/*.md' }],
     ] as const) assert.equal((await decide(tool, input)).behavior, 'allow', `${tool}: ${root}`);
   }
   for (const id of ['aff3f9c7-f14e-4cae-a905-c62beb3ea8c5', 'another-agent']) {
@@ -364,6 +364,15 @@ test('SuperAgent main reads are pre-approved only in its scoped roots; writes st
   }
   assert.equal(approvals.length, 0);
   for (const [tool, input] of [
+    ['Read', { file_path: `${DATA_DIR}/browser-bridge.token` }],
+    ['Grep', { path: DATA_DIR, pattern: '.', output_mode: 'content' }],
+    ['Glob', { path: DATA_DIR, pattern: '**/*' }],
+    ['Grep', { path: path.dirname(DATA_DIR), pattern: '.' }],
+  ] as const) assert.equal((await decide(tool, input)).behavior, 'deny', `${tool}: bridge credential`);
+  assert.equal((await decide('Read', { file_path: `${DATA_DIR}/agents/other/report.md` },
+    { blockedPath: `${DATA_DIR}/browser-bridge.token` })).behavior, 'deny');
+  assert.equal(approvals.length, 0, 'bridge credential and containing searches are refused without prompting');
+  for (const [tool, input] of [
     ['Read', { file_path: '/Users/example/Documents/private.txt' }],
     ['Grep', { path: '/etc', pattern: '.' }],
     ['Glob', { path: '/projects/one-extra', pattern: '*' }],
@@ -373,7 +382,7 @@ test('SuperAgent main reads are pre-approved only in its scoped roots; writes st
   assert.equal((await decide('Read', { file_path: `${DATA_DIR}/user.md` },
     { matchedAskRule: { source: 'userSettings', toolName: 'Read', ruleContent: '**' } })).behavior, 'deny');
   assert.equal(approvals.length, 5, 'explicit user ask rules still apply');
-  assert.equal((await decide('Grep', { path: DATA_DIR, pattern: '.' },
+  assert.equal((await decide('Grep', { path: `${DATA_DIR}/agents`, pattern: '.' },
     { blockedPath: '/Users/example/.ssh/id_ed25519' })).behavior, 'deny');
   assert.equal(approvals.length, 6, 'the SDK blocked path must also be in scope');
   assert.equal((await decide('Read', { file_path: `${DATA_DIR}/user.md` },
@@ -413,5 +422,19 @@ test('read scope checks canonical paths, traversal, symlink escapes and malforme
       assert.equal(superReadAllowed(tool, input('~another-user/.ssh/id_ed25519'), root, [root]), false);
     }
     assert.equal(superReadAllowed('Glob', { path: root, pattern: '~/.ssh/*' }, root, [root]), false);
+    for (const pattern of ['{..,x}/{..,x}/.ssh/*', 'foo/../bar', '..*', ' **/../*']) {
+      assert.equal(superReadAllowed('Glob', { path: root, pattern }, root, [root]), false);
+    }
+    for (const tool of ['Read', 'Grep', 'Glob']) {
+      for (const target of [' /Users/example/.aws', '/Users/example/.aws ', '\t~/.ssh', ' ~/.podcode/agents/other']) {
+        const input = tool === 'Read' ? { file_path: target } : { path: target, pattern: '*' };
+        assert.equal(superReadAllowed(tool, input, root, [root]), false, `${tool}: whitespace`);
+      }
+    }
+    const token = path.join(DATA_DIR, 'browser-bridge.token');
+    fs.symlinkSync(token, path.join(root, 'token-alias'));
+    assert.equal(superReadAllowed('Read', { file_path: path.join(root, 'token-alias') }, root, [root]), false);
+    assert.equal(superReadAllowed('Read', { file_path: token }, root, [DATA_DIR]), false);
+    for (const tool of ['Grep', 'Glob']) assert.equal(superReadAllowed(tool, { path: DATA_DIR, pattern: '*' }, root, [DATA_DIR]), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

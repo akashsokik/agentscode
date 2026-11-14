@@ -97,21 +97,34 @@ const inside = (dir: string, file: string) => {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 };
 
+/** Normalize exactly the paths we pre-approve; ambiguous spellings keep the normal approval gate. */
+function readTarget(tool: string, input: Record<string, unknown>, cwd: string): string | null {
+  if (!['Read', 'Grep', 'Glob'].includes(tool)) return null;
+  const target = tool === 'Read' ? input.file_path : input.path ?? cwd;
+  if (typeof target !== 'string' || !target || target !== target.trim() || target.includes('\0')) return null;
+  // Claude expands home shorthand before reading: do the same before checking the scope.
+  const expanded = target === '~' ? os.homedir() : target.startsWith('~/')
+    ? path.join(os.homedir(), target.slice(2)) : target;
+  return expanded.startsWith('~') ? null : realpath(path.resolve(cwd, expanded));
+}
+
+/** The browser bridge token authenticates as the desktop app. Never grant it through these reads,
+ * including a search whose root contains it, or an alias to the token. */
+function bridgeCredentialRead(tool: string, input: Record<string, unknown>, cwd: string): boolean {
+  const file = readTarget(tool, input, cwd);
+  const token = realpath(path.join(DATA_DIR, 'browser-bridge.token'));
+  return file !== null && (file === token || (tool !== 'Read' && inside(file, token)));
+}
+
 /** Main-session read approval only. Never put these roots in additionalDirectories or allow rules:
  * side-answer forks inherit those, but must keep their narrower ACH-42 scope. */
 export function superReadAllowed(tool: string, input: Record<string, unknown>, cwd: string, roots: string[]): boolean {
   if (tool === 'WebSearch' || tool === 'WebFetch') return true;
-  if (!['Read', 'Grep', 'Glob'].includes(tool)) return false;
-  const target = tool === 'Read' ? input.file_path : input.path ?? cwd;
-  if (typeof target !== 'string' || !target || target.includes('\0')) return false;
-  // Claude expands home shorthand before reading: do the same before checking the scope.
-  const expanded = target === '~' ? os.homedir() : target.startsWith('~/')
-    ? path.join(os.homedir(), target.slice(2)) : target;
-  if (expanded.startsWith('~')) return false; // no ambiguous ~user expansion
-  // Glob's pattern must stay relative to its checked search root.
+  const file = readTarget(tool, input, cwd);
+  if (file === null || bridgeCredentialRead(tool, input, cwd)) return false;
+  // Glob expands braces before matching: even a '..' hidden in a brace alternative must not pass.
   if (tool === 'Glob' && (typeof input.pattern !== 'string' || path.isAbsolute(input.pattern) || input.pattern.startsWith('~')
-    || input.pattern.split(/[\\/]/).includes('..'))) return false;
-  const file = realpath(path.resolve(cwd, expanded));
+    || input.pattern.includes('..'))) return false;
   return roots.some(root => inside(realpath(path.resolve(root)), file));
 }
 
@@ -658,6 +671,11 @@ export class ClaudeRunner implements Runner {
     // A second lock behind the tool list: the SuperAgent never edits, whatever reaches here.
     if (this.ctx.agent().role === 'super' && !superMayUse(toolName)) {
       return { behavior: 'deny', message: 'The SuperAgent never edits or runs commands. Delegate the work to an agent.' };
+    }
+
+    if (this.ctx.agent().role === 'super' && (bridgeCredentialRead(toolName, input, this.ctx.cwd)
+      || (options.blockedPath !== undefined && bridgeCredentialRead('Read', { file_path: options.blockedPath }, this.ctx.cwd)))) {
+      return { behavior: 'deny', message: 'The browser bridge credential authenticates as the desktop app. Read a specific agent folder instead.' };
     }
 
     if (this.ctx.agent().role === 'super' && !options.matchedAskRule) {
