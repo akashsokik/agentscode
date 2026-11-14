@@ -6,7 +6,7 @@
  * Decorative: the agent's name always sits beside it.
  */
 import type { Agent } from '../../shared/types.ts';
-import { AVATAR_FILL, AVATAR_INK, agentLook, avatarDelay, avatarEyeTransform, avatarMood, avatarParts, isSmallAvatar, type AvatarLook, type AvatarMood } from '../../shared/avatar.ts';
+import { AVATAR_FILL, agentLook, avatarDelay, avatarEyeTransform, avatarMood, avatarParts, isSmallAvatar, type AvatarLook, type AvatarMood } from '../../shared/avatar.ts';
 
 export { AVATAR_FILL };
 
@@ -44,7 +44,7 @@ export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-
       {/* The pills move as one (glance, look up) in the outer group; the inner one turns them with the body. Each blinks or flattens to a dash on its own. */}
       <g className="avatar-eyes">
         <g transform={avatarEyeTransform(look)}>
-          {parts.map((part, i) => (part.kind === 'eye' ? <rect key={i} className="avatar-eye" x={part.x} y={part.y} width={part.w} height={part.h} rx={part.w / 2} fill={AVATAR_INK} /> : null))}
+          {parts.map((part, i) => (part.kind === 'eye' ? <rect key={i} className="avatar-eye" x={part.x} y={part.y} width={part.w} height={part.h} rx={part.w / 2} fill={part.fill} /> : null))}
         </g>
       </g>
     </svg>

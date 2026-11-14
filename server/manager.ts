@@ -796,7 +796,7 @@ export class AgentManager {
     const avatar = patch.avatar === undefined ? undefined : cleanLook(patch.avatar);
     if (avatar === null) throw new HttpError(400, 'Unknown avatar: pick a shape, colour and eyes from the list.');
     if (avatar && agent.role === 'super') throw new HttpError(400, 'The SuperAgent keeps its own look.');
-    if (avatar && isSuperPair(avatar)) throw new HttpError(400, 'That shape and colour are the SuperAgent\'s. Pick another.');
+    if (avatar && isSuperPair(avatar)) throw new HttpError(400, 'That shape is the SuperAgent\'s. Pick another.');
     const model = patch.model === undefined ? undefined : clip(String(patch.model).trim(), MODEL_MAX);
     const effort = patch.effort === undefined ? undefined : validEffort(patch.effort);
     const tier = patch.serviceTier === undefined ? undefined : String(patch.serviceTier).trim().slice(0, 40);

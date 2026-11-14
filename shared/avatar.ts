@@ -4,8 +4,11 @@
 // with the body. Pure, shared by the server (validation, a new agent's look) and the app (drawing),
 // so it is tested directly.
 
-/** Every shape that can be drawn. The Cloud is the SuperAgent's; AGENT_SHAPES are the ones agents are given. */
-export const AVATAR_SHAPES = ['disc', 'pentagon', 'pick', 'tile', 'dome', 'bean', 'arch', 'almond', 'slice', 'bucket', 'kite', 'cloud'] as const;
+/**
+ * Every shape that can be drawn. The Block is the SuperAgent's (ACH-D60); the Cloud was, and stays
+ * for agents that already have it. AGENT_SHAPES are the ones agents are given.
+ */
+export const AVATAR_SHAPES = ['disc', 'pentagon', 'pick', 'tile', 'dome', 'bean', 'arch', 'almond', 'slice', 'bucket', 'kite', 'cloud', 'block'] as const;
 export const AVATAR_COLORS = ['teal', 'orange', 'indigo', 'violet', 'rose', 'amber', 'green', 'sky', 'coral', 'slate', 'olive', 'plum'] as const;
 export const AVATAR_EYES = ['round', 'tall', 'wide'] as const;
 
@@ -13,8 +16,11 @@ export type AvatarShape = (typeof AVATAR_SHAPES)[number];
 export type AvatarColor = (typeof AVATAR_COLORS)[number];
 export type AvatarEyes = (typeof AVATAR_EYES)[number];
 
-/** The shapes a new agent can get and the picker offers: every one but the SuperAgent's Cloud. */
-export const AGENT_SHAPES: readonly AvatarShape[] = AVATAR_SHAPES.filter(shape => shape !== 'cloud');
+/**
+ * The shapes a new agent can get and the picker offers: every one but the SuperAgent's Block and the
+ * Cloud (left out as before, so a look from an id never changes: lookFromId counts these).
+ */
+export const AGENT_SHAPES: readonly AvatarShape[] = AVATAR_SHAPES.filter(shape => shape !== 'cloud' && shape !== 'block');
 
 export interface AvatarLook {
   shape: AvatarShape;
@@ -31,8 +37,12 @@ export const LEGACY_SHAPES: Readonly<Record<string, AvatarShape>> = {
   circle: 'disc', squircle: 'tile', triangle: 'dome', pebble: 'bean', capsule: 'arch', pentagon: 'pentagon', blob: 'cloud', diamond: 'almond',
 };
 
-/** The SuperAgent's own look, the same everywhere: the violet Cloud. */
-export const SUPER_LOOK: AvatarLook = { shape: 'cloud', color: 'violet', eyes: 'round' };
+/**
+ * The SuperAgent's own look, the same everywhere: the Block, drawn in ink (the theme's text colour,
+ * eyes in the page colour; AVATAR_LEAD_INK) where every agent has a colour (ACH-43, ACH-D60). Its
+ * colour is only what stands for it where one colour is needed (the Work graph's owner colour).
+ */
+export const SUPER_LOOK: AvatarLook = { shape: 'block', color: 'violet', eyes: 'round' };
 
 /** FNV-1a over the id: small, stable across restarts and platforms. */
 function hash(text: string): number {
@@ -96,9 +106,9 @@ export function agentLook(agent: { id: string; role?: string; avatar?: unknown }
 
 const key = (look: AvatarLook) => `${look.shape}:${look.color}`;
 
-/** The SuperAgent's shape and colour pair, which no other agent may take. */
+/** Whether a look is the SuperAgent's: its Block, in any colour, which no other agent may take. */
 export function isSuperPair(look: Pick<AvatarLook, 'shape' | 'color'>): boolean {
-  return look.shape === SUPER_LOOK.shape && look.color === SUPER_LOOK.color;
+  return look.shape === SUPER_LOOK.shape;
 }
 
 /**
@@ -202,21 +212,24 @@ export const AVATAR_PATH: Record<AvatarShape, string> = {
   bucket: 'M4.21 9.77C4.65 6.08 7.16 3.46 10.83 2.89L14.32 2.33C17.99 1.75 21.09 3.51 22.49 6.95L27.68 19.68C29.28 23.61 27.69 26.43 23.50 27.11L8.50 29.52C4.31 30.19 2.05 28.02 2.55 23.81Z',
   // A leaning diamond with four soft corners.
   kite: 'M10.11 6.72C11.75 3.42 14.80 2.37 18.13 3.96L23.82 6.67C27.50 8.43 28.65 11.75 26.82 15.40L21.89 25.28C20.25 28.58 17.20 29.63 13.87 28.04L8.18 25.33C4.50 23.57 3.35 20.25 5.18 16.60Z',
-  // Three bumps over a flat-ish base. The SuperAgent's.
+  // Three bumps over a flat-ish base. The SuperAgent's until ACH-43.
   cloud: 'M5.50 25.25C3.95 23.23 3.10 20.67 3.25 18.50L3.26 18.39C3.41 16.29 4.36 14.34 5.75 13.25L6.26 12.85C7.34 12.01 8.20 10.69 8.53 9.37L8.75 8.50C9.21 6.64 10.54 5.03 12.25 4.25L12.25 4.25C13.96 3.48 15.86 3.48 17.25 4.25L17.93 4.63C18.90 5.17 19.98 5.33 20.75 5.05L20.75 5.05C21.52 4.77 22.95 5.15 24.50 6.05L24.50 6.05C26.05 6.95 27.04 8.54 27.10 10.25L27.11 10.60C27.17 12.09 27.68 13.77 28.47 15.04L28.60 15.25C29.47 16.64 29.81 18.73 29.50 20.75L29.50 20.75C29.19 22.77 28.05 24.76 26.50 26.00L26.50 26.00C24.95 27.24 22.10 28.06 19.00 28.16L13.00 28.34C9.90 28.44 7.05 27.27 5.50 25.25Z',
+  // An upright soft block, a little taller than wide: small left corners, big rounded right ones, its
+  // edges a little hand-drawn. The SuperAgent's (ACH-D60, from the user's reference).
+  block: 'M8.8 3.4C12.5 2.7 16.2 2.6 19.6 2.9C23.4 3.3 26.4 6.2 26.3 10.0L25.9 20.6C25.7 25.3 22.4 28.7 17.6 29.1C14.5 29.4 11.4 29.3 8.6 28.9C7.0 28.7 6.0 27.6 6.0 26.0C5.7 19.4 5.6 12.0 6.2 5.9C6.3 4.6 7.4 3.7 8.8 3.4Z',
 };
 
 /** What each shape is called, for the picker. */
 export const AVATAR_SHAPE_NAMES: Record<AvatarShape, string> = {
-  disc: 'Disc', pentagon: 'Pentagon', pick: 'Pick', tile: 'Tile', dome: 'Dome', bean: 'Bean', arch: 'Arch', almond: 'Almond', slice: 'Slice', bucket: 'Bucket', kite: 'Kite', cloud: 'Cloud',
+  disc: 'Disc', pentagon: 'Pentagon', pick: 'Pick', tile: 'Tile', dome: 'Dome', bean: 'Bean', arch: 'Arch', almond: 'Almond', slice: 'Slice', bucket: 'Bucket', kite: 'Kite', cloud: 'Cloud', block: 'Block',
 };
 
 /** How far each body is tilted, in degrees; its eyes turn with it (avatarEyeTurn). */
-export const AVATAR_TILT: Record<AvatarShape, number> = { disc: -12, pentagon: 10, pick: 14, tile: -9, dome: 8, bean: -14, arch: -16, almond: 0, slice: 6, bucket: -7, kite: 4, cloud: -6 };
+export const AVATAR_TILT: Record<AvatarShape, number> = { disc: -12, pentagon: 10, pick: 14, tile: -9, dome: 8, bean: -14, arch: -16, almond: 0, slice: 6, bucket: -7, kite: 4, cloud: -6, block: 0 };
 
 /** Where the eyes sit on each silhouette: high and to one side (the eye style moves them off it). */
 export const AVATAR_EYE_AT: Record<AvatarShape, { x: number; y: number }> = {
-  disc: { x: 19.24, y: 11.3 }, pentagon: { x: 18.8, y: 15.48 }, pick: { x: 16.2, y: 10.83 }, tile: { x: 18.66, y: 12.48 }, dome: { x: 20.93, y: 14.87 }, bean: { x: 20.63, y: 12.32 }, arch: { x: 15.27, y: 9.47 }, almond: { x: 19.14, y: 13.08 }, slice: { x: 11.39, y: 19.15 }, bucket: { x: 16.67, y: 12.72 }, kite: { x: 18.95, y: 13.44 }, cloud: { x: 19, y: 16.6 },
+  disc: { x: 19.24, y: 11.3 }, pentagon: { x: 18.8, y: 15.48 }, pick: { x: 16.2, y: 10.83 }, tile: { x: 18.66, y: 12.48 }, dome: { x: 20.93, y: 14.87 }, bean: { x: 20.63, y: 12.32 }, arch: { x: 15.27, y: 9.47 }, almond: { x: 19.14, y: 13.08 }, slice: { x: 11.39, y: 19.15 }, bucket: { x: 16.67, y: 12.72 }, kite: { x: 18.95, y: 13.44 }, cloud: { x: 19, y: 16.6 }, block: { x: 15.8, y: 10.8 },
 };
 
 /** Eye placements: the gaze. Where the shape puts them, a little down and left, or a little up and right. */
@@ -241,13 +254,24 @@ export const AVATAR_PILL = { w: 2.5, h: 6.4, gap: 4.9 };
 export const AVATAR_INK = '#141416';
 /** Below this many px the pills are drawn bigger so they stay visible at 14 to 16px. */
 export const AVATAR_SMALL_PX = 18;
-/** The eyes lean a touch more than the body does. */
+/** The eyes lean a touch more than the body does; the upright Block's lean only a little (ACH-D60). */
 const EYE_LEAN = 8;
+const EYE_LEAN_OF: Partial<Record<AvatarShape, number>> = { block: 4 };
+
+/**
+ * The SuperAgent's ink (ACH-D60): its body in the theme's text colour, its eyes in the page colour,
+ * so it reads on dark and light alike. In the app these are the theme tokens; a standalone SVG (the
+ * gallery, a notification icon) has no theme, so avatarMarkup takes a pair of colours for them.
+ */
+export const AVATAR_LEAD_INK = { body: 'var(--color-content)', eye: 'var(--color-background-base)' };
+/** The theme's text and page colours as plain values (web/styles.css), for SVG drawn outside the app. */
+export const LEAD_INK_DARK = { body: '#ebebeb', eye: '#171717' };
+export const LEAD_INK_LIGHT = { body: '#2e2e2e', eye: '#f7f7f7' };
 
 export type AvatarPart =
   | { kind: 'body'; d: string; fill: string }
   /** A pill eye: a rounded rect (rx is half the width), before the pair is turned (avatarEyeTurn). */
-  | { kind: 'eye'; x: number; y: number; w: number; h: number };
+  | { kind: 'eye'; x: number; y: number; w: number; h: number; fill: string };
 
 /** Where a look's pair of eyes is centred. */
 function eyeCentre(look: AvatarLook): { x: number; y: number } {
@@ -258,7 +282,7 @@ function eyeCentre(look: AvatarLook): { x: number; y: number } {
 
 /** The turn the pair of eyes takes with its body: degrees about the pair's centre. */
 export function avatarEyeTurn(look: AvatarLook): { deg: number; x: number; y: number } {
-  return { deg: AVATAR_TILT[look.shape] + EYE_LEAN, ...eyeCentre(look) };
+  return { deg: AVATAR_TILT[look.shape] + (EYE_LEAN_OF[look.shape] ?? EYE_LEAN), ...eyeCentre(look) };
 }
 
 /** The turn as an SVG transform, for the group that holds the two pills. */
@@ -277,8 +301,10 @@ export function avatarParts(look: AvatarLook, _mood: AvatarMood, small: boolean)
   const h = +(AVATAR_PILL.h * (small ? 1.32 : 1)).toFixed(2);
   const gap = AVATAR_PILL.gap * (small ? 1.18 : 1);
   const { x: cx, y: cy } = eyeCentre(look);
-  const parts: AvatarPart[] = [{ kind: 'body', d: AVATAR_PATH[look.shape], fill: AVATAR_FILL[look.color] }];
-  for (const x of [cx - gap / 2, cx + gap / 2]) parts.push({ kind: 'eye', x: +(x - w / 2).toFixed(2), y: +(cy - h / 2).toFixed(2), w, h });
+  const lead = isSuperPair(look);
+  const parts: AvatarPart[] = [{ kind: 'body', d: AVATAR_PATH[look.shape], fill: lead ? AVATAR_LEAD_INK.body : AVATAR_FILL[look.color] }];
+  const ink = lead ? AVATAR_LEAD_INK.eye : AVATAR_INK;
+  for (const x of [cx - gap / 2, cx + gap / 2]) parts.push({ kind: 'eye', x: +(x - w / 2).toFixed(2), y: +(cy - h / 2).toFixed(2), w, h, fill: ink });
   return parts;
 }
 
@@ -303,15 +329,18 @@ export function moodEyes(mood: AvatarMood): { dy: number; scaleY: number } {
  * One avatar as SVG markup, the same structure the app's component renders (classes for the CSS
  * moods). `still` bakes the mood's resting pose in, for galleries and PNGs.
  */
-export function avatarMarkup(look: AvatarLook, mood: AvatarMood, size: number, options: { x?: number; y?: number; seed?: string; live?: boolean; still?: boolean } = {}): string {
-  const parts = avatarParts(look, mood, isSmallAvatar(size));
+export function avatarMarkup(look: AvatarLook, mood: AvatarMood, size: number, options: { x?: number; y?: number; seed?: string; live?: boolean; still?: boolean; ink?: { body: string; eye: string } } = {}): string {
+  // Outside the app there is no theme: the SuperAgent's ink is drawn in plain colours (dark on light unless told).
+  const ink = options.ink ?? LEAD_INK_LIGHT;
+  const plain = (fill: string) => (fill === AVATAR_LEAD_INK.body ? ink.body : fill === AVATAR_LEAD_INK.eye ? ink.eye : fill);
+  const parts = avatarParts(look, mood, isSmallAvatar(size)).map(p => ({ ...p, fill: plain(p.fill) }));
   const m = options.still ? moodEyes(mood) : { dy: 0, scaleY: 1 };
   const body = parts.filter(p => p.kind === 'body').map(p => `<path d="${(p as Extract<AvatarPart, { kind: 'body' }>).d}" fill="${(p as Extract<AvatarPart, { kind: 'body' }>).fill}"/>`).join('');
   const face = parts.map(p => {
     if (p.kind !== 'eye') return '';
     const h = +(p.h * m.scaleY).toFixed(2);
     const y = +(p.y + (p.h - h) / 2).toFixed(2);
-    return `<rect class="avatar-eye" x="${p.x}" y="${y}" width="${p.w}" height="${h}" rx="${+(Math.min(p.w, h) / 2).toFixed(2)}" fill="${AVATAR_INK}"/>`;
+    return `<rect class="avatar-eye" x="${p.x}" y="${y}" width="${p.w}" height="${h}" rx="${+(Math.min(p.w, h) / 2).toFixed(2)}" fill="${p.fill}"/>`;
   }).join('');
   const pos = options.x !== undefined ? ` x="${options.x}" y="${options.y ?? 0}"` : '';
   const live = options.live ? ' avatar-live' : '';
@@ -322,8 +351,8 @@ export function avatarMarkup(look: AvatarLook, mood: AvatarMood, size: number, o
 }
 
 /** One avatar as a still SVG fragment at (x, y), `size` px wide (the gallery). */
-export function avatarSvg(look: AvatarLook, mood: AvatarMood, x: number, y: number, size: number): string {
-  return avatarMarkup(look, mood, size, { x, y, still: true });
+export function avatarSvg(look: AvatarLook, mood: AvatarMood, x: number, y: number, size: number, ink?: { body: string; eye: string }): string {
+  return avatarMarkup(look, mood, size, { x, y, still: true, ink });
 }
 
 /**
@@ -336,23 +365,25 @@ export function avatarGallery(): string {
   const rows = AVATAR_SHAPES.length;
   const height = 20 + rows * 50 + 10 + 44 + 110;
   const panel = (ox: number, bg: string, ink: string) => {
+    // The SuperAgent's ink in this panel's theme.
+    const lead = bg === '#171717' ? LEAD_INK_DARK : LEAD_INK_LIGHT;
     const out = [`<rect x="${ox}" y="0" width="660" height="${height}" fill="${bg}"/>`];
     AVATAR_SHAPES.forEach((shape, row) => {
       const y = 20 + row * 50;
       out.push(`<text x="${ox + 16}" y="${y + 24}" fill="${ink}" font-family="system-ui" font-size="12">${AVATAR_SHAPE_NAMES[shape]}</text>`);
       let x = ox + 110;
       for (const size of sizes) {
-        out.push(avatarSvg({ shape, color: AVATAR_COLORS[row % AVATAR_COLORS.length], eyes: 'round' }, 'calm', x, y + 20 - size / 2, size));
+        out.push(avatarSvg({ shape, color: AVATAR_COLORS[row % AVATAR_COLORS.length], eyes: 'round' }, 'calm', x, y + 20 - size / 2, size, lead));
         x += size + 14;
       }
-      AVATAR_EYES.forEach((eyes, i) => out.push(avatarSvg({ shape, color: AVATAR_COLORS[(row + 3 + i) % AVATAR_COLORS.length], eyes }, 'calm', x + 10 + i * 48, y, 40)));
+      AVATAR_EYES.forEach((eyes, i) => out.push(avatarSvg({ shape, color: AVATAR_COLORS[(row + 3 + i) % AVATAR_COLORS.length], eyes }, 'calm', x + 10 + i * 48, y, 40, lead)));
     });
     const colorsY = 20 + rows * 50 + 10;
-    AVATAR_COLORS.forEach((color, i) => out.push(avatarSvg({ shape: 'disc', color, eyes: 'round' }, 'calm', ox + 16 + i * 34, colorsY, 24)));
+    AVATAR_COLORS.forEach((color, i) => out.push(avatarSvg({ shape: 'disc', color, eyes: 'round' }, 'calm', ox + 16 + i * 34, colorsY, 24, lead)));
     const moodY = colorsY + 44;
     moods.forEach((mood, i) => {
-      out.push(avatarSvg(SUPER_LOOK, mood, ox + 16 + i * 126, moodY, 40));
-      out.push(avatarSvg(SUPER_LOOK, mood, ox + 16 + i * 126, moodY + 48, 16));
+      out.push(avatarSvg(SUPER_LOOK, mood, ox + 16 + i * 126, moodY, 40, lead));
+      out.push(avatarSvg(SUPER_LOOK, mood, ox + 16 + i * 126, moodY + 48, 16, lead));
       out.push(`<text x="${ox + 62 + i * 126}" y="${moodY + 24}" fill="${ink}" font-family="system-ui" font-size="12">${mood}</text>`);
     });
     return out.join('\n');
