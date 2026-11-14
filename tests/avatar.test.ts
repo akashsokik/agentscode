@@ -2,23 +2,23 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   AGENT_SHAPES, agentLook, assignLooks, AVATAR_COLORS, AVATAR_EYE_AT, AVATAR_EYES, AVATAR_FILL, AVATAR_PATH, AVATAR_PILL, AVATAR_SHAPE_NAMES, AVATAR_SHAPES, AVATAR_TILT,
-  avatarEyeTurn, avatarGallery, avatarMarkup, avatarMood, avatarParts, cleanLook, freshLook, isLook, isSmallAvatar, isSuperPair, LEGACY_SHAPES, lookFromId, migrateLooks, SUPER_LOOK,
+  AVATAR_INK, AVATAR_LEAD_INK, avatarEyeTurn, avatarGallery, avatarMarkup, avatarMood, avatarParts, cleanLook, freshLook, isLook, isSmallAvatar, isSuperPair, LEGACY_SHAPES, LEAD_INK_DARK, LEAD_INK_LIGHT, lookFromId, migrateLooks, SUPER_LOOK,
   type AvatarLook, type AvatarShape,
 } from '../shared/avatar.ts';
 import { HttpError } from '../server/errors.ts';
 import { harness, projectDir } from './helpers.ts';
 
-test('the set: twelve shapes (eleven for agents, the Cloud for the SuperAgent) and twelve colours', () => {
-  assert.equal(AVATAR_SHAPES.length, 12);
-  assert.equal(AGENT_SHAPES.length, 11);
-  assert.ok(!AGENT_SHAPES.includes('cloud'), 'agents are never given the Cloud');
-  assert.deepEqual(SUPER_LOOK, { shape: 'cloud', color: 'violet', eyes: 'round' });
+test('the set: thirteen shapes (eleven for agents, the Block for the SuperAgent, the old Cloud) and twelve colours', () => {
+  assert.equal(AVATAR_SHAPES.length, 13);
+  assert.equal(AGENT_SHAPES.length, 11, 'the same eleven as before, so no look from an id changes');
+  assert.ok(!AGENT_SHAPES.includes('cloud') && !AGENT_SHAPES.includes('block'), 'agents are never given the Cloud or the Block');
+  assert.deepEqual(SUPER_LOOK, { shape: 'block', color: 'violet', eyes: 'round' });
   assert.equal(AVATAR_COLORS.length, 12);
   assert.ok(AVATAR_COLORS.includes('olive') && AVATAR_COLORS.includes('plum'));
   for (const shape of AVATAR_SHAPES) {
     assert.ok(AVATAR_PATH[shape] && AVATAR_SHAPE_NAMES[shape] && AVATAR_EYE_AT[shape] && Number.isFinite(AVATAR_TILT[shape]), shape);
   }
-  assert.equal(new Set(Object.values(AVATAR_PATH)).size, 12, 'every shape has its own outline');
+  assert.equal(new Set(Object.values(AVATAR_PATH)).size, 13, 'every shape has its own outline');
   assert.equal(new Set(Object.values(AVATAR_FILL)).size, 12, 'every colour is its own');
 });
 
@@ -123,7 +123,10 @@ test('agents get a look when made; a change is validated, and the SuperAgent kee
   assert.deepEqual(legacy.avatar, { shape: 'almond', color: 'plum', eyes: 'wide' });
   await assert.rejects(h.manager.update(ada.id, { avatar: { shape: 'star', color: 'coral', eyes: 'wide' } as never }), (e: unknown) => e instanceof HttpError && e.status === 400);
   await assert.rejects(h.manager.update(ada.id, { avatar: { ...SUPER_LOOK, eyes: 'round' } }), (e: unknown) => e instanceof HttpError && e.status === 400, 'no one else looks like the SuperAgent');
-  await assert.rejects(h.manager.update(ada.id, { avatar: { shape: 'blob', color: 'violet', eyes: 'round' } as never }), (e: unknown) => e instanceof HttpError && e.status === 400, 'nor by its old name');
+  await assert.rejects(h.manager.update(ada.id, { avatar: { shape: 'block', color: 'teal', eyes: 'wide' } }), (e: unknown) => e instanceof HttpError && e.status === 400, 'the Block is the SuperAgent\'s in any colour');
+  // The violet Cloud was the SuperAgent's before ACH-43; it is an ordinary (if unoffered) look now.
+  const cloud = await h.manager.update(ada.id, { avatar: { shape: 'blob', color: 'violet', eyes: 'round' } as never });
+  assert.deepEqual(cloud.avatar, { shape: 'cloud', color: 'violet', eyes: 'round' });
   const copycat = await h.manager.create({ name: 'Cy', engine: 'claude', projectId: project.id, avatar: SUPER_LOOK });
   assert.ok(isLook(copycat.avatar) && !isSuperPair(copycat.avatar!), 'a create asking for it gets a free look');
   const sup = await h.manager.createSuper();
@@ -227,7 +230,7 @@ test('every body fills its 32 box without leaving it, and the eyes turn with the
     assert.ok(Math.min(...xs) >= 0.5 && Math.max(...xs) <= 31.5 && Math.min(...ys) >= 0.5 && Math.max(...ys) <= 31.5, `${shape} stays inside the box`);
     assert.ok(Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) >= 24, `${shape} is big enough to read at 16px`);
     const turn = avatarEyeTurn({ shape, color: 'teal', eyes: 'round' });
-    assert.equal(turn.deg, AVATAR_TILT[shape] + 8);
+    assert.equal(turn.deg, AVATAR_TILT[shape] + (shape === 'block' ? 4 : 8), 'eyes lean 8 degrees past the body (4 for the upright Block)');
     assert.deepEqual([turn.x, turn.y], [AVATAR_EYE_AT[shape].x, AVATAR_EYE_AT[shape].y]);
   }
 });
@@ -260,5 +263,29 @@ test('the gallery (every shape, colour, eye style and mood) matches tests/fixtur
   // Regenerate on purpose with UPDATE_AVATAR_GALLERY=1; otherwise a change to the set must be seen.
   if (process.env.UPDATE_AVATAR_GALLERY === '1' || !fs.existsSync(file)) fs.writeFileSync(file, svg);
   assert.equal(svg, fs.readFileSync(file, 'utf8'));
-  assert.equal(svg.match(/<path d="M[^"]*" fill="#/g)?.length, 2 * (12 * (6 + 3) + 12 + 4 * 2), 'both panels: every shape at 6 sizes and 3 eye styles, 12 colours, 4 moods at 40 and 16 px');
+  assert.equal(svg.match(/<path d="M[^"]*" fill="#/g)?.length, 2 * (13 * (6 + 3) + 12 + 4 * 2), 'both panels: every shape at 6 sizes and 3 eye styles, 12 colours, 4 moods at 40 and 16 px');
+});
+
+test('the SuperAgent is the ink Block (ACH-43, ACH-D60): text-colour body, page-colour eyes, a 4 degree eye lean', () => {
+  const parts = avatarParts(SUPER_LOOK, 'calm', false);
+  assert.deepEqual(parts.map(p => p.kind), ['body', 'eye', 'eye']);
+  assert.equal(parts[0].fill, AVATAR_LEAD_INK.body, 'the body in the theme\'s text colour');
+  assert.equal(AVATAR_LEAD_INK.body, 'var(--color-content)');
+  assert.equal(AVATAR_LEAD_INK.eye, 'var(--color-background-base)');
+  for (const p of parts.slice(1)) assert.equal(p.fill, AVATAR_LEAD_INK.eye, 'the eyes in the page colour');
+  assert.ok(Object.values(AVATAR_FILL).every(fill => !parts.some(p => p.fill === fill)), 'none of the team\'s colours');
+  assert.equal(avatarEyeTurn(SUPER_LOOK).deg, 4, 'upright body, eyes leaning 4 degrees');
+  // Every agent keeps its colour and near-black eyes.
+  const agent = avatarParts({ shape: 'disc', color: 'teal', eyes: 'round' }, 'calm', false);
+  assert.deepEqual(agent.map(p => p.fill), [AVATAR_FILL.teal, AVATAR_INK, AVATAR_INK]);
+  // Small sizes still get the bigger pills; the moods only move them (styles.css).
+  const small = avatarParts(SUPER_LOOK, 'calm', true)[1] as { w: number };
+  assert.ok(small.w > AVATAR_PILL.w * 1.3);
+  // Outside the app (gallery, notification icon) the ink is plain colours: dark on light unless told.
+  const plain = avatarMarkup(SUPER_LOOK, 'calm', 64, { still: true });
+  assert.doesNotMatch(plain, /var\(/);
+  assert.match(plain, new RegExp(`<path d="${AVATAR_PATH.block}" fill="${LEAD_INK_LIGHT.body}"`));
+  assert.equal(plain.match(new RegExp(`fill="${LEAD_INK_LIGHT.eye}"`, 'g'))?.length, 2);
+  assert.match(avatarMarkup(SUPER_LOOK, 'calm', 64, { still: true, ink: LEAD_INK_DARK }), new RegExp(`fill="${LEAD_INK_DARK.body}"`));
+  assert.ok(isSuperPair({ shape: 'block', color: 'teal' }) && !isSuperPair({ shape: 'cloud', color: 'violet' }), 'the Block in any colour is the SuperAgent\'s; the Cloud no longer is');
 });
