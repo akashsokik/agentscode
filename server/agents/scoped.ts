@@ -1,5 +1,5 @@
 import type { AgentTask, Autonomy } from '../../shared/types.ts';
-import type { Runner, RunnerCommand, RunnerContext, RunnerHooks, RunnerImage, RunnerInput, TurnResult } from './runner.ts';
+import type { Runner, RunnerCommand, RunnerContext, RunnerHooks, RunnerImage, RunnerInput, SideOptions, SideResult, TurnResult } from './runner.ts';
 
 export interface ExecutionContext {
   cwd: string;
@@ -191,6 +191,11 @@ export class ScopedRunner implements Runner {
   async setEffort(value: string): Promise<void> { await this.child?.setEffort(value); }
   async setServiceTier(value: string): Promise<void> { await this.child?.setServiceTier?.(value); }
   async commands(): Promise<RunnerCommand[] | undefined> { return this.child?.commands?.(); }
+  /** Only beside a turn that is really running in the provider: nothing to copy before that. */
+  side(prompt: string, options: SideOptions): Promise<SideResult> | null {
+    if (this.closed || !this.current || this.preparing || this.draining || this.ended) return null;
+    return this.child?.side?.(prompt, options) ?? null;
+  }
   close(): void { this.closed = true; void this.interrupt(); }
   async dispose(): Promise<void> { this.closed = true; await this.interrupt(); }
 }

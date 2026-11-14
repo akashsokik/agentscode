@@ -3,6 +3,7 @@ import { ISSUE_TOOL_ALIASES } from '../../shared/issues.ts';
 import {
   query,
   type CanUseTool,
+  type Options,
   type EffortLevel,
   type HookCallback,
   type PermissionMode,
@@ -17,7 +18,7 @@ import type { Agent, AgentTask, Autonomy, Question, ToolCall, TurnUsage } from '
 import { reservedHomeFile } from '../agentHome.ts';
 import { approvalTitle, clip, resultSummary, toolActivity, toolDetail, toolResultText, toolSummary } from './describe.ts';
 import { toolPaths } from '../whereabouts.ts';
-import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
+import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput, type SideOptions, type SideResult } from './runner.ts';
 import { commsMcpConfig, COMMS_TOOLS, EYES_TOOLS, hasEyes, SUPER_BROWSER_TOOLS, SUPER_TOOLS, BROWSER_TOOLS } from '../comms/tools.ts';
 import { COMMS_SERVER } from '../config.ts';
 import { parseCommand } from '../../shared/commands.ts';
@@ -53,6 +54,19 @@ export function claudeToolPolicy(agent: Pick<Agent, 'role' | 'autonomy' | 'useMc
     return { tools: [...SUPER_CLAUDE_TOOLS], disallowedTools: [...SUPER_DISALLOWED_TOOLS], allowedTools: comms ? mcp(own) : undefined, permissionMode: 'default', strictMcpConfig: true };
   }
   return { allowedTools: comms ? mcp([...COMMS_TOOLS, ...(hasEyes(agent.role) ? EYES_TOOLS : [])]) : undefined, permissionMode: MODE[agent.autonomy], strictMcpConfig: !agent.useMcp };
+}
+
+/**
+ * What a side answer of the SuperAgent may call: tools that only read. It answers a teammate from
+ * a copy of the session while the real turn goes on, so it must not act: no mail, no delegating,
+ * no issue, agent, channel, routine or decision changes, no questions to the user, no web.
+ */
+export const SUPER_SIDE_COMMS = [
+  'list_agents', 'read_messages', 'list_delegations', 'list_channels', 'read_channel', 'ref_get', 'ref_search',
+  'read_transcript', 'list_issues', 'list_routines', 'gh_prs', 'gh_pr', 'gh_runs', 'gh_run', 'gh_issues',
+] as const;
+export function superSideTools(): string[] {
+  return ['Read', 'Grep', 'Glob', ...SUPER_SIDE_COMMS.map(name => `mcp__${COMMS_SERVER}__${name}`)];
 }
 
 /** Whether the SuperAgent may use this tool at all: its read tools and its own MCP tools, nothing else. */
@@ -155,6 +169,9 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
   }
 }
 
+/** One side answer in flight (ClaudeRunner.side). */
+interface Side { q: Query; controller: AbortController; stopped: boolean; grace: ReturnType<typeof setTimeout> | null }
+
 type UserContent = SDKUserMessage['message']['content'];
 type UserBlock = Extract<UserContent, readonly unknown[]>[number];
 
@@ -200,6 +217,12 @@ export class ClaudeRunner implements Runner {
   private lastModel = '';
   private stderrTail = '';
   private tools = new Map<string, ToolCall>();
+  /** What the running process was started with: a side answer repeats it, so its prompt matches the session's cache. */
+  private started: Options | null = null;
+  /** Side answers running now, so a stop or a close ends them too. */
+  private sides = new Set<Side>();
+  /** How long a stopped side answer has to report its cost before its process is ended. */
+  static sideStopGraceMs = 5000;
 
   constructor(ctx: RunnerContext, queryFactory: typeof query = query) {
     this.ctx = ctx;
@@ -232,8 +255,110 @@ export class ClaudeRunner implements Runner {
     });
   }
 
+  /**
+   * Answer one prompt from a copy of the running session while its turn goes on. The copy is a
+   * second Claude Code process that resumes the session as a fork: same instructions, tools and
+   * history (so the prompt cache is reused), nothing saved, and only `allowedTools` may be called.
+   * Checked against Claude Code: a fork taken mid-turn, even inside a tool call, answers on its own
+   * and leaves the session as it was.
+   *
+   * Nobody is asked anything. A hook refuses every tool that is not on the list. Of the listed
+   * tools only the MCP ones are pre-approved: a built-in read goes through Claude Code's own rules,
+   * so it works inside the session's folders and anything further reaches the permission callback,
+   * which refuses it (the session itself would ask the user there).
+   */
+  side(prompt: string, options: SideOptions): Promise<SideResult> | null {
+    const agent = this.ctx.agent();
+    const sessionId = agent.sessionId;
+    if (!this.q || !this.turnActive || !this.started || !sessionId || options.signal?.aborted) return null;
+    const controller = new AbortController();
+    const allowed = new Set(options.allowedTools);
+    const refusal = 'This is a side answer beside your running turn: you can only read here, and only in your own folders. If the answer needs this, say so as your instructions for side answers tell you.';
+    // A hook, so it holds in every permission mode and before any allow rule of the user's.
+    const guard: HookCallback = async input => {
+      if (input.hook_event_name !== 'PreToolUse' || allowed.has(input.tool_name)) return {};
+      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: refusal } };
+    };
+    // Streaming input, as the session itself uses: only then can the copy be interrupted and still report its cost.
+    const input = new InputQueue();
+    input.push({ type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null });
+    let stderr = '';
+    const servers = this.started.mcpServers;
+    const q = this.query({
+      prompt: input,
+      options: {
+        ...this.started,
+        // As the session runs now, not as its process started: the user may have switched since, and the cache is per model.
+        model: agent.model || undefined,
+        effort: (agent.effort || undefined) as EffortLevel | undefined,
+        settings: agent.serviceTier === 'fast' ? { fastMode: true } : undefined,
+        resume: sessionId,
+        forkSession: true,
+        // Nothing to resume later: the answer goes out as mail, and the session gets a note.
+        persistSession: false,
+        abortController: controller,
+        allowedTools: [...allowed].filter(name => name.startsWith('mcp__')),
+        // Its own credential where the caller gives one, so the IDE can hold the copy to its tools too.
+        mcpServers: options.commsToken && servers?.[COMMS_SERVER]
+          ? { ...servers, [COMMS_SERVER]: commsMcpConfig(options.commsToken, agent.role === 'super', hasEyes(agent.role)) } : servers,
+        hooks: { PreToolUse: [{ hooks: [guard] }] },
+        canUseTool: async () => ({ behavior: 'deny', message: refusal }),
+        stderr: (data: string) => { stderr = (stderr + data).slice(-2000); },
+      },
+    });
+    const side: Side = { q, controller, stopped: false, grace: null };
+    this.sides.add(side);
+    const onAbort = () => this.stopSide(side);
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    return this.consumeSide(side).catch((err): SideResult => {
+      const error = err instanceof Error ? err.message : String(err);
+      const tail = stderr.trim();
+      return { ok: false, text: '', error: side.stopped ? 'Stopped.' : tail && !error.includes(tail) ? `${error}\n${clip(tail, 600)}` : error };
+    }).finally(() => {
+      this.sides.delete(side);
+      if (side.grace) clearTimeout(side.grace);
+      options.signal?.removeEventListener('abort', onAbort);
+      input.end();
+      try { q.close(); } catch { /* already gone */ }
+    });
+  }
+
+  private async consumeSide(side: Side): Promise<SideResult> {
+    let last = '';
+    for await (const message of side.q) {
+      if (message.type === 'assistant' && !message.parent_tool_use_id) {
+        for (const block of message.message.content) if (block.type === 'text' && block.text.trim()) last = block.text;
+      } else if (message.type === 'result') {
+        const ok = message.subtype === 'success' && !message.is_error && !side.stopped;
+        return {
+          ok,
+          text: ok ? (message.subtype === 'success' && message.result) || last : '',
+          error: ok ? undefined : side.stopped ? 'Stopped.' : message.subtype === 'success' ? message.result : message.errors.join('\n') || message.subtype,
+          // Also for one that was stopped or failed: what it spent still counts.
+          costUsd: message.total_cost_usd,
+          usage: claudeTurnUsage(message.usage),
+        };
+      }
+    }
+    return { ok: false, text: '', error: side.stopped ? 'Stopped.' : 'The copy of the session ended without an answer.' };
+  }
+
+  /** Interrupt a side answer so it still reports what it spent; end its process if it does not answer in time. */
+  private stopSide(side: Side): void {
+    if (side.stopped) return;
+    side.stopped = true;
+    void Promise.resolve().then(() => side.q.interrupt()).catch(() => { /* gone already */ });
+    side.grace = setTimeout(() => side.controller.abort(), ClaudeRunner.sideStopGraceMs);
+    side.grace.unref?.();
+  }
+
+  private stopSides(): void {
+    for (const side of [...this.sides]) this.stopSide(side);
+  }
+
   async interrupt(): Promise<void> {
     this.queue = [];
+    this.stopSides();
     const q = this.q;
     if (!q || !this.turnActive) return;
     this.stopping = true;
@@ -296,6 +421,7 @@ export class ClaudeRunner implements Runner {
   close(): void {
     this.queue = [];
     this.turnActive = false;
+    this.stopSides();
     this.shutdown();
   }
 
@@ -329,37 +455,36 @@ export class ClaudeRunner implements Runner {
     this.startedWithBypass = agent.autonomy === 'full' && agent.role !== 'super';
     const policy = claudeToolPolicy(agent, Boolean(this.ctx.commsToken));
     this.stderrTail = '';
-    const q = this.query({
-      prompt: input,
-      options: {
-        cwd: this.ctx.cwd,
-        additionalDirectories: directories.length ? directories : undefined,
-        model: agent.model || undefined,
-        effort: (agent.effort || undefined) as EffortLevel | undefined,
-        settings: agent.serviceTier === 'fast' ? { fastMode: true } : undefined,
-        permissionMode: policy.permissionMode,
-        ...(policy.tools ? { tools: policy.tools, disallowedTools: policy.disallowedTools } : {}),
-        allowDangerouslySkipPermissions: this.startedWithBypass || undefined,
-        canUseTool: this.canUseTool,
-        // soul.md, memory.md and the dream records are off limits to edit tools in every mode.
-        hooks: { PreToolUse: [{ matcher: Object.keys(EDIT_TOOLS).join('|'), hooks: [this.guardOwnFiles] }, { matcher: 'Bash', hooks: [this.guardPushCheck] }] },
-        // git in the agent's shell runs PodCode's push check (server/pushGuard.ts, ALL-D9).
-        env: pushGuardEnv(process.env) as Record<string, string>,
-        // Load CLAUDE.md, settings and plugins like a normal Claude Code session...
-        settingSources: ['user', 'project', 'local'],
-        // ...but skip MCP servers unless asked: they can add ~200k tokens of tool definitions.
-        strictMcpConfig: policy.strictMcpConfig,
-        // The comms tools only reach the IDE, so they run without a permission prompt.
-        mcpServers: this.ctx.commsToken ? { [COMMS_SERVER]: commsMcpConfig(this.ctx.commsToken, agent.role === 'super', hasEyes(agent.role)) } : undefined,
-        allowedTools: policy.allowedTools,
-        resume: agent.sessionId ?? undefined,
-        pathToClaudeCodeExecutable: this.ctx.binPath ?? undefined,
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: this.ctx.instructions?.() ?? systemInstructions(agent, project) },
-        stderr: (data: string) => {
-          this.stderrTail = (this.stderrTail + data).slice(-2000);
-        },
+    const options: Options = {
+      cwd: this.ctx.cwd,
+      additionalDirectories: directories.length ? directories : undefined,
+      model: agent.model || undefined,
+      effort: (agent.effort || undefined) as EffortLevel | undefined,
+      settings: agent.serviceTier === 'fast' ? { fastMode: true } : undefined,
+      permissionMode: policy.permissionMode,
+      ...(policy.tools ? { tools: policy.tools, disallowedTools: policy.disallowedTools } : {}),
+      allowDangerouslySkipPermissions: this.startedWithBypass || undefined,
+      canUseTool: this.canUseTool,
+      // soul.md, memory.md and the dream records are off limits to edit tools in every mode.
+      hooks: { PreToolUse: [{ matcher: Object.keys(EDIT_TOOLS).join('|'), hooks: [this.guardOwnFiles] }, { matcher: 'Bash', hooks: [this.guardPushCheck] }] },
+      // git in the agent's shell runs PodCode's push check (server/pushGuard.ts, ALL-D9).
+      env: pushGuardEnv(process.env) as Record<string, string>,
+      // Load CLAUDE.md, settings and plugins like a normal Claude Code session...
+      settingSources: ['user', 'project', 'local'],
+      // ...but skip MCP servers unless asked: they can add ~200k tokens of tool definitions.
+      strictMcpConfig: policy.strictMcpConfig,
+      // The comms tools only reach the IDE, so they run without a permission prompt.
+      mcpServers: this.ctx.commsToken ? { [COMMS_SERVER]: commsMcpConfig(this.ctx.commsToken, agent.role === 'super', hasEyes(agent.role)) } : undefined,
+      allowedTools: policy.allowedTools,
+      resume: agent.sessionId ?? undefined,
+      pathToClaudeCodeExecutable: this.ctx.binPath ?? undefined,
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: this.ctx.instructions?.() ?? systemInstructions(agent, project) },
+      stderr: (data: string) => {
+        this.stderrTail = (this.stderrTail + data).slice(-2000);
       },
-    });
+    };
+    this.started = options;
+    const q = this.query({ prompt: input, options });
     this.q = q;
     this.input = input;
     void this.consume(q);
