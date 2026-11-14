@@ -14,9 +14,8 @@ import { continuesGroup, seenBaseline, type Thread } from '../threads.ts';
 import { Markdown } from '../ui/Markdown.tsx';
 import { ChipButton, cx } from '../ui/common.tsx';
 import { Bot, Chatting, ChevronDown, CircleAlert, Clock, MessageSquare } from '../mono/icons.tsx';
-import { StatusMark } from '../ui/StatusMark.tsx';
+import { StatusMark, StatusText } from '../ui/StatusMark.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
-import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { channelAttachmentUrl } from '../api.ts';
 import { PostImages } from './ComposerImages.tsx';
@@ -55,10 +54,12 @@ export function Deliveries({ to, agents }: { to: ChannelDelivery[]; agents: Agen
         <span className="text-content/60">{to.length} agents</span>
         {needYou ? <span className="text-warning">{needYou} need you</span> : null}
         {counts.map(([status, n]) => (
-          <span key={status} className={`inline-flex items-center gap-1 ${status === 'failed' ? 'text-danger' : status === 'stopped' ? 'text-content/35' : 'text-content/50'}`}>
-            {status === 'working' ? <TerminalSpinner className={SPINNER} /> : null}
-            {n} {DELIVERY_LABEL[status].toLowerCase()}
-          </span>
+          // Working is the shared pending mark and its words (ACH-D45, ACH-44), as in Comms.
+          status === 'working' ? <StatusText key={status} state="pending">{n} {DELIVERY_LABEL[status].toLowerCase()}</StatusText> : (
+            <span key={status} className={`inline-flex items-center gap-1 ${status === 'failed' ? 'text-danger' : status === 'stopped' ? 'text-content/35' : 'text-content/50'}`}>
+              {n} {DELIVERY_LABEL[status].toLowerCase()}
+            </span>
+          )
         ))}
         <button type="button" onClick={() => setExpanded(true)} className="rounded text-content/55 hover:text-content">Show everyone</button>
       </span>
@@ -82,8 +83,9 @@ export function Deliveries({ to, agents }: { to: ChannelDelivery[]; agents: Agen
           >
             {agent ? <AgentAvatar agent={agent} className="size-3.5" /> : null}
             <span>{d.name}</span>
-            {d.status === 'working' && !needsYou ? <TerminalSpinner className={SPINNER} /> : null}
-            <span className={tone}>{needsYou ? 'Needs you' : DELIVERY_LABEL[d.status]}</span>
+            {d.status === 'working' && !needsYou
+              ? <StatusText state="pending">{DELIVERY_LABEL[d.status]}</StatusText>
+              : <span className={tone}>{needsYou ? 'Needs you' : DELIVERY_LABEL[d.status]}</span>}
           </button>
         );
       })}
