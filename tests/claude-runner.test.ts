@@ -399,7 +399,8 @@ test('SuperAgent main reads are pre-approved only in its scoped roots; writes st
   ] as const) {
     const result = await sensitive.hooks[0]({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input,
       tool_use_id: 't', session_id: 's', transcript_path: '', cwd: '/work/super' } as never, 't', { signal: new AbortController().signal });
-    assert.equal('hookSpecificOutput' in result ? result.hookSpecificOutput?.permissionDecision : undefined, 'ask', `${tool}: saved allow rules cannot skip approval`);
+    const specific = 'hookSpecificOutput' in result ? result.hookSpecificOutput : undefined;
+    assert.equal(specific?.hookEventName === 'PreToolUse' ? specific.permissionDecision : undefined, 'ask', `${tool}: saved allow rules cannot skip approval`);
   }
   const beforeFetch = approvals.length;
   for (let i = 0; i < 2; i++) assert.equal((await decide('WebFetch', { url: 'https://example.invalid/page' },
