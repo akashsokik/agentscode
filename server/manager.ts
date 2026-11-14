@@ -48,7 +48,7 @@ import { isIdeCommand } from '../shared/commands.ts';
 import { injectSkillPrompt, skillNamesInText, type ComposerCommand } from '../shared/composer.ts';
 import { commandBody, commandsFor, type DiscoveredCommand } from './skills.ts';
 import { dropContextWindow, mergeContextUsage, sameContextUsage } from '../shared/contextUsage.ts';
-import { ClaudeRunner } from './agents/claude.ts';
+import { ClaudeRunner, superSideTools } from './agents/claude.ts';
 import { CodexRunner } from './agents/codex.ts';
 import { OrcacodeRunner } from './agents/orcacode.ts';
 import { clip } from './agents/describe.ts';
@@ -60,7 +60,7 @@ import { AgentHomes, capMemory, MEMORY_TEXT_LIMIT, MEMORY_WHY_LIMIT, SOUL_LIMIT,
 import { Attachments } from './attachments.ts';
 import { ScopedRunner, type ExecutionContext } from './agents/scoped.ts';
 import { Channels } from './comms/channels.ts';
-import { Mailbox } from './comms/mailbox.ts';
+import { Mailbox, type SideAnswer } from './comms/mailbox.ts';
 import {
   addIssueInput, listIssuesInput, type ListIssuesInput, type UpdateIssueInput, agentCommandInput, proposeRoutineInput, askUserInput, completeIssueInput, updateIssueInput, BROWSER_TOOLS, browserInputs, COMMS_TOOLS, createAgentInput, createChannelInput, readTranscriptInput, SUPER_BROWSER_TOOLS,
   SUPER_TOOLS, canonicalTool, takeActionInput, type TakeActionInput, updateAgentInput, updateChannelInput, walkthroughInput, type BrowserTool, delegationInput, forgetInput, postInput, readChannelInput,
@@ -190,6 +190,10 @@ function createEngineRunner(ctx: RunnerContext): Runner {
 /** Owns agents, projects and the runners behind them; every change is persisted and broadcast. */
 /** How long the user's yes to an ask-first step stays good: a day (ALL-D9). */
 const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
+/** How long a side answer may take before it is dropped and the question waits for the turn's end. */
+const SIDE_ANSWER_MS = 3 * 60 * 1000;
+/** Side answers kept for the session's next turn; older ones are in the messages (read_messages). */
+const SIDE_NOTES_MAX = 20;
 /** An approval is for one task text exactly: a hash of it, kept with the question. */
 const taskHash = (task: string | undefined) => (task?.trim() ? createHash('sha256').update(task.trim()).digest('hex').slice(0, 16) : '');
 
@@ -242,6 +246,8 @@ export class AgentManager {
   private models: Record<EngineKind, EngineModels> = { claude: emptyModels('claude'), codex: emptyModels('codex'), orcacode: emptyModels('orcacode') };
   /** Claude reports cost cumulatively per process; remember the last figure to get each turn's share. */
   private processCost = new Map<string, number>();
+  /** Answers the SuperAgent gave beside a turn, which its session has not seen: its next turn is told. */
+  private sideNotes = new Map<string, string[]>();
   private shuttingDown = false;
 
   /** The desktop app's browser, for agents' browser_* tools (server/browserBridge.ts). */
@@ -349,6 +355,8 @@ export class AgentManager {
         if (reason) this.watcher.noteHeld(message.id, reason);
         return reason;
       },
+      side: (id, message, prompt) => this.sideAnswer(id, message, prompt),
+      sideSettled: (id, message, reply) => this.sideSettled(id, message, reply),
       // ALL-D2 applies to user turns given to any teammate, not only the SuperAgent.
       userTurn: id => this.store.agents.get(id)?.currentTask?.source === 'user',
       changed: message => this.publishMessage(message),
@@ -1496,7 +1504,7 @@ export class AgentManager {
           commsToken,
           // Fresh team context, and any section of the instructions that changed since the session saw it.
           preparePrompt: text => {
-            const prepared = this.mailbox.preparePrompt(agentId, text);
+            const prepared = this.withSideNotes(agentId, this.mailbox.preparePrompt(agentId, text));
             const live = this.agent(agentId);
             const context = this.promptContext(live);
             const sections = contextSections(live, view(), context);
@@ -2399,6 +2407,64 @@ export class AgentManager {
   private mailHold(conversation: Conversation | undefined): string | null {
     // Work you asked for always goes, past the daily budget too: the caps stop only what it starts on its own.
     return conversation?.userStarted ? null : this.watcher.held();
+  }
+
+  /**
+   * A teammate's question reached the SuperAgent while it is in a turn: answer it now from a copy of
+   * its session (a Claude Code fork that reads its whole history from the prompt cache), so the
+   * teammate does not wait for the turn to end. The copy can only read; anything that needs an
+   * action stays queued for the SuperAgent's own turn. Null when it cannot be done now. The same
+   * limits as a mail turn apply (the mailbox checks hold first), and it is counted the same way:
+   * against the wake budget and the daily budget unless it is work the user asked for (ALL-D2).
+   */
+  private sideAnswer(id: string, message: PeerMessage, prompt: string): Promise<SideAnswer> | null {
+    if (id !== this.superId() || process.env.PODCODE_SIDE_ANSWERS === '0') return null;
+    const agent = this.store.agents.get(id);
+    const runner = this.runners.get(id);
+    if (!agent || agent.engine !== 'claude' || !runner?.side) return null;
+    const controller = new AbortController();
+    const run = runner.side(prompt, { allowedTools: superSideTools(), signal: controller.signal });
+    if (!run) return null;
+    const userWork = this.userWork(message.id);
+    if (!userWork) this.superStore.noteWake();
+    const timer = setTimeout(() => controller.abort(), SIDE_ANSWER_MS);
+    timer.unref?.();
+    return run.then(result => {
+      clearTimeout(timer);
+      if (typeof result.costUsd === 'number' && result.costUsd > 0) {
+        const live = this.store.agents.get(id);
+        if (live) {
+          live.costUsd += result.costUsd;
+          this.emitAgent(live);
+        }
+        if (!userWork) this.superStore.addAutonomousCost(result.costUsd);
+      }
+      if (!result.ok) console.warn(`[side] ${agent.name} could not answer ${message.fromName} beside its turn: ${result.error ?? 'no answer'}`);
+      return { ok: result.ok, text: result.text, error: result.error };
+    });
+  }
+
+  /** A side answer went out: show it in the transcript, and keep a note for the session, which did not see it. */
+  private sideSettled(id: string, message: PeerMessage, reply: PeerMessage | null): void {
+    if (!reply || !this.store.agents.has(id)) return;
+    const line = (text: string, max: number) => clip(text.replace(/\s+/g, ' ').trim(), max);
+    this.addEntry(id, { id: randomUUID(), kind: 'system', text: `Answered ${message.fromName} beside this turn: ${line(reply.text, 300)}` });
+    const notes = this.sideNotes.get(id) ?? [];
+    notes.push(`- ${message.fromName} (${message.fromAgentId}) asked (message ${message.id}): ${line(message.text, 600)}\n  You answered: ${line(reply.text, 1200)}`);
+    this.sideNotes.set(id, notes.slice(-SIDE_NOTES_MAX));
+  }
+
+  /** Put the side answers given since the session's last turn ahead of this one, once. */
+  private withSideNotes(id: string, text: string): string {
+    const notes = this.sideNotes.get(id);
+    if (!notes?.length) return text;
+    this.sideNotes.delete(id);
+    return [
+      'While you were in an earlier turn, PodCode answered these teammate questions from a copy of your session, so the teammates did not wait. They are not in your history. The answers were sent as your replies: stand by them, or correct one with send_message if it was wrong.',
+      notes.join('\n'),
+      '\n---\n',
+      text,
+    ].join('\n');
   }
 
   /** The SuperAgent is handling mail about work the user asked for (a report or reply in such a conversation). */

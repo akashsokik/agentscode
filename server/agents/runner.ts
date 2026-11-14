@@ -28,6 +28,24 @@ export interface ApprovalRequest {
   plan?: string;
 }
 
+/**
+ * An answer given beside a running turn (ACH side answers): from a copy of the agent's session, so
+ * the question does not wait for the turn to end. `text` is the copy's final message.
+ */
+export interface SideResult {
+  ok: boolean;
+  text: string;
+  error?: string;
+  costUsd?: number;
+  usage?: TurnUsage;
+}
+
+export interface SideOptions {
+  /** The only tools the copy may call, by their full names; every other call is refused. */
+  allowedTools: string[];
+  signal?: AbortSignal;
+}
+
 export type EntryDraft = Omit<Entry, 'agentId' | 'ts'> & { ts?: number };
 
 /** An image the user attached, as a stored file the engine reads when the turn starts. */
@@ -103,6 +121,12 @@ export interface Runner {
    * commands; undefined when no session is running or the engine cannot say.
    */
   commands?(): Promise<RunnerCommand[] | undefined>;
+  /**
+   * Answer one prompt from a copy (fork) of the running session while its turn goes on. The copy
+   * starts with the session's whole history, may only call `allowedTools`, and leaves the session
+   * itself untouched. Null when it cannot be done now: no session yet, or an engine without forks.
+   */
+  side?(prompt: string, options: SideOptions): Promise<SideResult> | null;
 }
 
 export interface RunnerCommand {
