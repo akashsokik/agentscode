@@ -9,7 +9,9 @@ import type { RunnerHooks, SideOptions, SideResult } from '../server/agents/runn
 import { ScopedRunner } from '../server/agents/scoped.ts';
 import { Mailbox, SIDE_DEFER, SIDE_LIMIT, sidePrompt, type SideAnswer } from '../server/comms/mailbox.ts';
 import { COMMS_SERVER } from '../server/config.ts';
+import { SIDE_ANSWER_MS } from '../server/manager.ts';
 import { Store } from '../server/store.ts';
+import { SuperStore } from '../server/superAgent.ts';
 import { FakeRunner, harness, settle, tempDir } from './helpers.ts';
 
 function agent(id: string, overrides: Partial<Agent> = {}): Agent {
@@ -38,6 +40,7 @@ function setup(options: { side?: boolean; hold?: (message: PeerMessage) => strin
     changed: () => {},
     conversationChanged: () => {},
     hold: (_id, message) => options.hold?.(message) ?? null,
+    inChannel: () => true,
     side: (id, message, prompt) => {
       if (id !== 's' || !available) return null;
       return new Promise<SideAnswer>(resolve => asked.push({ message, prompt, answer: resolve }));
@@ -98,13 +101,63 @@ test('two teammates asking at different times are both answered while the turn r
 test('only plain questions are answered beside a turn: delegations, reports, channel mentions and news wait', async () => {
   const t = setup();
   t.store.agents.get('a')!.role = 'lead';
+  // The SuperAgent handed c a task while it was free; c reports once the SuperAgent is busy again.
+  const handed = t.mailbox.delegate('s', 'c', { kind: 'implementation', task: 'Build it.', acceptanceCriteria: 'Built.' });
+  await settle();
   t.busy.add('s');
   const task = t.mailbox.delegate('a', 's', { kind: 'implementation', task: 'Coordinate this.', acceptanceCriteria: 'Done.' });
   const news = t.mailbox.send('b', 's', 'FYI: the build is green.', false);
+  const report = t.mailbox.report('c', handed.id, { outcome: 'done', summary: 'Built.', evidence: 'Ran it.' });
+  // Even a report or a mention that asked for a reply is not a plain question.
+  report.expectsReply = true;
+  const mention = t.mailbox.mention('d', 's', 'Can you look at this thread?', true, 'channel-1', 'post-1');
+  await settle();
+  t.mailbox.drain('s');
   await settle();
   assert.equal(t.asked.length, 0);
-  assert.equal(task.status, 'queued');
-  assert.equal(news.status, 'queued');
+  for (const message of [task, news, report, mention]) assert.equal(message.status, 'queued');
+});
+
+test('stopping the conversation while a side answer runs sends nothing and cancels the question', async () => {
+  const t = setup();
+  t.busy.add('s');
+  const question = t.mailbox.send('a', 's', 'Status?');
+  await settle();
+  assert.equal(question.status, 'delivering');
+  t.mailbox.stopConversation(question.conversationId);
+  t.asked[0].answer({ ok: true, text: 'All green.' });
+  await settle();
+  assert.equal(t.store.messages.filter(m => m.replyTo === question.id).length, 0, 'no reply into a stopped conversation');
+  assert.equal(t.settled[0].reply, null);
+  // Back in the queue, where the recipient's own drain cancels it with its conversation.
+  t.busy.delete('s');
+  t.mailbox.drain('s');
+  await settle();
+  assert.equal(question.status, 'cancelled');
+  assert.equal(t.delivered.filter(d => d.agentId === 's').length, 0);
+});
+
+test('a side answer stays on record until the recipient\'s session is told, across a restart', async () => {
+  const t = setup();
+  t.busy.add('s');
+  const question = t.mailbox.send('a', 's', 'Which branch?');
+  await settle();
+  t.asked[0].answer({ ok: true, text: 'main.' });
+  await settle();
+  const reply = t.store.messages.find(m => m.replyTo === question.id)!;
+  assert.equal(reply.side, 'pending');
+
+  // A restart: a new mailbox over what the store saved.
+  t.store.flush();
+  const store = new Store(t.store.dataDir);
+  store.load();
+  const restarted = new Mailbox(store, { ready: () => true, send: () => {}, changed: () => {}, conversationChanged: () => {} });
+  const told = restarted.takeSideAnswers('s', 20);
+  assert.equal(told.length, 1);
+  assert.equal(told[0].request?.text, 'Which branch?');
+  assert.equal(told[0].reply.text, 'main.');
+  assert.equal(told[0].reply.side, 'noted');
+  assert.deepEqual(restarted.takeSideAnswers('s', 20), [], 'told once');
 });
 
 test('a side answer that needs the main session puts the question back in the queue, once', async () => {
@@ -202,29 +255,37 @@ type Options = Record<string, unknown> & {
 };
 type Call = { prompt: unknown; options: Options; closed: boolean };
 
-/** The SDK stand-in: a streaming session that stays in its turn, and one-shot forks that answer. */
-function fakeQuery(calls: Call[], fork: { text?: string; fail?: boolean; hang?: boolean } = {}) {
-  return ((params: { prompt: unknown; options: Options }) => {
-    const call: Call = { prompt: params.prompt, options: params.options, closed: false };
+/** The SDK stand-in: a streaming session that stays in its turn, and forks that answer one prompt. */
+function fakeQuery(calls: Call[], fork: { text?: string; fail?: boolean; hang?: boolean; interruptible?: boolean } = {}) {
+  return ((params: { prompt: AsyncIterable<{ message: { content: unknown } }>; options: Options }) => {
+    const call: Call = { prompt: undefined, options: params.options, closed: false };
     calls.push(call);
+    let interrupted: (() => void) | undefined;
     async function* session() {
       yield { type: 'system', subtype: 'init', session_id: 'session-1' };
-      await (params.prompt as AsyncIterable<unknown>)[Symbol.asyncIterator]().next();
+      call.prompt = (await params.prompt[Symbol.asyncIterator]().next()).value?.message.content;
       yield { type: 'assistant', uuid: 'u1', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'Working on it.' }] } };
       await new Promise(() => {}); // the turn keeps running
     }
     async function* side() {
       yield { type: 'system', subtype: 'init', session_id: 'fork-1' };
+      call.prompt = (await params.prompt[Symbol.asyncIterator]().next()).value?.message.content;
       if (fork.hang) {
         const signal = (params.options.abortController as AbortController).signal;
-        await new Promise((_, reject) => signal.aborted ? reject(new Error('aborted')) : signal.addEventListener('abort', () => reject(new Error('aborted'))));
+        const how = await new Promise<string>((resolve, reject) => {
+          interrupted = () => resolve('interrupted');
+          if (signal.aborted) reject(new Error('aborted'));
+          else signal.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+        // An interrupted turn still ends with a result that says what it spent.
+        if (how === 'interrupted') { yield { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['interrupted'], total_cost_usd: 0.02 }; return; }
       }
       yield { type: 'assistant', uuid: 'f1', parent_tool_use_id: null, message: { content: [{ type: 'text', text: fork.text ?? 'Base it on main.' }] } };
       if (fork.fail) yield { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['It broke.'], total_cost_usd: 0.01 };
       else yield { type: 'result', subtype: 'success', is_error: false, result: fork.text ?? 'Base it on main.', total_cost_usd: 0.03, usage: { input_tokens: 3, output_tokens: 20, cache_read_input_tokens: 9000, cache_creation_input_tokens: 80 } };
     }
-    return Object.assign(typeof params.prompt === 'string' ? side() : session(), {
-      interrupt: async () => {}, setPermissionMode: async () => {}, setModel: async () => {},
+    return Object.assign(params.options.forkSession ? side() : session(), {
+      interrupt: async () => { if (fork.interruptible) interrupted?.(); }, setPermissionMode: async () => {}, setModel: async () => {},
       applyFlagSettings: async () => {}, close: () => { call.closed = true; }, return: async () => ({ done: true, value: undefined }),
     });
   }) as unknown as typeof query;
@@ -259,7 +320,11 @@ test('the Claude runner answers beside a turn from a fork of the session, with t
   for (const key of ['systemPrompt', 'tools', 'disallowedTools', 'mcpServers', 'model', 'cwd', 'settingSources', 'strictMcpConfig']) {
     assert.deepEqual(fork.options[key], main.options[key], key);
   }
-  assert.deepEqual(fork.options.allowedTools, superSideTools());
+  // Only the MCP read tools run unasked. A built-in read keeps Claude Code's own rules, so it
+  // works in the session's folders only: there is no allow rule for Read, Grep or Glob on any path.
+  const preapproved = fork.options.allowedTools as string[];
+  assert.deepEqual(preapproved, superSideTools().filter(name => name.startsWith('mcp__')));
+  for (const tool of ['Read', 'Grep', 'Glob']) assert.ok(!preapproved.includes(tool), tool);
   assert.ok(fork.closed, 'the fork process is closed when it has answered');
   assert.equal(main.closed, false);
 
@@ -273,7 +338,35 @@ test('the Claude runner answers beside a turn from a fork of the session, with t
     assert.equal(await decide(tool), 'deny', tool);
     assert.equal((await fork.options.canUseTool(tool, {}, {})).behavior, 'deny', tool);
   }
-  assert.equal((await fork.options.canUseTool('Read', {}, {})).behavior, 'allow');
+  // What reaches the permission callback is what the session would ask the user about, such as a
+  // read outside its folders: the copy asks nobody and is refused.
+  for (const [tool, input] of [['Read', { file_path: '/Users/someone/.ssh/id_ed25519' }], ['Grep', { pattern: 'token', path: '/Users/someone/.aws' }], ['Glob', { pattern: '**/*', path: '/Users/someone/.config' }]] as const) {
+    assert.equal((await fork.options.canUseTool(tool, input, {})).behavior, 'deny', tool);
+  }
+  runner.close();
+});
+
+test('a side answer runs on the model, effort and tier the agent has now, with its own comms credential', async () => {
+  const calls: Call[] = [];
+  const { runner, boss } = claudeRunner(calls);
+  boss.model = 'claude-opus-5-5';
+  boss.effort = 'high';
+  runner.send('Update', { summary: 'Update', source: 'system' });
+  await settle(10);
+  // The user switches mid-session: the live process follows, its start options do not.
+  boss.model = 'claude-sonnet-5-5';
+  boss.effort = 'low';
+  boss.serviceTier = 'fast';
+  await runner.side('Question?', { allowedTools: superSideTools(), commsToken: 'tok-side' })!;
+  const [main, fork] = calls;
+  assert.equal(main.options.model, 'claude-opus-5-5');
+  assert.equal(fork.options.model, 'claude-sonnet-5-5');
+  assert.equal(fork.options.effort, 'low');
+  assert.deepEqual(fork.options.settings, { fastMode: true });
+  const token = (options: Options) => (options.mcpServers as Record<string, { env: Record<string, string> }>)[COMMS_SERVER].env.PODCODE_TOKEN;
+  assert.equal(token(main.options), 'tok-s');
+  assert.equal(token(fork.options), 'tok-side');
+  assert.equal(fork.prompt, 'Question?');
   runner.close();
 });
 
@@ -286,18 +379,39 @@ test('a side answer that fails, or is stopped with the agent, reports it instead
   assert.equal(result.ok, false);
   assert.equal(result.text, '');
   assert.match(result.error ?? '', /It broke/);
+  assert.equal(result.costUsd, 0.01, 'a failed answer still reports what it spent');
   failed.runner.close();
 
-  const hanging: Call[] = [];
-  const hung = claudeRunner(hanging, { hang: true });
+  // Stopped with the agent: it is interrupted, and the result it ends with carries its cost.
+  const hung = claudeRunner([], { hang: true, interruptible: true });
   hung.runner.send('Update', { summary: 'Update', source: 'system' });
   await settle(10);
   const pending = hung.runner.side('Question?', { allowedTools: [] })!;
+  await settle(10);
   await hung.runner.interrupt();
   const stopped = await pending;
-  assert.equal(stopped.ok, false);
-  assert.equal(stopped.error, 'Stopped.');
+  assert.deepEqual({ ok: stopped.ok, error: stopped.error, costUsd: stopped.costUsd }, { ok: false, error: 'Stopped.', costUsd: 0.02 });
   hung.runner.close();
+});
+
+test('a side answer stopped by its caller that does not end on its own is ended after the grace time', async () => {
+  const grace = ClaudeRunner.sideStopGraceMs;
+  ClaudeRunner.sideStopGraceMs = 20;
+  try {
+    const calls: Call[] = [];
+    const stuck = claudeRunner(calls, { hang: true });
+    stuck.runner.send('Update', { summary: 'Update', source: 'system' });
+    await settle(10);
+    const controller = new AbortController();
+    const pending = stuck.runner.side('Question?', { allowedTools: [], signal: controller.signal })!;
+    await settle(10);
+    controller.abort();
+    const stopped = await pending;
+    assert.equal(stopped.ok, false);
+    assert.equal(stopped.error, 'Stopped.');
+    assert.ok(calls[1].closed);
+    stuck.runner.close();
+  } finally { ClaudeRunner.sideStopGraceMs = grace; }
 });
 
 test('the scoped runner passes a side answer to the provider only while a turn is running', async () => {
@@ -341,7 +455,8 @@ async function team() {
     new Promise<SideResult>(resolve => sides.push({ prompt, options, answer: resolve }));
   const call = (id: string, tool: string, args: Record<string, unknown>) => h.manager.commsTool(h.runner(id).ctx.commsToken!, tool, args);
   const entries = (id: string): Entry[] => h.store.readEntries(id, 200);
-  return { ...h, dev, other, sup, sides, call, entries };
+  const wakesBefore = new SuperStore(h.store.dataDir).wakesSince(Date.now() - 3_600_000);
+  return { ...h, dev, other, sup, sides, call, entries, wakesBefore };
 }
 
 test('the SuperAgent answers a teammate who asks while it is mid-turn, and its next turn is told', async () => {
@@ -356,6 +471,13 @@ test('the SuperAgent answers a teammate who asks while it is mid-turn, and its n
 
     assert.equal(t.sides.length, 1, 'answered beside the turn, not queued behind it');
     assert.deepEqual(t.sides[0].options.allowedTools, superSideTools());
+    // The copy's own credential reaches the tools that read, as the SuperAgent, and nothing else.
+    const sideToken = t.sides[0].options.commsToken!;
+    assert.notEqual(sideToken, t.runner(t.sup.id).ctx.commsToken);
+    assert.ok(Array.isArray(await t.manager.commsTool(sideToken, 'list_agents', {})));
+    for (const [tool, args] of [['send_message', { to_agent_id: t.dev.id, text: 'Hi.' }], ['reply', { message_id: question.id, text: 'Hi.' }], ['add_issue', { text: 'New issue' }], ['ask_user', { question: 'May I?' }], ['decision_add', { title: 'x', body: 'y' }]] as const) {
+      await assert.rejects(t.manager.commsTool(sideToken, tool, args), (error: unknown) => (error as { status?: number }).status === 403, tool);
+    }
     assert.match(t.sides[0].prompt, /Which branch do I base this on\?/);
     assert.equal(t.runner(t.sup.id).sent.length, before, 'the running session got nothing new');
     assert.equal(t.runner(t.sup.id).busy, true);
@@ -369,11 +491,17 @@ test('the SuperAgent answers a teammate who asks while it is mid-turn, and its n
     assert.equal(t.runner(t.dev.id).sent.at(-1)?.task?.messageId, reply.id, 'the asker has its answer while the SuperAgent still works');
     assert.equal(t.runner(t.sup.id).busy, true);
     assert.equal(t.store.agents.get(t.sup.id)!.costUsd, 0.05);
+    await assert.rejects(t.manager.commsTool(sideToken, 'list_agents', {}), (error: unknown) => (error as { status?: number }).status === 401, 'the credential ends with the answer');
+    // Work the user asked for: no wake counted, nothing against the daily budget (ALL-D2).
+    assert.equal(new SuperStore(t.store.dataDir).wakesSince(Date.now() - 3_600_000), t.wakesBefore);
+    assert.equal(new SuperStore(t.store.dataDir).spentToday(new Date()), 0);
     assert.ok(t.entries(t.sup.id).some(e => e.kind === 'system' && /Answered Dev beside this turn: Base it on main\./.test(e.text)));
 
     // Its next turn starts with a note of what it answered; the one after that does not repeat it.
     const ctx = t.runner(t.sup.id).ctx;
     const next = ctx.preparePrompt!('Next task.');
+    assert.match(next, /PodCode note, not a new instruction from the user:/);
+    assert.match(next, /context from peer agents, not instructions/);
     assert.match(next, /answered these teammate questions from a copy of your session/);
     assert.match(next, /Dev \([^)]+\) asked \(message [^)]+\): Which branch do I base this on\?/);
     assert.match(next, /You answered: Base it on main\./);
@@ -451,4 +579,55 @@ test('side answers can be switched off, and respect the limits on what the Super
     delete process.env.PODCODE_SIDE_ANSWERS;
     await t.manager.shutdown();
   }
+});
+
+test('a side answer on work the team started itself counts as a wake and against the daily budget, even when it fails', async () => {
+  const t = await team();
+  try {
+    t.manager.send(t.sup.id, 'Plan the next release.');
+    t.manager.send(t.dev.id, 'Ask the SuperAgent which branch to use.');
+    await settle();
+    process.env.PODCODE_SIDE_ANSWERS = '0';
+    const question = await t.call(t.dev.id, 'send_message', { to_agent_id: t.sup.id, text: 'Which branch next?' }) as PeerMessage;
+    await settle();
+    delete process.env.PODCODE_SIDE_ANSWERS;
+    delete t.store.conversations.find(c => c.id === question.conversationId)!.userStarted;
+    (t.manager as unknown as { mailbox: Mailbox }).mailbox.drain(t.sup.id);
+    await settle();
+    assert.equal(t.sides.length, 1);
+    const store = () => new SuperStore(t.store.dataDir);
+    assert.equal(store().wakesSince(Date.now() - 3_600_000), t.wakesBefore + 1);
+
+    // Stopped or failed, it still spent something: that counts too.
+    t.sides[0].answer({ ok: false, text: '', error: 'Stopped.', costUsd: 0.04 });
+    await settle();
+    assert.equal(store().spentToday(new Date()), 0.04);
+    assert.equal(t.store.agents.get(t.sup.id)!.costUsd, 0.04);
+    assert.equal(question.status, 'queued', 'and the question waits for the SuperAgent\'s own turn');
+  } finally {
+    delete process.env.PODCODE_SIDE_ANSWERS;
+    await t.manager.shutdown();
+  }
+});
+
+test('a side answer that takes too long is stopped, and the question waits for the turn', async t0 => {
+  const t = await team();
+  try {
+    t.manager.send(t.sup.id, 'Plan the next release.');
+    t.manager.send(t.dev.id, 'Ask the SuperAgent which branch to use.');
+    await settle();
+    t0.mock.timers.enable({ apis: ['setTimeout'] });
+    const question = await t.call(t.dev.id, 'send_message', { to_agent_id: t.sup.id, text: 'Which branch next?' }) as PeerMessage;
+    await settle();
+    const signal = t.sides[0].options.signal!;
+    signal.addEventListener('abort', () => t.sides[0].answer({ ok: false, text: '', error: 'Stopped.' }));
+    t0.mock.timers.tick(SIDE_ANSWER_MS - 1);
+    assert.equal(signal.aborted, false);
+    t0.mock.timers.tick(1);
+    assert.equal(signal.aborted, true);
+    t0.mock.timers.reset();
+    await settle();
+    assert.equal(question.status, 'queued');
+    assert.equal(t.store.messages.filter(m => m.replyTo === question.id).length, 0);
+  } finally { await t.manager.shutdown(); }
 });

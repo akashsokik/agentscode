@@ -169,6 +169,9 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
   }
 }
 
+/** One side answer in flight (ClaudeRunner.side). */
+interface Side { q: Query; controller: AbortController; stopped: boolean; grace: ReturnType<typeof setTimeout> | null }
+
 type UserContent = SDKUserMessage['message']['content'];
 type UserBlock = Extract<UserContent, readonly unknown[]>[number];
 
@@ -217,7 +220,9 @@ export class ClaudeRunner implements Runner {
   /** What the running process was started with: a side answer repeats it, so its prompt matches the session's cache. */
   private started: Options | null = null;
   /** Side answers running now, so a stop or a close ends them too. */
-  private sides = new Set<AbortController>();
+  private sides = new Set<Side>();
+  /** How long a stopped side answer has to report its cost before its process is ended. */
+  static sideStopGraceMs = 5000;
 
   constructor(ctx: RunnerContext, queryFactory: typeof query = query) {
     this.ctx = ctx;
@@ -256,71 +261,99 @@ export class ClaudeRunner implements Runner {
    * history (so the prompt cache is reused), nothing saved, and only `allowedTools` may be called.
    * Checked against Claude Code: a fork taken mid-turn, even inside a tool call, answers on its own
    * and leaves the session as it was.
+   *
+   * Nobody is asked anything. A hook refuses every tool that is not on the list. Of the listed
+   * tools only the MCP ones are pre-approved: a built-in read goes through Claude Code's own rules,
+   * so it works inside the session's folders and anything further reaches the permission callback,
+   * which refuses it (the session itself would ask the user there).
    */
   side(prompt: string, options: SideOptions): Promise<SideResult> | null {
-    const sessionId = this.ctx.agent().sessionId;
+    const agent = this.ctx.agent();
+    const sessionId = agent.sessionId;
     if (!this.q || !this.turnActive || !this.started || !sessionId || options.signal?.aborted) return null;
     const controller = new AbortController();
-    this.sides.add(controller);
-    const onAbort = () => controller.abort();
-    options.signal?.addEventListener('abort', onAbort, { once: true });
     const allowed = new Set(options.allowedTools);
-    const refusal = 'This is a side answer beside your running turn: you can only read here. If the answer needs this, say so as your instructions for side answers tell you.';
+    const refusal = 'This is a side answer beside your running turn: you can only read here, and only in your own folders. If the answer needs this, say so as your instructions for side answers tell you.';
     // A hook, so it holds in every permission mode and before any allow rule of the user's.
     const guard: HookCallback = async input => {
       if (input.hook_event_name !== 'PreToolUse' || allowed.has(input.tool_name)) return {};
       return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: refusal } };
     };
+    // Streaming input, as the session itself uses: only then can the copy be interrupted and still report its cost.
+    const input = new InputQueue();
+    input.push({ type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null });
     let stderr = '';
+    const servers = this.started.mcpServers;
     const q = this.query({
-      prompt,
+      prompt: input,
       options: {
         ...this.started,
+        // As the session runs now, not as its process started: the user may have switched since, and the cache is per model.
+        model: agent.model || undefined,
+        effort: (agent.effort || undefined) as EffortLevel | undefined,
+        settings: agent.serviceTier === 'fast' ? { fastMode: true } : undefined,
         resume: sessionId,
         forkSession: true,
         // Nothing to resume later: the answer goes out as mail, and the session gets a note.
         persistSession: false,
         abortController: controller,
-        allowedTools: [...allowed],
+        allowedTools: [...allowed].filter(name => name.startsWith('mcp__')),
+        // Its own credential where the caller gives one, so the IDE can hold the copy to its tools too.
+        mcpServers: options.commsToken && servers?.[COMMS_SERVER]
+          ? { ...servers, [COMMS_SERVER]: commsMcpConfig(options.commsToken, agent.role === 'super', hasEyes(agent.role)) } : servers,
         hooks: { PreToolUse: [{ hooks: [guard] }] },
-        // Nobody is asked: what is not allowed outright is refused.
-        canUseTool: async toolName => allowed.has(toolName) ? { behavior: 'allow' } : { behavior: 'deny', message: refusal },
+        canUseTool: async () => ({ behavior: 'deny', message: refusal }),
         stderr: (data: string) => { stderr = (stderr + data).slice(-2000); },
       },
     });
-    return this.consumeSide(q).catch((err): SideResult => {
+    const side: Side = { q, controller, stopped: false, grace: null };
+    this.sides.add(side);
+    const onAbort = () => this.stopSide(side);
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    return this.consumeSide(side).catch((err): SideResult => {
       const error = err instanceof Error ? err.message : String(err);
       const tail = stderr.trim();
-      return { ok: false, text: '', error: controller.signal.aborted ? 'Stopped.' : tail && !error.includes(tail) ? `${error}\n${clip(tail, 600)}` : error };
+      return { ok: false, text: '', error: side.stopped ? 'Stopped.' : tail && !error.includes(tail) ? `${error}\n${clip(tail, 600)}` : error };
     }).finally(() => {
-      this.sides.delete(controller);
+      this.sides.delete(side);
+      if (side.grace) clearTimeout(side.grace);
       options.signal?.removeEventListener('abort', onAbort);
+      input.end();
       try { q.close(); } catch { /* already gone */ }
     });
   }
 
-  private async consumeSide(q: Query): Promise<SideResult> {
+  private async consumeSide(side: Side): Promise<SideResult> {
     let last = '';
-    for await (const message of q) {
+    for await (const message of side.q) {
       if (message.type === 'assistant' && !message.parent_tool_use_id) {
         for (const block of message.message.content) if (block.type === 'text' && block.text.trim()) last = block.text;
       } else if (message.type === 'result') {
-        const ok = message.subtype === 'success' && !message.is_error;
+        const ok = message.subtype === 'success' && !message.is_error && !side.stopped;
         return {
           ok,
           text: ok ? (message.subtype === 'success' && message.result) || last : '',
-          error: ok ? undefined : message.subtype === 'success' ? message.result : message.errors.join('\n') || message.subtype,
+          error: ok ? undefined : side.stopped ? 'Stopped.' : message.subtype === 'success' ? message.result : message.errors.join('\n') || message.subtype,
+          // Also for one that was stopped or failed: what it spent still counts.
           costUsd: message.total_cost_usd,
           usage: claudeTurnUsage(message.usage),
         };
       }
     }
-    return { ok: false, text: '', error: 'The copy of the session ended without an answer.' };
+    return { ok: false, text: '', error: side.stopped ? 'Stopped.' : 'The copy of the session ended without an answer.' };
+  }
+
+  /** Interrupt a side answer so it still reports what it spent; end its process if it does not answer in time. */
+  private stopSide(side: Side): void {
+    if (side.stopped) return;
+    side.stopped = true;
+    void Promise.resolve().then(() => side.q.interrupt()).catch(() => { /* gone already */ });
+    side.grace = setTimeout(() => side.controller.abort(), ClaudeRunner.sideStopGraceMs);
+    side.grace.unref?.();
   }
 
   private stopSides(): void {
-    for (const controller of this.sides) controller.abort();
-    this.sides.clear();
+    for (const side of [...this.sides]) this.stopSide(side);
   }
 
   async interrupt(): Promise<void> {

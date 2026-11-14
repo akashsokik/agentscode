@@ -602,6 +602,11 @@ export interface PeerMessage {
   postId?: string;
   /** It was being handled when PodCode restarted, so it is delivered once more; the recipient may have started on it. */
   redelivered?: boolean;
+  /**
+   * A reply sent in the sender's name from a copy of its session, beside its running turn. Its own
+   * session has not seen it: "pending" until that session's next turn is told, then "noted".
+   */
+  side?: 'pending' | 'noted';
 }
 
 /** A chain of peer messages started by one task. All its messages share one budget. */

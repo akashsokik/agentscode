@@ -434,7 +434,8 @@ its own commands (`create_agent`, `update_agent`, `new_session`, `stop_agent`, `
   user messages already queued for it. An idle recipient starts right away.
 - The SuperAgent does not make a teammate wait for its turn to end. A plain question that reaches it
   mid-turn is answered straight away from a copy of its session (a Claude Code fork, which reads the
-  session's history from the prompt cache). The copy can only read; a question that needs an action,
+  session's history from the prompt cache). The copy can only read, and only in the SuperAgent's own
+  folders, without asking you anything; a question that needs more, an action,
   a delegation or a report still waits for the SuperAgent's own turn, and its next turn is told what
   the copy answered. Set `PODCODE_SIDE_ANSWERS=0` to turn this off.
 - Peer text is framed as context from a teammate, not as instructions from you. Agents keep their own

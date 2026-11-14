@@ -40,7 +40,7 @@ export const SIDE_LIMIT = 2;
 /** What a side answer says, alone, when the question needs the agent's own turn. */
 export const SIDE_DEFER = 'NEEDS_MAIN_SESSION';
 
-type Metadata = Pick<PeerMessage, 'delegation' | 'report' | 'channelId' | 'postId'>;
+type Metadata = Pick<PeerMessage, 'delegation' | 'report' | 'channelId' | 'postId' | 'side'>;
 
 /**
  * Durable agent-to-agent mail with one peer turn at a time per recipient. Delivery runs a
@@ -168,6 +168,19 @@ export class Mailbox {
   }
 
   activeMessage(id: string): PeerMessage | undefined { return this.active.get(id); }
+
+  /**
+   * The side answers sent in this agent's name that its session has not been told of yet, oldest
+   * first, each with the message it answered; they are marked as told. Kept on the messages, so a
+   * restart between the answer and the agent's next turn does not lose them.
+   */
+  takeSideAnswers(id: string, max: number): { request: PeerMessage | undefined; reply: PeerMessage }[] {
+    const pending = this.store.messages.filter(m => m.fromAgentId === id && m.side === 'pending');
+    if (!pending.length) return [];
+    for (const reply of pending) reply.side = 'noted';
+    this.store.save();
+    return pending.slice(-max).map(reply => ({ request: this.store.messages.find(m => m.id === reply.replyTo), reply }));
+  }
 
   history(id: string): PeerMessage[] {
     this.agent(id);
@@ -425,7 +438,7 @@ export class Mailbox {
     let reason = !result.ok ? result.error || 'The side answer failed.' : deferred ? 'It needs the agent\'s own turn.' : '';
     if (result.ok && !deferred) {
       try {
-        reply = this.enqueue(id, message.fromAgentId, text.slice(0, 10_000), false, message.id);
+        reply = this.enqueue(id, message.fromAgentId, text.slice(0, 10_000), false, message.id, { side: 'pending' });
       } catch (error) {
         reason = (error as Error).message;
       }

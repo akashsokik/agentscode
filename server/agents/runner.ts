@@ -41,8 +41,14 @@ export interface SideResult {
 }
 
 export interface SideOptions {
-  /** The only tools the copy may call, by their full names; every other call is refused. */
+  /**
+   * The only tools the copy may call, by their full names; every other call is refused. MCP tools
+   * on it run unasked. Built-in tools on it keep the engine's own rules: a read works inside the
+   * session's folders, and one that would need the user's approval is refused.
+   */
   allowedTools: string[];
+  /** A comms credential for the copy alone, so the IDE can tell its calls from the session's. */
+  commsToken?: string;
   signal?: AbortSignal;
 }
 
