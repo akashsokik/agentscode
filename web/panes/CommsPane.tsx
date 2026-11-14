@@ -346,7 +346,6 @@ function ThreadView({ thread, state, title, agents, now }: { thread: CommsThread
           {thread.messages.map((message, i) => (
             <TimelineStop
               key={message.id}
-              card
               fresh={!initial.current?.has(message.id)}
               first={i === 0}
               last={i === stops - 1}
