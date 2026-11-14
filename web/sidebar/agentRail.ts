@@ -65,3 +65,15 @@ export function agentsSummary(agents: readonly Pick<Agent, 'id' | 'status'>[], p
   const needs = agents.filter(a => a.status === 'waiting' || pendingIds.has(a.id)).length;
   return { needsYou: needs, working: agents.some(a => a.status === 'working' && !pendingIds.has(a.id)) };
 }
+
+/**
+ * The one slot at the right of an Agents row (ACH-49): a status mark while the agent needs you,
+ * works or failed (ACH-D45), with its words for the tooltip and screen readers; otherwise no mark,
+ * and the row shows how long ago it was active. Pure, tested.
+ */
+export function agentRowSlot(agent: Pick<Agent, 'status' | 'turnStartedAt' | 'lastActiveAt'>, pending: boolean, ago: (ts: number) => string): { state: 'warn' | 'pending' | 'fail' | null; words: string } {
+  if (pending || agent.status === 'waiting') return { state: 'warn', words: 'Needs you' };
+  if (agent.status === 'working') return { state: 'pending', words: agent.turnStartedAt ? `Working for ${ago(agent.turnStartedAt)}` : 'Working' };
+  if (agent.status === 'error') return { state: 'fail', words: 'Failed' };
+  return { state: null, words: `Active ${ago(agent.lastActiveAt)} ago` };
+}
