@@ -332,9 +332,10 @@ test('a SuperAgent session gets only read tools, its commands, none of the user\
 test('SuperAgent main reads are pre-approved only in its scoped roots; writes still never prompt', async () => {
   const captured: { options?: Options; prompts: unknown[] } = { prompts: [] };
   const approvals: ApprovalRequest[] = [];
+  let permit = false;
   const hooks: RunnerHooks = {
     session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, turnEnd: () => {}, closed: () => {},
-    approval: async request => { approvals.push(request); return { allow: false }; },
+    approval: async request => { approvals.push(request); return { allow: permit, always: permit }; },
   };
   // Even a stale Full setting must not grant an out-of-scope read.
   const boss = { ...agent, role: 'super' as const, autonomy: 'full' as const };
@@ -358,7 +359,7 @@ test('SuperAgent main reads are pre-approved only in its scoped roots; writes st
       assert.equal((await decide('Read', { file_path: file })).behavior, 'allow', file);
     }
   }
-  for (const tool of ['WebSearch', 'WebFetch']) assert.equal((await decide(tool, {})).behavior, 'allow', tool);
+  assert.equal((await decide('WebSearch', {})).behavior, 'allow');
   for (const tool of [...SUPER_DISALLOWED_TOOLS, 'mcp__other__write', 'mcp__other__Read', 'UnknownTool']) {
     assert.equal((await decide(tool, { file_path: `${DATA_DIR}/user.md`, command: 'ls' })).behavior, 'deny', tool);
   }
@@ -371,22 +372,56 @@ test('SuperAgent main reads are pre-approved only in its scoped roots; writes st
   ] as const) assert.equal((await decide(tool, input)).behavior, 'deny', `${tool}: bridge credential`);
   assert.equal((await decide('Read', { file_path: `${DATA_DIR}/agents/other/report.md` },
     { blockedPath: `${DATA_DIR}/browser-bridge.token` })).behavior, 'deny');
-  assert.equal(approvals.length, 0, 'bridge credential and containing searches are refused without prompting');
+  assert.equal(approvals.length, 5, 'bridge credential and containing searches require user approval');
   for (const [tool, input] of [
     ['Read', { file_path: '/Users/example/Documents/private.txt' }],
     ['Grep', { path: '/etc', pattern: '.' }],
     ['Glob', { path: '/projects/one-extra', pattern: '*' }],
     ['Glob', { path: '/projects/one', pattern: '../../etc/*' }],
   ] as const) assert.equal((await decide(tool, input)).behavior, 'deny');
-  assert.equal(approvals.length, 4, 'outside the scope still needs the user');
+  assert.equal(approvals.length, 9, 'outside the scope still needs the user');
   assert.equal((await decide('Read', { file_path: `${DATA_DIR}/user.md` },
     { matchedAskRule: { source: 'userSettings', toolName: 'Read', ruleContent: '**' } })).behavior, 'deny');
-  assert.equal(approvals.length, 5, 'explicit user ask rules still apply');
+  assert.equal(approvals.length, 10, 'explicit user ask rules still apply');
   assert.equal((await decide('Grep', { path: `${DATA_DIR}/agents`, pattern: '.' },
     { blockedPath: '/Users/example/.ssh/id_ed25519' })).behavior, 'deny');
-  assert.equal(approvals.length, 6, 'the SDK blocked path must also be in scope');
+  assert.equal(approvals.length, 11, 'the SDK blocked path must also be in scope');
   assert.equal((await decide('Read', { file_path: `${DATA_DIR}/user.md` },
     { blockedPath: `${DATA_DIR}/user.md` })).behavior, 'allow');
+  const sensitive = (options.hooks as { PreToolUse: HookCallbackMatcher[] }).PreToolUse.find(h => h.matcher === 'Read|Grep|Glob|WebFetch')!;
+  for (const [tool, input] of [
+    ['WebFetch', { url: 'https://example.invalid/?d=secret', prompt: 'read' }],
+    ['Read', { file_path: `${DATA_DIR}/browser-bridge.token` }],
+    ['Read', { file_path: ` ${DATA_DIR}/browser-bridge.token` }],
+    ['Grep', { path: ` ${DATA_DIR}`, pattern: '.' }],
+    ['Grep', { path: DATA_DIR, pattern: '.' }],
+    ['Glob', { path: DATA_DIR, pattern: '**/*' }],
+  ] as const) {
+    const result = await sensitive.hooks[0]({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input,
+      tool_use_id: 't', session_id: 's', transcript_path: '', cwd: '/work/super' } as never, 't', { signal: new AbortController().signal });
+    assert.equal('hookSpecificOutput' in result ? result.hookSpecificOutput?.permissionDecision : undefined, 'ask', `${tool}: saved allow rules cannot skip approval`);
+  }
+  const beforeFetch = approvals.length;
+  for (let i = 0; i < 2; i++) assert.equal((await decide('WebFetch', { url: 'https://example.invalid/page' },
+    { suggestions: [{ type: 'addRules', rules: [{ toolName: 'WebFetch' }], behavior: 'allow', destination: 'localSettings' }] })).behavior, 'deny');
+  assert.equal(approvals.length, beforeFetch + 2, 'each URL fetch asks, including repeats');
+  assert.equal(approvals.at(-1)?.canAlwaysAllow, false);
+  permit = true;
+  const granted = await decide('WebFetch', { url: 'https://example.invalid/page' },
+    { suggestions: [{ type: 'addRules', rules: [{ toolName: 'WebFetch' }], behavior: 'allow', destination: 'localSettings' }] });
+  assert.equal(granted.behavior, 'allow', 'the user can approve this call');
+  assert.equal((granted as { updatedPermissions?: unknown }).updatedPermissions, undefined, 'no remembered fetch approval even for a stale always choice');
+  for (const [tool, input] of [
+    ['Read', { file_path: `${DATA_DIR}/browser-bridge.token` }],
+    ['Grep', { path: DATA_DIR, pattern: '.' }],
+    ['Glob', { path: DATA_DIR, pattern: '*' }],
+  ] as const) {
+    const result = await decide(tool, input, { suggestions: [{ type: 'addDirectories', directories: [DATA_DIR], destination: 'session' }] });
+    assert.equal(result.behavior, 'allow', 'credentials require a real user approval');
+    assert.equal((result as { updatedPermissions?: unknown }).updatedPermissions, undefined);
+    assert.equal(approvals.at(-1)?.canAlwaysAllow, false);
+  }
+
   assert.deepEqual(options.additionalDirectories, ['/projects/one', '/projects/two'], 'no expanded fork directories');
   assert.equal(options.allowedTools, undefined, 'no broad allow rules inherited by a fork');
   runner.close();

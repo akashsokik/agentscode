@@ -108,10 +108,13 @@ function readTarget(tool: string, input: Record<string, unknown>, cwd: string): 
   return expanded.startsWith('~') ? null : realpath(path.resolve(cwd, expanded));
 }
 
-/** The browser bridge token authenticates as the desktop app. Never grant it through these reads,
+/** The browser bridge token authenticates as the desktop app. Never pre-approve it through reads,
  * including a search whose root contains it, or an alias to the token. */
 function bridgeCredentialRead(tool: string, input: Record<string, unknown>, cwd: string): boolean {
-  const file = readTarget(tool, input, cwd);
+  const key = tool === 'Read' ? 'file_path' : 'path';
+  const target = input[key];
+  // Sensitive reads must ask even when the CLI trims the supplied path.
+  const file = readTarget(tool, typeof target === 'string' ? { ...input, [key]: target.trim() } : input, cwd);
   const token = realpath(path.join(DATA_DIR, 'browser-bridge.token'));
   return file !== null && (file === token || (tool !== 'Read' && inside(file, token)));
 }
@@ -119,7 +122,7 @@ function bridgeCredentialRead(tool: string, input: Record<string, unknown>, cwd:
 /** Main-session read approval only. Never put these roots in additionalDirectories or allow rules:
  * side-answer forks inherit those, but must keep their narrower ACH-42 scope. */
 export function superReadAllowed(tool: string, input: Record<string, unknown>, cwd: string, roots: string[]): boolean {
-  if (tool === 'WebSearch' || tool === 'WebFetch') return true;
+  if (tool === 'WebSearch') return true;
   const file = readTarget(tool, input, cwd);
   if (file === null || bridgeCredentialRead(tool, input, cwd)) return false;
   // Glob expands braces before matching: even a '..' hidden in a brace alternative must not pass.
@@ -497,7 +500,7 @@ export class ClaudeRunner implements Runner {
       allowDangerouslySkipPermissions: this.startedWithBypass || undefined,
       canUseTool: this.canUseTool,
       // soul.md, memory.md and the dream records are off limits to edit tools in every mode.
-      hooks: { PreToolUse: [{ matcher: Object.keys(EDIT_TOOLS).join('|'), hooks: [this.guardOwnFiles] }, { matcher: 'Bash', hooks: [this.guardPushCheck] }] },
+      hooks: { PreToolUse: [{ matcher: Object.keys(EDIT_TOOLS).join('|'), hooks: [this.guardOwnFiles] }, { matcher: 'Bash', hooks: [this.guardPushCheck] }, { matcher: 'Read|Grep|Glob|WebFetch', hooks: [this.askSensitiveRead] }] },
       // git in the agent's shell runs PodCode's push check (server/pushGuard.ts, ALL-D9).
       env: pushGuardEnv(process.env) as Record<string, string>,
       // Load CLAUDE.md, settings and plugins like a normal Claude Code session...
@@ -650,6 +653,16 @@ export class ClaudeRunner implements Runner {
     }
   }
 
+  /** ACH-D67: old saved WebFetch/domain or credential rules must not skip the user. Side forks
+   * replace the main hooks entirely, keeping their own deny-only policy. */
+  private askSensitiveRead: HookCallback = async input => {
+    if (input.hook_event_name !== 'PreToolUse' || this.ctx.agent().role !== 'super') return {};
+    const sensitive = input.tool_name === 'WebFetch'
+      || bridgeCredentialRead(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, this.ctx.cwd);
+    return sensitive ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask',
+      permissionDecisionReason: 'ACH-D67: page fetches and credential reads require the user on each call.' } } : {};
+  };
+
   private guardOwnFiles: HookCallback = async input => {
     if (input.hook_event_name !== 'PreToolUse') return {};
     const problem = ownFileProblem(this.ctx.agent().home, this.ctx.cwd, input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>);
@@ -673,17 +686,16 @@ export class ClaudeRunner implements Runner {
       return { behavior: 'deny', message: 'The SuperAgent never edits or runs commands. Delegate the work to an agent.' };
     }
 
-    if (this.ctx.agent().role === 'super' && (bridgeCredentialRead(toolName, input, this.ctx.cwd)
-      || (options.blockedPath !== undefined && bridgeCredentialRead('Read', { file_path: options.blockedPath }, this.ctx.cwd)))) {
-      return { behavior: 'deny', message: 'The browser bridge credential authenticates as the desktop app. Read a specific agent folder instead.' };
-    }
+    const sensitiveRead = this.ctx.agent().role === 'super' && (toolName === 'WebFetch'
+      || bridgeCredentialRead(toolName, input, this.ctx.cwd)
+      || (options.blockedPath !== undefined && bridgeCredentialRead('Read', { file_path: options.blockedPath }, this.ctx.cwd)));
 
     if (this.ctx.agent().role === 'super' && !options.matchedAskRule) {
       const roots = [DATA_DIR, '/tmp', '/private/tmp', this.ctx.cwd, ...this.directories()];
       // The SDK may identify a different path that triggered the prompt (for example a search's
       // symlink target). Approve that too, rather than trusting only the tool's nominal root.
       const blocked = options.blockedPath;
-      if (superReadAllowed(toolName, input, this.ctx.cwd, roots)
+      if (!sensitiveRead && superReadAllowed(toolName, input, this.ctx.cwd, roots)
         && (blocked === undefined || superReadAllowed('Read', { file_path: blocked }, this.ctx.cwd, roots))) {
         return { behavior: 'allow', updatedInput: input };
       }
@@ -742,7 +754,7 @@ export class ClaudeRunner implements Runner {
         title: approvalTitle(toolName, input, this.ctx.cwd),
         detail: toolDetail(toolName, input, this.ctx.cwd),
         description: options.decisionReason || options.title || options.description || '',
-        canAlwaysAllow: !options.suppressAlwaysAllowRule && Boolean(options.suggestions?.length),
+        canAlwaysAllow: !sensitiveRead && !options.suppressAlwaysAllowRule && Boolean(options.suggestions?.length),
       },
       options.signal,
     );
@@ -750,7 +762,7 @@ export class ClaudeRunner implements Runner {
       return {
         behavior: 'allow',
         updatedInput: input,
-        updatedPermissions: decision.always ? options.suggestions : undefined,
+        updatedPermissions: decision.always && !sensitiveRead ? options.suggestions : undefined,
       };
     }
     return {
