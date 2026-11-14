@@ -7,6 +7,7 @@
 import { globalShortcut, ipcMain, Menu, nativeImage, Tray, type BrowserWindow, type IpcMainEvent, type MenuItemConstructorOptions } from 'electron';
 import { SUPER_GLOBAL_ACCELERATOR, type SuperCommand, type SuperTrayState } from '../shared/superAgent.ts';
 import type { QuickWindow } from './quickWindow.ts';
+import { blockTemplatePixels } from './trayMark.ts';
 
 interface Options {
   window: () => BrowserWindow | null;
@@ -19,24 +20,12 @@ interface Options {
 }
 
 /**
- * The menu bar icon, drawn here so nothing has to ship beside the app: PodCode's 2x2 grid, the
- * top-left and bottom-right cells solid and the others faint, as a template image macOS tints.
+ * The menu bar icon: PodCode's mark, the SuperAgent's Block (electron/trayMark.ts, ACH-D63), as a
+ * template image macOS tints for the menu bar.
  */
 function trayIcon(): Electron.NativeImage {
   const size = 36; // 18pt at 2x
-  const pad = 2;
-  const cell = 14;
-  const gap = 4;
-  const pixels = Buffer.alloc(size * size * 4);
-  const fill = (x0: number, y0: number, alpha: number) => {
-    for (let y = y0; y < y0 + cell; y++) for (let x = x0; x < x0 + cell; x++) pixels.writeUInt32BE(alpha, (y * size + x) * 4); // BGRA: black, alpha last
-  };
-  const far = pad + cell + gap;
-  fill(pad, pad, 255);
-  fill(far, far, 255);
-  fill(far, pad, 80);
-  fill(pad, far, 80);
-  const image = nativeImage.createFromBitmap(pixels, { width: size, height: size, scaleFactor: 2 });
+  const image = nativeImage.createFromBitmap(blockTemplatePixels(size), { width: size, height: size, scaleFactor: 2 });
   image.setTemplateImage(true);
   return image;
 }

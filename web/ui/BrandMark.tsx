@@ -1,15 +1,11 @@
+import { SUPER_LOOK } from '../../shared/avatar.ts';
+import { AvatarGlyph } from './Avatar.tsx';
+
 /**
- * The app's mark at 16px: Orca's 2x2 grid (top-left and bottom-right cells lit), monochrome, with
- * its two empty cells filled in dim. The app icon (build/icon.svg) and the favicon (public/favicon.svg)
- * draw the same grid.
+ * The app's mark at 16px: the SuperAgent's Block (ACH-D63), in the theme's text colour with its eyes
+ * in the page colour, still (a logo does not blink). The app icon (build/icon.svg), the favicon
+ * (public/favicon.svg) and the menu bar icon (electron/trayMark.ts) draw the same Block on a tile.
  */
 export function BrandMark() {
-  return (
-    <svg aria-hidden viewBox="0 0 16 16" className="size-4 shrink-0">
-      <rect x="2.5" y="2.5" width="5" height="5" className="fill-content" />
-      <rect x="8.5" y="2.5" width="5" height="5" className="fill-content/30" />
-      <rect x="2.5" y="8.5" width="5" height="5" className="fill-content/30" />
-      <rect x="8.5" y="8.5" width="5" height="5" className="fill-content" />
-    </svg>
-  );
+  return <AvatarGlyph look={SUPER_LOOK} animate={false} seed="podcode" className="size-4" />;
 }
