@@ -1,17 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- PodCode: Orca's mark (orcapods.ai: a 2x2 grid with the top-left and bottom-right cells lit,
-       in the same 9:2 cell-to-gap proportions), monochrome, with its two empty cells filled in dim
-       so the whole grid shows. The sidebar mark (web/ui/BrandMark.tsx) and the favicon (public/favicon.svg)
-       draw the same grid. -->
-  <defs>
-    <filter id="drop" x="-10%" y="-10%" width="120%" height="125%">
-      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.35" />
-    </filter>
-  </defs>
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="#0a0a0a" filter="url(#drop)" />
-  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="3" />
-  <rect x="254" y="254" width="232" height="232" fill="#f5f5f5" />
-  <rect x="538" y="254" width="232" height="232" fill="#f5f5f5" fill-opacity="0.28" />
-  <rect x="254" y="538" width="232" height="232" fill="#f5f5f5" fill-opacity="0.28" />
-  <rect x="538" y="538" width="232" height="232" fill="#f5f5f5" />
+  <!-- PodCode (ACH-D63): the SuperAgent's Block (shared/avatar.ts, ACH-D60) in chalk on a flat near-black
+       tile on the macOS icon grid (an 824 tile, 100 in, ~185 corners). Flat: no shadow, stroke or gradient.
+       The sidebar mark (web/ui/BrandMark.tsx), the favicon (public/favicon.svg) and the menu bar icon
+       (electron/trayMark.ts) draw the same Block. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#0a0a0a" />
+  <svg x="212" y="212" width="600" height="600" viewBox="0 0 32 32"><path d="M8.8 3.4C12.5 2.7 16.2 2.6 19.6 2.9C23.4 3.3 26.4 6.2 26.3 10.0L25.9 20.6C25.7 25.3 22.4 28.7 17.6 29.1C14.5 29.4 11.4 29.3 8.6 28.9C7.0 28.7 6.0 27.6 6.0 26.0C5.7 19.4 5.6 12.0 6.2 5.9C6.3 4.6 7.4 3.7 8.8 3.4Z" fill="#f5f5f5"/><g><g transform="rotate(4 15.8 10.8)"><rect x="12.1" y="7.6" width="2.5" height="6.4" rx="1.25" fill="#0a0a0a"/><rect x="17" y="7.6" width="2.5" height="6.4" rx="1.25" fill="#0a0a0a"/></g></g></svg>
 </svg>
