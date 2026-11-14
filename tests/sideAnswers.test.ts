@@ -631,3 +631,24 @@ test('a side answer that takes too long is stopped, and the question waits for t
     assert.equal(t.store.messages.filter(m => m.replyTo === question.id).length, 0);
   } finally { await t.manager.shutdown(); }
 });
+
+test('stopping the SuperAgent ends its side answers\' credentials at once', async () => {
+  const t = await team();
+  try {
+    t.manager.send(t.sup.id, 'Plan the next release.');
+    t.manager.send(t.dev.id, 'Ask the SuperAgent which branch to use.');
+    await settle();
+    const question = await t.call(t.dev.id, 'send_message', { to_agent_id: t.sup.id, text: 'Which branch next?' }) as PeerMessage;
+    await settle();
+    const sideToken = t.sides[0].options.commsToken!;
+    assert.ok(Array.isArray(await t.manager.commsTool(sideToken, 'read_messages', {})), 'it reads while the answer runs');
+
+    await t.manager.stop(t.sup.id);
+    // The side answer has not settled yet: its credential is gone all the same.
+    await assert.rejects(t.manager.commsTool(sideToken, 'read_messages', {}), (error: unknown) => (error as { status?: number }).status === 401);
+    assert.equal(question.status, 'cancelled');
+    t.sides[0].answer({ ok: true, text: 'Too late.' });
+    await settle();
+    assert.equal(t.store.messages.filter(m => m.replyTo === question.id).length, 0);
+  } finally { await t.manager.shutdown(); }
+});
