@@ -68,3 +68,10 @@ test('the pending chips on delegations and threads use the shared mark, with the
   assert.match(card, /working`, icon: <StatusMark state="pending" \/> \}/, 'a thread someone works on: the pending mark; its label stays in the title');
   assert.doesNotMatch(card, /<Loader\b/, 'no hand-picked loader');
 });
+
+test('a channel post\'s delivery line uses the shared pending mark, no spinner of its own (ACH-44)', () => {
+  const src = fs.readFileSync(new URL('../web/panes/ChannelPosts.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /TerminalSpinner/, 'no TerminalSpinner left in ChannelPosts');
+  assert.match(src, /<StatusText key=\{status\} state="pending">\{n\} \{DELIVERY_LABEL\[status\]\.toLowerCase\(\)\}<\/StatusText>/, 'the counts row');
+  assert.match(src, /<StatusText state="pending">\{DELIVERY_LABEL\[d\.status\]\}<\/StatusText>/, 'each agent, keeping its label');
+});
