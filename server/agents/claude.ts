@@ -104,10 +104,14 @@ export function superReadAllowed(tool: string, input: Record<string, unknown>, c
   if (!['Read', 'Grep', 'Glob'].includes(tool)) return false;
   const target = tool === 'Read' ? input.file_path : input.path ?? cwd;
   if (typeof target !== 'string' || !target || target.includes('\0')) return false;
+  // Claude expands home shorthand before reading: do the same before checking the scope.
+  const expanded = target === '~' ? os.homedir() : target.startsWith('~/')
+    ? path.join(os.homedir(), target.slice(2)) : target;
+  if (expanded.startsWith('~')) return false; // no ambiguous ~user expansion
   // Glob's pattern must stay relative to its checked search root.
-  if (tool === 'Glob' && (typeof input.pattern !== 'string' || path.isAbsolute(input.pattern)
+  if (tool === 'Glob' && (typeof input.pattern !== 'string' || path.isAbsolute(input.pattern) || input.pattern.startsWith('~')
     || input.pattern.split(/[\\/]/).includes('..'))) return false;
-  const file = realpath(path.resolve(cwd, target));
+  const file = realpath(path.resolve(cwd, expanded));
   return roots.some(root => inside(realpath(path.resolve(root)), file));
 }
 

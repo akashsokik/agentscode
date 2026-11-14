@@ -352,6 +352,12 @@ test('SuperAgent main reads are pre-approved only in its scoped roots; writes st
       ['Glob', { path: root, pattern: '**/*.md' }],
     ] as const) assert.equal((await decide(tool, input)).behavior, 'allow', `${tool}: ${root}`);
   }
+  for (const id of ['aff3f9c7-f14e-4cae-a905-c62beb3ea8c5', 'another-agent']) {
+    for (const image of ['after-dark.png', 'next-screenshot.png']) {
+      const file = `${DATA_DIR}/agents/${id}/workspace/activity-shots/${image}`;
+      assert.equal((await decide('Read', { file_path: file })).behavior, 'allow', file);
+    }
+  }
   for (const tool of ['WebSearch', 'WebFetch']) assert.equal((await decide(tool, {})).behavior, 'allow', tool);
   for (const tool of [...SUPER_DISALLOWED_TOOLS, 'mcp__other__write', 'mcp__other__Read', 'UnknownTool']) {
     assert.equal((await decide(tool, { file_path: `${DATA_DIR}/user.md`, command: 'ls' })).behavior, 'deny', tool);
@@ -398,5 +404,14 @@ test('read scope checks canonical paths, traversal, symlink escapes and malforme
     assert.equal(superReadAllowed('Read', {}, root, [root]), false);
     assert.equal(superReadAllowed('Glob', { path: root, pattern: '/etc/*' }, root, [root]), false);
     assert.equal(superReadAllowed('Write', { file_path: root }, root, [root]), false);
+    for (const tool of ['Read', 'Grep', 'Glob']) {
+      const input = (file: string) => tool === 'Read' ? { file_path: file } : { path: file, pattern: '*' };
+      const homeRoot = path.join(os.homedir(), '.podcode');
+      assert.equal(superReadAllowed(tool, input('~/.podcode/agents/other/workspace/screenshot.png'), root, [homeRoot]), true);
+      assert.equal(superReadAllowed(tool, input('~/.ssh/id_ed25519'), root, [root, homeRoot]), false);
+      assert.equal(superReadAllowed(tool, input('~/.podcode/../.ssh/id_ed25519'), root, [root, homeRoot]), false);
+      assert.equal(superReadAllowed(tool, input('~another-user/.ssh/id_ed25519'), root, [root]), false);
+    }
+    assert.equal(superReadAllowed('Glob', { path: root, pattern: '~/.ssh/*' }, root, [root]), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
