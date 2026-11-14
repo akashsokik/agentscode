@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { HookCallbackMatcher, query } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, ApprovalDecision } from '../shared/types.ts';
-import { ClaudeRunner } from '../server/agents/claude.ts';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { DATA_DIR } from '../server/config.ts';
+import { ClaudeRunner, superReadAllowed, SUPER_DISALLOWED_TOOLS } from '../server/agents/claude.ts';
 import type { ApprovalRequest, EntryDraft, RunnerHooks, TurnResult } from '../server/agents/runner.ts';
 import { COMMS_SERVER } from '../server/config.ts';
 import { COMMS_TOOLS } from '../server/comms/tools.ts';
@@ -322,4 +326,151 @@ test('a SuperAgent session gets only read tools, its commands, none of the user\
   }
   assert.equal(approvals.length, 0, 'refused without asking the user');
   runner.close();
+});
+
+
+test('SuperAgent main reads are pre-approved only in its scoped roots; writes still never prompt', async () => {
+  const captured: { options?: Options; prompts: unknown[] } = { prompts: [] };
+  const approvals: ApprovalRequest[] = [];
+  let permit = false;
+  const hooks: RunnerHooks = {
+    session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, turnEnd: () => {}, closed: () => {},
+    approval: async request => { approvals.push(request); return { allow: permit, always: permit }; },
+  };
+  // Even a stale Full setting must not grant an out-of-scope read.
+  const boss = { ...agent, role: 'super' as const, autonomy: 'full' as const };
+  const runner = new ClaudeRunner({ agent: () => boss, project: null, cwd: '/work/super',
+    directories: () => ['/projects/one', '/projects/two'], binPath: null, hooks }, fakeQuery(captured));
+  runner.send('Read the evidence');
+  await settle(10);
+  const options = captured.options!;
+  const decide = (name: string, input: Record<string, unknown>, extra = {}) => options.canUseTool(name, input,
+    { signal: new AbortController().signal, suggestions: [], ...extra });
+  for (const root of [DATA_DIR, '/tmp', '/private/tmp', '/work/super', '/projects/one', '/projects/two']) {
+    for (const [tool, input] of [
+      ['Read', { file_path: `${root}/nested/report.md` }],
+      ['Grep', { path: `${root}/nested`, pattern: 'status' }],
+      ['Glob', { path: `${root}/nested`, pattern: '**/*.md' }],
+    ] as const) assert.equal((await decide(tool, input)).behavior, 'allow', `${tool}: ${root}`);
+  }
+  for (const id of ['aff3f9c7-f14e-4cae-a905-c62beb3ea8c5', 'another-agent']) {
+    for (const image of ['after-dark.png', 'next-screenshot.png']) {
+      const file = `${DATA_DIR}/agents/${id}/workspace/activity-shots/${image}`;
+      assert.equal((await decide('Read', { file_path: file })).behavior, 'allow', file);
+    }
+  }
+  assert.equal((await decide('WebSearch', {})).behavior, 'allow');
+  for (const tool of [...SUPER_DISALLOWED_TOOLS, 'mcp__other__write', 'mcp__other__Read', 'UnknownTool']) {
+    assert.equal((await decide(tool, { file_path: `${DATA_DIR}/user.md`, command: 'ls' })).behavior, 'deny', tool);
+  }
+  assert.equal(approvals.length, 0);
+  for (const [tool, input] of [
+    ['Read', { file_path: `${DATA_DIR}/browser-bridge.token` }],
+    ['Grep', { path: DATA_DIR, pattern: '.', output_mode: 'content' }],
+    ['Glob', { path: DATA_DIR, pattern: '**/*' }],
+    ['Grep', { path: path.dirname(DATA_DIR), pattern: '.' }],
+  ] as const) assert.equal((await decide(tool, input)).behavior, 'deny', `${tool}: bridge credential`);
+  assert.equal((await decide('Read', { file_path: `${DATA_DIR}/agents/other/report.md` },
+    { blockedPath: `${DATA_DIR}/browser-bridge.token` })).behavior, 'deny');
+  assert.equal(approvals.length, 5, 'bridge credential and containing searches require user approval');
+  for (const [tool, input] of [
+    ['Read', { file_path: '/Users/example/Documents/private.txt' }],
+    ['Grep', { path: '/etc', pattern: '.' }],
+    ['Glob', { path: '/projects/one-extra', pattern: '*' }],
+    ['Glob', { path: '/projects/one', pattern: '../../etc/*' }],
+  ] as const) assert.equal((await decide(tool, input)).behavior, 'deny');
+  assert.equal(approvals.length, 9, 'outside the scope still needs the user');
+  assert.equal((await decide('Read', { file_path: `${DATA_DIR}/user.md` },
+    { matchedAskRule: { source: 'userSettings', toolName: 'Read', ruleContent: '**' } })).behavior, 'deny');
+  assert.equal(approvals.length, 10, 'explicit user ask rules still apply');
+  assert.equal((await decide('Grep', { path: `${DATA_DIR}/agents`, pattern: '.' },
+    { blockedPath: '/Users/example/.ssh/id_ed25519' })).behavior, 'deny');
+  assert.equal(approvals.length, 11, 'the SDK blocked path must also be in scope');
+  assert.equal((await decide('Read', { file_path: `${DATA_DIR}/user.md` },
+    { blockedPath: `${DATA_DIR}/user.md` })).behavior, 'allow');
+  const sensitive = (options.hooks as { PreToolUse: HookCallbackMatcher[] }).PreToolUse.find(h => h.matcher === 'Read|Grep|Glob|WebFetch')!;
+  for (const [tool, input] of [
+    ['WebFetch', { url: 'https://example.invalid/?d=secret', prompt: 'read' }],
+    ['Read', { file_path: `${DATA_DIR}/browser-bridge.token` }],
+    ['Read', { file_path: ` ${DATA_DIR}/browser-bridge.token` }],
+    ['Grep', { path: ` ${DATA_DIR}`, pattern: '.' }],
+    ['Grep', { path: DATA_DIR, pattern: '.' }],
+    ['Glob', { path: DATA_DIR, pattern: '**/*' }],
+  ] as const) {
+    const result = await sensitive.hooks[0]({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input,
+      tool_use_id: 't', session_id: 's', transcript_path: '', cwd: '/work/super' } as never, 't', { signal: new AbortController().signal });
+    const specific = 'hookSpecificOutput' in result ? result.hookSpecificOutput : undefined;
+    assert.equal(specific?.hookEventName === 'PreToolUse' ? specific.permissionDecision : undefined, 'ask', `${tool}: saved allow rules cannot skip approval`);
+  }
+  const beforeFetch = approvals.length;
+  for (let i = 0; i < 2; i++) assert.equal((await decide('WebFetch', { url: 'https://example.invalid/page' },
+    { suggestions: [{ type: 'addRules', rules: [{ toolName: 'WebFetch' }], behavior: 'allow', destination: 'localSettings' }] })).behavior, 'deny');
+  assert.equal(approvals.length, beforeFetch + 2, 'each URL fetch asks, including repeats');
+  assert.equal(approvals.at(-1)?.canAlwaysAllow, false);
+  permit = true;
+  const granted = await decide('WebFetch', { url: 'https://example.invalid/page' },
+    { suggestions: [{ type: 'addRules', rules: [{ toolName: 'WebFetch' }], behavior: 'allow', destination: 'localSettings' }] });
+  assert.equal(granted.behavior, 'allow', 'the user can approve this call');
+  assert.equal((granted as { updatedPermissions?: unknown }).updatedPermissions, undefined, 'no remembered fetch approval even for a stale always choice');
+  for (const [tool, input] of [
+    ['Read', { file_path: `${DATA_DIR}/browser-bridge.token` }],
+    ['Grep', { path: DATA_DIR, pattern: '.' }],
+    ['Glob', { path: DATA_DIR, pattern: '*' }],
+  ] as const) {
+    const result = await decide(tool, input, { suggestions: [{ type: 'addDirectories', directories: [DATA_DIR], destination: 'session' }] });
+    assert.equal(result.behavior, 'allow', 'credentials require a real user approval');
+    assert.equal((result as { updatedPermissions?: unknown }).updatedPermissions, undefined);
+    assert.equal(approvals.at(-1)?.canAlwaysAllow, false);
+  }
+
+  assert.deepEqual(options.additionalDirectories, ['/projects/one', '/projects/two'], 'no expanded fork directories');
+  assert.equal(options.allowedTools, undefined, 'no broad allow rules inherited by a fork');
+  runner.close();
+});
+
+test('read scope checks canonical paths, traversal, symlink escapes and malformed inputs', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'podcode-read-scope-'));
+  try {
+    const root = path.join(dir, 'allowed');
+    const outside = path.join(dir, 'outside');
+    fs.mkdirSync(root); fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(root, 'escape'));
+    fs.symlinkSync(root, path.join(dir, 'alias'));
+    for (const tool of ['Read', 'Grep', 'Glob']) {
+      const input = (target: unknown) => tool === 'Read' ? { file_path: target } : { path: target, pattern: '*' };
+      assert.equal(superReadAllowed(tool, input(`${root}/new/report.md`), root, [root]), true);
+      assert.equal(superReadAllowed(tool, input(`${dir}/alias/report.md`), root, [root]), true);
+      for (const target of [`${root}/../outside/report.md`, `${root}/escape/report.md`, `${root}-extra/report.md`, 2, '', 'bad\0path']) {
+        assert.equal(superReadAllowed(tool, input(target), root, [root]), false, `${tool}: ${target}`);
+      }
+    }
+    assert.equal(superReadAllowed('Grep', { pattern: '.' }, root, [root]), true);
+    assert.equal(superReadAllowed('Glob', { pattern: '**/*.md' }, root, [root]), true);
+    assert.equal(superReadAllowed('Read', {}, root, [root]), false);
+    assert.equal(superReadAllowed('Glob', { path: root, pattern: '/etc/*' }, root, [root]), false);
+    assert.equal(superReadAllowed('Write', { file_path: root }, root, [root]), false);
+    for (const tool of ['Read', 'Grep', 'Glob']) {
+      const input = (file: string) => tool === 'Read' ? { file_path: file } : { path: file, pattern: '*' };
+      const homeRoot = path.join(os.homedir(), '.podcode');
+      assert.equal(superReadAllowed(tool, input('~/.podcode/agents/other/workspace/screenshot.png'), root, [homeRoot]), true);
+      assert.equal(superReadAllowed(tool, input('~/.ssh/id_ed25519'), root, [root, homeRoot]), false);
+      assert.equal(superReadAllowed(tool, input('~/.podcode/../.ssh/id_ed25519'), root, [root, homeRoot]), false);
+      assert.equal(superReadAllowed(tool, input('~another-user/.ssh/id_ed25519'), root, [root]), false);
+    }
+    assert.equal(superReadAllowed('Glob', { path: root, pattern: '~/.ssh/*' }, root, [root]), false);
+    for (const pattern of ['{..,x}/{..,x}/.ssh/*', 'foo/../bar', '..*', ' **/../*']) {
+      assert.equal(superReadAllowed('Glob', { path: root, pattern }, root, [root]), false);
+    }
+    for (const tool of ['Read', 'Grep', 'Glob']) {
+      for (const target of [' /Users/example/.aws', '/Users/example/.aws ', '\t~/.ssh', ' ~/.podcode/agents/other']) {
+        const input = tool === 'Read' ? { file_path: target } : { path: target, pattern: '*' };
+        assert.equal(superReadAllowed(tool, input, root, [root]), false, `${tool}: whitespace`);
+      }
+    }
+    const token = path.join(DATA_DIR, 'browser-bridge.token');
+    fs.symlinkSync(token, path.join(root, 'token-alias'));
+    assert.equal(superReadAllowed('Read', { file_path: path.join(root, 'token-alias') }, root, [root]), false);
+    assert.equal(superReadAllowed('Read', { file_path: token }, root, [DATA_DIR]), false);
+    for (const tool of ['Grep', 'Glob']) assert.equal(superReadAllowed(tool, { path: DATA_DIR, pattern: '*' }, root, [DATA_DIR]), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

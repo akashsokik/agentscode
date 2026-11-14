@@ -20,7 +20,7 @@ import { approvalTitle, clip, resultSummary, toolActivity, toolDetail, toolResul
 import { toolPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput, type SideOptions, type SideResult } from './runner.ts';
 import { commsMcpConfig, COMMS_TOOLS, EYES_TOOLS, hasEyes, SUPER_BROWSER_TOOLS, SUPER_TOOLS, BROWSER_TOOLS } from '../comms/tools.ts';
-import { COMMS_SERVER } from '../config.ts';
+import { COMMS_SERVER, DATA_DIR } from '../config.ts';
 import { parseCommand } from '../../shared/commands.ts';
 
 const MODE: Record<Autonomy, PermissionMode> = {
@@ -96,6 +96,40 @@ const inside = (dir: string, file: string) => {
   const rel = path.relative(dir, file);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 };
+
+/** Normalize exactly the paths we pre-approve; ambiguous spellings keep the normal approval gate. */
+function readTarget(tool: string, input: Record<string, unknown>, cwd: string): string | null {
+  if (!['Read', 'Grep', 'Glob'].includes(tool)) return null;
+  const target = tool === 'Read' ? input.file_path : input.path ?? cwd;
+  if (typeof target !== 'string' || !target || target !== target.trim() || target.includes('\0')) return null;
+  // Claude expands home shorthand before reading: do the same before checking the scope.
+  const expanded = target === '~' ? os.homedir() : target.startsWith('~/')
+    ? path.join(os.homedir(), target.slice(2)) : target;
+  return expanded.startsWith('~') ? null : realpath(path.resolve(cwd, expanded));
+}
+
+/** The browser bridge token authenticates as the desktop app. Never pre-approve it through reads,
+ * including a search whose root contains it, or an alias to the token. */
+function bridgeCredentialRead(tool: string, input: Record<string, unknown>, cwd: string): boolean {
+  const key = tool === 'Read' ? 'file_path' : 'path';
+  const target = input[key];
+  // Sensitive reads must ask even when the CLI trims the supplied path.
+  const file = readTarget(tool, typeof target === 'string' ? { ...input, [key]: target.trim() } : input, cwd);
+  const token = realpath(path.join(DATA_DIR, 'browser-bridge.token'));
+  return file !== null && (file === token || (tool !== 'Read' && inside(file, token)));
+}
+
+/** Main-session read approval only. Never put these roots in additionalDirectories or allow rules:
+ * side-answer forks inherit those, but must keep their narrower ACH-42 scope. */
+export function superReadAllowed(tool: string, input: Record<string, unknown>, cwd: string, roots: string[]): boolean {
+  if (tool === 'WebSearch') return true;
+  const file = readTarget(tool, input, cwd);
+  if (file === null || bridgeCredentialRead(tool, input, cwd)) return false;
+  // Glob expands braces before matching: even a '..' hidden in a brace alternative must not pass.
+  if (tool === 'Glob' && (typeof input.pattern !== 'string' || path.isAbsolute(input.pattern) || input.pattern.startsWith('~')
+    || input.pattern.includes('..'))) return false;
+  return roots.some(root => inside(realpath(path.resolve(root)), file));
+}
 
 /** user.md and its proposals, relative to the data dir; case-insensitive, as macOS file names are. */
 const PROFILE_FILE = /^user\.(?:md(?:\.tmp)?|proposals\.json(?:\.tmp)?)$/i;
@@ -466,7 +500,7 @@ export class ClaudeRunner implements Runner {
       allowDangerouslySkipPermissions: this.startedWithBypass || undefined,
       canUseTool: this.canUseTool,
       // soul.md, memory.md and the dream records are off limits to edit tools in every mode.
-      hooks: { PreToolUse: [{ matcher: Object.keys(EDIT_TOOLS).join('|'), hooks: [this.guardOwnFiles] }, { matcher: 'Bash', hooks: [this.guardPushCheck] }] },
+      hooks: { PreToolUse: [{ matcher: Object.keys(EDIT_TOOLS).join('|'), hooks: [this.guardOwnFiles] }, { matcher: 'Bash', hooks: [this.guardPushCheck] }, { matcher: 'Read|Grep|Glob|WebFetch', hooks: [this.askSensitiveRead] }] },
       // git in the agent's shell runs PodCode's push check (server/pushGuard.ts, ALL-D9).
       env: pushGuardEnv(process.env) as Record<string, string>,
       // Load CLAUDE.md, settings and plugins like a normal Claude Code session...
@@ -619,6 +653,16 @@ export class ClaudeRunner implements Runner {
     }
   }
 
+  /** ACH-D67: old saved WebFetch/domain or credential rules must not skip the user. Side forks
+   * replace the main hooks entirely, keeping their own deny-only policy. */
+  private askSensitiveRead: HookCallback = async input => {
+    if (input.hook_event_name !== 'PreToolUse' || this.ctx.agent().role !== 'super') return {};
+    const sensitive = input.tool_name === 'WebFetch'
+      || bridgeCredentialRead(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, this.ctx.cwd);
+    return sensitive ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask',
+      permissionDecisionReason: 'ACH-D67: page fetches and credential reads require the user on each call.' } } : {};
+  };
+
   private guardOwnFiles: HookCallback = async input => {
     if (input.hook_event_name !== 'PreToolUse') return {};
     const problem = ownFileProblem(this.ctx.agent().home, this.ctx.cwd, input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>);
@@ -640,6 +684,21 @@ export class ClaudeRunner implements Runner {
     // A second lock behind the tool list: the SuperAgent never edits, whatever reaches here.
     if (this.ctx.agent().role === 'super' && !superMayUse(toolName)) {
       return { behavior: 'deny', message: 'The SuperAgent never edits or runs commands. Delegate the work to an agent.' };
+    }
+
+    const sensitiveRead = this.ctx.agent().role === 'super' && (toolName === 'WebFetch'
+      || bridgeCredentialRead(toolName, input, this.ctx.cwd)
+      || (options.blockedPath !== undefined && bridgeCredentialRead('Read', { file_path: options.blockedPath }, this.ctx.cwd)));
+
+    if (this.ctx.agent().role === 'super' && !options.matchedAskRule) {
+      const roots = [DATA_DIR, '/tmp', '/private/tmp', this.ctx.cwd, ...this.directories()];
+      // The SDK may identify a different path that triggered the prompt (for example a search's
+      // symlink target). Approve that too, rather than trusting only the tool's nominal root.
+      const blocked = options.blockedPath;
+      if (!sensitiveRead && superReadAllowed(toolName, input, this.ctx.cwd, roots)
+        && (blocked === undefined || superReadAllowed('Read', { file_path: blocked }, this.ctx.cwd, roots))) {
+        return { behavior: 'allow', updatedInput: input };
+      }
     }
 
     if (toolName === 'AskUserQuestion') {
@@ -684,7 +743,7 @@ export class ClaudeRunner implements Runner {
     // Full access means no prompts. Bypass mode still sends Claude Code's own safety checks
     // here, and a switch to Full access mid-turn only reaches the CLI when the turn ends, so
     // allow from the live setting. An ask rule the user wrote in their settings still asks.
-    if (this.ctx.agent().autonomy === 'full' && !options.matchedAskRule) {
+    if (this.ctx.agent().role !== 'super' && this.ctx.agent().autonomy === 'full' && !options.matchedAskRule) {
       return { behavior: 'allow', updatedInput: input };
     }
 
@@ -695,7 +754,7 @@ export class ClaudeRunner implements Runner {
         title: approvalTitle(toolName, input, this.ctx.cwd),
         detail: toolDetail(toolName, input, this.ctx.cwd),
         description: options.decisionReason || options.title || options.description || '',
-        canAlwaysAllow: !options.suppressAlwaysAllowRule && Boolean(options.suggestions?.length),
+        canAlwaysAllow: !sensitiveRead && !options.suppressAlwaysAllowRule && Boolean(options.suggestions?.length),
       },
       options.signal,
     );
@@ -703,7 +762,7 @@ export class ClaudeRunner implements Runner {
       return {
         behavior: 'allow',
         updatedInput: input,
-        updatedPermissions: decision.always ? options.suggestions : undefined,
+        updatedPermissions: decision.always && !sensitiveRead ? options.suggestions : undefined,
       };
     }
     return {
