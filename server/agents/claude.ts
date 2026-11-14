@@ -656,10 +656,15 @@ export class ClaudeRunner implements Runner {
       return { behavior: 'deny', message: 'The SuperAgent never edits or runs commands. Delegate the work to an agent.' };
     }
 
-    if (this.ctx.agent().role === 'super' && !options.matchedAskRule
-      && superReadAllowed(toolName, input, this.ctx.cwd,
-        [DATA_DIR, '/tmp', '/private/tmp', this.ctx.cwd, ...this.directories()])) {
-      return { behavior: 'allow', updatedInput: input };
+    if (this.ctx.agent().role === 'super' && !options.matchedAskRule) {
+      const roots = [DATA_DIR, '/tmp', '/private/tmp', this.ctx.cwd, ...this.directories()];
+      // The SDK may identify a different path that triggered the prompt (for example a search's
+      // symlink target). Approve that too, rather than trusting only the tool's nominal root.
+      const blocked = options.blockedPath;
+      if (superReadAllowed(toolName, input, this.ctx.cwd, roots)
+        && (blocked === undefined || superReadAllowed('Read', { file_path: blocked }, this.ctx.cwd, roots))) {
+        return { behavior: 'allow', updatedInput: input };
+      }
     }
 
     if (toolName === 'AskUserQuestion') {

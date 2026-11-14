@@ -335,7 +335,7 @@ test('the Claude runner answers beside a turn from a fork of the session, with t
   const decide = async (tool: string) => (await hook.hooks[0]({ hook_event_name: 'PreToolUse', tool_name: tool })).hookSpecificOutput?.permissionDecision;
   assert.equal(await decide('Read'), undefined);
   assert.equal(await decide(`mcp__${COMMS_SERVER}__list_issues`), undefined);
-  for (const tool of ['Bash', 'Edit', 'WebFetch', 'Agent', `mcp__${COMMS_SERVER}__reply`, `mcp__${COMMS_SERVER}__send_message`, `mcp__${COMMS_SERVER}__delegate_task`, `mcp__${COMMS_SERVER}__update_issue`, `mcp__${COMMS_SERVER}__ask_user`, `mcp__${COMMS_SERVER}__decision_add`, `mcp__${COMMS_SERVER}__take_action`]) {
+  for (const tool of ['Bash', 'Write', 'Edit', 'WebSearch', 'WebFetch', 'Agent', `mcp__${COMMS_SERVER}__reply`, `mcp__${COMMS_SERVER}__send_message`, `mcp__${COMMS_SERVER}__delegate_task`, `mcp__${COMMS_SERVER}__update_issue`, `mcp__${COMMS_SERVER}__ask_user`, `mcp__${COMMS_SERVER}__decision_add`, `mcp__${COMMS_SERVER}__take_action`]) {
     assert.equal(await decide(tool), 'deny', tool);
     assert.equal((await fork.options.canUseTool(tool, {}, {})).behavior, 'deny', tool);
   }

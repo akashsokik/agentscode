@@ -367,6 +367,11 @@ test('SuperAgent main reads are pre-approved only in its scoped roots; writes st
   assert.equal((await decide('Read', { file_path: `${DATA_DIR}/user.md` },
     { matchedAskRule: { source: 'userSettings', toolName: 'Read', ruleContent: '**' } })).behavior, 'deny');
   assert.equal(approvals.length, 5, 'explicit user ask rules still apply');
+  assert.equal((await decide('Grep', { path: DATA_DIR, pattern: '.' },
+    { blockedPath: '/Users/example/.ssh/id_ed25519' })).behavior, 'deny');
+  assert.equal(approvals.length, 6, 'the SDK blocked path must also be in scope');
+  assert.equal((await decide('Read', { file_path: `${DATA_DIR}/user.md` },
+    { blockedPath: `${DATA_DIR}/user.md` })).behavior, 'allow');
   assert.deepEqual(options.additionalDirectories, ['/projects/one', '/projects/two'], 'no expanded fork directories');
   assert.equal(options.allowedTools, undefined, 'no broad allow rules inherited by a fork');
   runner.close();
