@@ -13,6 +13,19 @@ export function shortWhen(at: number, now: number): string {
   return `${d.getDate()} ${d.toLocaleString('en', { month: 'short' })}`;
 }
 
+/**
+ * How long ago, in one unit only: "now", "5m", "2h", "1d" (ACH-49). For a narrow column of times
+ * that must line up; format.ts's relativeTime adds the minutes ("2h 6m") where there is room.
+ */
+export function compactAgo(ts: number, now = Date.now()): string {
+  const minutes = Math.round(Math.max(0, now - ts) / 60_000);
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
 /** A day's header: Today, Yesterday, then "11 Nov". */
 export function dayLabel(at: number, now: number): string {
   const d = new Date(at);

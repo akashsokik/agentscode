@@ -3,6 +3,7 @@ import type { Agent, Channel, Project, TreeEntry } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { api, type Root } from '../api.ts';
 import { modelLabel, relativeTime, shortPath } from '../format.ts';
+import { compactAgo } from '../panelList.ts';
 import { closeTab, focusedAgentId, focusedChannelId, focusedKind, open, openToSide, setProject, setRail, setSectionFolded, setSidebarView, useLayout, type Layout, type RailSectionKey } from '../layout.ts';
 import { ChangesView } from '../right/RightPanel.tsx';
 import { attempt, useApp } from '../store.ts';
@@ -25,8 +26,9 @@ import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
 import { ContextMenu, openContextMenu, toggleMenu, type MenuAnchor } from '../ui/ContextMenu.tsx';
 import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
+import { StatusMark } from '../ui/StatusMark.tsx';
 import { useNow } from '../ui/useNow.ts';
-import { AGENT_GROUP_LABEL, agentsSummary, groupAgents, railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
+import { AGENT_GROUP_LABEL, agentRowSlot, agentsSummary, groupAgents, railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
 import { openAsks, openSuper } from '../super.ts';
 import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
 import { AvatarStack } from '../ui/AvatarStack.tsx';
@@ -399,7 +401,7 @@ function SummaryMark({ needs, working }: { needs: number; working: boolean }) {
 /** A rail row makes room at its end only for a status mark, or for the ... button while hovered (MonoCode's group-hover:pr-6). */
 function railRow(reserve: boolean): string {
   return cx(
-    'flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left transition-[background-color,color,padding] duration-150 group-hover:pr-7 group-focus-within:pr-7',
+    'flex h-[30px] w-full min-w-0 items-center gap-2 rounded-md px-2 text-left transition-[background-color,color,padding] duration-150 group-hover:pr-7 group-focus-within:pr-7',
     reserve && 'pr-7',
   );
 }
@@ -478,6 +480,7 @@ function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: bo
   const pending = usePendingApproval(agent.id);
   const now = useNow();
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
+  const slot = agentRowSlot(agent, pending, ts => relativeTime(ts, now));
   return (
     <div className="group relative" onContextMenu={e => openContextMenu(e, setMenu)}>
       <button
@@ -487,11 +490,15 @@ function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: bo
         aria-current={selected ? 'page' : undefined}
         className={cx(railRow(Boolean(menu)), railRowState(selected || Boolean(menu)))}
       >
-        <AgentAvatar agent={agent} className="size-5" />
-        <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', agent.unread ? 'font-semibold text-content' : 'font-medium')}>{agent.name}</span>
-        {/* How it is doing, in the same place on every row; the ... button takes the spot on hover. */}
-        <span className={cx('flex shrink-0 items-center group-hover:hidden group-has-[[data-card-more]:focus-visible]:hidden', menu && 'hidden')}>
-          <AgentStateMark agent={agent} pending={pending} now={now} />
+        {/* One box, every shape at the same visual size and centred in it (ACH-49). */}
+        <AgentAvatar agent={agent} fit className="size-5" />
+        {/* Bold means one thing: news you have not opened (ACH-49); there is no dot for it besides. */}
+        <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', agent.unread ? 'font-semibold text-content' : 'font-normal')}>{agent.name}</span>
+        {/* One slot at the right, aligned on every row: the status mark while it works, needs you or
+            failed (ACH-D45); otherwise how long ago it was active, in one unit. The ... button takes it on hover. */}
+        <span title={slot.words} className={cx('flex w-6 shrink-0 items-center justify-end group-hover:hidden group-has-[[data-card-more]:focus-visible]:hidden', menu && 'hidden')}>
+          {slot.state ? <StatusMark state={slot.state} label={slot.words} className="size-3.5" />
+            : <span className="text-[11px] tabular-nums text-content/40">{compactAgo(agent.lastActiveAt, now)}</span>}
         </span>
       </button>
       <RowMore label={`${agent.name} actions`} open={Boolean(menu)} onClick={e => toggleMenu(e, setMenu)} />

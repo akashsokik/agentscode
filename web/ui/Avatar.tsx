@@ -8,6 +8,7 @@
 import type { Agent } from '../../shared/types.ts';
 import { useAvatarStyle } from '../avatarStyle.ts';
 import { colourParts, inkParts } from '../avatarStylePreference.ts';
+import { avatarFitTransform } from './avatarFit.ts';
 import { AVATAR_FILL, agentLook, avatarDelay, avatarEyeTransform, avatarMood, avatarParts, isSmallAvatar, type AvatarLook, type AvatarMood } from '../../shared/avatar.ts';
 
 export { AVATAR_FILL };
@@ -24,7 +25,7 @@ export function classSize(className: string): number {
   return px ? Number(px[1]) : 16;
 }
 
-export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-4', animate = true, colour = false, ink: alwaysInk = false }: {
+export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-4', animate = true, colour = false, ink: alwaysInk = false, fit = false }: {
   look: AvatarLook;
   mood?: AvatarMood;
   /** Spreads blinks out between avatars (the agent id). */
@@ -35,6 +36,8 @@ export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-
   colour?: boolean;
   /** Always in ink, whatever the Avatars setting: the app's logo (BrandMark, ACH-D63). */
   ink?: boolean;
+  /** Every shape at one visual size, centred: for a column of rows (the sidebar's Agents, ACH-49). */
+  fit?: boolean;
 }) {
   // Appearance > Avatars (ACH-46, ACH-D64): every avatar follows it, the SuperAgent included: all
   // in ink, or all in colour (the SuperAgent's Block in its violet, with the usual dark pills).
@@ -50,11 +53,13 @@ export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-
       className={`avatar shrink-0 select-none ${animate ? 'avatar-live' : ''} ${className}`}
       style={{ ['--avatar-delay' as string]: avatarDelay(seed) }}
     >
-      {parts.map((part, i) => (part.kind === 'body' ? <path key={i} d={part.d} fill={part.fill} /> : null))}
-      {/* The pills move as one (glance, look up) in the outer group; the inner one turns them with the body. Each blinks or flattens to a dash on its own. */}
-      <g className="avatar-eyes">
-        <g transform={avatarEyeTransform(look)}>
-          {parts.map((part, i) => (part.kind === 'eye' ? <rect key={i} className="avatar-eye" x={part.x} y={part.y} width={part.w} height={part.h} rx={part.w / 2} fill={part.fill} /> : null))}
+      <g transform={fit ? avatarFitTransform(look.shape) : undefined}>
+        {parts.map((part, i) => (part.kind === 'body' ? <path key={i} d={part.d} fill={part.fill} /> : null))}
+        {/* The pills move as one (glance, look up) in the outer group; the inner one turns them with the body. Each blinks or flattens to a dash on its own. */}
+        <g className="avatar-eyes">
+          <g transform={avatarEyeTransform(look)}>
+            {parts.map((part, i) => (part.kind === 'eye' ? <rect key={i} className="avatar-eye" x={part.x} y={part.y} width={part.w} height={part.h} rx={part.w / 2} fill={part.fill} /> : null))}
+          </g>
         </g>
       </g>
     </svg>
@@ -62,11 +67,13 @@ export function AvatarGlyph({ look, mood = 'calm', seed = '', className = 'size-
 }
 
 /** An agent's avatar: its own look and the mood of its status. */
-export function AgentAvatar({ agent, className = 'size-4', animate = true }: {
+export function AgentAvatar({ agent, className = 'size-4', animate = true, fit = false }: {
   /** Just an id is enough (a removed agent keeps the look its id gives it). */
   agent: { id: string; role?: Agent['role']; avatar?: Agent['avatar']; status?: Agent['status'] };
   className?: string;
   animate?: boolean;
+  /** One visual size for every shape (AvatarGlyph's fit). */
+  fit?: boolean;
 }) {
-  return <AvatarGlyph look={agentLook(agent)} mood={avatarMood(agent.status)} seed={agent.id} className={className} animate={animate} />;
+  return <AvatarGlyph look={agentLook(agent)} mood={avatarMood(agent.status)} seed={agent.id} className={className} animate={animate} fit={fit} />;
 }
