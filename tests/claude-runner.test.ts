@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { HookCallbackMatcher, query } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, ApprovalDecision } from '../shared/types.ts';
-import { ClaudeRunner } from '../server/agents/claude.ts';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { DATA_DIR } from '../server/config.ts';
+import { ClaudeRunner, superReadAllowed, SUPER_DISALLOWED_TOOLS } from '../server/agents/claude.ts';
 import type { ApprovalRequest, EntryDraft, RunnerHooks, TurnResult } from '../server/agents/runner.ts';
 import { COMMS_SERVER } from '../server/config.ts';
 import { COMMS_TOOLS } from '../server/comms/tools.ts';
@@ -322,4 +326,72 @@ test('a SuperAgent session gets only read tools, its commands, none of the user\
   }
   assert.equal(approvals.length, 0, 'refused without asking the user');
   runner.close();
+});
+
+
+test('SuperAgent main reads are pre-approved only in its scoped roots; writes still never prompt', async () => {
+  const captured: { options?: Options; prompts: unknown[] } = { prompts: [] };
+  const approvals: ApprovalRequest[] = [];
+  const hooks: RunnerHooks = {
+    session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, turnEnd: () => {}, closed: () => {},
+    approval: async request => { approvals.push(request); return { allow: false }; },
+  };
+  // Even a stale Full setting must not grant an out-of-scope read.
+  const boss = { ...agent, role: 'super' as const, autonomy: 'full' as const };
+  const runner = new ClaudeRunner({ agent: () => boss, project: null, cwd: '/work/super',
+    directories: () => ['/projects/one', '/projects/two'], binPath: null, hooks }, fakeQuery(captured));
+  runner.send('Read the evidence');
+  await settle(10);
+  const options = captured.options!;
+  const decide = (name: string, input: Record<string, unknown>, extra = {}) => options.canUseTool(name, input,
+    { signal: new AbortController().signal, suggestions: [], ...extra });
+  for (const root of [DATA_DIR, '/tmp', '/private/tmp', '/work/super', '/projects/one', '/projects/two']) {
+    for (const [tool, input] of [
+      ['Read', { file_path: `${root}/nested/report.md` }],
+      ['Grep', { path: `${root}/nested`, pattern: 'status' }],
+      ['Glob', { path: root, pattern: '**/*.md' }],
+    ] as const) assert.equal((await decide(tool, input)).behavior, 'allow', `${tool}: ${root}`);
+  }
+  for (const tool of ['WebSearch', 'WebFetch']) assert.equal((await decide(tool, {})).behavior, 'allow', tool);
+  for (const tool of [...SUPER_DISALLOWED_TOOLS, 'mcp__other__write', 'mcp__other__Read', 'UnknownTool']) {
+    assert.equal((await decide(tool, { file_path: `${DATA_DIR}/user.md`, command: 'ls' })).behavior, 'deny', tool);
+  }
+  assert.equal(approvals.length, 0);
+  for (const [tool, input] of [
+    ['Read', { file_path: '/Users/example/Documents/private.txt' }],
+    ['Grep', { path: '/etc', pattern: '.' }],
+    ['Glob', { path: '/projects/one-extra', pattern: '*' }],
+    ['Glob', { path: '/projects/one', pattern: '../../etc/*' }],
+  ] as const) assert.equal((await decide(tool, input)).behavior, 'deny');
+  assert.equal(approvals.length, 4, 'outside the scope still needs the user');
+  assert.equal((await decide('Read', { file_path: `${DATA_DIR}/user.md` },
+    { matchedAskRule: { source: 'userSettings', toolName: 'Read', ruleContent: '**' } })).behavior, 'deny');
+  assert.equal(approvals.length, 5, 'explicit user ask rules still apply');
+  assert.deepEqual(options.additionalDirectories, ['/projects/one', '/projects/two'], 'no expanded fork directories');
+  assert.equal(options.allowedTools, undefined, 'no broad allow rules inherited by a fork');
+  runner.close();
+});
+
+test('read scope checks canonical paths, traversal, symlink escapes and malformed inputs', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'podcode-read-scope-'));
+  try {
+    const root = path.join(dir, 'allowed');
+    const outside = path.join(dir, 'outside');
+    fs.mkdirSync(root); fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(root, 'escape'));
+    fs.symlinkSync(root, path.join(dir, 'alias'));
+    for (const tool of ['Read', 'Grep', 'Glob']) {
+      const input = (target: unknown) => tool === 'Read' ? { file_path: target } : { path: target, pattern: '*' };
+      assert.equal(superReadAllowed(tool, input(`${root}/new/report.md`), root, [root]), true);
+      assert.equal(superReadAllowed(tool, input(`${dir}/alias/report.md`), root, [root]), true);
+      for (const target of [`${root}/../outside/report.md`, `${root}/escape/report.md`, `${root}-extra/report.md`, 2, '', 'bad\0path']) {
+        assert.equal(superReadAllowed(tool, input(target), root, [root]), false, `${tool}: ${target}`);
+      }
+    }
+    assert.equal(superReadAllowed('Grep', { pattern: '.' }, root, [root]), true);
+    assert.equal(superReadAllowed('Glob', { pattern: '**/*.md' }, root, [root]), true);
+    assert.equal(superReadAllowed('Read', {}, root, [root]), false);
+    assert.equal(superReadAllowed('Glob', { path: root, pattern: '/etc/*' }, root, [root]), false);
+    assert.equal(superReadAllowed('Write', { file_path: root }, root, [root]), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

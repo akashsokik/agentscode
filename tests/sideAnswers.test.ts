@@ -4,6 +4,7 @@ import test from 'node:test';
 import type { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Agent, AgentTask, ApprovalDecision, Entry, PeerMessage } from '../shared/types.ts';
 import { DEFAULT_SETTINGS } from '../shared/types.ts';
+import { DATA_DIR } from '../server/config.ts';
 import { ClaudeRunner, superSideTools } from '../server/agents/claude.ts';
 import type { RunnerHooks, SideOptions, SideResult } from '../server/agents/runner.ts';
 import { ScopedRunner } from '../server/agents/scoped.ts';
@@ -340,7 +341,7 @@ test('the Claude runner answers beside a turn from a fork of the session, with t
   }
   // What reaches the permission callback is what the session would ask the user about, such as a
   // read outside its folders: the copy asks nobody and is refused.
-  for (const [tool, input] of [['Read', { file_path: '/Users/someone/.ssh/id_ed25519' }], ['Grep', { pattern: 'token', path: '/Users/someone/.aws' }], ['Glob', { pattern: '**/*', path: '/Users/someone/.config' }]] as const) {
+  for (const [tool, input] of [['Read', { file_path: `${DATA_DIR}/agents/other/workspace/report.md` }], ['Read', { file_path: '/private/tmp/claude-image.png' }], ['Grep', { path: '/tmp', pattern: 'logs' }], ['Glob', { path: DATA_DIR, pattern: '**/*.md' }], ['Read', { file_path: '/Users/someone/.ssh/id_ed25519' }], ['Grep', { pattern: 'token', path: '/Users/someone/.aws' }], ['Glob', { pattern: '**/*', path: '/Users/someone/.config' }]] as const) {
     assert.equal((await fork.options.canUseTool(tool, input, {})).behavior, 'deny', tool);
   }
   runner.close();

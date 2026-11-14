@@ -20,7 +20,7 @@ import { approvalTitle, clip, resultSummary, toolActivity, toolDetail, toolResul
 import { toolPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput, type SideOptions, type SideResult } from './runner.ts';
 import { commsMcpConfig, COMMS_TOOLS, EYES_TOOLS, hasEyes, SUPER_BROWSER_TOOLS, SUPER_TOOLS, BROWSER_TOOLS } from '../comms/tools.ts';
-import { COMMS_SERVER } from '../config.ts';
+import { COMMS_SERVER, DATA_DIR } from '../config.ts';
 import { parseCommand } from '../../shared/commands.ts';
 
 const MODE: Record<Autonomy, PermissionMode> = {
@@ -96,6 +96,20 @@ const inside = (dir: string, file: string) => {
   const rel = path.relative(dir, file);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 };
+
+/** Main-session read approval only. Never put these roots in additionalDirectories or allow rules:
+ * side-answer forks inherit those, but must keep their narrower ACH-42 scope. */
+export function superReadAllowed(tool: string, input: Record<string, unknown>, cwd: string, roots: string[]): boolean {
+  if (tool === 'WebSearch' || tool === 'WebFetch') return true;
+  if (!['Read', 'Grep', 'Glob'].includes(tool)) return false;
+  const target = tool === 'Read' ? input.file_path : input.path ?? cwd;
+  if (typeof target !== 'string' || !target || target.includes('\0')) return false;
+  // Glob's pattern must stay relative to its checked search root.
+  if (tool === 'Glob' && (typeof input.pattern !== 'string' || path.isAbsolute(input.pattern)
+    || input.pattern.split(/[\\/]/).includes('..'))) return false;
+  const file = realpath(path.resolve(cwd, target));
+  return roots.some(root => inside(realpath(path.resolve(root)), file));
+}
 
 /** user.md and its proposals, relative to the data dir; case-insensitive, as macOS file names are. */
 const PROFILE_FILE = /^user\.(?:md(?:\.tmp)?|proposals\.json(?:\.tmp)?)$/i;
@@ -642,6 +656,12 @@ export class ClaudeRunner implements Runner {
       return { behavior: 'deny', message: 'The SuperAgent never edits or runs commands. Delegate the work to an agent.' };
     }
 
+    if (this.ctx.agent().role === 'super' && !options.matchedAskRule
+      && superReadAllowed(toolName, input, this.ctx.cwd,
+        [DATA_DIR, '/tmp', '/private/tmp', this.ctx.cwd, ...this.directories()])) {
+      return { behavior: 'allow', updatedInput: input };
+    }
+
     if (toolName === 'AskUserQuestion') {
       const questions = (Array.isArray(input.questions) ? input.questions : []) as Question[];
       const decision = await hooks.approval(
@@ -684,7 +704,7 @@ export class ClaudeRunner implements Runner {
     // Full access means no prompts. Bypass mode still sends Claude Code's own safety checks
     // here, and a switch to Full access mid-turn only reaches the CLI when the turn ends, so
     // allow from the live setting. An ask rule the user wrote in their settings still asks.
-    if (this.ctx.agent().autonomy === 'full' && !options.matchedAskRule) {
+    if (this.ctx.agent().role !== 'super' && this.ctx.agent().autonomy === 'full' && !options.matchedAskRule) {
       return { behavior: 'allow', updatedInput: input };
     }
 
