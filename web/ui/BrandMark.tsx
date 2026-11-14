@@ -7,5 +7,6 @@ import { AvatarGlyph } from './Avatar.tsx';
  * (public/favicon.svg) and the menu bar icon (electron/trayMark.ts) draw the same Block on a tile.
  */
 export function BrandMark() {
-  return <AvatarGlyph look={SUPER_LOOK} animate={false} seed="podcode" className="size-4" />;
+  // Always ink: the logo does not follow Appearance > Avatars (ACH-D64).
+  return <AvatarGlyph look={SUPER_LOOK} ink animate={false} seed="podcode" className="size-4" />;
 }

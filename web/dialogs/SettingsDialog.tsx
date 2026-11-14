@@ -43,7 +43,7 @@ export function SettingsDialog({ onClose, group }: { onClose: () => void; group?
           <Row label="Theme">
             <Segmented<ThemePreference> label="Theme" value={theme} onChange={setTheme} options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'system', label: 'System' }]} />
           </Row>
-          <Row label="Avatars" description="Ink draws every agent the way the SuperAgent is drawn, in the theme's text colour.">
+          <Row label="Avatars" description="Colour gives every agent its own colour. Ink draws them all, the SuperAgent included, in the theme's text colour.">
             <Segmented<AvatarStyle> label="Avatars" value={avatars} onChange={setAvatarStyle} options={[{ value: 'colour', label: 'Colour' }, { value: 'ink', label: 'Ink' }]} />
           </Row>
         </Group>

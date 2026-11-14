@@ -1,6 +1,6 @@
-// The Avatars setting (Appearance: Colour or Ink, ACH-46, ACH-D62), as values: no DOM, so it is
+// The Avatars setting (Appearance: Colour or Ink, ACH-46, ACH-D64), as values: no DOM, so it is
 // tested directly (web/avatarStyle.ts stores it, web/ui/Avatar.tsx draws it).
-import { AVATAR_LEAD_INK, type AvatarPart } from '../shared/avatar.ts';
+import { AVATAR_FILL, AVATAR_INK, AVATAR_LEAD_INK, type AvatarLook, type AvatarPart } from '../shared/avatar.ts';
 
 export type AvatarStyle = 'colour' | 'ink';
 
@@ -10,10 +10,21 @@ export function parseAvatarStyle(value: string | null): AvatarStyle {
 }
 
 /**
- * An avatar drawn in ink: every agent the way the SuperAgent is (ACH-D60), its body in the theme's
- * text colour and its eyes in the page colour (AVATAR_LEAD_INK). Shapes, moods and tilt stay as
- * they are; only the fills change. Pure, tested.
+ * An avatar drawn in ink, the SuperAgent included (ACH-D64): its body in the theme's text colour and
+ * its eyes in the page colour (AVATAR_LEAD_INK, the ink ACH-D60 gave the SuperAgent). Shapes, moods
+ * and tilt stay as they are; only the fills change. Pure, tested.
  */
 export function inkParts(parts: readonly AvatarPart[]): AvatarPart[] {
   return parts.map(part => ({ ...part, fill: part.kind === 'body' ? AVATAR_LEAD_INK.body : AVATAR_LEAD_INK.eye }));
+}
+
+/**
+ * An avatar drawn in colour, the SuperAgent included (ACH-D64): its body in its own colour and the
+ * near-black pills every teammate has. The SuperAgent's Block then takes its violet back (the colour
+ * it had before ACH-43); everyone else is drawn as avatarParts already draws them. Outside the app
+ * (the logo, the tray and notification icons) the SuperAgent stays ink: those draw avatarParts
+ * directly. Pure, tested.
+ */
+export function colourParts(look: AvatarLook, parts: readonly AvatarPart[]): AvatarPart[] {
+  return parts.map(part => ({ ...part, fill: part.kind === 'body' ? AVATAR_FILL[look.color] : AVATAR_INK }));
 }
