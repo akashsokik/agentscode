@@ -18,6 +18,7 @@ import { cx } from '../ui/common.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
 import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
+import { HalftoneBackground } from '../ui/HalftoneBackground.tsx';
 
 const RECENT = 4;
 const CREW = 5;
@@ -42,8 +43,10 @@ export function HomePane({ chrome, actions }: { chrome: PaneChrome; actions: Sid
 
   return (
     <PaneFrame chrome={chrome} title={<span className="text-content/50">Home</span>}>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex min-h-full w-full max-w-[600px] flex-col items-center px-8 pb-7 pt-[max(3rem,12vh)] font-sans">
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
+        {/* Behind the content: faint dots that drift and gather into the Block (ACH-50, ACH-D68). */}
+        <HalftoneBackground />
+        <div className="relative mx-auto flex min-h-full w-full max-w-[600px] flex-col items-center px-8 pb-7 pt-[max(3rem,12vh)] font-sans">
           <Crew agents={homeRecent(team, pendingIds, CREW)} />
           <h1 className="mt-4 text-center text-[19px] font-semibold tracking-[-0.015em] text-content">What should the team work on?</h1>
           <p className="mt-0.5 text-center text-[12.5px] text-content/45"><TeamLine agents={team} pendingIds={pendingIds} /></p>
