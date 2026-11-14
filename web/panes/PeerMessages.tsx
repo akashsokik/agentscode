@@ -113,10 +113,24 @@ function showDelegation(asked: PeerMessage, from: HTMLElement): void {
 }
 
 /** The quiet line under a report that names the delegation it answers, and goes to it. */
-function Answers({ report, answered }: { report: PeerMessage; answered?: PeerMessage }) {
+function Answers({ report, answered, compact = false }: { report: PeerMessage; answered?: PeerMessage; compact?: boolean }) {
   const { byId } = useContext(Comms);
   const asked = answered ?? (report.replyTo ? byId.get(report.replyTo) : undefined);
   if (!asked?.delegation) return null;
+  // Comms' timeline (ACH-48): a quiet reply row, the arrow and the request's title, no underline.
+  if (compact) {
+    return (
+      <button
+        type="button"
+        title={`Answers: ${taskTitle(asked.delegation.task)}`}
+        onClick={event => showDelegation(asked, event.currentTarget)}
+        className="flex min-w-0 max-w-full items-center gap-1 rounded text-left text-[12px] text-content/40 transition-colors duration-150 hover:text-content/70 focus-visible:bg-content/5"
+      >
+        <CornerDownRight aria-hidden className="size-3 shrink-0" strokeWidth={1.75} />
+        <span className="min-w-0 truncate">{taskTitle(asked.delegation.task)}</span>
+      </button>
+    );
+  }
   return (
     <span className="flex min-w-0 items-center gap-1 text-content/45">
       <CornerDownRight aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
@@ -188,21 +202,36 @@ export function PeerBubble({ message, between = false, answered, arrivedAt, thre
       {trailing}
     </>
   );
-  // Comms shows who wrote to whom on one line above the bubble.
+  // Comms' Activity timeline (ACH-48): one row per message on TimelineStop's rail, whose node is
+  // the sender's avatar. A 20px header (who to whom, the kind, the outcome mark, the time), then the
+  // message as quiet text, two lines with "more" at their end, and a quiet reply row. No bubble.
   if (between) {
     return (
-      <div data-peer-message={message.id} tabIndex={-1} className="flex w-fit min-w-0 max-w-full flex-col items-start rounded font-sans outline-none focus-visible:ring-1 focus-visible:ring-content/30">
-        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-1 pb-1 text-[12px]">
-          <span className="flex min-w-0 items-center gap-1.5 text-content/45">
-            <Who id={message.fromAgentId} name={message.fromName} role={false} />
-            <span className="shrink-0">to</span>
-            <Who id={message.toAgentId} name={message.toName} role={false} />
-          </span>
-          <span className="shrink-0 text-content/45">{tag}</span>
-          {outcome ? <OutcomeChip words={outcome.words} tone={outcome.tone} /> : null}
-          {time}
+      <div data-peer-message={message.id} tabIndex={-1} className="flex min-w-0 max-w-full flex-col rounded font-sans outline-none focus-visible:bg-content/5">
+        <div className="flex h-5 min-w-0 items-center gap-1.5 text-[12px]">
+          <span className="min-w-0 truncate font-medium text-content/85">{message.fromName}</span>
+          <span className="shrink-0 text-content/35">to</span>
+          <span className="min-w-0 truncate text-content/60">{message.toName}</span>
+          <span aria-hidden className="shrink-0 text-content/25">·</span>
+          <span className="shrink-0 text-content/40">{tag}</span>
+          {outcome ? <StatusText state={TONE_STATE[outcome.tone]} className="shrink-0">{outcome.words}</StatusText> : null}
+          <DeliveryNote message={message} />
+          <span className="ml-auto pl-2">{time}</span>
         </div>
-        {body}
+        <div className="flex min-w-0 items-end gap-1.5 pt-0.5">
+          {expanded ? (
+            <div id={bodyId} className="min-w-0 flex-1 text-content/80"><Markdown inert text={full} /></div>
+          ) : (
+            <p id={bodyId} className="line-clamp-2 min-w-0 flex-1 whitespace-pre-wrap break-words text-[13px] leading-5 text-content/75"><RefText text={preview} /></p>
+          )}
+          {more ? (
+            <TextButton aria-expanded={expanded} aria-controls={bodyId} onClick={() => setExpanded(v => !v)} className="shrink-0 text-content/45">
+              {expanded ? 'less' : 'more'}
+            </TextButton>
+          ) : null}
+        </div>
+        {message.report ? <div className="pt-1"><Answers report={message} answered={answered} compact /></div> : null}
+        {trailing}
       </div>
     );
   }
