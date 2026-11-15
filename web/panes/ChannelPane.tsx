@@ -18,9 +18,9 @@ import { DiscussionMark } from '../mono/DiscussionMark.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
 import { TabLabel } from '../mono/TabLabel.tsx';
-import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
+import { StatusMark } from '../ui/StatusMark.tsx';
 import { ChannelComposer } from './ChannelComposer.tsx';
-import { ActivityLine, JumpToLatest, PostList, SPINNER, useFollowLatest } from './ChannelPosts.tsx';
+import { ActivityLine, JumpToLatest, PostList, useFollowLatest } from './ChannelPosts.tsx';
 import { ChannelThread } from './ChannelThread.tsx';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
 import { AgentAvatar } from '../ui/Avatar.tsx';
@@ -138,7 +138,7 @@ export function ChannelPane({ channelId, chrome }: { channelId: string; chrome: 
           <span className="shrink-0 text-content/45">#</span>
           <span className="shrink-0 text-content">{channel.name}</span>
           {channel.topic ? <TabLabel className="font-normal text-content/45">{channel.topic}</TabLabel> : null}
-          {running.length ? <TerminalSpinner className={`${SPINNER} text-content/45`} /> : null}
+          {running.length ? <StatusMark state="pending" className="size-3.5" /> : null}
         </span>
       }
       actions={

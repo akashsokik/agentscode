@@ -8,7 +8,7 @@ import { menuRowTone } from './menuRowTone.ts';
 import { createContext, useContext, type ComponentPropsWithoutRef, type ReactNode, type Ref } from 'react';
 import { Check, type IconComponent } from '../mono/icons.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
-import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
+import { StatusMark } from './StatusMark.tsx';
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ');
@@ -22,7 +22,7 @@ export const TEXTAREA = `${INPUT} resize-y leading-5`;
 export const PRIMARY = 'primary-action flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-[transform,background-color] duration-150 active:scale-[0.97] disabled:cursor-default';
 
 /** Icon-only header control: Modal's close button. `active` marks a toggle that is on. */
-export function HeaderButton({ icon: Icon, label, active = false, className = '', ...props }: ComponentPropsWithoutRef<'button'> & { icon: IconComponent; label: string; active?: boolean }) {
+export function HeaderButton({ icon: Icon, label, active = false, busy = false, className = '', ...props }: ComponentPropsWithoutRef<'button'> & { icon: IconComponent; label: string; active?: boolean; busy?: boolean }) {
   return (
     <button
       type="button"
@@ -35,7 +35,7 @@ export function HeaderButton({ icon: Icon, label, active = false, className = ''
         className,
       )}
     >
-      <Icon className="size-3.5" strokeWidth={1.75} />
+      {busy ? <StatusMark state="pending" className="size-3.5" /> : <Icon className="size-3.5" strokeWidth={1.75} />}
     </button>
   );
 }
@@ -136,7 +136,7 @@ const WORDS: Record<Tone, string> = {
 };
 
 /**
- * A status word with a tone dot, or MonoCode's terminal spinner while something runs.
+ * A status word with a tone dot, or the shared pending StatusMark while something runs (ACH-D73).
  * `quiet` drops the words to the faintest ink and leaves the colour to the dot. Pass it
  * rather than a text colour in `className`, which would compete with the tone's.
  */
@@ -152,7 +152,7 @@ export function StatusLabel({ tone = 'neutral', busy = false, quiet = false, shr
 }) {
   return (
     <span title={title} className={cx('inline-flex items-center gap-1.5 font-sans', shrink ? 'min-w-0 max-w-full' : 'shrink-0', quiet ? 'text-content/35' : WORDS[tone], className)}>
-      {busy ? <TerminalSpinner /> : <span aria-hidden className={cx('size-1.5 shrink-0 rounded-full', DOT[tone])} />}
+      {busy ? <StatusMark state="pending" className="size-3.5" /> : <span aria-hidden className={cx('size-1.5 shrink-0 rounded-full', DOT[tone])} />}
       {children}
     </span>
   );

@@ -16,7 +16,6 @@ import { PeerBubble } from './PeerMessages.tsx';
 import { Bot, CheckCheck, ChevronDown, Clock, MessageMultiple, Square, type IconComponent } from '../mono/icons.tsx';
 import { StatusMark, type StatusState } from '../ui/StatusMark.tsx';
 import { Shimmer } from '../mono/Shimmer.tsx';
-import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { useFollowLatest } from './ChannelPosts.tsx';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
 import { AgentAvatar } from '../ui/Avatar.tsx';
@@ -73,7 +72,7 @@ const STATE_MARK: Record<Exclude<ThreadState, 'working'>, { icon: IconComponent;
 };
 
 function StateIcon({ state, className = 'size-3' }: { state: ThreadState; className?: string }) {
-  if (state === 'working') return <TerminalSpinner className="text-content/60" />;
+  if (state === 'working') return <StatusMark state="pending" className={className} />;
   const mark = STATE_MARK[state];
   if ('status' in mark) return <StatusMark state={mark.status} quiet={mark.quiet} className={className} />;
   const { icon: Icon, className: tone } = mark;
@@ -379,7 +378,7 @@ function TailStop({ stop, agents, fresh, first, last }: { stop: TimelineTail; ag
   if (stop.kind === 'working') {
     const agent = agents.find(a => a.id === stop.agentId);
     return (
-      <TimelineStop first={first} last={last} fresh={fresh} node={<TerminalSpinner className="text-content/60" />}>
+      <TimelineStop first={first} last={last} fresh={fresh} node={<StatusMark state="pending" className="size-3.5" />}>
         <p className="flex h-5 min-w-0 items-center gap-1.5 font-sans text-[12px] text-content/50">
           <span className="shrink-0 font-medium text-content">{stop.name}</span>
           <span className="shrink-0">is working on {stop.forName}'s message</span>

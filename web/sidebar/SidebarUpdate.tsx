@@ -1,3 +1,4 @@
+import { StatusMark } from '../ui/StatusMark.tsx';
 /**
  * MonoCode's update UI at the foot of the sidebar (src/app/shell/SidebarUpdate.tsx and
  * UpdateRailCard.tsx in hardbeat920/monocode): an "Update to X" row while an update waits or
@@ -7,7 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BrandMark } from '../ui/BrandMark.tsx';
-import { ArrowDownCircle, Loader, X } from '../mono/icons.tsx';
+import { ArrowDownCircle, X } from '../mono/icons.tsx';
 import {
   isUpdateActionable,
   releaseNotesUrl,
@@ -129,7 +130,7 @@ export function SidebarUpdate({ snapshot }: { snapshot: UpdateSnapshot }) {
       } disabled:cursor-default disabled:opacity-70`}
     >
       <span className="grid size-[18px] shrink-0 place-items-center">
-        {busy ? <Loader className="size-4 animate-spin opacity-70" aria-hidden /> : <ArrowDownCircle className="size-4 text-accent" aria-hidden />}
+        {busy ? <StatusMark state="pending" className="size-4" /> : <ArrowDownCircle className="size-4 text-accent" aria-hidden />}
       </span>
       <span className="flex min-w-0 flex-1 items-center">
         <span className="block truncate text-[12px] font-medium leading-tight">{updateLabel(snapshot)}</span>

@@ -25,7 +25,6 @@ import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
 import { ContextMenu, openContextMenu, toggleMenu, type MenuAnchor } from '../ui/ContextMenu.tsx';
-import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
 import { StatusMark } from '../ui/StatusMark.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { AGENT_GROUP_LABEL, agentRowSlot, agentsSummary, groupAgents, railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
@@ -137,7 +136,7 @@ function AgentStateMark({ agent, pending, now }: { agent: Agent; pending: boolea
     const since = agent.turnStartedAt ? relativeTime(agent.turnStartedAt, now) : 'now';
     return (
       <span className="flex items-center gap-1.5 text-[11px] tabular-nums text-content/45" title="Working">
-        <TerminalSpinner className="text-content/55" />
+        <StatusMark state="pending" className="size-3.5" />
         {since === 'now' ? null : since}
       </span>
     );
@@ -395,7 +394,7 @@ function RailSection({ id, title, count, mark, addLabel, onAdd, children }: { id
 /** What a folded section or a project says about its agents: how many need you, or that one is working. */
 function SummaryMark({ needs, working }: { needs: number; working: boolean }) {
   if (needs) return <span className="text-[11px] font-medium tabular-nums text-warning" title={`${needs} ${needs === 1 ? 'needs' : 'need'} you`}>{needs}</span>;
-  return working ? <TerminalSpinner className="text-content/55" /> : null;
+  return working ? <StatusMark state="pending" className="size-3.5" /> : null;
 }
 
 /** A rail row makes room at its end only for a status mark, or for the ... button while hovered (MonoCode's group-hover:pr-6). */
@@ -470,11 +469,11 @@ function openRailAgent(agent: Agent, e: MouseEvent<HTMLElement>): void {
   (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'agent', agentId: agent.id });
 }
 
-/** An agent's status at the end of a rail row or in a rail icon's corner; `compact` swaps the spinner for a dot. */
+/** An agent's status at the end of a rail row or in a rail icon's corner; `compact` scales the shared pending mark down. */
 function AgentRailMark({ status, compact = false }: { status: RailAgentStatus; compact?: boolean }) {
   switch (status) {
     case 'needs-you': return <NeedsYouDot />;
-    case 'working': return compact ? <WorkingDot /> : <TerminalSpinner className="text-content/55" />;
+    case 'working': return <StatusMark state="pending" className={compact ? 'size-2.5' : 'size-3.5'} label="Working" />;
     case 'failed': return <FailedDot />;
     case 'unread': return <UnreadDot />;
     default: return null;
@@ -534,7 +533,7 @@ function ChannelRailRow({ channel, selected, actions }: { channel: Channel; sele
         <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', channel.unread ? 'font-semibold text-content' : 'font-medium')}>{channel.name}</span>
       </button>
       <RowStatus hidden={Boolean(menu)}>
-        {waiting ? <NeedsYouDot /> : working ? <TerminalSpinner className="text-content/55" /> : channel.unread ? <UnreadPill /> : null}
+        {waiting ? <NeedsYouDot /> : working ? <StatusMark state="pending" className="size-3.5" /> : channel.unread ? <UnreadPill /> : null}
       </RowStatus>
       <RowMore label={`#${channel.name} actions`} open={Boolean(menu)} onClick={e => toggleMenu(e, setMenu)} />
       {menu ? <ChannelMenu channel={channel} anchor={menu} actions={actions} onClose={() => setMenu(null)} /> : null}
@@ -657,7 +656,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
           id="channels"
           title="Channels"
           count={sorted.length}
-          mark={channelsWaiting ? <NeedsYouDot /> : channelsWorking ? <TerminalSpinner className="text-content/55" /> : sorted.some(c => c.unread) ? <UnreadDot /> : null}
+          mark={channelsWaiting ? <NeedsYouDot /> : channelsWorking ? <StatusMark state="pending" className="size-3.5" /> : sorted.some(c => c.unread) ? <UnreadDot /> : null}
           addLabel="New channel"
           onAdd={actions.newChannel}
         >
@@ -886,11 +885,6 @@ function RailIconButton({ label, active = false, dot, badge = 0, onClick, onCont
   );
 }
 
-/** A working mark small enough for a rail corner. */
-function WorkingDot() {
-  return <span role="img" aria-label="Working" title="Working" className="size-1.5 shrink-0 animate-pulse rounded-full bg-content/55 motion-reduce:animate-none" />;
-}
-
 function ChannelRailIcon({ channel, selected, actions }: { channel: Channel; selected: boolean; actions: SidebarActions }) {
   const { working, waiting } = useChannelActivity(channel.id);
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
@@ -899,7 +893,7 @@ function ChannelRailIcon({ channel, selected, actions }: { channel: Channel; sel
       <RailIconButton
         label={`#${channel.name}`}
         active={selected || Boolean(menu)}
-        dot={waiting ? <NeedsYouDot /> : working ? <WorkingDot /> : channel.unread ? <UnreadDot /> : null}
+        dot={waiting ? <NeedsYouDot /> : working ? <StatusMark state="pending" className="size-2.5" label="Working" /> : channel.unread ? <UnreadDot /> : null}
         onClick={e => (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'channel', channelId: channel.id })}
         onContextMenu={e => openContextMenu(e, setMenu)}
       >
@@ -940,7 +934,7 @@ function ProjectRailIcon({ project, agents, selected, actions }: { project: Proj
         label={summary.needsYou ? `${project.name}, ${summary.needsYou} ${summary.needsYou === 1 ? 'needs' : 'need'} you` : project.name}
         active={selected || Boolean(menu)}
         badge={summary.needsYou}
-        dot={summary.working ? <WorkingDot /> : null}
+        dot={summary.working ? <StatusMark state="pending" className="size-2.5" label="Working" /> : null}
         onClick={() => selectProject(project, agents.length, actions)}
         onContextMenu={e => openContextMenu(e, setMenu)}
       >

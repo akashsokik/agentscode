@@ -52,7 +52,7 @@ test('polish (ACH-23): keyboard, focus, copy and refresh feedback, errors with a
   assert.match(prs, /e\.key !== 'Escape'/, 'Escape in the detail returns to the card');
   assert.match(prs, /'Copy failed'/, 'a refused clipboard says so');
   assert.match(prs, /aria-live="polite"/);
-  assert.match(prs, /\[&_svg\]:animate-spin motion-reduce:\[&_svg\]:animate-none/, 'Refresh spins while it reads');
+  assert.match(prs, /busy=\{loading\}/, "Refresh uses HeaderButton's shared pending StatusMark (ACH-57)");
   assert.equal(prs.match(/action=\{retry\}/g)?.length, 2, 'both error states offer Try again');
   assert.match(prs, /Could not refresh \(\{error\}\)/, 'a failed refresh keeps the old list and says so, above it');
   assert.match(prs, /setState\(prev => \(\{ detail: prev\.detail, error/, 'a failed re-read keeps the detail shown');

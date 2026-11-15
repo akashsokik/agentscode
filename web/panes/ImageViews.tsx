@@ -8,7 +8,7 @@ import { useState } from 'react';
 import type { ImageAttachment } from '../../shared/types.ts';
 import { attachmentUrl } from '../api.ts';
 import { AlertCircle, File, X } from '../mono/icons.tsx';
-import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
+import { StatusMark } from '../ui/StatusMark.tsx';
 import { ImageViewer } from '../ui/ImageViewer.tsx';
 
 /** An image in the composer, before it is sent: uploading, ready or failed, with a way to remove it. */
@@ -32,7 +32,7 @@ export function AttachmentChip({ name, preview, uploading, error, onRemove }: {
       </button>
       {uploading ? (
         <span role="status" aria-label={`Uploading ${name}`} className="pointer-events-none absolute inset-0 grid place-items-center text-content">
-          <TerminalSpinner />
+          <StatusMark state="pending" className="size-3.5" />
         </span>
       ) : error ? (
         <span aria-hidden className="pointer-events-none absolute inset-0 grid place-items-center text-danger">

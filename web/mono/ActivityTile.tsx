@@ -4,10 +4,11 @@
  * terminal tile, edits amber, reading and searching blue, subagents violet) or by the provider that
  * did it. Pointing at a tile that folds something pushes its mark out to the right as a chevron
  * slides in from the left; an open fold keeps the chevron, turned down. A running phase shows the
- * dot spinner instead of its mark. The geometry and colours are MonoCode's tab_tile.rs and
+ * shared pending StatusMark instead of its mark. The geometry and colours are MonoCode's tab_tile.rs and
  * phase_tile.rs; the motion lives in styles.css (.activity-tile).
  */
 import type { CSSProperties, ReactNode } from 'react';
+import { StatusMark } from '../ui/StatusMark.tsx';
 import type { EngineKind } from '../../shared/types.ts';
 import type { PhaseKind } from '../activity.ts';
 import claudeMark from '../assets/claude.svg';
@@ -36,20 +37,6 @@ function ProviderGlyph({ engine }: { engine: string }) {
   return <span aria-hidden className="block size-3 bg-current" style={{ mask, WebkitMask: mask } as CSSProperties} />;
 }
 
-/** MonoCode's three-row dot spinner, each dot riding a wave across the grid. */
-export function DotSpinner() {
-  return (
-    <span aria-hidden className="tile-spinner">
-      {Array.from({ length: 9 }, (_, index) => {
-        const row = Math.floor(index / 3);
-        const col = index % 3;
-        const peak = 0.93 * (1 - (0.65 * Math.abs(col - row)) / 2);
-        return <span key={index} data-row={row} style={{ '--k': col + row, '--peak': peak } as CSSProperties} />;
-      })}
-    </span>
-  );
-}
-
 export function phaseFace(kind: PhaseKind): TileFace {
   return kind === 'run' || kind === 'edit' || kind === 'research' || kind === 'agent' ? kind : 'neutral';
 }
@@ -71,7 +58,7 @@ function phaseMark(kind: PhaseKind): ReactNode {
 function Tile({ face, mark, folds, open, spinning }: { face: TileFace; mark: ReactNode; folds: boolean; open: boolean; spinning: boolean }) {
   return (
     <span aria-hidden className="activity-tile" data-face={spinning ? 'neutral' : face} data-folds={folds || undefined} data-open={(folds && open) || undefined}>
-      <span className="activity-tile-mark">{spinning ? <DotSpinner /> : mark}</span>
+      <span className="activity-tile-mark">{spinning ? <StatusMark state="pending" className="size-3" /> : mark}</span>
       {folds ? (
         <span className="activity-tile-chevron">
           <ChevronRight className="size-3.5" strokeWidth={2} />

@@ -24,7 +24,7 @@ import { cx, MenuRow, MenuRowRole } from '../ui/common.tsx';
 import { EngineIcon, ENGINE_NAMES } from '../ui/EngineIcon.tsx';
 import { Markdown } from '../ui/Markdown.tsx';
 import { ArrowUp, ChevronDown, Folder, Plus, Search, Sparkles, X } from '../mono/icons.tsx';
-import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
+import { StatusMark } from '../ui/StatusMark.tsx';
 import { answerQuick, sendQuick, targetAgentId, teamStatus, type QuickTarget, type TeamMember, type TeamState } from './route.ts';
 import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
 import { SUPER_LOOK } from '../../shared/avatar.ts';
@@ -345,7 +345,7 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
           aria-label="Send"
           className="primary-action ml-1 grid size-7 shrink-0 place-items-center rounded-lg transition-[transform,opacity] duration-150 active:scale-[0.96] disabled:opacity-35"
         >
-          {busy ? <TerminalSpinner /> : <ArrowUp className="size-3.5" strokeWidth={2.25} />}
+          {busy ? <StatusMark state="pending" className="size-3.5" /> : <ArrowUp className="size-3.5" strokeWidth={2.25} />}
         </button>
       </footer>
 
@@ -485,7 +485,7 @@ function AgentStateLine({ agent }: { agent: Agent }) {
 
 /** A small mark for each state: the same marks the sidebar and palette use. */
 function StateMark({ state }: { state: TeamState }) {
-  if (state === 'working') return <TerminalSpinner className="text-content/45" />;
+  if (state === 'working') return <StatusMark state="pending" className="size-3.5" />;
   const dot = {
     'needs-you': 'bg-warning',
     stuck: 'border border-warning bg-transparent',
@@ -602,7 +602,7 @@ function Reply({ target, agent, entries }: { target: QuickTarget; agent: Agent |
         {problem && !working ? <p className="text-[12px] text-danger">{problem.text}</p> : null}
         {working ? (
           <p className="mt-1 flex items-center gap-1.5 text-[12px] text-content/45">
-            <TerminalSpinner className="text-content/45" />
+            <StatusMark state="pending" className="size-3.5" />
             <span className="truncate">{agent.activity || 'Thinking'}</span>
           </p>
         ) : !reply && !problem ? <p className="text-[12px] text-content/40">Waiting to start…</p> : null}

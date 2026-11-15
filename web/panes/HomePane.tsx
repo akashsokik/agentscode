@@ -13,7 +13,7 @@ import { Kbd } from '../ui/Kbd.tsx';
 import type { SidebarActions } from '../sidebar/Sidebar.tsx';
 import { attempt, useApp } from '../store.ts';
 import { ArrowUp } from '../mono/icons.tsx';
-import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
+import { StatusMark } from '../ui/StatusMark.tsx';
 import { cx } from '../ui/common.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { PaneFrame, type PaneChrome } from './PaneFrame.tsx';
@@ -196,7 +196,7 @@ function HomeComposer({ agents, team, superId }: { agents: readonly Agent[]; tea
 function AgentRow({ agent, pending, place, now }: { agent: Agent; pending: boolean; place: string; now: number }) {
   const what = agent.currentTask?.summary || agent.lastSummary || place;
   const state = pending || agent.status === 'waiting' ? <span className="font-medium text-warning">Needs you</span>
-    : agent.status === 'working' ? <span className="flex items-center gap-1.5 text-content/45"><TerminalSpinner className="text-content/55" />{agent.turnStartedAt ? relativeTime(agent.turnStartedAt, now) : ''}</span>
+    : agent.status === 'working' ? <span className="flex items-center gap-1.5 text-content/45"><StatusMark state="pending" className="size-3.5" />{agent.turnStartedAt ? relativeTime(agent.turnStartedAt, now) : ''}</span>
     : agent.status === 'error' ? <span className="text-danger">Failed</span>
     : <span className="text-content/35">{relativeTime(agent.lastActiveAt, now)}</span>;
   return (
