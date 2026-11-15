@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { Root } from './api.ts';
 import { closedWeights, prunedWeights, weightOf } from './paneSizes.ts';
 import { moveTab, orderTabs, othersToClose, rightToClose, setPinned } from './tabs.ts';
+import { canVisitBack, canVisitForward, emptyTabVisits, pruneVisits, recordVisit, visitBack, visitForward, type TabVisits } from './tabVisits.ts';
 import type { SplitTree } from './terminal/splits.ts';
 
 /** What a tab shows. Tabs are keyed by content, so opening the same thing twice focuses it. */
@@ -162,8 +163,32 @@ function initial(): Layout {
 let layout: Layout = initial();
 const listeners = new Set<() => void>();
 
+/** The tab the focused pane shows, or null (an empty pane shows Home). */
+function focusedTabId(l: Layout): string | null {
+  return l.panes.find(p => p.id === l.focused)?.tabId ?? null;
+}
+
+// Back and Forward (ACH-31, ACH-D69): the main-pane tabs you focused, kept for this window only
+// (web/tabVisits.ts). Every change of the focused tab is a visit, pinned tabs and the Issues and PR
+// pages included; the right panel's views are not tabs, so they never enter it.
+let visits: TabVisits = emptyTabVisits(focusedTabId(layout));
+/** Set while Back or Forward moves focus, so that move is not recorded as a new visit. */
+let navigating = false;
+let nav = { canBack: false, canForward: false };
+
+function followVisits(l: Layout): void {
+  const ids = new Set(l.tabs.map(t => t.id));
+  const focused = focusedTabId(l);
+  let next = pruneVisits(visits, ids, focused);
+  if (!navigating) next = recordVisit(next, focused);
+  visits = pruneVisits(next, ids, focused);
+  const canBack = canVisitBack(visits), canForward = canVisitForward(visits);
+  if (canBack !== nav.canBack || canForward !== nav.canForward) nav = { canBack, canForward };
+}
+
 function set(next: Layout): void {
   layout = next;
+  followVisits(layout);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
   } catch {
@@ -187,6 +212,47 @@ export function getLayout(): Layout {
 export function subscribeLayout(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/** Whether Back and Forward can move now (the title bar's buttons). */
+export function useTabNav(): { canBack: boolean; canForward: boolean } {
+  return useSyncExternalStore(listener => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  }, () => nav);
+}
+
+/** The visit history as it stands (for tests). */
+export function getTabVisits(): TabVisits {
+  return visits;
+}
+
+function goTo(step: (h: TabVisits) => TabVisits | null): void {
+  const ids = new Set(layout.tabs.map(t => t.id));
+  const next = step(pruneVisits(visits, ids, focusedTabId(layout)));
+  const tab = next?.current ? layout.tabs.find(t => t.id === next.current) : undefined;
+  if (!next || !tab) return;
+  const before = nav;
+  visits = next;
+  navigating = true;
+  try {
+    open(tab.content);
+  } finally {
+    navigating = false;
+  }
+  // open() may change nothing (the tab was in focus already); the buttons still follow the move.
+  followVisits(layout);
+  if (nav !== before) for (const listener of listeners) listener();
+}
+
+/** Back to the tab focused before this one (Cmd+[). */
+export function goBack(): void {
+  goTo(visitBack);
+}
+
+/** Forward again after Back (Cmd+]). */
+export function goForward(): void {
+  goTo(visitForward);
 }
 
 let nextId = 0;

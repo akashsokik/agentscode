@@ -19,7 +19,9 @@ export type ShortcutAction =
   | { kind: 'panel' } | { kind: 'closeOthers' } | { kind: 'superQuick' } | { kind: 'browser' }
   | { kind: 'maximize' } | { kind: 'sidebar' } | { kind: 'newAgent' } | { kind: 'palette' }
   | { kind: 'terminal' } | { kind: 'settings' } | { kind: 'closeTab' }
-  | { kind: 'cycle'; step: 1 | -1 } | { kind: 'pickTab'; n: number };
+  | { kind: 'cycle'; step: 1 | -1 } | { kind: 'pickTab'; n: number }
+  /** Back and Forward through the tabs you focused (ACH-31, ACH-D69). */
+  | { kind: 'back' } | { kind: 'forward' };
 
 /** The app shortcut a Mod chord stands for, or null. Ctrl+Tab and the terminal toggle are handled before. */
 export function shortcutFor(e: KeyPress, mac: boolean): ShortcutAction | null {
@@ -47,6 +49,9 @@ export function shortcutFor(e: KeyPress, mac: boolean): ShortcutAction | null {
     case 'KeyJ': return { kind: 'terminal' };
     case 'Comma': return { kind: 'settings' };
     case 'KeyW': return { kind: 'closeTab' };
+    // As in MonoCode and browsers; with Shift these cycle tabs instead (above).
+    case 'BracketLeft': return { kind: 'back' };
+    case 'BracketRight': return { kind: 'forward' };
   }
   // Cmd+1 to Cmd+8 pick that tab; Cmd+9 is always the last, as in browsers.
   if (/^Digit[1-9]$/.test(e.code)) return { kind: 'pickTab', n: Number(e.code.slice(5)) };

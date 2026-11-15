@@ -11,7 +11,7 @@ import { ProfileDialog } from './dialogs/UserProfile.tsx';
 import { SuperQuickBar } from './ui/SuperQuickBar.tsx';
 import { openAsks, openSuper, superLabel, useSuperAgent, useSuperBridge } from './super.ts';
 import { useGitStatus } from './git.ts';
-import { closeOtherTabs, closeTab, closeTabsToRight, focusedAgentId, open, openToSide, pinTab, pruneTabs, reorderTab, setProject, setRightPanel, setSidebar, setSidebarView, toggleMaximize, useLayout, type Pane, type Tab } from './layout.ts';
+import { closeOtherTabs, closeTab, closeTabsToRight, focusedAgentId, goBack, goForward, open, openToSide, pinTab, pruneTabs, reorderTab, setProject, setRightPanel, setSidebar, setSidebarView, toggleMaximize, useLayout, useTabNav, type Pane, type Tab } from './layout.ts';
 import { othersToClose, rightToClose } from './tabs.ts';
 import { ContextMenu, openContextMenu, type MenuAnchor } from './ui/ContextMenu.tsx';
 import { AgentPane } from './panes/AgentPane.tsx';
@@ -42,7 +42,7 @@ import { projectLabel } from './projects.ts';
 import { dismissToast, useApp } from './store.ts';
 import { UsageFooter } from './ui/UsageFooter.tsx';
 import { HeaderButton, MenuDivider, MenuRow, StatusLabel } from './ui/common.tsx';
-import { ChevronRight, CircleDashed, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X, GitPullRequest } from './mono/icons.tsx';
+import { ChevronLeft, ChevronRight, CircleDashed, CircleX, GitBranch, Route, File, FileDiff, Globe, Maximize2, MessageMultiple, Minimize2, PanelLeft, PanelRight, Pin, PinOff, Plus, SplitColumns, Terminal, X, GitPullRequest } from './mono/icons.tsx';
 import { StatusMark } from './ui/StatusMark.tsx';
 import { LAYER } from './mono/layers.ts';
 import { Shimmer } from './mono/Shimmer.tsx';
@@ -183,6 +183,7 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
   const layout = useLayout();
   const snapshot = useApp(s => s.snapshot);
   const focusedPane = layout.panes.find(p => p.id === layout.focused);
+  const nav = useTabNav();
   const agentId = focusedAgentId(layout);
   const agent = snapshot?.agents.find(a => a.id === agentId);
   const root = useMemo(() => (agentId ? { agent: agentId } : null), [agentId]);
@@ -205,6 +206,11 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
           <HeaderButton icon={PanelLeft} label="Show sidebar" title={`Show sidebar (${SHORTCUTS.sidebar})`} onClick={() => setSidebar(true)} />
         </div>
       )}
+      {/* Back and Forward through the tabs you focused, as in MonoCode's title bar (ACH-31, ACH-D69). */}
+      <div className="flex shrink-0 items-center pl-1">
+        <HeaderButton icon={ChevronLeft} label={`Back (${SHORTCUTS.back})`} disabled={!nav.canBack} onClick={goBack} />
+        <HeaderButton icon={ChevronRight} label={`Forward (${SHORTCUTS.forward})`} disabled={!nav.canForward} onClick={goForward} />
+      </div>
       <div
         ref={strip}
         className="flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden overscroll-none pl-1.5 pr-2.5 [scrollbar-width:none]"
