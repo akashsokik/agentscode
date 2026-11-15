@@ -1,3 +1,4 @@
+import { StatusMark } from '../ui/StatusMark.tsx';
 /**
  * Settings > About: the version and build, the update state with Check for updates, the install
  * command for an unsigned Mac build, and the release notes. The update state comes from
@@ -43,7 +44,7 @@ function UpdatesRow({ snapshot }: { snapshot: UpdateSnapshot }) {
       <SecondaryButton disabled={busy || !updates} onClick={() => void (available ? updates?.install() : updates?.check())}>
         {available
           ? <ArrowDownCircle className="size-3.5" strokeWidth={1.75} />
-          : <RefreshCw className={`size-3.5 ${snapshot.phase === 'checking' ? 'animate-spin' : ''}`} strokeWidth={1.75} />}
+          : <>{snapshot.phase === 'checking' ? <StatusMark state="pending" className="size-3.5" /> : <RefreshCw className="size-3.5" strokeWidth={1.75} />}</>}
         {available ? `Update to ${snapshot.availableVersion}` : 'Check for updates'}
       </SecondaryButton>
     </Row>

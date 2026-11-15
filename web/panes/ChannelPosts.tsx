@@ -24,7 +24,6 @@ import { CopyTurnButton, DaySeparator, UserMessageBlock } from './Transcript.tsx
 import { AgentAvatar } from '../ui/Avatar.tsx';
 import { AvatarStack } from '../ui/AvatarStack.tsx';
 
-export const SPINNER = 'inline-block w-3.5 shrink-0 select-none text-center text-[11px] leading-none';
 
 const DELIVERY_LABEL: Record<ChannelDelivery['status'], string> = {
   queued: 'Queued',

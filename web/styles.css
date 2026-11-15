@@ -947,71 +947,6 @@ html.theme-light .activity-tile[data-face="neutral"] {
   transform: none;
 }
 
-/*
- * MonoCode's dot spinner (session_mark.rs): a 3x3 grid, one colour per row,
- * a wave crossing it on the diagonal every 1.2s. Each dot's brightness peaks
- * as the wave passes, less so off the diagonal.
- */
-@property --tile-wave {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 0;
-}
-
-@keyframes tile-spinner-wave {
-  0%,
-  100% {
-    --tile-wave: 0;
-  }
-  20% {
-    --tile-wave: 0.02;
-  }
-  30% {
-    --tile-wave: 0.23;
-  }
-  40% {
-    --tile-wave: 0.7;
-  }
-  50% {
-    --tile-wave: 1;
-  }
-  60% {
-    --tile-wave: 0.7;
-  }
-  70% {
-    --tile-wave: 0.23;
-  }
-  80% {
-    --tile-wave: 0.02;
-  }
-}
-
-.tile-spinner {
-  display: grid;
-  grid-template-columns: repeat(3, 4px);
-  grid-template-rows: repeat(3, 4px);
-  place-items: center;
-}
-
-.tile-spinner > span {
-  width: 2.5px;
-  height: 2.5px;
-  border-radius: 9999px;
-  background: #6f84a3;
-  opacity: calc(0.07 + var(--peak) * var(--tile-wave));
-  animation: tile-spinner-wave 1200ms linear infinite;
-  /* Each step along the diagonal lags the one before by 0.9 rad. */
-  animation-delay: calc(var(--k) * 171.9ms - 1200ms);
-}
-
-.tile-spinner > span[data-row="1"] {
-  background: #e8b583;
-}
-
-.tile-spinner > span[data-row="2"] {
-  background: #e47fa6;
-}
-
 .zen-fold-item[data-fold-state="closed"] {
   display: grid;
   grid-template-rows: 0fr;
@@ -1072,17 +1007,6 @@ html.theme-light .activity-tile[data-face="neutral"] {
     opacity: 0;
   }
 }
-@keyframes zen-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* The dashed ring on a running tool turns slowly, so the line reads as live. */
-.zen-tool-spin {
-  animation: zen-spin 3.6s linear infinite;
-}
-
 /*
  * Zen mode's activity phases: a run of related tool calls under one line,
  * on a rail, folding back to that line when the agent moves on.
@@ -1390,7 +1314,6 @@ html.theme-light .activity-tile[data-face="neutral"] {
   .zen-phase-step[data-entering],
   .zen-phase-step[data-entering]::before,
   .zen-phase-step[data-entering]::after,
-  .zen-tool-spin,
   .transcript-turn-enter,
   .transcript-turn[data-prompt-rise] > * {
     animation: none;
@@ -1409,10 +1332,6 @@ html.theme-light .activity-tile[data-face="neutral"] {
     transition: none;
   }
 
-  .tile-spinner > span {
-    animation: none;
-    opacity: calc(0.25 + var(--peak) * 0.5);
-  }
 
   /* No fade means no animationend to settle on, so an arriving step drops
      straight into its settled layout. */

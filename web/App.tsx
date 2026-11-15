@@ -48,7 +48,6 @@ import { LAYER } from './mono/layers.ts';
 import { Shimmer } from './mono/Shimmer.tsx';
 import { TabLabel } from './mono/TabLabel.tsx';
 import { TabWidthMotion } from './mono/TabWidthMotion.tsx';
-import { TerminalSpinner } from './mono/TerminalSpinner.tsx';
 import { useTabCloseMotion } from './mono/useTabCloseMotion.ts';
 import { AgentAvatar } from './ui/Avatar.tsx';
 import { AvatarStack } from './ui/AvatarStack.tsx';
@@ -227,7 +226,7 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
           const moving = entry.closing || entry.opening;
           const status = attention
             ? <span aria-hidden className="size-1.5 rounded-full bg-warning" />
-            : busy ? <TerminalSpinner className="text-content/45" /> : null;
+            : busy ? <StatusMark state="pending" className="size-3.5" /> : null;
           const dragProps = {
             draggable: !moving,
             onDragStart: (e: DragEvent) => { e.dataTransfer.setData(TAB_DRAG, tab.id); e.dataTransfer.effectAllowed = 'move'; },
@@ -387,7 +386,7 @@ function StatusFooter() {
           <StatusLabel tone="warning">{connection === 'connecting' ? 'Connecting…' : 'Reconnecting…'}</StatusLabel>
         </span>
       )}
-      {working ? <span className="flex shrink-0 items-center gap-1 text-content/45" title={(agents ?? []).filter(a => a.status === 'working').map(a => a.name).join(', ')}><AvatarStack agents={(agents ?? []).filter(a => a.status === 'working')} size="size-3.5" />{working} working</span> : null}
+      {working ? <span className="flex shrink-0 items-center gap-1 text-content/45" title={(agents ?? []).filter(a => a.status === 'working').map(a => a.name).join(', ')}><StatusMark state="pending" className="size-3" /><AvatarStack agents={(agents ?? []).filter(a => a.status === 'working')} size="size-3.5" />{working} working</span> : null}
       {waiting ? <span className="flex shrink-0 items-center gap-1 text-warning" title={(agents ?? []).filter(a => a.status === 'waiting').map(a => a.name).join(', ')}><AvatarStack agents={(agents ?? []).filter(a => a.status === 'waiting')} size="size-3.5" />{waiting} {waiting === 1 ? 'needs' : 'need'} you</span> : null}
       {/* This page is older than the build the server serves now (web/staleBuild.ts). */}
       <StaleBuildNotice />

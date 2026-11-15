@@ -267,7 +267,6 @@ export const Keyboard = wrap(KeyboardIcon, "Keyboard");
 export const ListBullet = wrap(LeftToRightListBulletIcon, "ListBullet");
 export const ListEnd = wrap(ListEndIcon, "ListEnd");
 export const ListFilter = wrap(FilterIcon, "ListFilter");
-export const Loader = wrap(Loading03Icon, "Loader");
 export const LoaderCircle = wrap(Loading03Icon, "LoaderCircle");
 export const Lock = wrap(SquareLock02Icon, "Lock");
 export const Maximize2 = wrap(ArrowExpand01Icon, "Maximize2");

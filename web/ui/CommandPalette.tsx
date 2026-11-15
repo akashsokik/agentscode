@@ -23,7 +23,7 @@ import { setTheme, useTheme, type ThemePreference } from '../theme.ts';
 import { cx } from './common.tsx';
 import { Check, Globe, Folder, FolderPlus, FolderTree, GitCompare, MessageMultiple, MessageSquarePlus, Palette, PanelBottom, PanelLeft, PanelRight, Plus, RotateCcw, Search, Settings, SlidersHorizontal, SplitColumns, SplitRows, Square, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Modal } from '../mono/Modal.tsx';
-import { TerminalSpinner } from '../mono/TerminalSpinner.tsx';
+import { StatusMark } from './StatusMark.tsx';
 import { AgentAvatar } from './Avatar.tsx';
 
 /** What the palette needs from the app shell: the dialogs it can open. */
@@ -71,7 +71,7 @@ const icon = (Icon: IconComponent) => <Icon className="size-4 text-content/60" s
 
 function agentStatus(agent: Agent, pending: boolean): { label: string; mark?: ReactNode } {
   if (pending || agent.status === 'waiting') return { label: 'Needs you', mark: <span aria-hidden className="size-1.5 rounded-full bg-warning" /> };
-  if (agent.status === 'working') return { label: agent.activity || 'Working', mark: <TerminalSpinner className="text-content/45" /> };
+  if (agent.status === 'working') return { label: agent.activity || 'Working', mark: <StatusMark state="pending" className="size-3.5" /> };
   if (agent.status === 'error') return { label: 'Failed' };
   return { label: '' };
 }

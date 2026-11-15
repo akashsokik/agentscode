@@ -1,3 +1,4 @@
+import { StatusMark } from './StatusMark.tsx';
 /**
  * MonoCode's usage footer (usage_footer.rs), for the agent in front: its engine's logo, a small bar
  * for the window closest to its limit and each window's use and countdown ("12% 3h 5m · 41% 4d 2h"),
@@ -200,7 +201,7 @@ export function UsageFooter({ fallback }: { fallback: ReactNode }) {
         }}
         className="grid size-5 shrink-0 place-items-center rounded-md text-content/40 transition-colors duration-150 hover:bg-content/10 hover:text-content disabled:opacity-50 disabled:hover:bg-transparent"
       >
-        <RefreshCw className={`size-3 ${refreshing ? 'animate-spin' : ''}`} strokeWidth={1.75} />
+        {refreshing ? <StatusMark state="pending" className="size-3" /> : <RefreshCw className="size-3" strokeWidth={1.75} />}
       </button>
     </span>
   );

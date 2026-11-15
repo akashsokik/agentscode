@@ -557,7 +557,7 @@ function ActivityPhaseGroup({ entries, active, selfId, trailing }: { entries: En
         className={`tile-host group flex w-full min-w-0 items-center gap-2 py-1 text-left${open ? ' zen-phase-drop' : ''}`}
       >
         {/* A running phase keeps its spinner unless pointed at; a settled open one keeps the chevron. */}
-        <PhaseTile kind={kind} open={open && !active} spinning={active && !reducedMotion()} />
+        <PhaseTile kind={kind} open={open && !active} spinning={active} />
         {label}
       </button>
       <div className="zen-phase-body" data-open={open}>
@@ -613,7 +613,7 @@ function TurnRow({ folded, children }: { folded: boolean; children: ReactNode | 
 function LiveFoldTitle({ startedAt, paused, waitingLabel }: { startedAt?: number; paused: boolean; waitingLabel?: string }) {
   const elapsedMs = useElapsedFrom(startedAt, paused);
   const text = paused ? (waitingLabel ?? 'waiting for approval') : formatWorkingDuration(elapsedMs, false);
-  return <Shimmer className="min-w-0 truncate" duration={1}>{text}</Shimmer>;
+  return <span className="inline-flex min-w-0 items-center gap-1.5">{!paused ? <StatusMark state="pending" className="size-3" /> : null}<Shimmer className="min-w-0 truncate" duration={1}>{text}</Shimmer></span>;
 }
 
 /**

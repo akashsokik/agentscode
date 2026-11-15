@@ -77,7 +77,7 @@ export function PullRequestsPane({ prId, chrome }: { prId?: string; chrome: Pane
     </span>
   );
   // Spins while a read runs (still, under reduced motion).
-  const actions = <HeaderButton icon={RefreshCw} label={loading ? 'Refreshing pull requests' : 'Refresh pull requests'} disabled={loading} onClick={refresh} className={loading ? '[&_svg]:animate-spin motion-reduce:[&_svg]:animate-none' : ''} />;
+  const actions = <HeaderButton icon={RefreshCw} label={loading ? 'Refreshing pull requests' : 'Refresh pull requests'} disabled={loading} onClick={refresh} busy={loading} />;
   const retry = <ChipButton onClick={refresh} disabled={loading}>{loading ? 'Trying…' : 'Try again'}</ChipButton>;
 
   if (!data) {
