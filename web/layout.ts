@@ -3,7 +3,7 @@ import type { Root } from './api.ts';
 import { closedWeights, prunedWeights, weightOf } from './paneSizes.ts';
 import { moveTab, orderTabs, othersToClose, rightToClose, setPinned } from './tabs.ts';
 import { canVisitBack, canVisitForward, emptyTabVisits, pruneVisits, recordVisit, visitBack, visitForward, type TabVisits } from './tabVisits.ts';
-import { isAppSection, type AppSettingsSection } from './settingsSections.ts';
+import { appSection, type AppSettingsSection } from './settingsSections.ts';
 import { settingsShortcut, type ShortcutAction } from './shortcutMap.ts';
 import type { SplitTree } from './terminal/splits.ts';
 
@@ -94,6 +94,8 @@ export interface Layout {
   settingsOpen?: boolean;
   /** The Settings section last shown; Settings open on it again. Appearance until one is picked. */
   settingsSection?: AppSettingsSection;
+  /** What "Search settings" holds while Settings are open; empty shows the section. Never saved. */
+  settingsQuery?: string;
 }
 
 export type ColumnKey = 'nav' | 'workspace' | 'panel';
@@ -165,7 +167,11 @@ function initial(): Layout {
     restored.superView = migrateSuperView(restored.superView);
     // Settings are never open at start, and a section this build lacks falls back to Appearance.
     delete restored.settingsOpen;
-    if (!isAppSection(restored.settingsSection)) delete restored.settingsSection;
+    delete restored.settingsQuery;
+    // A section saved under its old id (ACH-D82) opens as today's; one this build lacks is dropped.
+    const section = appSection(restored.settingsSection);
+    if (section) restored.settingsSection = section;
+    else delete restored.settingsSection;
     // A tab kind this build cannot show would crash the strip: drop it (TAB_KINDS).
     ({ tabs: restored.tabs, panes: restored.panes } = knownTabs(restored.tabs, restored.panes));
     // Pinned tabs come first; a layout saved before pins existed has none and keeps its order.
@@ -207,7 +213,7 @@ function set(next: Layout): void {
   layout = next;
   followVisits(layout);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...layout, settingsOpen: undefined }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...layout, settingsOpen: undefined, settingsQuery: undefined }));
   } catch {
     // private mode or full storage: the layout just is not remembered
   }
@@ -498,17 +504,23 @@ export function pruneTabs(agentIds: Set<string>, channelIds: Set<string>): void 
 /** Settings as a full-window page (ACH-D77), on `section` or the one last shown. */
 export function openSettings(section?: AppSettingsSection): void {
   const settingsSection = section ?? layout.settingsSection ?? 'appearance';
-  if (layout.settingsOpen && layout.settingsSection === settingsSection) return;
-  set({ ...layout, settingsOpen: true, settingsSection });
+  if (layout.settingsOpen && layout.settingsSection === settingsSection && !layout.settingsQuery) return;
+  set({ ...layout, settingsOpen: true, settingsSection, settingsQuery: '' });
 }
 
 /** Back to the app as it was: the tabs, panes and panels were only hidden. */
 export function closeSettings(): void {
-  if (layout.settingsOpen) set({ ...layout, settingsOpen: false });
+  if (layout.settingsOpen) set({ ...layout, settingsOpen: false, settingsQuery: '' });
 }
 
+/** Show a section; picking one also clears the search. */
 export function setSettingsSection(settingsSection: AppSettingsSection): void {
-  if (layout.settingsSection !== settingsSection) set({ ...layout, settingsSection });
+  if (layout.settingsSection !== settingsSection || layout.settingsQuery) set({ ...layout, settingsSection, settingsQuery: '' });
+}
+
+/** "Search settings": a query shows the matching rows of every section in place of the section. */
+export function setSettingsQuery(settingsQuery: string): void {
+  if ((layout.settingsQuery ?? '') !== settingsQuery) set({ ...layout, settingsQuery });
 }
 
 /**
