@@ -65,16 +65,16 @@ export function shortcutFor(e: KeyPress, mac: boolean): ShortcutAction | null {
 
 /**
  * What an app shortcut does while Settings fill the window (ACH-D77). Back (Cmd+[) closes them, as
- * the Back row and Esc do; Cmd+1 to Cmd+9 pick a section instead of a tab. Shortcuts that open
- * something (the palette, a new agent, the SuperAgent, a browser tab) still run, and opening a tab
- * leaves Settings. The rest act on the hidden tabs and panels, so they do nothing until you are back.
+ * the Back row and Esc do. Settings have no shortcuts of their own (ACH-D81): Cmd+1 to Cmd+9 do
+ * nothing there. Shortcuts that open something (the palette, a new agent, the SuperAgent, a browser
+ * tab) still run, and opening a tab leaves Settings. The rest act on the hidden tabs and panels
+ * (Cmd+1 to Cmd+9 among them), so they do nothing until you are back.
  */
-export type SettingsShortcut = { kind: 'close' } | { kind: 'section'; n: number } | { kind: 'run' } | { kind: 'ignore' };
+export type SettingsShortcut = { kind: 'close' } | { kind: 'run' } | { kind: 'ignore' };
 
 export function settingsShortcut(action: ShortcutAction): SettingsShortcut {
   switch (action.kind) {
     case 'back': return { kind: 'close' };
-    case 'pickTab': return { kind: 'section', n: action.n };
     case 'settings': case 'palette': case 'newAgent': case 'superQuick': case 'browser': return { kind: 'run' };
     default: return { kind: 'ignore' };
   }
