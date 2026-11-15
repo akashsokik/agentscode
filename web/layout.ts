@@ -3,7 +3,7 @@ import type { Root } from './api.ts';
 import { closedWeights, prunedWeights, weightOf } from './paneSizes.ts';
 import { moveTab, orderTabs, othersToClose, rightToClose, setPinned } from './tabs.ts';
 import { canVisitBack, canVisitForward, emptyTabVisits, pruneVisits, recordVisit, visitBack, visitForward, type TabVisits } from './tabVisits.ts';
-import { APP_SECTION_IDS, isAppSection, type AppSettingsSection } from './settingsSections.ts';
+import { isAppSection, type AppSettingsSection } from './settingsSections.ts';
 import { settingsShortcut, type ShortcutAction } from './shortcutMap.ts';
 import type { SplitTree } from './terminal/splits.ts';
 
@@ -512,18 +512,14 @@ export function setSettingsSection(settingsSection: AppSettingsSection): void {
 }
 
 /**
- * An app shortcut while Settings are open (web/shortcuts.ts, ACH-D77): Cmd+[ closes them, Cmd+1 to
- * Cmd+5 pick a section, and the shortcuts for the hidden tabs and panels wait. True when the key is
+ * An app shortcut while Settings are open (web/shortcuts.ts, ACH-D77, ACH-D81): Cmd+[ closes them,
+ * and the shortcuts for the hidden tabs and panels wait. True when the key is
  * done with; false when Settings are closed or the shortcut should run as usual.
  */
 export function settingsShortcutStep(action: ShortcutAction): boolean {
   if (!layout.settingsOpen) return false;
   const step = settingsShortcut(action);
   if (step.kind === 'close') closeSettings();
-  if (step.kind === 'section') {
-    const section = APP_SECTION_IDS[step.n - 1];
-    if (section) setSettingsSection(section);
-  }
   return step.kind !== 'run';
 }
 

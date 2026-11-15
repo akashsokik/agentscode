@@ -101,20 +101,16 @@ test('Cmd+[ closes Settings while they are open, and moves back through tabs oth
   assert.equal(focusedKey(), 'agent:fen', 'with Settings closed it is Back again');
 });
 
-test('Cmd+1 to Cmd+5 pick a section while Settings are open, and a tab otherwise', () => {
+test('ACH-D81: Settings have no shortcuts of their own; Cmd+1 to Cmd+5 do nothing while open, and pick a tab otherwise', () => {
   setup();
-  L.openSettings();
-  for (const [index, id] of APP_SECTION_IDS.entries()) {
-    press(`Digit${index + 1}`);
-    assert.equal(L.getLayout().settingsSection, id);
-  }
-  assert.equal(focusedKey(), 'agent:cy', 'no tab was picked behind Settings');
-  press('Digit6');
-  assert.equal(L.getLayout().settingsSection, 'about', 'past the last section nothing happens');
+  L.openSettings('appearance');
+  for (const n of [1, 2, 3, 4, 5, 6, 9]) press(`Digit${n}`);
+  assert.equal(L.getLayout().settingsSection, 'appearance', 'no section was picked by a digit');
   assert.equal(L.getLayout().settingsOpen, true);
+  assert.equal(focusedKey(), 'agent:cy', 'and no tab was picked behind Settings');
   L.closeSettings();
   press('Digit1');
-  assert.equal(focusedKey(), 'comms', 'closed, Cmd+1 picks the first tab');
+  assert.equal(focusedKey(), 'comms', 'closed, Cmd+1 picks the first tab as before');
 });
 
 test('shortcuts on the hidden tabs and panels do nothing while Settings are open', () => {
@@ -136,10 +132,10 @@ test('shortcuts on the hidden tabs and panels do nothing while Settings are open
   L.closeSettings();
 });
 
-test('settingsShortcut: Back closes, a digit picks, openers run, the rest wait', () => {
+test('settingsShortcut: Back closes, openers run, the rest wait (digits included)', () => {
   const kind = (code: string, shift = false) => settingsShortcut(shortcutFor({ code, metaKey: true, ctrlKey: false, altKey: false, shiftKey: shift }, true)!).kind;
   assert.equal(kind('BracketLeft'), 'close');
-  assert.deepEqual(settingsShortcut({ kind: 'pickTab', n: 3 }), { kind: 'section', n: 3 });
+  assert.deepEqual(settingsShortcut({ kind: 'pickTab', n: 3 }), { kind: 'ignore' });
   for (const code of ['KeyK', 'Comma', 'KeyN']) assert.equal(kind(code), 'run', code);
   assert.equal(kind('Space', true), 'run', 'the SuperAgent quick bar');
   for (const code of ['KeyW', 'BracketRight', 'KeyB', 'KeyJ']) assert.equal(kind(code), 'ignore', code);
@@ -179,7 +175,10 @@ test('wiring: every way in opens the page; the modal path is gone', () => {
   assert.match(page, /Group|Row|Segmented|Toggle/);
   const sidebar = read('web/sidebar/Sidebar.tsx');
   assert.match(sidebar, /<HeaderButton data-settings-gear icon=\{Settings\}/, 'the gear in the foot row');
-  assert.match(sidebar, /<RailAction icon=\{ArrowLeft\} label="Back" hint="Escape" onClick=\{closeSettings\} \/>/, 'Back where the gear was, as a rail row');
+  assert.match(sidebar, /<RailAction icon=\{ArrowLeft\} label="Back" onClick=\{closeSettings\} \/>/, 'Back where the gear was, as a rail row, with no Esc hint (ACH-D81)');
+  const nav = sidebar.slice(sidebar.indexOf('function SettingsNav'), sidebar.indexOf('\n}\n', sidebar.indexOf('function SettingsNav')));
+  assert.doesNotMatch(nav, /hint=|Kbd|Mod\+/, 'no shortcut hints anywhere in the Settings navigation');
+  assert.doesNotMatch(read('web/panes/SettingsPage.tsx'), /<Kbd|SHORTCUT/, 'nor on the page');
   assert.match(sidebar, /if \(settingsOpen\) return true;/, 'the full column shows the sections even when folded');
   assert.match(read('web/ui/CommandPalette.tsx'), /run: actions\.settings/);
   const shortcuts = read('web/shortcuts.ts');

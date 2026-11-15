@@ -52,8 +52,8 @@ export function sectionForKey<T extends string = AgentSettingsSection>(
 }
 
 /**
- * The app's Settings page sections (ACH-D77), in the order the sidebar lists them and Cmd+1 to
- * Cmd+5 pick them. Each is one of the groups the Settings modal used to stack.
+ * The app's Settings page sections (ACH-D77), in the order the sidebar lists them. Each is one of
+ * the groups the Settings modal used to stack. No shortcuts pick them (ACH-D81).
  */
 export type AppSettingsSection = 'appearance' | 'comms' | 'super' | 'engines' | 'about';
 

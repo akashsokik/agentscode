@@ -704,7 +704,7 @@ const SECTION_ICONS: Record<AppSettingsSection, IconComponent> = { appearance: P
 
 /**
  * The navigation column's body while Settings are open (ACH-D77, MonoCode's SettingsNav): the
- * sections as RailAction rows, Cmd+1 to Cmd+5 beside them, and Back at the foot where the gear was.
+ * sections as RailAction rows, and Back at the foot where the gear was. No shortcut hints (ACH-D81).
  * Opening moves focus to the section shown; closing gives it back to the gear.
  */
 function SettingsNav({ open: isOpen, section }: { open: boolean; section: AppSettingsSection }) {
@@ -727,14 +727,14 @@ function SettingsNav({ open: isOpen, section }: { open: boolean; section: AppSet
     <div data-swap="nav" data-shown={isOpen} inert={!isOpen} className="settings-swap flex flex-col">
       <div ref={list} aria-label="Settings" onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto overscroll-none px-2 pb-2 pt-0.5">
         <div className="px-2 pb-1 pt-1 text-xs font-semibold text-content/35">Settings</div>
-        {APP_SECTIONS.map((item, index) => (
+        {APP_SECTIONS.map(item => (
           <div key={item.id} data-section={item.id} className="contents">
-            <RailAction icon={SECTION_ICONS[item.id]} label={item.label} hint={`Mod+${index + 1}`} active={item.id === section} onClick={() => setSettingsSection(item.id)} />
+            <RailAction icon={SECTION_ICONS[item.id]} label={item.label} active={item.id === section} onClick={() => setSettingsSection(item.id)} />
           </div>
         ))}
       </div>
       <div className="flex shrink-0 items-center gap-0.5 px-2 pb-2 pt-1.5">
-        <RailAction icon={ArrowLeft} label="Back" hint="Escape" onClick={closeSettings} />
+        <RailAction icon={ArrowLeft} label="Back" onClick={closeSettings} />
       </div>
     </div>
   );
