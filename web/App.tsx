@@ -13,7 +13,8 @@ import { ProfileDialog } from './dialogs/UserProfile.tsx';
 import { SuperQuickBar } from './ui/SuperQuickBar.tsx';
 import { openAsks, openSuper, superLabel, useSuperAgent, useSuperBridge } from './super.ts';
 import { useGitStatus } from './git.ts';
-import { closeOtherTabs, closeSettings, closeTab, closeTabsToRight, focusedAgentId, goBack, goForward, open, openSettings, openToSide, pinTab, pruneTabs, reorderTab, setProject, setRightPanel, setSidebar, setSidebarView, toggleMaximize, useLayout, useTabNav, type Pane, type Tab } from './layout.ts';
+import { closeOtherTabs, closeSettings, closeTab, closeTabsToRight, focusedAgentId, goBack, goForward, offersProjectColumn, open, openSettings, openToSide, pinTab, pruneTabs, reorderTab, setProject, setRightPanel, setSidebar, setSidebarView, setWorkspaceColumn, toggleMaximize, useLayout, useTabNav, type Pane, type Tab } from './layout.ts';
+import { showsWorkspace } from './sidebar/agentRail.ts';
 import { othersToClose, rightToClose } from './tabs.ts';
 import { ContextMenu, openContextMenu, type MenuAnchor } from './ui/ContextMenu.tsx';
 import { AgentPane } from './panes/AgentPane.tsx';
@@ -185,6 +186,8 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
   const snapshot = useApp(s => s.snapshot);
   const focusedPane = layout.panes.find(p => p.id === layout.focused);
   const nav = useTabNav();
+  // The project the workspace column shows, as Sidebars picks it: the selected one, else the first.
+  const projectId = snapshot?.projects.find(p => p.id === layout.projectId)?.id ?? snapshot?.projects[0]?.id;
   const agentId = focusedAgentId(layout);
   const agent = snapshot?.agents.find(a => a.id === agentId);
   const root = useMemo(() => (agentId ? { agent: agentId } : null), [agentId]);
@@ -207,6 +210,12 @@ function TabBar({ onNewAgent, underLights }: { onNewAgent: () => void; underLigh
           <HeaderButton icon={PanelLeft} label="Show sidebar" title={`Show sidebar (${SHORTCUTS.sidebar})`} onClick={() => setSidebar(true)} />
         </div>
       )}
+      {/* The project column collapsed (ACH-D80): it comes back from here, where Show sidebar stands when the whole sidebar is hidden. */}
+      {offersProjectColumn(layout, showsWorkspace(snapshot?.agents ?? [], projectId)) ? (
+        <div className="flex shrink-0 items-center pl-1.5">
+          <HeaderButton icon={PanelLeft} label={`Show project column (${SHORTCUTS.workspace})`} onClick={() => setWorkspaceColumn(true)} />
+        </div>
+      ) : null}
       {/* Back and Forward through the tabs you focused, as in MonoCode's title bar (ACH-31, ACH-D69). */}
       <div className="flex shrink-0 items-center pl-1">
         <HeaderButton icon={ChevronLeft} label={`Back (${SHORTCUTS.back})`} disabled={!nav.canBack} onClick={goBack} />

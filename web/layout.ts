@@ -59,6 +59,11 @@ export interface Layout {
    * the user picks, so the default follows the window: folded below 1280px.
    */
   rail?: boolean;
+  /**
+   * The project column (Agents / Files / Changes): shown when unset, collapsed when false (ACH-56,
+   * ACH-D80). Settings cover it for a while without changing this (ACH-D77).
+   */
+  workspace?: boolean;
   /** Navigation sections the user folded away; one not listed is open. */
   folded?: Partial<Record<RailSectionKey, boolean>>;
   /** Column widths the user dragged to, in px; a column without one uses its default. */
@@ -525,6 +530,17 @@ export function settingsShortcutStep(action: ShortcutAction): boolean {
 export function setSidebar(sidebar: boolean): void { set({ ...layout, sidebar }); }
 export function setSidebarView(sidebarView: Layout['sidebarView']): void { set({ ...layout, sidebar: true, sidebarView }); }
 export function setRail(rail: boolean): void { set({ ...layout, sidebar: true, rail }); }
+/** Collapse or reopen the project column (ACH-D80); reopening also brings the sidebar back if it was hidden. */
+export function setWorkspaceColumn(open: boolean): void {
+  set(open ? { ...layout, sidebar: true, workspace: undefined } : { ...layout, workspace: false });
+}
+/**
+ * Whether the tab strip offers "Show project column": only while it is collapsed, the sidebar is
+ * shown (otherwise Show sidebar stands there) and the selected project has a column to show.
+ */
+export function offersProjectColumn(l: Pick<Layout, 'sidebar' | 'workspace'>, columnShows: boolean): boolean {
+  return l.sidebar && l.workspace === false && columnShows;
+}
 export function setColumnWidth(key: ColumnKey, width: number | undefined): void {
   const widths = { ...layout.widths };
   if (width === undefined) delete widths[key];

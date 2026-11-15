@@ -21,7 +21,9 @@ export type ShortcutAction =
   | { kind: 'terminal' } | { kind: 'settings' } | { kind: 'closeTab' }
   | { kind: 'cycle'; step: 1 | -1 } | { kind: 'pickTab'; n: number }
   /** Back and Forward through the tabs you focused (ACH-31, ACH-D69). */
-  | { kind: 'back' } | { kind: 'forward' };
+  | { kind: 'back' } | { kind: 'forward' }
+  /** Collapse or reopen the project column (ACH-56, ACH-D80). */
+  | { kind: 'workspace' };
 
 /** The app shortcut a Mod chord stands for, or null. Ctrl+Tab and the terminal toggle are handled before. */
 export function shortcutFor(e: KeyPress, mac: boolean): ShortcutAction | null {
@@ -32,6 +34,8 @@ export function shortcutFor(e: KeyPress, mac: boolean): ShortcutAction | null {
     if (e.code === 'KeyB') return { kind: 'panel' };
     // Close others (ACH-D27): every unpinned tab but the one in focus.
     if (e.code === 'KeyW') return { kind: 'closeOthers' };
+    // The fallback for Mod+\\ (where Ctrl+\\ means something to a terminal).
+    if (e.code === 'Backslash') return { kind: 'workspace' };
     return null;
   }
   if (e.shiftKey) {
@@ -52,6 +56,7 @@ export function shortcutFor(e: KeyPress, mac: boolean): ShortcutAction | null {
     // As in MonoCode and browsers; with Shift these cycle tabs instead (above).
     case 'BracketLeft': return { kind: 'back' };
     case 'BracketRight': return { kind: 'forward' };
+    case 'Backslash': return { kind: 'workspace' };
   }
   // Cmd+1 to Cmd+8 pick that tab; Cmd+9 is always the last, as in browsers.
   if (/^Digit[1-9]$/.test(e.code)) return { kind: 'pickTab', n: Number(e.code.slice(5)) };
