@@ -6,7 +6,7 @@ import { useEffect } from 'react';
 import { openBrowser } from './browser.ts';
 import { formatClick, formatKeys, type KeySpec } from './keys.ts';
 import { shortcutFor } from './shortcutMap.ts';
-import { closeOtherTabs, closeTab, getLayout, goBack, goForward, open, setRightPanel, setSidebar, toggleMaximize } from './layout.ts';
+import { closeOtherTabs, closeTab, getLayout, goBack, goForward, open, setRightPanel, settingsShortcutStep, setSidebar, toggleMaximize } from './layout.ts';
 import { IS_MAC } from './platform.ts';
 import { isConfirmingClose, toggleTerminal } from './terminal/actions.ts';
 import { isTerminalToggle } from './terminal/keys.ts';
@@ -69,18 +69,20 @@ let handlers: Handlers | null = null;
  */
 export function runShortcut(e: KeyboardEvent): boolean {
   if (!handlers || handlers.blocked || isConfirmingClose()) return false;
+  const settingsOpen = Boolean(getLayout().settingsOpen);
   // Ctrl+Tab cycles tabs and Ctrl+` shows or hides the terminal (as Cmd+J does), on every platform.
   if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Tab') {
-    cycleTab(e.shiftKey ? -1 : 1);
+    if (!settingsOpen) cycleTab(e.shiftKey ? -1 : 1);
     return true;
   }
   if (isTerminalToggle(e)) {
-    toggleTerminal();
+    if (!settingsOpen) toggleTerminal();
     return true;
   }
   const action = shortcutFor({ code: e.code, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, altGraph: e.getModifierState?.('AltGraph') ?? false }, IS_MAC);
   if (!action) return false;
   const layout = getLayout();
+  if (settingsShortcutStep(action)) return true;
   const pane = layout.panes.find(p => p.id === layout.focused);
   switch (action.kind) {
     case 'panel': setRightPanel(!layout.rightPanel); break;

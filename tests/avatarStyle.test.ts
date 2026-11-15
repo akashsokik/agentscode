@@ -41,7 +41,7 @@ test('the SuperAgent follows the switch too: its violet Block with dark pills in
 
 test('the switch sits in Appearance, kept like the theme; pickers keep colour; the Work graph keeps owner colours', () => {
   const read = (path: string) => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
-  const settings = read('../web/dialogs/SettingsDialog.tsx');
+  const settings = read('../web/panes/SettingsPage.tsx');
   assert.match(settings, /<Segmented<AvatarStyle> label="Avatars" value=\{avatars\} onChange=\{setAvatarStyle\} options=\{\[\{ value: 'colour', label: 'Colour' \}, \{ value: 'ink', label: 'Ink' \}\]\}/);
   assert.match(read('../web/avatarStyle.ts'), /const KEY = 'podcode:avatars';/, 'stored in this browser, like the theme');
   const avatar = read('../web/ui/Avatar.tsx');

@@ -1,10 +1,10 @@
-import { Fragment, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import type { Agent, Channel, Project, TreeEntry } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { api, type Root } from '../api.ts';
 import { modelLabel, relativeTime, shortPath } from '../format.ts';
 import { compactAgo } from '../panelList.ts';
-import { closeTab, focusedAgentId, focusedChannelId, focusedKind, open, openToSide, setProject, setRail, setSectionFolded, setSidebarView, useLayout, type Layout, type RailSectionKey } from '../layout.ts';
+import { closeSettings, closeTab, focusedAgentId, focusedChannelId, focusedKind, open, openToSide, setProject, setRail, setSectionFolded, setSettingsSection, setSidebarView, useLayout, type Layout, type RailSectionKey } from '../layout.ts';
 import { ChangesView } from '../right/RightPanel.tsx';
 import { attempt, useApp } from '../store.ts';
 import { whereabouts } from '../whereabouts.ts';
@@ -20,7 +20,7 @@ import { showTerminal } from '../terminal/actions.ts';
 import { openCount, usePrs, usePrsData } from '../prs/prsData.ts';
 import { openIssueCount } from './navCounts.ts';
 import { cx, Empty, HeaderButton, Loading, MenuDivider, MenuLabel, MenuRow, StatusLabel } from '../ui/common.tsx';
-import { ArrowDownCircle, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, GitPullRequest, CircleDashed, MessageMultiple, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, Sparkles, SplitColumns, Square, StickyNote, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
+import { ArrowDownCircle, ArrowLeft, Bot, ChevronDown, ChevronRight, ChevronsUpDown, File, Folder, FolderOpen, FolderPlus, GitBranch, GitPullRequest, CircleDashed, Info, MessageMultiple, Palette, MoreHorizontal, PanelLeft, Plus, RotateCcw, Search, Settings, Sparkles, SplitColumns, Square, StickyNote, Terminal, Trash2, X, type IconComponent } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Select } from '../mono/settings.tsx';
@@ -29,6 +29,7 @@ import { StatusMark } from '../ui/StatusMark.tsx';
 import { useNow } from '../ui/useNow.ts';
 import { AGENT_GROUP_LABEL, agentRowSlot, agentsSummary, groupAgents, railAgents, railAgentStatus, showsWorkspace, type RailAgentStatus } from './agentRail.ts';
 import { openAsks, openSuper } from '../super.ts';
+import { APP_SECTIONS, APP_SECTION_IDS, sectionForKey, type AppSettingsSection } from '../settingsSections.ts';
 import { AgentAvatar, AvatarGlyph } from '../ui/Avatar.tsx';
 import { AvatarStack } from '../ui/AvatarStack.tsx';
 import { SUPER_LOOK } from '../../shared/avatar.ts';
@@ -611,6 +612,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
   const projectSummary = agentsSummary((agents ?? []).filter(a => a.projectIds !== null), pendingIds);
   const channelsWaiting = (agents ?? []).some(a => a.currentTask?.channelId && a.status === 'waiting');
   const channelsWorking = (agents ?? []).some(a => a.currentTask?.channelId && a.status === 'working');
+  const settingsOpen = Boolean(layout.settingsOpen);
   return (
     <nav aria-label="PodCode" style={{ width: column.width }} className="sidebar-glass relative flex shrink-0 flex-col border-r border-stroke font-sans">
       {/* In the desktop app the traffic lights take the brand's place, as in MonoCode. */}
@@ -620,6 +622,9 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
           <span className="min-w-0 truncate text-[13px] font-semibold text-content/85">PodCode</span>
         </span>
       </div>
+      {/* The app's navigation and the Settings sections share the column (ACH-D77); one shows at a time. */}
+      <div className="settings-stack min-h-0 flex-1">
+      <div data-swap="app" data-shown={!settingsOpen} inert={settingsOpen} className="settings-swap flex flex-col">
       {/* New agent is the one raised control; Search sits beside it as an icon. */}
       <div className="flex shrink-0 items-center gap-1.5 px-2 pb-2 pt-0.5">
         <button
@@ -684,11 +689,54 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
           <span className="min-w-0 flex-1 truncate">About you</span>
           {waiting ? <span className="min-w-4 shrink-0 rounded bg-content/[0.14] px-1 text-center text-[10px] font-medium leading-4 tabular-nums text-content/80" title={`${waiting} waiting for your approval`}>{waiting}</span> : null}
         </button>
-        <HeaderButton icon={Settings} label={`Settings (${SHORTCUTS.settings})`} onClick={actions.settings} className="size-[30px]" />
+        <HeaderButton data-settings-gear icon={Settings} label={`Settings (${SHORTCUTS.settings})`} onClick={actions.settings} className="size-[30px]" />
         <HeaderButton icon={PanelLeft} label="Collapse navigation" onClick={() => setRail(false)} className="size-[30px]" />
+      </div>
+      </div>
+      <SettingsNav open={settingsOpen} section={layout.settingsSection ?? 'appearance'} />
       </div>
       <ResizeHandle column={column} edge="right" label="Resize navigation" />
     </nav>
+  );
+}
+
+const SECTION_ICONS: Record<AppSettingsSection, IconComponent> = { appearance: Palette, comms: MessageMultiple, super: Sparkles, engines: Bot, about: Info };
+
+/**
+ * The navigation column's body while Settings are open (ACH-D77, MonoCode's SettingsNav): the
+ * sections as RailAction rows, Cmd+1 to Cmd+5 beside them, and Back at the foot where the gear was.
+ * Opening moves focus to the section shown; closing gives it back to the gear.
+ */
+function SettingsNav({ open: isOpen, section }: { open: boolean; section: AppSettingsSection }) {
+  const list = useRef<HTMLDivElement>(null);
+  const was = useRef(isOpen);
+  useEffect(() => {
+    if (was.current === isOpen) return;
+    was.current = isOpen;
+    if (isOpen) list.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus({ preventScroll: true });
+    else if (document.activeElement === document.body || list.current?.parentElement?.contains(document.activeElement)) document.querySelector<HTMLElement>('[data-settings-gear]')?.focus({ preventScroll: true });
+  }, [isOpen]);
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const next = sectionForKey(section, event, true, APP_SECTION_IDS);
+    if (!next || event.metaKey || event.ctrlKey) return;
+    event.preventDefault();
+    setSettingsSection(next);
+    list.current?.querySelector<HTMLElement>(`[data-section="${next}"] button`)?.focus();
+  };
+  return (
+    <div data-swap="nav" data-shown={isOpen} inert={!isOpen} className="settings-swap flex flex-col">
+      <div ref={list} aria-label="Settings" onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto overscroll-none px-2 pb-2 pt-0.5">
+        <div className="px-2 pb-1 pt-1 text-xs font-semibold text-content/35">Settings</div>
+        {APP_SECTIONS.map((item, index) => (
+          <div key={item.id} data-section={item.id} className="contents">
+            <RailAction icon={SECTION_ICONS[item.id]} label={item.label} hint={`Mod+${index + 1}`} active={item.id === section} onClick={() => setSettingsSection(item.id)} />
+          </div>
+        ))}
+      </div>
+      <div className="flex shrink-0 items-center gap-0.5 px-2 pb-2 pt-1.5">
+        <RailAction icon={ArrowLeft} label="Back" hint="Escape" onClick={closeSettings} />
+      </div>
+    </div>
   );
 }
 
@@ -1018,8 +1066,10 @@ function CompactRail({ actions, projectId, titleBarAbove }: { actions: SidebarAc
 
 /** Whether the navigation column shows in full: the user's pick, else folded below 1280px. */
 export function useNavFull(): boolean {
-  const rail = useLayout().rail;
+  const { rail, settingsOpen } = useLayout();
   const width = useWindowWidth();
+  // Settings list their sections in the full column, even when it is folded (ACH-D77).
+  if (settingsOpen) return true;
   return rail ?? width >= 1280;
 }
 
@@ -1029,17 +1079,21 @@ export function useNavFull(): boolean {
  * channel) brings its project in. `titleBarAbove`: the tab strip spans the window over both
  * (the desktop app, folded).
  */
-export function Sidebars({ actions, titleBarAbove }: { actions: SidebarActions; titleBarAbove: boolean }) {
+export function Sidebars({ actions, titleBarAbove, part }: { actions: SidebarActions; titleBarAbove: boolean; part?: 'nav' | 'workspace' }) {
   const layout = useLayout();
   const projects = useApp(s => s.snapshot?.projects);
   const agents = useApp(s => s.snapshot?.agents);
   // App brings the focused agent's project in (setProject), for this column and the terminal.
   const project = projects?.find(p => p.id === layout.projectId) ?? projects?.[0];
   const full = useNavFull();
+  // `part`: App places the two columns apart while Settings can cover the workspace column (ACH-D77).
+  const nav = part === 'workspace' ? null : full ? <NavRail actions={actions} projectId={project?.id} /> : <CompactRail actions={actions} projectId={project?.id} titleBarAbove={titleBarAbove} />;
+  const workspace = part === 'nav' ? null : showsWorkspace(agents ?? [], project?.id) ? <WorkspaceColumn actions={actions} project={project} titleBarAbove={titleBarAbove} /> : null;
+  if (!nav && !workspace) return null;
   return (
     <div className="flex h-full shrink-0">
-      {full ? <NavRail actions={actions} projectId={project?.id} /> : <CompactRail actions={actions} projectId={project?.id} titleBarAbove={titleBarAbove} />}
-      {showsWorkspace(agents ?? [], project?.id) ? <WorkspaceColumn actions={actions} project={project} titleBarAbove={titleBarAbove} /> : null}
+      {nav}
+      {workspace}
     </div>
   );
 }

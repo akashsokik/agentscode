@@ -1950,3 +1950,36 @@ button.ref-chip:focus-visible { outline: 2px solid color-mix(in srgb, var(--link
   background: color-mix(in srgb, var(--color-warning) 22%, transparent);
   border-radius: 3px;
 }
+
+/*
+ * Settings swap (ACH-D77): the app and Settings share the window in two stacked layers, the
+ * navigation column's body and the area right of it. The layer leaving fades in the first half
+ * (90ms); the one arriving fades in the second (from 80ms to 180ms), so their text never doubles
+ * up. Only opacity and transform move, and a hidden layer stays mounted and keeps its size, so
+ * nothing reflows and every tab, pane and terminal comes back as it was. Instant under reduced motion.
+ */
+.settings-stack {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+.settings-swap {
+  grid-area: 1 / 1;
+  min-height: 0;
+  min-width: 0;
+  transition: opacity 90ms cubic-bezier(0.33, 1, 0.68, 1), transform 90ms cubic-bezier(0.33, 1, 0.68, 1), visibility 0s linear 90ms;
+}
+.settings-swap[data-shown='true'] {
+  transition: opacity 100ms cubic-bezier(0.33, 1, 0.68, 1) 80ms, transform 100ms cubic-bezier(0.33, 1, 0.68, 1) 80ms, visibility 0s;
+}
+.settings-swap[data-shown='false'] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.settings-swap[data-swap='app'][data-shown='false'] { transform: translateX(-12px); }
+.settings-swap[data-swap='nav'][data-shown='false'] { transform: translateX(12px); }
+.settings-swap[data-swap='page'][data-shown='false'] { transform: translateY(6px); }
+@media (prefers-reduced-motion: reduce) {
+  .settings-swap,
+  .settings-swap[data-shown='true'] { transition: none; }
+}

@@ -6,12 +6,14 @@ import { AgentSettingsDialog } from './dialogs/AgentSettingsDialog.tsx';
 import { ChannelDialog } from './dialogs/ChannelDialog.tsx';
 import { NewAgentDialog } from './dialogs/NewAgentDialog.tsx';
 import { RemoveAgentDialog } from './dialogs/RemoveAgentDialog.tsx';
-import { SettingsDialog, type SettingsGroup } from './dialogs/SettingsDialog.tsx';
+import { SettingsPage } from './panes/SettingsPage.tsx';
+import { isAppSection } from './settingsSections.ts';
+import { settingsEscape } from './shortcutMap.ts';
 import { ProfileDialog } from './dialogs/UserProfile.tsx';
 import { SuperQuickBar } from './ui/SuperQuickBar.tsx';
 import { openAsks, openSuper, superLabel, useSuperAgent, useSuperBridge } from './super.ts';
 import { useGitStatus } from './git.ts';
-import { closeOtherTabs, closeTab, closeTabsToRight, focusedAgentId, goBack, goForward, open, openToSide, pinTab, pruneTabs, reorderTab, setProject, setRightPanel, setSidebar, setSidebarView, toggleMaximize, useLayout, useTabNav, type Pane, type Tab } from './layout.ts';
+import { closeOtherTabs, closeSettings, closeTab, closeTabsToRight, focusedAgentId, goBack, goForward, open, openSettings, openToSide, pinTab, pruneTabs, reorderTab, setProject, setRightPanel, setSidebar, setSidebarView, toggleMaximize, useLayout, useTabNav, type Pane, type Tab } from './layout.ts';
 import { othersToClose, rightToClose } from './tabs.ts';
 import { ContextMenu, openContextMenu, type MenuAnchor } from './ui/ContextMenu.tsx';
 import { AgentPane } from './panes/AgentPane.tsx';
@@ -458,7 +460,6 @@ function Toasts() {
 type Dialog =
   | { kind: 'newAgent'; projectId?: string | null }
   | { kind: 'addProject'; thenNewAgent?: boolean }
-  | { kind: 'settings'; group?: SettingsGroup }
   | { kind: 'profile' }
   | { kind: 'agentSettings' | 'removeAgent'; agentId: string }
   | { kind: 'newChannel' }
@@ -502,20 +503,43 @@ export function App() {
     document.title = waiting ? `(${waiting}) PodCode` : 'PodCode';
   }, [waiting]);
 
-  // An agent's settings link to Settings at a group (the SuperAgent's limits); see openSettingsAt.
+  // An agent's settings link to Settings at a section (the SuperAgent's limits); see openSettingsAt.
   useEffect(() => {
-    const onOpen = (event: Event) => setDialog({ kind: 'settings', group: (event as CustomEvent<{ group?: SettingsGroup }>).detail?.group });
+    const onOpen = (event: Event) => {
+      const group = (event as CustomEvent<{ group?: string }>).detail?.group;
+      openSettings(isAppSection(group) ? group : undefined);
+    };
     window.addEventListener('podcode:open-settings', onOpen);
     return () => window.removeEventListener('podcode:open-settings', onOpen);
   }, []);
 
   // The app menu's About PodCode (electron/main.ts) opens Settings at About.
-  useEffect(() => window.podcodeDesktop?.updates?.onShowAbout?.(() => setDialog({ kind: 'settings', group: 'about' })), []);
+  useEffect(() => window.podcodeDesktop?.updates?.onShowAbout?.(() => openSettings('about')), []);
+
+  // Esc closes Settings (ACH-D77), as Modal's does: in the capture phase, so nothing on the hidden
+  // panes (an approval, a thread) takes it, but never while a dialog or a popover is open.
+  const settingsOpen = Boolean(layout.settingsOpen);
+  useEffect(() => {
+    if (!settingsOpen || dialog) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!settingsEscape(event, Boolean(document.querySelector('[data-dialog-popover], [role="dialog"]')))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeSettings();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [settingsOpen, dialog]);
+  // The page mounts fresh each time Settings open, so its fields read the settings as they are now.
+  const settingsOpens = useRef(0);
+  const settingsWasOpen = useRef(false);
+  if (settingsOpen && !settingsWasOpen.current) settingsOpens.current += 1;
+  settingsWasOpen.current = settingsOpen;
 
   const actions: SidebarActions = {
     newAgent: projectId => setDialog({ kind: 'newAgent', projectId }),
     addProject: () => setDialog({ kind: 'addProject' }),
-    settings: () => setDialog({ kind: 'settings' }),
+    settings: () => openSettings(),
     profile: () => setDialog({ kind: 'profile' }),
     agentSettings: agentId => setDialog({ kind: 'agentSettings', agentId }),
     removeAgent: agentId => setDialog({ kind: 'removeAgent', agentId }),
@@ -551,7 +575,13 @@ export function App() {
     <div className="body-glass flex h-full flex-col text-content">
       {spans ? tabBar : null}
       <div className="flex min-h-0 min-w-0 flex-1">
-        {layout.sidebar ? <Sidebars actions={actions} titleBarAbove={spans} /> : null}
+        {/* Settings show their sections in the navigation column, even when it is hidden (ACH-D77). */}
+        {layout.sidebar || settingsOpen ? <Sidebars part="nav" actions={actions} titleBarAbove={spans} /> : null}
+        {/* Settings fill the rest of the window over the workspace column, tabs, panes and panels,
+            which stay mounted underneath (hidden, not closed) and come back as they were. */}
+        <div className="settings-stack min-h-0 min-w-0 flex-1">
+        <div data-swap="main" data-shown={!settingsOpen} inert={settingsOpen} className="settings-swap flex">
+        {layout.sidebar ? <Sidebars part="workspace" actions={actions} titleBarAbove={spans} /> : null}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {spans ? null : tabBar}
           {/* Below 1280px the right panel floats over the panes instead of squeezing them. */}
@@ -588,6 +618,11 @@ export function App() {
           <TerminalPanel />
           <StatusFooter />
         </div>
+        </div>
+        <div data-swap="page" data-shown={settingsOpen} inert={!settingsOpen} className="settings-swap flex bg-background-base">
+          {settingsOpens.current ? <SettingsPage key={settingsOpens.current} section={layout.settingsSection ?? 'appearance'} /> : null}
+        </div>
+        </div>
       </div>
       {dialog?.kind === 'newAgent' ? <NewAgentDialog projectId={dialog.projectId} onClose={() => setDialog(null)} onAddProject={() => setDialog({ kind: 'addProject', thenNewAgent: true })} /> : null}
       {dialog?.kind === 'addProject' ? (
@@ -596,7 +631,6 @@ export function App() {
           onAdded={projectId => { if (dialog.thenNewAgent) setTimeout(() => setDialog({ kind: 'newAgent', projectId })); }}
         />
       ) : null}
-      {dialog?.kind === 'settings' ? <SettingsDialog group={dialog.group} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'profile' ? <ProfileDialog onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'agentSettings' && dialogAgent ? <AgentSettingsDialog agent={dialogAgent} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'removeAgent' && dialogAgent ? <RemoveAgentDialog agent={dialogAgent} onClose={() => setDialog(null)} /> : null}
