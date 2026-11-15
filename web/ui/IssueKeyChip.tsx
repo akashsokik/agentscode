@@ -1,4 +1,3 @@
-import { useRef, type CSSProperties, type RefObject } from 'react';
 import { ISSUE_PRIORITY_LABEL, ISSUE_STATUS_LABEL } from '../../shared/issues.ts';
 import type { SuperIssue } from '../../shared/types.ts';
 import { DueDate, PriorityIcon, StatusIcon } from '../issues/issueParts.tsx';
@@ -7,7 +6,7 @@ import { relativeTime } from '../format.ts';
 import { showIssueInList } from '../issues/openIssue.ts';
 import { WhoAvatar } from '../notes/parts.tsx';
 import { getState, useApp } from '../store.ts';
-import { HoverCard, useHoverCard } from './HoverCard.tsx';
+import { ReferenceChip } from '../notes/RefChip.tsx';
 import { issueGist, updated } from './issueCard.ts';
 import { useNow } from './useNow.ts';
 
@@ -31,57 +30,15 @@ export function useIssueKeysKey(): string {
   return useApp(s => (s.snapshot?.super.issues ?? []).map(i => i.key).join(' '));
 }
 
-const NEUTRAL = { '--ref-hue': 'var(--color-content)' } as CSSProperties;
-
-export function IssueKeyChip({ issueKey, fade, inert = false }: {
-  issueKey: string;
-  fade?: boolean;
-  /** Inside another control (a row that is itself a button): a span that still shows its card and opens on click, without being a second tab stop. */
-  inert?: boolean;
-}) {
+export function IssueKeyChip({ issueKey, fade, inert = false }: { issueKey: string; fade?: boolean; inert?: boolean }) {
   const issue = useApp(s => s.snapshot?.super.issues.find(i => i.key === issueKey));
-  const chip = useRef<HTMLElement>(null);
-  const card = useHoverCard();
   if (!issue) return <>{issueKey}</>;
-  const show = (event: { stopPropagation: () => void; preventDefault: () => void }) => { event.stopPropagation(); event.preventDefault(); card.close(); showIssueInList(issue.id); };
-  const content = <><StatusIcon status={issue.status} className="size-3" />{issue.key}</>;
-  return (
-    <>
-      {inert ? (
-        <span ref={chip} className="ref-chip cursor-pointer" style={NEUTRAL} onMouseEnter={card.chipEvents.onMouseEnter} onMouseLeave={card.chipEvents.onMouseLeave} onClick={show}>
-          {content}
-        </span>
-      ) : (
-        <button
-          ref={chip as RefObject<HTMLButtonElement>}
-          type="button"
-          className="ref-chip"
-          style={NEUTRAL}
-          {...(fade ? { 'data-word-fade': '' } : {})}
-          aria-label={`Issue ${issue.key}, ${ISSUE_STATUS_LABEL[issue.status]}: ${issue.title}. Show it on the Issues page.`}
-          aria-expanded={card.open}
-          aria-describedby={card.open ? card.cardId : undefined}
-          {...card.chipEvents}
-          onKeyDown={event => { if (event.key === 'Escape' && card.open) { event.stopPropagation(); card.close(); } }}
-          onClick={show}
-        >
-          {content}
-        </button>
-      )}
-      {card.open ? <IssueCard id={card.cardId} anchor={chip.current} issue={issue} onEnter={card.onCardEnter} onLeave={card.onCardLeave} onClose={card.close} /> : null}
-    </>
-  );
+  return <ReferenceChip kind="Issue" label={issue.key} inert={inert} fade={fade} glyph={<StatusIcon status={issue.status} className="size-3" />}
+    onOpen={() => showIssueInList(issue.id)} cardContent={<IssueCard issue={issue} />} />;
 }
 
 /** The issue's card: the decision card's shell and order, with an issue's facts. */
-function IssueCard({ id, anchor, issue, onEnter, onLeave, onClose }: {
-  id: string;
-  anchor: HTMLElement | null;
-  issue: SuperIssue;
-  onEnter: () => void;
-  onLeave: () => void;
-  onClose: () => void;
-}) {
+function IssueCard({ issue }: { issue: SuperIssue }) {
   const agent = useApp(s => (issue.agentId ? s.snapshot?.agents.find(a => a.id === issue.agentId) : undefined));
   const project = useApp(s => s.snapshot?.projects.find(p => p.id === issue.projectId));
   const now = useNow();
@@ -94,7 +51,7 @@ function IssueCard({ id, anchor, issue, onEnter, onLeave, onClose }: {
     project ? <span key="project" className="truncate">{project.name}</span> : null,
   ].filter(Boolean);
   return (
-    <HoverCard id={id} anchor={anchor} onEnter={onEnter} onLeave={onLeave} onClose={onClose} deps={issue}>
+    <>
       <div className="flex items-center gap-1.5 text-[11px] text-content/55">
         <StatusIcon status={issue.status} className="size-3" />
         <span>Issue</span>
@@ -114,15 +71,8 @@ function IssueCard({ id, anchor, issue, onEnter, onLeave, onClose }: {
       {gist && gist !== issue.title ? <p className="mt-1.5 line-clamp-3 text-[12px] leading-[1.45] text-content/55">{gist}</p> : null}
       <div className="mt-2.5 flex min-w-0 items-center gap-1.5 text-[11px] text-content/45">
         <span className="truncate">{updated(relativeTime(issue.updatedAt, now))}</span>
-        <button
-          type="button"
-          tabIndex={-1}
-          onClick={() => { onClose(); showIssueInList(issue.id); }}
-          className="ml-auto shrink-0 text-[var(--link-color)] hover:underline"
-        >
-          Open in Issues
-        </button>
+
       </div>
-    </HoverCard>
+    </>
   );
 }

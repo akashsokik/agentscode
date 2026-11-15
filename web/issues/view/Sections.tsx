@@ -3,6 +3,7 @@
  * progress A), Relations both ways, In git, and Decisions. One-line rows; a row opens its issue
  * in the full pane. In git and Decisions read through issueLinks.ts (Hal's API once it lands).
  */
+import { BranchChip, CommitChip } from '../../notes/RefChip.tsx';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { IssueRelationType, SuperIssue } from '../../../shared/types.ts';
 import { showIssueInList } from '../openIssue.ts';
@@ -156,12 +157,12 @@ export function InGit({ issue, links: state }: { issue: SuperIssue; links: Issue
           <KeyValueList
             labelWidth="6rem"
             rows={[
-              ...(git.branch ? [['Branch', <span className="truncate font-mono">{git.branch.name}</span>] as [string, ReactNode]] : []),
+              ...(git.branch ? [['Branch', <span className="inline-flex min-w-0 max-w-full"><BranchChip name={git.branch.name} /></span>] as [string, ReactNode]] : []),
               ...(git.commits.length ? [['Commits', (
                 <span className="flex min-w-0 flex-1 flex-col">
                   {git.commits.map(c => (
                     <span key={c.sha} className="flex min-h-7 min-w-0 items-center">
-                      <span className="mr-2 shrink-0 font-mono text-[11.5px] text-content/45">{c.sha.slice(0, 7)}</span>
+                      <span className="mr-2 shrink-0"><CommitChip sha={c.sha} title={c.subject} /></span>
                       <span className="truncate text-content/80">{c.subject}</span>
                     </span>
                   ))}

@@ -1,9 +1,11 @@
+import { useApp } from '../store.ts';
+import { BranchChip, CommitChip, PullRequestChip, ReferenceChip } from '../notes/RefChip.tsx';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { checksLabel, isHttpUrl, isOpen, PR_VIEWS, prsInView, viewCounts, type PrCheck, type PrDetail, type PrReview, type PrView, type PullRequest } from '../../shared/prs.ts';
 import { api } from '../api.ts';
 import { relativeTime } from '../format.ts';
 import { open } from '../layout.ts';
-import { Copy, ExternalLink, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, RefreshCw } from '../mono/icons.tsx';
+import { Copy, ExternalLink, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, RefreshCw } from '../mono/icons.tsx';
 import { WhoAvatar } from '../notes/parts.tsx';
 import { PaneFrame, type PaneChrome } from '../panes/PaneFrame.tsx';
 import { ChipButton, cx, Empty, HeaderButton, Loading } from '../ui/common.tsx';
@@ -180,7 +182,7 @@ function PrCard({ pr, now, active }: { pr: PullRequest; now: number; active: boo
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px] text-content/55">
           <StateIcon pr={pr} className="size-3.5" />
           <span className="shrink-0 font-mono">{projectLabel(pr)}</span>
-          <span className="shrink-0 tabular-nums">#{pr.number}</span>
+          <PullRequestChip id={pr.id} number={pr.number} title={pr.title} state={pr.state} inert />
           <span className="min-w-0 truncate text-content/40">{pr.repo}</span>
         </span>
         <time dateTime={new Date(when).toISOString()} title={new Date(when).toLocaleString()} className="shrink-0 text-[11px] tabular-nums text-content/45">{relativeTime(when, now)}</time>
@@ -239,6 +241,7 @@ function usePrDetail(pr: PullRequest, fresh: number): { detail: PrDetail | null;
  * which branches, the actions, the Summary / Code / Checks tabs, and its commits as the activity.
  */
 function PrInboxDetail({ pr, now, tab, onTab: setTab, fresh, onKeyDown }: { pr: PullRequest; now: number; tab: PrTab; onTab: (tab: PrTab) => void; fresh: number; onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => void }) {
+  const agent = useApp(s => s.snapshot?.agents.find(a => a.id === pr.agentId));
   const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -260,7 +263,7 @@ function PrInboxDetail({ pr, now, tab, onTab: setTab, fresh, onKeyDown }: { pr: 
       bar={
         <InboxBar backLabel="All pull requests" onBack={() => { open({ kind: 'pullRequests' }); focusCard(pr.id); }}>
           <span className="flex shrink-0 items-center gap-1.5"><StateIcon pr={pr} /><span className="text-content/70">{STATE_WORD[pr.state]}</span></span>
-          <span className="shrink-0 tabular-nums">#{pr.number}</span>
+          <PullRequestChip id={pr.id} number={pr.number} title={pr.title} state={pr.state} />
           <span className="min-w-0 truncate">{pr.repo}</span>
           <span className="ml-auto shrink-0 @max-[28rem]/detail:hidden"><StatusText state={SUMMARY_STATE[checks.tone]} quiet={checks.tone === 'muted'}>{checks.text}</StatusText></span>
         </InboxBar>
@@ -280,10 +283,7 @@ function PrInboxDetail({ pr, now, tab, onTab: setTab, fresh, onKeyDown }: { pr: 
           <span aria-hidden>·</span>
           <span>{pr.mergedAt ? `Merged ${relativeTime(Date.parse(pr.mergedAt), now)}` : `Updated ${relativeTime(Date.parse(pr.updatedAt), now)}`}</span>
           <span aria-hidden>·</span>
-          <span className="inline-flex min-w-0 items-center gap-1" title={`${detail?.baseRef ?? 'base'} ← ${pr.branch}`}>
-            <GitBranch aria-hidden className="size-3 shrink-0" strokeWidth={1.75} />
-            <span className="min-w-0 truncate font-mono text-[11.5px]">{detail?.baseRef ? `${detail.baseRef} ← ` : ''}{pr.branch}</span>
-          </span>
+          <BranchChip name={pr.branch} base={detail?.baseRef} />
           <span aria-hidden>·</span>
           <span>{reviewSummary(pr)}</span>
         </div>
@@ -294,10 +294,8 @@ function PrInboxDetail({ pr, now, tab, onTab: setTab, fresh, onKeyDown }: { pr: 
               <IssueKeyChip issueKey={pr.issueKey} />
             ) : null}
             {pr.agentId ? (
-              <button type="button" onClick={() => open({ kind: 'agent', agentId: pr.agentId! })} className="inline-flex items-center gap-1.5 rounded-md bg-content/5 px-2 py-1 text-content/70 transition-colors duration-150 hover:bg-content/10 hover:text-content">
-                <WhoAvatar name="" agentId={pr.agentId} className="size-3.5" />
-                Worked on by this agent
-              </button>
+              <ReferenceChip kind="Agent" label={`@${agent?.name ?? pr.author}`} glyph={<WhoAvatar name="" agentId={pr.agentId} className="size-3" />} onOpen={() => open({ kind: 'agent', agentId: pr.agentId! })}
+                cardContent={<><div className="text-[11px] text-content/55">Agent</div><h3 className="mt-2 text-[13px] font-semibold">Worked on this pull request</h3><p className="mt-1 text-[12px]">{agent?.name ?? pr.author}</p></>} />
             ) : null}
           </div>
         ) : null}
@@ -378,7 +376,7 @@ function Commits({ pr, detail, now }: { pr: PullRequest; detail: PrDetail; now: 
             <span className="min-w-0 truncate text-content">{c.headline}</span>
             <span aria-hidden>·</span>
             <span className="shrink-0">{c.author}</span>
-            <span className="shrink-0 font-mono text-[11px] text-content/40">{c.oid.slice(0, 7)}</span>
+            <CommitChip sha={c.oid} title={c.headline} author={c.author} />
             {c.at ? <span className="ml-auto shrink-0 tabular-nums text-[11px] text-content/40">{relativeTime(Date.parse(c.at), now)}</span> : null}
           </p>
         </TimelineStop>
@@ -387,7 +385,7 @@ function Commits({ pr, detail, now }: { pr: PullRequest; detail: PrDetail; now: 
         <TimelineStop first={!detail.commits.length} last node={<GitMerge className="size-3.5 text-info" strokeWidth={1.75} />}>
           <p className="flex h-5 items-center gap-1.5 font-sans text-[12px] text-content/50">
             <span className="text-content">Merged</span>
-            {pr.mergeCommit ? <span className="font-mono text-[11px] text-content/40">{pr.mergeCommit.slice(0, 7)}</span> : null}
+            {pr.mergeCommit ? <CommitChip sha={pr.mergeCommit} title="Merge commit" /> : null}
             <span className="ml-auto tabular-nums text-[11px] text-content/40">{relativeTime(Date.parse(pr.mergedAt), now)}</span>
           </p>
         </TimelineStop>
