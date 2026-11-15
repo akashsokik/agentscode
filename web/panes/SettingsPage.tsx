@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ENGINE_LABELS, ENGINES, type Settings } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { attempt, useApp } from '../store.ts';
@@ -7,25 +7,24 @@ import { setAvatarStyle, useAvatarStyle, type AvatarStyle } from '../avatarStyle
 import { EngineIcon } from '../ui/EngineIcon.tsx';
 import { INPUT } from '../ui/common.tsx';
 import { RefreshCw } from '../mono/icons.tsx';
-import { Modal } from '../mono/Modal.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Group, Row, Segmented, Toggle } from '../mono/settings.tsx';
-import { AboutGroup } from './AboutGroup.tsx';
-import { AutonomySettings } from './AutonomySettings.tsx';
+import { AboutGroup } from '../dialogs/AboutGroup.tsx';
+import { AutonomySettings } from '../dialogs/AutonomySettings.tsx';
+import { APP_SECTIONS, type AppSettingsSection } from '../settingsSections.ts';
 import { createCapText } from '../../shared/autonomy.ts';
 
 function save(change: Partial<Settings>) {
   return attempt(() => api.updateSettings(change));
 }
 
-export type SettingsGroup = 'super' | 'about';
-
-/** `group` opens Settings scrolled to that group: the SuperAgent's limits from an agent's settings, About from the app menu. */
-export function SettingsDialog({ onClose, group }: { onClose: () => void; group?: SettingsGroup }) {
+/**
+ * Settings as a full-window page (ACH-D71, ACH-D77): the groups the Settings modal used to stack, one
+ * section at a time. The navigation column lists the sections (Sidebar.tsx NavRail) and App lays the
+ * page over the hidden tabs and panels. MonoCode's SettingsView: a breadcrumb header, then the page.
+ */
+export function SettingsPage({ section }: { section: AppSettingsSection }) {
   const settings = useApp(s => s.snapshot?.settings);
-  useEffect(() => {
-    if (group) document.getElementById(`settings-${group}`)?.scrollIntoView({ block: 'start' });
-  }, [group, Boolean(settings)]);
   const engines = useApp(s => s.snapshot?.engines);
   const models = useApp(s => s.snapshot?.models);
   const theme = useTheme();
@@ -36,19 +35,26 @@ export function SettingsDialog({ onClose, group }: { onClose: () => void; group?
   const [creates, setCreates] = useState(String(settings?.superMaxCreatesPerDay ?? 25));
   const [refreshing, setRefreshing] = useState(false);
   if (!settings) return null;
+  const label = APP_SECTIONS.find(s => s.id === section)?.label ?? 'Settings';
   return (
-    <Modal title="Settings" size="md" fitViewport onClose={onClose}>
-      <div className="px-4 pb-4 pt-4">
-        <Group title="Appearance">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col font-sans">
+      <header data-window-drag className="flex h-10 shrink-0 items-center gap-1.5 border-b border-stroke px-4 text-[13px]">
+        <span className="text-content/45">Settings</span>
+        <span aria-hidden className="text-content/30">/</span>
+        <h1 className="min-w-0 truncate font-medium text-content">{label}</h1>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-none">
+      <div className="mx-auto w-full max-w-[720px] px-8 py-8">
+        {section === 'appearance' ? <Group title="Appearance">
           <Row label="Theme">
             <Segmented<ThemePreference> label="Theme" value={theme} onChange={setTheme} options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'system', label: 'System' }]} />
           </Row>
           <Row label="Avatars" description="Colour gives every agent its own colour. Ink draws them all, the SuperAgent included, in the theme's text colour.">
             <Segmented<AvatarStyle> label="Avatars" value={avatars} onChange={setAvatarStyle} options={[{ value: 'colour', label: 'Colour' }, { value: 'ink', label: 'Ink' }]} />
           </Row>
-        </Group>
+        </Group> : null}
 
-        <Group title="Agent communication" description="How agents see and message each other.">
+        {section === 'comms' ? <Group title="Agent communication" description="How agents see and message each other.">
           <Row label="Who can agents message?" description="Replies to messages they received always go through, and channel members can always reach each other in their channel.">
             <Segmented<Settings['awareness']>
               label="Who can agents message?"
@@ -76,9 +82,9 @@ export function SettingsDialog({ onClose, group }: { onClose: () => void; group?
           <Row label="Browser scripts" description="Let agents run their own JavaScript in their browser tabs (browser_eval). Plan-only agents never can.">
             <Toggle label="Browser scripts" on={settings.browserEval} onChange={browserEval => void save({ browserEval })} />
           </Row>
-        </Group>
+        </Group> : null}
 
-        <Group id="settings-super" title="SuperAgent" description="It runs your team across every project. It never edits code; agents do the work. The limits below stop only what it starts on its own: your own messages to it, and the work you asked it for, always go.">
+        {section === 'super' ? <Group id="settings-super" title="SuperAgent" description="It runs your team across every project. It never edits code; agents do the work. The limits below stop only what it starts on its own: your own messages to it, and the work you asked it for, always go.">
           <AutonomySettings settings={settings} save={save} />
           <Row label="Wake it when agents finish, fail or get stuck" description="Updates are batched into one turn, and only sent while it is idle.">
             <Toggle label="Wake the SuperAgent" on={settings.superWake} onChange={superWake => void save({ superWake })} />
@@ -126,9 +132,9 @@ export function SettingsDialog({ onClose, group }: { onClose: () => void; group?
           <Row label="Notify me when it asks something" description="A desktop notification while you are in another app or window.">
             <Toggle label="SuperAgent notifications" on={settings.superNotify} onChange={superNotify => void save({ superNotify })} />
           </Row>
-        </Group>
+        </Group> : null}
 
-        <Group
+        {section === 'engines' ? <Group
           title="Engines"
           action={
             <SecondaryButton disabled={refreshing} onClick={async () => { setRefreshing(true); await attempt(() => api.refreshModels()); setRefreshing(false); }}>
@@ -145,10 +151,11 @@ export function SettingsDialog({ onClose, group }: { onClose: () => void; group?
               <span className="text-[12px] text-content/45">{models?.[kind].discovered ? `${models[kind].models.length} models` : ''}</span>
             </Row>
           ))}
-        </Group>
+        </Group> : null}
 
-        <AboutGroup />
+        {section === 'about' ? <AboutGroup /> : null}
       </div>
-    </Modal>
+      </div>
+    </div>
   );
 }

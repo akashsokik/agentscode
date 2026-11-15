@@ -3,6 +3,8 @@ import type { Root } from './api.ts';
 import { closedWeights, prunedWeights, weightOf } from './paneSizes.ts';
 import { moveTab, orderTabs, othersToClose, rightToClose, setPinned } from './tabs.ts';
 import { canVisitBack, canVisitForward, emptyTabVisits, pruneVisits, recordVisit, visitBack, visitForward, type TabVisits } from './tabVisits.ts';
+import { APP_SECTION_IDS, isAppSection, type AppSettingsSection } from './settingsSections.ts';
+import { settingsShortcut, type ShortcutAction } from './shortcutMap.ts';
 import type { SplitTree } from './terminal/splits.ts';
 
 /** What a tab shows. Tabs are keyed by content, so opening the same thing twice focuses it. */
@@ -80,6 +82,13 @@ export interface Layout {
   terminalSplits?: Record<string, SplitTree[]>;
   /** The terminal filling its tab in each project, if one is zoomed. */
   terminalZoom?: Record<string, string>;
+  /**
+   * Settings fill the window (ACH-D71, ACH-D77): the navigation column shows their sections, and the
+   * tab strip, panes and right panel are hidden, not closed. Never saved, so a reload opens the app.
+   */
+  settingsOpen?: boolean;
+  /** The Settings section last shown; Settings open on it again. Appearance until one is picked. */
+  settingsSection?: AppSettingsSection;
 }
 
 export type ColumnKey = 'nav' | 'workspace' | 'panel';
@@ -149,6 +158,9 @@ function initial(): Layout {
     const restored: Layout = { ...fallback, ...kept, ...(kept.widths ? { widths } : {}) };
     // The Goals tab is the Issues tab now (ACH-D38).
     restored.superView = migrateSuperView(restored.superView);
+    // Settings are never open at start, and a section this build lacks falls back to Appearance.
+    delete restored.settingsOpen;
+    if (!isAppSection(restored.settingsSection)) delete restored.settingsSection;
     // A tab kind this build cannot show would crash the strip: drop it (TAB_KINDS).
     ({ tabs: restored.tabs, panes: restored.panes } = knownTabs(restored.tabs, restored.panes));
     // Pinned tabs come first; a layout saved before pins existed has none and keeps its order.
@@ -190,7 +202,7 @@ function set(next: Layout): void {
   layout = next;
   followVisits(layout);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...layout, settingsOpen: undefined }));
   } catch {
     // private mode or full storage: the layout just is not remembered
   }
@@ -291,6 +303,8 @@ export function focusedKind(l: Layout): TabContent['kind'] | null {
 
 /** Show content in the focused pane, or in the pane that already shows it. */
 export function open(content: TabContent): void {
+  // Showing something (from the palette, a link, a notification) leaves Settings for it.
+  closeSettings();
   const { tabs, tab } = ensureTab(layout.tabs, content);
   const showing = layout.panes.find(p => p.tabId === tab.id);
   if (showing) {
@@ -318,6 +332,7 @@ export function updateBrowserTab(id: string, patch: { url?: string; title?: stri
 
 /** Show content in a new pane to the right (or the rightmost pane when full). */
 export function openToSide(content: TabContent): void {
+  closeSettings();
   const { tabs, tab } = ensureTab(layout.tabs, content);
   const showing = layout.panes.find(p => p.tabId === tab.id);
   if (showing) {
@@ -473,6 +488,38 @@ export function pruneTabs(agentIds: Set<string>, channelIds: Set<string>): void 
   });
   // Their content is gone: dropped even when pinned (closeTab would keep a pinned one).
   for (const tab of stale) dropTab(tab.id);
+}
+
+/** Settings as a full-window page (ACH-D77), on `section` or the one last shown. */
+export function openSettings(section?: AppSettingsSection): void {
+  const settingsSection = section ?? layout.settingsSection ?? 'appearance';
+  if (layout.settingsOpen && layout.settingsSection === settingsSection) return;
+  set({ ...layout, settingsOpen: true, settingsSection });
+}
+
+/** Back to the app as it was: the tabs, panes and panels were only hidden. */
+export function closeSettings(): void {
+  if (layout.settingsOpen) set({ ...layout, settingsOpen: false });
+}
+
+export function setSettingsSection(settingsSection: AppSettingsSection): void {
+  if (layout.settingsSection !== settingsSection) set({ ...layout, settingsSection });
+}
+
+/**
+ * An app shortcut while Settings are open (web/shortcuts.ts, ACH-D77): Cmd+[ closes them, Cmd+1 to
+ * Cmd+5 pick a section, and the shortcuts for the hidden tabs and panels wait. True when the key is
+ * done with; false when Settings are closed or the shortcut should run as usual.
+ */
+export function settingsShortcutStep(action: ShortcutAction): boolean {
+  if (!layout.settingsOpen) return false;
+  const step = settingsShortcut(action);
+  if (step.kind === 'close') closeSettings();
+  if (step.kind === 'section') {
+    const section = APP_SECTION_IDS[step.n - 1];
+    if (section) setSettingsSection(section);
+  }
+  return step.kind !== 'run';
 }
 
 export function setSidebar(sidebar: boolean): void { set({ ...layout, sidebar }); }

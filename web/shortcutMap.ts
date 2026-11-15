@@ -57,3 +57,31 @@ export function shortcutFor(e: KeyPress, mac: boolean): ShortcutAction | null {
   if (/^Digit[1-9]$/.test(e.code)) return { kind: 'pickTab', n: Number(e.code.slice(5)) };
   return null;
 }
+
+/**
+ * What an app shortcut does while Settings fill the window (ACH-D77). Back (Cmd+[) closes them, as
+ * the Back row and Esc do; Cmd+1 to Cmd+9 pick a section instead of a tab. Shortcuts that open
+ * something (the palette, a new agent, the SuperAgent, a browser tab) still run, and opening a tab
+ * leaves Settings. The rest act on the hidden tabs and panels, so they do nothing until you are back.
+ */
+export type SettingsShortcut = { kind: 'close' } | { kind: 'section'; n: number } | { kind: 'run' } | { kind: 'ignore' };
+
+export function settingsShortcut(action: ShortcutAction): SettingsShortcut {
+  switch (action.kind) {
+    case 'back': return { kind: 'close' };
+    case 'pickTab': return { kind: 'section', n: action.n };
+    case 'settings': case 'palette': case 'newAgent': case 'superQuick': case 'browser': return { kind: 'run' };
+    default: return { kind: 'ignore' };
+  }
+}
+
+/**
+ * Whether a key press closes Settings (ACH-D77): a plain Escape that nothing else took, while no
+ * dialog or popover (`overlayOpen`) is open to take it first, and not one ending an IME composition.
+ */
+export function settingsEscape(
+  e: { key: string; defaultPrevented: boolean; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; isComposing?: boolean },
+  overlayOpen: boolean,
+): boolean {
+  return e.key === 'Escape' && !e.defaultPrevented && !overlayOpen && !e.isComposing && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
+}

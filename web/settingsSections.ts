@@ -12,6 +12,7 @@ export const SECTIONS: { id: AgentSettingsSection; label: string }[] = [
 ];
 
 const IDS = SECTIONS.map(s => s.id);
+const AGENT_IDS: readonly AgentSettingsSection[] = IDS;
 
 export function isSection(value: unknown): value is AgentSettingsSection {
   return typeof value === 'string' && (IDS as string[]).includes(value);
@@ -28,24 +29,46 @@ export function openingSection(requested: AgentSettingsSection | undefined, reme
 
 /**
  * Where a key takes the section nav, or null when the key is not the nav's: arrows step (and
- * wrap), Home and End jump, and Cmd or Ctrl with 1 to 4 picks a section directly.
+ * wrap), Home and End jump, and Cmd or Ctrl with a digit picks that section directly. `ids` is the
+ * list the nav shows: the agent dialog's by default, or the app's Settings page's (APP_SECTION_IDS).
  */
-export function sectionForKey(
-  current: AgentSettingsSection,
+export function sectionForKey<T extends string = AgentSettingsSection>(
+  current: T,
   key: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean },
   inNav: boolean,
-): AgentSettingsSection | null {
+  ids: readonly T[] = AGENT_IDS as readonly string[] as readonly T[],
+): T | null {
   if ((key.metaKey || key.ctrlKey) && !key.altKey && !key.shiftKey && /^[1-9]$/.test(key.key)) {
-    return IDS[Number(key.key) - 1] ?? null;
+    return ids[Number(key.key) - 1] ?? null;
   }
   if (!inNav || key.metaKey || key.ctrlKey || key.altKey) return null;
-  const index = IDS.indexOf(current);
+  const index = ids.indexOf(current);
   // Left and Right too: in a narrow window the nav is a row.
-  if (key.key === 'ArrowDown' || key.key === 'ArrowRight') return IDS[(index + 1) % IDS.length];
-  if (key.key === 'ArrowUp' || key.key === 'ArrowLeft') return IDS[(index - 1 + IDS.length) % IDS.length];
-  if (key.key === 'Home') return IDS[0];
-  if (key.key === 'End') return IDS[IDS.length - 1];
+  if (key.key === 'ArrowDown' || key.key === 'ArrowRight') return ids[(index + 1) % ids.length];
+  if (key.key === 'ArrowUp' || key.key === 'ArrowLeft') return ids[(index - 1 + ids.length) % ids.length];
+  if (key.key === 'Home') return ids[0];
+  if (key.key === 'End') return ids[ids.length - 1];
   return null;
+}
+
+/**
+ * The app's Settings page sections (ACH-D77), in the order the sidebar lists them and Cmd+1 to
+ * Cmd+5 pick them. Each is one of the groups the Settings modal used to stack.
+ */
+export type AppSettingsSection = 'appearance' | 'comms' | 'super' | 'engines' | 'about';
+
+export const APP_SECTIONS: { id: AppSettingsSection; label: string }[] = [
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'comms', label: 'Agent communication' },
+  { id: 'super', label: 'SuperAgent' },
+  { id: 'engines', label: 'Engines' },
+  { id: 'about', label: 'About' },
+];
+
+export const APP_SECTION_IDS: readonly AppSettingsSection[] = APP_SECTIONS.map(s => s.id);
+
+export function isAppSection(value: unknown): value is AppSettingsSection {
+  return typeof value === 'string' && (APP_SECTION_IDS as readonly string[]).includes(value);
 }
 
 const STORAGE_KEY = 'podcode:agent-settings-section';
