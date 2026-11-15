@@ -7,7 +7,7 @@ import { ChannelDialog } from './dialogs/ChannelDialog.tsx';
 import { NewAgentDialog } from './dialogs/NewAgentDialog.tsx';
 import { RemoveAgentDialog } from './dialogs/RemoveAgentDialog.tsx';
 import { SettingsPage } from './panes/SettingsPage.tsx';
-import { isAppSection } from './settingsSections.ts';
+import { appSection } from './settingsSections.ts';
 import { settingsEscape } from './shortcutMap.ts';
 import { ProfileDialog } from './dialogs/UserProfile.tsx';
 import { SuperQuickBar } from './ui/SuperQuickBar.tsx';
@@ -516,7 +516,8 @@ export function App() {
   useEffect(() => {
     const onOpen = (event: Event) => {
       const group = (event as CustomEvent<{ group?: string }>).detail?.group;
-      openSettings(isAppSection(group) ? group : undefined);
+      // Old ids are aliases (ACH-D82): 'super' is Limits, 'comms' is Messaging.
+      openSettings(appSection(group));
     };
     window.addEventListener('podcode:open-settings', onOpen);
     return () => window.removeEventListener('podcode:open-settings', onOpen);
@@ -532,6 +533,8 @@ export function App() {
     if (!settingsOpen || dialog) return;
     const onKey = (event: KeyboardEvent) => {
       if (!settingsEscape(event, Boolean(document.querySelector('[data-dialog-popover], [role="dialog"]')))) return;
+      // Esc in "Search settings" with something typed clears it first (Sidebar.tsx SettingsNav).
+      if (event.target instanceof HTMLInputElement && event.target.type === 'search' && event.target.value) return;
       event.preventDefault();
       event.stopPropagation();
       closeSettings();
@@ -629,7 +632,7 @@ export function App() {
         </div>
         </div>
         <div data-swap="page" data-shown={settingsOpen} inert={!settingsOpen} className="settings-swap flex bg-background-base">
-          {settingsOpens.current ? <SettingsPage key={settingsOpens.current} section={layout.settingsSection ?? 'appearance'} /> : null}
+          {settingsOpens.current ? <SettingsPage key={settingsOpens.current} section={layout.settingsSection ?? 'appearance'} query={layout.settingsQuery ?? ''} /> : null}
         </div>
         </div>
       </div>

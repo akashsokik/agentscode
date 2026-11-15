@@ -1,32 +1,46 @@
-import { useState } from 'react';
-import { ENGINE_LABELS, ENGINES, type Settings } from '../../shared/types.ts';
+import { Fragment, useState, type ReactNode } from 'react';
+import { ENGINES, type EngineKind, type Settings } from '../../shared/types.ts';
+import { buildLabel, channelLabel } from '../../shared/buildInfo.ts';
+import { releaseNotesUrl } from '../../shared/updates.ts';
+import { ASK_FIRST_KEYS, createCapText, type AskFirst, type SuperAutonomy } from '../../shared/autonomy.ts';
 import { api } from '../api.ts';
+import { BUILD } from '../buildInfo.ts';
+import { IS_MAC } from '../platform.ts';
 import { attempt, useApp } from '../store.ts';
 import { setTheme, useTheme, type ThemePreference } from '../theme.ts';
 import { setAvatarStyle, useAvatarStyle, type AvatarStyle } from '../avatarStyle.ts';
-import { EngineIcon } from '../ui/EngineIcon.tsx';
+import { useDesktopUpdate } from '../sidebar/SidebarUpdate.tsx';
 import { INPUT } from '../ui/common.tsx';
-import { RefreshCw } from '../mono/icons.tsx';
+import { ExternalLink, RefreshCw } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
-import { Group, Row, Segmented, Toggle } from '../mono/settings.tsx';
-import { AboutGroup } from '../dialogs/AboutGroup.tsx';
-import { AutonomySettings } from '../dialogs/AutonomySettings.tsx';
+import { Group, Row, Select, Toggle } from '../mono/settings.tsx';
+import { InstallCommandRow, UpdatesRow } from '../dialogs/AboutGroup.tsx';
+import { AlwaysSafe, LevelActions, SoulSuggestion } from '../dialogs/AutonomySettings.tsx';
 import { APP_SECTIONS, type AppSettingsSection } from '../settingsSections.ts';
-import { createCapText } from '../../shared/autonomy.ts';
+import { searchSettings, sectionRows, type SettingEntry } from '../settingsIndex.ts';
 
 function save(change: Partial<Settings>) {
   return attempt(() => api.updateSettings(change));
 }
 
+/** A Select at the width the reference gives them, right-aligned in its row. */
+function Choice<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (value: T) => void }) {
+  return <div className="w-40"><Select label={label} value={value} options={options} onChange={next => onChange(next as T)} /></div>;
+}
+
 /**
- * Settings as a full-window page (ACH-D71, ACH-D77): the groups the Settings modal used to stack, one
- * section at a time. The navigation column lists the sections (Sidebar.tsx NavRail) and App lays the
- * page over the hidden tabs and panels. MonoCode's SettingsView: a breadcrumb header, then the page.
+ * Settings as a full-window page (ACH-D71, ACH-D77, ACH-D82), after the user's reference: a centred
+ * column with the section's title, then small headings over flat rounded cards of rows, each with a
+ * title and one line on the left and its control on the right. The rows and their words come from
+ * web/settingsIndex.ts; this page adds the controls. With a query from "Search settings" (the
+ * navigation column, Sidebar.tsx), it shows the matching rows of every section instead, each still
+ * working. No shortcut hints (ACH-D81).
  */
-export function SettingsPage({ section }: { section: AppSettingsSection }) {
+export function SettingsPage({ section, query = '' }: { section: AppSettingsSection; query?: string }) {
   const settings = useApp(s => s.snapshot?.settings);
   const engines = useApp(s => s.snapshot?.engines);
   const models = useApp(s => s.snapshot?.models);
+  const update = useDesktopUpdate();
   const theme = useTheme();
   const avatars = useAvatarStyle();
   const [limit, setLimit] = useState(String(settings?.messageLimit ?? 12));
@@ -34,127 +48,119 @@ export function SettingsPage({ section }: { section: AppSettingsSection }) {
   const [budget, setBudget] = useState(String(settings?.superDailyBudgetUsd ?? 10));
   const [creates, setCreates] = useState(String(settings?.superMaxCreatesPerDay ?? 25));
   const [refreshing, setRefreshing] = useState(false);
+  // Rows that open a longer text under themselves (Autonomy's lists and the soul.md line).
+  const [shown, setShown] = useState<Record<string, boolean>>({});
   if (!settings) return null;
-  const label = APP_SECTIONS.find(s => s.id === section)?.label ?? 'Settings';
+  const level = settings.superAutonomy;
+  const version = update?.currentVersion || BUILD.version;
+  const toggleShown = (id: string) => setShown(s => ({ ...s, [id]: !s[id] }));
+  const showButton = (id: string) => <SecondaryButton aria-expanded={Boolean(shown[id])} onClick={() => toggleShown(id)}>{shown[id] ? 'Hide' : 'Show'}</SecondaryButton>;
+  // INPUT is full width; a wrapper gives the field the reference's narrow size.
+  const number = (value: string, set: (v: string) => void, commit: (v: number) => void, opts: { min?: number; max?: number; step?: number; disabled?: boolean; title?: string; valid: (v: number) => boolean }) => (
+    <div className="w-20"><input
+      type="number"
+      min={opts.min}
+      max={opts.max}
+      step={opts.step}
+      disabled={opts.disabled}
+      title={opts.title}
+      value={value}
+      onChange={e => set(e.target.value)}
+      onBlur={() => { const v = Number(value); if (opts.valid(v)) commit(v); }}
+      className={`${INPUT} ${opts.disabled ? 'text-content/35' : ''}`}
+    /></div>
+  );
+  const engineRow = (kind: EngineKind) => (engines?.[kind].available ? `v${engines[kind].version} at ${engines[kind].path}` : 'Not found on PATH');
+
+  const askFirst = Object.fromEntries(ASK_FIRST_KEYS.map(key => [`ask-${key}`, (
+    <Toggle label={`Ask first: ${key}`} on={settings.superAskFirst[key]} onChange={on => void save({ superAskFirst: { ...settings.superAskFirst, [key]: on } as AskFirst })} />
+  )]));
+  const controls: Record<string, ReactNode> = {
+    theme: <Choice<ThemePreference> label="Theme" value={theme} onChange={setTheme} options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'system', label: 'System' }]} />,
+    avatars: <Choice<AvatarStyle> label="Avatars" value={avatars} onChange={setAvatarStyle} options={[{ value: 'colour', label: 'Colour' }, { value: 'ink', label: 'Ink' }]} />,
+    awareness: <Choice<Settings['awareness']> label="Agents can message" value={settings.awareness} onChange={awareness => void save({ awareness })} options={[{ value: 'off', label: 'Nobody' }, { value: 'project', label: 'Same project' }, { value: 'all', label: 'All projects' }]} />,
+    'message-budget': number(limit, setLimit, messageLimit => void save({ messageLimit }), { min: 0, valid: v => Number.isInteger(v) && v >= 0 && v !== settings.messageLimit }),
+    'share-activity': <Toggle label="Share current tasks" on={settings.shareActivity} onChange={shareActivity => void save({ shareActivity })} />,
+    'team-snapshot': <Toggle label="Start with a team snapshot" on={settings.autoTeamContext} onChange={autoTeamContext => void save({ autoTeamContext })} />,
+    'browser-eval': <Toggle label="Browser scripts" on={settings.browserEval} onChange={browserEval => void save({ browserEval })} />,
+    ...Object.fromEntries(ENGINES.map(kind => [`engine-${kind}`, <span className="text-[12px] text-content/45">{models?.[kind].discovered ? `${models[kind].models.length} models` : ''}</span>])),
+    'refresh-models': (
+      <SecondaryButton disabled={refreshing} onClick={async () => { setRefreshing(true); await attempt(() => api.refreshModels()); setRefreshing(false); }}>
+        <RefreshCw className="size-3.5" strokeWidth={1.75} /> {refreshing ? 'Asking the CLIs…' : 'Refresh'}
+      </SecondaryButton>
+    ),
+    autonomy: <Choice<SuperAutonomy> label="Autonomy" value={level} onChange={superAutonomy => void save({ superAutonomy })} options={[{ value: 'ask', label: 'Ask' }, { value: 'standard', label: 'Standard' }, { value: 'full', label: 'Full' }]} />,
+    'autonomy-actions': showButton('autonomy-actions'),
+    ...askFirst,
+    'always-safe': showButton('always-safe'),
+    pause: <SecondaryButton onClick={() => void save({ superPaused: !settings.superPaused })}>{settings.superPaused ? 'Resume' : 'Pause'}</SecondaryButton>,
+    'soul-line': showButton('soul-line'),
+    'super-wake': <Toggle label="Wake the SuperAgent" on={settings.superWake} onChange={superWake => void save({ superWake })} />,
+    'wakes-per-hour': number(wakes, setWakes, superMaxWakesPerHour => void save({ superMaxWakesPerHour }), { min: 0, max: 60, valid: v => Number.isInteger(v) && v >= 0 && v !== settings.superMaxWakesPerHour }),
+    'super-notify': <Toggle label="SuperAgent notifications" on={settings.superNotify} onChange={superNotify => void save({ superNotify })} />,
+    'daily-budget': number(budget, setBudget, superDailyBudgetUsd => void save({ superDailyBudgetUsd }), { min: 0, step: 1, valid: v => Number.isFinite(v) && v >= 0 && v !== settings.superDailyBudgetUsd }),
+    'creates-per-day': number(creates, setCreates, superMaxCreatesPerDay => void save({ superMaxCreatesPerDay }), { min: 0, max: 200, disabled: level === 'full', title: level === 'full' ? 'Not used on Full' : undefined, valid: v => Number.isInteger(v) && v >= 0 && v <= 200 && v !== settings.superMaxCreatesPerDay }),
+    'quiet-hours': (
+      <>
+        <div className="w-24"><input type="time" aria-label="Quiet from" value={settings.superQuietFrom} onChange={e => void save({ superQuietFrom: e.target.value })} className={INPUT} /></div>
+        <span className="text-[12px] text-content/45">to</span>
+        <div className="w-24"><input type="time" aria-label="Quiet to" value={settings.superQuietTo} onChange={e => void save({ superQuietTo: e.target.value })} className={INPUT} /></div>
+      </>
+    ),
+    version: <span className="text-[12px] text-content/45">{channelLabel(version)}</span>,
+    'release-notes': (
+      <SecondaryButton onClick={() => window.open(releaseNotesUrl(version), '_blank')}>
+        <ExternalLink className="size-3.5" strokeWidth={1.75} /> Open
+      </SecondaryButton>
+    ),
+  };
+  // Live words in place of the index's, where the row reports a state.
+  const descriptions: Record<string, string> = {
+    ...Object.fromEntries(ENGINES.map(kind => [`engine-${kind}`, engineRow(kind)])),
+    pause: settings.superPaused ? 'Paused: it starts nothing on its own until you resume' : 'It starts nothing on its own until you resume',
+    'creates-per-day': createCapText(level),
+    version: buildLabel(BUILD),
+    'release-notes': `What changed in ${version}`,
+  };
+  const titles: Record<string, string> = { pause: settings.superPaused ? 'Paused' : 'Pause the SuperAgent', version: `PodCode ${version}`.trim() };
+  const panels: Record<string, ReactNode> = { 'autonomy-actions': <LevelActions level={level} />, 'always-safe': <AlwaysSafe />, 'soul-line': <SoulSuggestion /> };
+  // Rows this machine has nothing for: the install command is only for an unsigned Mac build, the
+  // release notes only with a version.
+  const present = (e: SettingEntry) => {
+    if (e.id === 'install-command') return Boolean(update && IS_MAC && !update.canInstall);
+    if (e.id === 'release-notes') return Boolean(version);
+    return true;
+  };
+
+  const row = (e: SettingEntry) => {
+    if (e.id === 'install-command') return <InstallCommandRow key={e.id} />;
+    if (e.id === 'updates' && update) return <UpdatesRow key={e.id} snapshot={update} oneLine />;
+    return (
+      <Fragment key={e.id}>
+        <Row id={e.id} oneLine label={titles[e.id] ?? e.title} description={descriptions[e.id] ?? e.description}>{controls[e.id]}</Row>
+        {shown[e.id] ? panels[e.id] : null}
+      </Fragment>
+    );
+  };
+
+  const searching = query.trim().length > 0;
+  const groups = searching
+    ? searchSettings(query).map(hit => ({ heading: hit.label, rows: hit.rows.filter(present) }))
+    : sectionRows(section).map(g => ({ heading: g.group, rows: g.rows.filter(present) }));
+  const shownGroups = groups.filter(g => g.rows.length);
+  const title = searching ? 'Search' : APP_SECTIONS.find(s => s.id === section)?.label ?? 'Settings';
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col font-sans">
-      <header data-window-drag className="flex h-10 shrink-0 items-center gap-1.5 border-b border-stroke px-4 text-[13px]">
-        <span className="text-content/45">Settings</span>
-        <span aria-hidden className="text-content/30">/</span>
-        <h1 className="min-w-0 truncate font-medium text-content">{label}</h1>
-      </header>
+      {/* The window's drag strip in the desktop app, level with the navigation column's header. */}
+      <div data-window-drag className="h-10 shrink-0" />
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-none">
-      <div className="mx-auto w-full max-w-[720px] px-8 py-8">
-        {section === 'appearance' ? <Group title="Appearance">
-          <Row label="Theme">
-            <Segmented<ThemePreference> label="Theme" value={theme} onChange={setTheme} options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'system', label: 'System' }]} />
-          </Row>
-          <Row label="Avatars" description="Colour gives every agent its own colour. Ink draws them all, the SuperAgent included, in the theme's text colour.">
-            <Segmented<AvatarStyle> label="Avatars" value={avatars} onChange={setAvatarStyle} options={[{ value: 'colour', label: 'Colour' }, { value: 'ink', label: 'Ink' }]} />
-          </Row>
-        </Group> : null}
-
-        {section === 'comms' ? <Group title="Agent communication" description="How agents see and message each other.">
-          <Row label="Who can agents message?" description="Replies to messages they received always go through, and channel members can always reach each other in their channel.">
-            <Segmented<Settings['awareness']>
-              label="Who can agents message?"
-              value={settings.awareness}
-              onChange={awareness => void save({ awareness })}
-              options={[{ value: 'off', label: 'Nobody' }, { value: 'project', label: 'Same project' }, { value: 'all', label: 'All projects' }]}
-            />
-          </Row>
-          <Row label="Message budget" description="Messages per collaboration, replies and hand-offs included. 0 means unlimited.">
-            <input
-              type="number"
-              min={0}
-              value={limit}
-              onChange={e => setLimit(e.target.value)}
-              onBlur={() => { const value = Number(limit); if (Number.isInteger(value) && value >= 0 && value !== settings.messageLimit) void save({ messageLimit: value }); }}
-              className={`${INPUT} w-20`}
-            />
-          </Row>
-          <Row label="Share current tasks" description="list_agents includes each agent's task summary and activity.">
-            <Toggle label="Share current tasks" on={settings.shareActivity} onChange={shareActivity => void save({ shareActivity })} />
-          </Row>
-          <Row label="Start tasks with a team snapshot" description="Agents see who is working on what before they begin.">
-            <Toggle label="Start tasks with a team snapshot" on={settings.autoTeamContext} onChange={autoTeamContext => void save({ autoTeamContext })} />
-          </Row>
-          <Row label="Browser scripts" description="Let agents run their own JavaScript in their browser tabs (browser_eval). Plan-only agents never can.">
-            <Toggle label="Browser scripts" on={settings.browserEval} onChange={browserEval => void save({ browserEval })} />
-          </Row>
-        </Group> : null}
-
-        {section === 'super' ? <Group id="settings-super" title="SuperAgent" description="It runs your team across every project. It never edits code; agents do the work. The limits below stop only what it starts on its own: your own messages to it, and the work you asked it for, always go.">
-          <AutonomySettings settings={settings} save={save} />
-          <Row label="Wake it when agents finish, fail or get stuck" description="Updates are batched into one turn, and only sent while it is idle.">
-            <Toggle label="Wake the SuperAgent" on={settings.superWake} onChange={superWake => void save({ superWake })} />
-          </Row>
-          <Row label="Wake-ups an hour" description="Past this, updates wait for the next hour.">
-            <input
-              type="number"
-              min={0}
-              max={60}
-              value={wakes}
-              onChange={e => setWakes(e.target.value)}
-              onBlur={() => { const value = Number(wakes); if (Number.isInteger(value) && value >= 0 && value !== settings.superMaxWakesPerHour) void save({ superMaxWakesPerHour: value }); }}
-              className={`${INPUT} w-20`}
-            />
-          </Row>
-          <Row label="Daily budget" description="Dollars a day it may spend on wake-ups; then they wait for tomorrow. 0 means no cap. Your own messages always go.">
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={budget}
-              onChange={e => setBudget(e.target.value)}
-              onBlur={() => { const value = Number(budget); if (Number.isFinite(value) && value >= 0 && value !== settings.superDailyBudgetUsd) void save({ superDailyBudgetUsd: value }); }}
-              className={`${INPUT} w-20`}
-            />
-          </Row>
-          <Row label="Agents it may create a day" description={createCapText(settings.superAutonomy)}>
-            <input
-              type="number"
-              min={0}
-              max={200}
-              disabled={settings.superAutonomy === 'full'}
-              title={settings.superAutonomy === 'full' ? 'Not used on Full' : undefined}
-              value={creates}
-              onChange={e => setCreates(e.target.value)}
-              onBlur={() => { const value = Number(creates); if (Number.isInteger(value) && value >= 0 && value <= 200 && value !== settings.superMaxCreatesPerDay) void save({ superMaxCreatesPerDay: value }); }}
-              className={`${INPUT} w-20 ${settings.superAutonomy === 'full' ? 'text-content/35' : ''}`}
-            />
-          </Row>
-          <Row label="Quiet hours" description="No wake-ups and no notifications between these times. The same time twice turns them off.">
-            <input type="time" aria-label="Quiet from" value={settings.superQuietFrom} onChange={e => void save({ superQuietFrom: e.target.value })} className={`${INPUT} w-24`} />
-            <span className="text-[12px] text-content/45">to</span>
-            <input type="time" aria-label="Quiet to" value={settings.superQuietTo} onChange={e => void save({ superQuietTo: e.target.value })} className={`${INPUT} w-24`} />
-          </Row>
-          <Row label="Notify me when it asks something" description="A desktop notification while you are in another app or window.">
-            <Toggle label="SuperAgent notifications" on={settings.superNotify} onChange={superNotify => void save({ superNotify })} />
-          </Row>
-        </Group> : null}
-
-        {section === 'engines' ? <Group
-          title="Engines"
-          action={
-            <SecondaryButton disabled={refreshing} onClick={async () => { setRefreshing(true); await attempt(() => api.refreshModels()); setRefreshing(false); }}>
-              <RefreshCw className="size-3.5" strokeWidth={1.75} /> {refreshing ? 'Asking the CLIs…' : 'Refresh models'}
-            </SecondaryButton>
-          }
-        >
-          {ENGINES.map(kind => (
-            <Row
-              key={kind}
-              label={<span className="flex items-center gap-2"><EngineIcon engine={kind} className="size-4" />{ENGINE_LABELS[kind]}</span>}
-              description={engines?.[kind].available ? `v${engines[kind].version} at ${engines[kind].path}` : 'Not found on PATH.'}
-            >
-              <span className="text-[12px] text-content/45">{models?.[kind].discovered ? `${models[kind].models.length} models` : ''}</span>
-            </Row>
-          ))}
-        </Group> : null}
-
-        {section === 'about' ? <AboutGroup /> : null}
-      </div>
+        <div className="mx-auto w-full max-w-[664px] px-8 pb-16 pt-2">
+          <h1 className="pb-6 text-[20px] font-semibold tracking-[-0.01em] text-content">{title}</h1>
+          <div>
+            {shownGroups.map(g => <Group key={g.heading} title={g.heading}>{g.rows.map(row)}</Group>)}
+          </div>
+          {searching && !shownGroups.length ? <p className="text-[13px] text-content/45">Nothing matches "{query.trim()}".</p> : null}
+        </div>
       </div>
     </div>
   );

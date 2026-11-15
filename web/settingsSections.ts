@@ -52,23 +52,43 @@ export function sectionForKey<T extends string = AgentSettingsSection>(
 }
 
 /**
- * The app's Settings page sections (ACH-D77), in the order the sidebar lists them. Each is one of
- * the groups the Settings modal used to stack. No shortcuts pick them (ACH-D81).
+ * The app's Settings page sections (ACH-D77, ACH-D82), in the order the sidebar lists them, under
+ * their group headers ('' for none). No shortcuts pick them (ACH-D81).
  */
-export type AppSettingsSection = 'appearance' | 'comms' | 'super' | 'engines' | 'about';
+export type AppSettingsSection = 'appearance' | 'messaging' | 'engines' | 'autonomy' | 'limits' | 'about';
 
-export const APP_SECTIONS: { id: AppSettingsSection; label: string }[] = [
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'comms', label: 'Agent communication' },
-  { id: 'super', label: 'SuperAgent' },
-  { id: 'engines', label: 'Engines' },
-  { id: 'about', label: 'About' },
+export const APP_SECTIONS: { id: AppSettingsSection; label: string; group: string }[] = [
+  { id: 'appearance', label: 'Appearance', group: '' },
+  { id: 'messaging', label: 'Messaging', group: 'Agents' },
+  { id: 'engines', label: 'Engines', group: 'Agents' },
+  { id: 'autonomy', label: 'Autonomy', group: 'SuperAgent' },
+  { id: 'limits', label: 'Limits', group: 'SuperAgent' },
+  { id: 'about', label: 'About', group: 'PodCode' },
 ];
 
 export const APP_SECTION_IDS: readonly AppSettingsSection[] = APP_SECTIONS.map(s => s.id);
 
+/** The sidebar's groups in order, each with its sections. */
+export function sectionGroups(): { group: string; sections: typeof APP_SECTIONS }[] {
+  const groups = [...new Set(APP_SECTIONS.map(s => s.group))];
+  return groups.map(group => ({ group, sections: APP_SECTIONS.filter(s => s.group === group) }));
+}
+
+/**
+ * Section ids from before ACH-D82, kept as aliases for deep links and saved layouts: Agent
+ * communication is Messaging, and the SuperAgent link (its wake-ups, budgets and quiet hours,
+ * openSettingsAt('super')) lands on Limits.
+ */
+export const SECTION_ALIASES: Readonly<Record<string, AppSettingsSection>> = { comms: 'messaging', super: 'limits' };
+
 export function isAppSection(value: unknown): value is AppSettingsSection {
   return typeof value === 'string' && (APP_SECTION_IDS as readonly string[]).includes(value);
+}
+
+/** A section id, or an old one, as today's section; undefined for anything else. */
+export function appSection(value: unknown): AppSettingsSection | undefined {
+  if (isAppSection(value)) return value;
+  return typeof value === 'string' && Object.hasOwn(SECTION_ALIASES, value) ? SECTION_ALIASES[value] : undefined;
 }
 
 const STORAGE_KEY = 'podcode:agent-settings-section';
