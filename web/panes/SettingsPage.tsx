@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { ENGINES, type EngineKind, type Settings } from '../../shared/types.ts';
 import { buildLabel, channelLabel } from '../../shared/buildInfo.ts';
 import { releaseNotesUrl } from '../../shared/updates.ts';
@@ -11,32 +11,131 @@ import { setTheme, useTheme, type ThemePreference } from '../theme.ts';
 import { setAvatarStyle, useAvatarStyle, type AvatarStyle } from '../avatarStyle.ts';
 import { useDesktopUpdate } from '../sidebar/SidebarUpdate.tsx';
 import { INPUT } from '../ui/common.tsx';
-import { ExternalLink, RefreshCw } from '../mono/icons.tsx';
+import { ExternalLink, RefreshCw, Search, X } from '../mono/icons.tsx';
+import { Popover } from '../mono/Popover.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
-import { Group, Row, Select, Toggle } from '../mono/settings.tsx';
+import { Group, RevealedSetting, Row, Segmented, Toggle } from '../mono/settings.tsx';
 import { InstallCommandRow, UpdatesRow } from '../dialogs/AboutGroup.tsx';
 import { AlwaysSafe, LevelActions, SoulSuggestion } from '../dialogs/AutonomySettings.tsx';
 import { APP_SECTIONS, type AppSettingsSection } from '../settingsSections.ts';
-import { searchSettings, sectionRows, type SettingEntry } from '../settingsIndex.ts';
+import { setSettingsSection } from '../layout.ts';
+import { searchSettings, sectionRows, type SettingEntry, type SettingsSearchResult } from '../settingsIndex.ts';
 
 function save(change: Partial<Settings>) {
   return attempt(() => api.updateSettings(change));
 }
 
-/** A Select at the width the reference gives them, right-aligned in its row. */
-function Choice<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (value: T) => void }) {
-  return <div className="w-40"><Select label={label} value={value} options={options} onChange={next => onChange(next as T)} /></div>;
+/** MonoCode's PageHeader (SettingsView.tsx): the section's title and its line. */
+function PageHeader({ title, description }: { title: string; description: string }) {
+  return (
+    <header className="pb-4">
+      <h1 className="text-[20px] font-semibold leading-tight text-content">{title}</h1>
+      {description ? <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-content/45">{description}</p> : null}
+    </header>
+  );
 }
 
 /**
- * Settings as a full-window page (ACH-D71, ACH-D77, ACH-D82), after the user's reference: a centred
- * column with the section's title, then small headings over flat rounded cards of rows, each with a
- * title and one line on the left and its control on the right. The rows and their words come from
- * web/settingsIndex.ts; this page adds the controls. With a query from "Search settings" (the
- * navigation column, Sidebar.tsx), it shows the matching rows of every section instead, each still
- * working. No shortcut hints (ACH-D81).
+ * MonoCode's SettingsSearch, at the end of the header bar: a field whose results list under it;
+ * picking one opens its section and reveals the row. Esc in the list clears the field.
  */
-export function SettingsPage({ section, query = '' }: { section: AppSettingsSection; query?: string }) {
+function SettingsSearch({ onReveal }: { onReveal: (result: SettingsSearchResult) => void }) {
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const listId = useId();
+  const results = useMemo(() => searchSettings(query), [query]);
+  const open = query.trim().length > 0;
+  useEffect(() => setActive(0), [query]);
+  const go = (result: SettingsSearchResult | undefined) => {
+    if (!result) return;
+    onReveal(result);
+    setQuery('');
+    input.current?.blur();
+  };
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); setActive(i => Math.min(results.length - 1, i + 1)); return; }
+    if (event.key === 'ArrowUp') { event.preventDefault(); setActive(i => Math.max(0, i - 1)); return; }
+    if (event.key === 'Enter') { event.preventDefault(); go(results[active]); }
+  };
+  return (
+    <div ref={root} className="relative shrink-0">
+      <label className="flex h-7 w-48 items-center gap-2 rounded-md border border-content/10 px-2 text-content/45 focus-within:border-content/20">
+        <Search className="size-3.5 shrink-0" strokeWidth={1.75} />
+        <input
+          ref={input}
+          role="combobox"
+          data-settings-search
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="Search settings"
+          aria-label="Search settings"
+          aria-expanded={open}
+          aria-controls={listId}
+          spellCheck={false}
+          autoComplete="off"
+          className="min-w-0 flex-1 bg-transparent text-[12px] text-content outline-none placeholder:text-content/35"
+        />
+        {query ? (
+          <button
+            type="button"
+            aria-label="Clear settings search"
+            onMouseDown={event => event.preventDefault()}
+            onClick={() => { setQuery(''); input.current?.focus(); }}
+            className="grid size-4 shrink-0 place-items-center rounded text-content/45 hover:text-content"
+          >
+            <X className="size-3" strokeWidth={2} />
+          </button>
+        ) : null}
+      </label>
+      {open ? (
+        <Popover
+          anchor={root}
+          side="bottom"
+          align="end"
+          width={300}
+          maxHeight={320}
+          onDismiss={reason => { setQuery(''); if (reason === 'escape') input.current?.focus(); }}
+          id={listId}
+          role="listbox"
+          aria-label="Settings search results"
+          className="overflow-y-auto overscroll-contain p-1"
+        >
+          {results.length === 0 ? (
+            <p className="px-2 py-1.5 text-[12px] text-content/45">No matching settings</p>
+          ) : (
+            results.map((result, index) => (
+              <button
+                key={`${result.section}:${result.settingId ?? '*'}`}
+                type="button"
+                role="option"
+                aria-selected={index === active}
+                onMouseDown={event => event.preventDefault()}
+                onMouseEnter={() => setActive(index)}
+                onClick={() => go(result)}
+                className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] ${index === active ? 'bg-selection text-content' : 'text-content hover:bg-content/5'}`}
+              >
+                <span className="min-w-0 flex-1 truncate">{result.label}</span>
+                <span className="shrink-0 text-[11px] text-content/40">{result.settingId ? result.sectionLabel : 'Page'}</span>
+              </button>
+            ))
+          )}
+        </Popover>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Settings as a full-window page (ACH-D71, ACH-D77), in MonoCode's settings UI (SettingsView.tsx,
+ * ACH-D83): a 40px header bar with the breadcrumb and Search settings, then a max-w-5xl body with
+ * the PageHeader and the section's Groups of Rows. The rows and their words come from
+ * web/settingsIndex.ts; this page adds the controls. A search result opens its section and flashes
+ * its row (RevealedSetting). No shortcut hints (ACH-D81).
+ */
+export function SettingsPage({ section }: { section: AppSettingsSection }) {
   const settings = useApp(s => s.snapshot?.settings);
   const engines = useApp(s => s.snapshot?.engines);
   const models = useApp(s => s.snapshot?.models);
@@ -50,6 +149,19 @@ export function SettingsPage({ section, query = '' }: { section: AppSettingsSect
   const [refreshing, setRefreshing] = useState(false);
   // Rows that open a longer text under themselves (Autonomy's lists and the soul.md line).
   const [shown, setShown] = useState<Record<string, boolean>>({});
+  // MonoCode's reveal: scroll the row a search picked to the middle, flash it, then let go.
+  // The section is a dependency so a result on another page scrolls once that page has the row.
+  const [revealed, setRevealed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!revealed) return;
+    document.getElementById(revealed)?.scrollIntoView?.({ block: 'center' });
+    const timer = window.setTimeout(() => setRevealed(null), 1800);
+    return () => window.clearTimeout(timer);
+  }, [revealed, section]);
+  const onReveal = (result: SettingsSearchResult) => {
+    if (result.section !== section) setSettingsSection(result.section);
+    setRevealed(result.settingId);
+  };
   if (!settings) return null;
   const level = settings.superAutonomy;
   const version = update?.currentVersion || BUILD.version;
@@ -76,9 +188,9 @@ export function SettingsPage({ section, query = '' }: { section: AppSettingsSect
     <Toggle label={`Ask first: ${key}`} on={settings.superAskFirst[key]} onChange={on => void save({ superAskFirst: { ...settings.superAskFirst, [key]: on } as AskFirst })} />
   )]));
   const controls: Record<string, ReactNode> = {
-    theme: <Choice<ThemePreference> label="Theme" value={theme} onChange={setTheme} options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'system', label: 'System' }]} />,
-    avatars: <Choice<AvatarStyle> label="Avatars" value={avatars} onChange={setAvatarStyle} options={[{ value: 'colour', label: 'Colour' }, { value: 'ink', label: 'Ink' }]} />,
-    awareness: <Choice<Settings['awareness']> label="Agents can message" value={settings.awareness} onChange={awareness => void save({ awareness })} options={[{ value: 'off', label: 'Nobody' }, { value: 'project', label: 'Same project' }, { value: 'all', label: 'All projects' }]} />,
+    theme: <Segmented<ThemePreference> label="Theme" value={theme} onChange={setTheme} options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'system', label: 'System' }]} />,
+    avatars: <Segmented<AvatarStyle> label="Avatars" value={avatars} onChange={setAvatarStyle} options={[{ value: 'colour', label: 'Colour' }, { value: 'ink', label: 'Ink' }]} />,
+    awareness: <Segmented<Settings['awareness']> label="Who can agents message?" value={settings.awareness} onChange={awareness => void save({ awareness })} options={[{ value: 'off', label: 'Nobody' }, { value: 'project', label: 'Same project' }, { value: 'all', label: 'All projects' }]} />,
     'message-budget': number(limit, setLimit, messageLimit => void save({ messageLimit }), { min: 0, valid: v => Number.isInteger(v) && v >= 0 && v !== settings.messageLimit }),
     'share-activity': <Toggle label="Share current tasks" on={settings.shareActivity} onChange={shareActivity => void save({ shareActivity })} />,
     'team-snapshot': <Toggle label="Start with a team snapshot" on={settings.autoTeamContext} onChange={autoTeamContext => void save({ autoTeamContext })} />,
@@ -89,7 +201,7 @@ export function SettingsPage({ section, query = '' }: { section: AppSettingsSect
         <RefreshCw className="size-3.5" strokeWidth={1.75} /> {refreshing ? 'Asking the CLIs…' : 'Refresh'}
       </SecondaryButton>
     ),
-    autonomy: <Choice<SuperAutonomy> label="Autonomy" value={level} onChange={superAutonomy => void save({ superAutonomy })} options={[{ value: 'ask', label: 'Ask' }, { value: 'standard', label: 'Standard' }, { value: 'full', label: 'Full' }]} />,
+    autonomy: <Segmented<SuperAutonomy> label="Autonomy" value={level} onChange={superAutonomy => void save({ superAutonomy })} options={[{ value: 'ask', label: 'Ask' }, { value: 'standard', label: 'Standard' }, { value: 'full', label: 'Full' }]} />,
     'autonomy-actions': showButton('autonomy-actions'),
     ...askFirst,
     'always-safe': showButton('always-safe'),
@@ -134,34 +246,40 @@ export function SettingsPage({ section, query = '' }: { section: AppSettingsSect
 
   const row = (e: SettingEntry) => {
     if (e.id === 'install-command') return <InstallCommandRow key={e.id} />;
-    if (e.id === 'updates' && update) return <UpdatesRow key={e.id} snapshot={update} oneLine />;
+    if (e.id === 'updates' && update) return <UpdatesRow key={e.id} snapshot={update} />;
     return (
       <Fragment key={e.id}>
-        <Row id={e.id} oneLine label={titles[e.id] ?? e.title} description={descriptions[e.id] ?? e.description}>{controls[e.id]}</Row>
+        <Row id={e.id} label={titles[e.id] ?? e.title} description={descriptions[e.id] ?? e.description}>{controls[e.id]}</Row>
         {shown[e.id] ? panels[e.id] : null}
       </Fragment>
     );
   };
 
-  const searching = query.trim().length > 0;
-  const groups = searching
-    ? searchSettings(query).map(hit => ({ heading: hit.label, rows: hit.rows.filter(present) }))
-    : sectionRows(section).map(g => ({ heading: g.group, rows: g.rows.filter(present) }));
-  const shownGroups = groups.filter(g => g.rows.length);
-  const title = searching ? 'Search' : APP_SECTIONS.find(s => s.id === section)?.label ?? 'Settings';
+  const groups = sectionRows(section).map(g => ({ heading: g.group, rows: g.rows.filter(present) })).filter(g => g.rows.length);
+  const info = APP_SECTIONS.find(s => s.id === section);
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col font-sans">
-      {/* The window's drag strip in the desktop app, level with the navigation column's header. */}
-      <div data-window-drag className="h-10 shrink-0" />
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-none">
-        <div className="mx-auto w-full max-w-[664px] px-8 pb-16 pt-2">
-          <h1 className="pb-6 text-[20px] font-semibold tracking-[-0.01em] text-content">{title}</h1>
-          <div>
-            {shownGroups.map(g => <Group key={g.heading} title={g.heading}>{g.rows.map(row)}</Group>)}
-          </div>
-          {searching && !shownGroups.length ? <p className="text-[13px] text-content/45">Nothing matches "{query.trim()}".</p> : null}
+    <div role="region" aria-label="Settings" className="flex min-h-0 min-w-0 flex-1 flex-col text-content">
+      {/* MonoCode's header bar: the breadcrumb, then Search settings at its end. It drags the window. */}
+      <div data-window-drag className="flex h-10 shrink-0 select-none items-center border-b border-stroke">
+        <div className="flex min-w-0 flex-1 items-center gap-2 px-3 text-[13px]">
+          <span className="shrink-0 text-content/45">Settings</span>
+          <span aria-hidden className="shrink-0 text-content/25">/</span>
+          <span className="min-w-0 truncate text-content">{info?.label ?? 'Settings'}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 pr-2">
+          <SettingsSearch onReveal={onReveal} />
         </div>
       </div>
+      <RevealedSetting.Provider value={revealed}>
+        <div className="@container/settings min-h-0 flex-1 overflow-y-auto overscroll-none">
+          <div className="mx-auto w-full max-w-5xl px-5 py-6 pb-16 @min-[560px]/settings:px-8 @min-[560px]/settings:py-8">
+            <PageHeader title={info?.label ?? 'Settings'} description={info?.description ?? ''} />
+            <div>
+              {groups.map(g => <Group key={g.heading} title={g.heading}>{g.rows.map(row)}</Group>)}
+            </div>
+          </div>
+        </div>
+      </RevealedSetting.Provider>
     </div>
   );
 }

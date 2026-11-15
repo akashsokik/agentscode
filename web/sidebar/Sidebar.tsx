@@ -4,7 +4,7 @@ import { rolePreset } from '../../shared/roles.ts';
 import { api, type Root } from '../api.ts';
 import { modelLabel, relativeTime, shortPath } from '../format.ts';
 import { compactAgo } from '../panelList.ts';
-import { closeSettings, closeTab, focusedAgentId, focusedChannelId, focusedKind, open, openToSide, setProject, setRail, setSectionFolded, setWorkspaceColumn, setSettingsQuery, setSettingsSection, setSidebarView, useLayout, type Layout, type RailSectionKey } from '../layout.ts';
+import { closeSettings, closeTab, focusedAgentId, focusedChannelId, focusedKind, open, openToSide, setProject, setRail, setSectionFolded, setWorkspaceColumn, setSettingsSection, setSidebarView, useLayout, type Layout, type RailSectionKey } from '../layout.ts';
 import { ChangesView } from '../right/RightPanel.tsx';
 import { attempt, useApp } from '../store.ts';
 import { whereabouts } from '../whereabouts.ts';
@@ -339,16 +339,16 @@ function PullRequestsAction() {
 }
 
 /** A row at the top or foot of the navigation column: MonoCode's RailAction. */
-function RailAction({ icon: Icon, mark, label, hint, active = false, compact = false, onClick, children }: { icon: IconComponent; mark?: ReactNode; label: string; hint?: KeySpec; active?: boolean; /** The Settings list's 28px, 13px rows (ACH-D82). */ compact?: boolean; onClick: () => void; children?: ReactNode }) {
+function RailAction({ icon: Icon, mark, label, hint, active = false, settings = false, onClick, children }: { icon: IconComponent; mark?: ReactNode; label: string; hint?: KeySpec; active?: boolean; /** MonoCode's settings NavRow (SettingsRail.tsx, ACH-D83): py-1.5, content/50 until active or hovered. */ settings?: boolean; onClick: () => void; children?: ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      className={cx('relative flex w-full items-center gap-2 rounded-md px-2 text-left transition-colors duration-150', compact ? 'h-7' : 'h-8', active ? 'bg-selection text-content' : 'text-content/75 hover:bg-content/10 hover:text-content')}
+      className={cx('relative flex w-full items-center gap-2 rounded-md px-2 text-left', settings ? 'py-1.5' : 'h-8 transition-colors duration-150', active ? 'bg-selection text-content' : settings ? 'text-content/50 hover:bg-content/5 hover:text-content' : 'text-content/75 hover:bg-content/10 hover:text-content')}
     >
-      {mark ?? <Icon className={cx('shrink-0 opacity-70', compact ? 'size-3.5' : 'size-4')} strokeWidth={1.75} />}
-      <span className={cx('min-w-0 flex-1 truncate leading-tight', compact ? 'text-[13px]' : 'text-sm font-medium')}>{label}</span>
+      {mark ?? <Icon className="size-4 shrink-0 opacity-70" strokeWidth={1.75} />}
+      <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight">{label}</span>
       {children}
       {/* MonoCode's shortcut hint at the end of the row, as in "Settings ⌘,". */}
       {hint ? <Kbd spec={hint} quiet /> : null}
@@ -693,7 +693,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
         <HeaderButton icon={PanelLeft} label="Collapse navigation" onClick={() => setRail(false)} className="size-[30px]" />
       </div>
       </div>
-      <SettingsNav open={settingsOpen} section={layout.settingsSection ?? 'appearance'} query={layout.settingsQuery ?? ''} />
+      <SettingsNav open={settingsOpen} section={layout.settingsSection ?? 'appearance'} />
       </div>
       <ResizeHandle column={column} edge="right" label="Resize navigation" />
     </nav>
@@ -703,12 +703,12 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
 const SECTION_ICONS: Record<AppSettingsSection, IconComponent> = { appearance: Palette, messaging: MessageMultiple, engines: Bot, autonomy: Sparkles, limits: Clock, about: Info };
 
 /**
- * The navigation column's body while Settings are open (ACH-D77, ACH-D82, after the user's
- * reference): "Search settings", then the sections as compact RailAction rows under small group
- * headers, and Back at the foot where the gear was. No shortcut hints (ACH-D81). Opening moves focus
+ * The navigation column's body while Settings are open: MonoCode's SettingsNav (SettingsRail.tsx,
+ * ACH-D83). The sections as its NavRows under small group labels, gap-5 between groups, and Back as
+ * a NavRow at the foot where the gear was (ACH-D77). No shortcut hints (ACH-D81). Opening moves focus
  * to the section shown; closing gives it back to the gear.
  */
-function SettingsNav({ open: isOpen, section, query }: { open: boolean; section: AppSettingsSection; query: string }) {
+function SettingsNav({ open: isOpen, section }: { open: boolean; section: AppSettingsSection }) {
   const list = useRef<HTMLDivElement>(null);
   const was = useRef(isOpen);
   useEffect(() => {
@@ -718,44 +718,28 @@ function SettingsNav({ open: isOpen, section, query }: { open: boolean; section:
     else if (document.activeElement === document.body || list.current?.parentElement?.contains(document.activeElement)) document.querySelector<HTMLElement>('[data-settings-gear]')?.focus({ preventScroll: true });
   }, [isOpen]);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.target instanceof HTMLInputElement) return;
     const next = sectionForKey(section, event, true, APP_SECTION_IDS);
     if (!next || event.metaKey || event.ctrlKey) return;
     event.preventDefault();
     setSettingsSection(next);
     list.current?.querySelector<HTMLElement>(`[data-section="${next}"] button`)?.focus();
   };
-  const searching = query.trim().length > 0;
   return (
     <div data-swap="nav" data-shown={isOpen} inert={!isOpen} className="settings-swap flex flex-col">
-      <div className="px-4 pb-1.5 pt-1 text-[11px] font-medium text-content/40">Settings</div>
-      <label className="mx-2 mb-2 flex h-7 shrink-0 items-center gap-2 rounded-md border border-content/10 bg-content/5 px-2 text-[12px] text-content/40 focus-within:border-content/20">
-        <Search className="size-3.5 shrink-0 opacity-70" strokeWidth={1.75} />
-        <input
-          type="search"
-          aria-label="Search settings"
-          placeholder="Search settings"
-          value={query}
-          onChange={e => setSettingsQuery(e.target.value)}
-          // Esc in the field clears it first; with it empty, Esc closes Settings as anywhere else.
-          onKeyDown={e => { if (e.key === 'Escape' && query) { e.preventDefault(); setSettingsQuery(''); } }}
-          className="min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-content/40 [&::-webkit-search-cancel-button]:hidden"
-        />
-      </label>
-      <div ref={list} aria-label="Settings sections" onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none px-2 pb-2">
+      <div ref={list} aria-label="Settings" onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-none px-2 py-3">
         {sectionGroups().map(({ group, sections }) => (
-          <div key={group || 'top'} className={cx('flex flex-col gap-px', group && 'mt-4')}>
-            {group ? <div className="px-2 pb-1 text-[11px] font-medium text-content/40">{group}</div> : null}
+          <div key={group || 'top'} className="flex flex-col gap-px">
+            {group ? <div className="px-2 pb-1 text-xs font-semibold text-content/35">{group}</div> : null}
             {sections.map(item => (
               <div key={item.id} data-section={item.id} className="contents">
-                <RailAction compact icon={SECTION_ICONS[item.id]} label={item.label} active={!searching && item.id === section} onClick={() => setSettingsSection(item.id)} />
+                <RailAction settings icon={SECTION_ICONS[item.id]} label={item.label} active={item.id === section} onClick={() => setSettingsSection(item.id)} />
               </div>
             ))}
           </div>
         ))}
       </div>
-      <div className="flex shrink-0 items-center gap-0.5 px-2 pb-2 pt-1.5">
-        <RailAction icon={ArrowLeft} label="Back" onClick={closeSettings} />
+      <div className="flex shrink-0 flex-col gap-px p-2">
+        <RailAction settings icon={ArrowLeft} label="Back" onClick={closeSettings} />
       </div>
     </div>
   );

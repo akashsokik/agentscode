@@ -11,12 +11,12 @@ import { ArrowDownCircle, Check, Copy, RefreshCw } from '../mono/icons.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { Row } from '../mono/settings.tsx';
 
-export function UpdatesRow({ snapshot, oneLine = false }: { snapshot: UpdateSnapshot; oneLine?: boolean }) {
+export function UpdatesRow({ snapshot }: { snapshot: UpdateSnapshot }) {
   const updates = window.podcodeDesktop?.updates;
   const busy = snapshot.phase === 'checking' || snapshot.phase === 'downloading' || snapshot.phase === 'ready';
   const available = snapshot.phase === 'available' && snapshot.availableVersion;
   return (
-    <Row id="updates" oneLine={oneLine} label="Updates" description={updateStatusText(snapshot)}>
+    <Row id="updates" label="Updates" description={updateStatusText(snapshot)}>
       <SecondaryButton disabled={busy || !updates} onClick={() => void (available ? updates?.install() : updates?.check())}>
         {available
           ? <ArrowDownCircle className="size-3.5" strokeWidth={1.75} />
