@@ -18,7 +18,6 @@ import type { Agent, Approval, Entry, ToolCall, TurnMeta } from '../../shared/ty
 import { turnMetricsText } from '../../shared/turnUsage.ts';
 import { foldableWork, groupTurnItems, isDreamLine, keptInView, memoryLine, turnItemKey, walkthroughResult, workKind, workSummaryLine, type TurnItem } from '../activity.ts';
 import { api } from '../api.ts';
-import { modelLabel } from '../format.ts';
 import { open, openToSide } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { browserScreenshot, presentTool } from '../toolPresentation.ts';
@@ -85,12 +84,6 @@ function formatWorkingDuration(elapsedMs: number | null, done = false): string {
   const elapsed = formatElapsed(elapsedMs);
   if (elapsed == null) return done ? verb : `${verb}…`;
   return `${verb} for ${elapsed}`;
-}
-
-/** The agent's model as the turn clock names it; the CLI default stays unnamed. */
-function useModelName(agent: Agent): string | undefined {
-  const label = useApp(s => modelLabel(agent, s.snapshot?.models[agent.engine]));
-  return label === 'Default' ? undefined : label;
 }
 
 function useElapsedFrom(startedAt: number | undefined, paused: boolean): number | null {
@@ -625,14 +618,12 @@ function LiveFoldTitle({ startedAt, paused, waitingLabel }: { startedAt?: number
 
 /**
  * MonoCode's WorkFoldLine, read as a sentence: the agent's avatar in the gutter, its name, the clock
- * ("worked for 2m 17s"), the model as a quiet suffix and the time the turn landed at the right. The
+ * ("worked for 2m 17s") and the time the turn landed at the right; no engine or model (ACH-D70). The
  * work folds behind it.
  */
-function WorkFoldLine({ title, agent, model, at, live, expandable, open, onToggle }: {
+function WorkFoldLine({ title, agent, at, live, expandable, open, onToggle }: {
   title: ReactNode;
   agent: Agent;
-  /** The model's name, when it has one. */
-  model?: string;
   /** When the turn settled. */
   at?: number;
   live: boolean;
@@ -647,7 +638,6 @@ function WorkFoldLine({ title, agent, model, at, live, expandable, open, onToggl
     <span className="flex min-w-0 flex-1 items-center gap-1.5 font-sans text-[12.5px]">
       <span className="shrink-0 font-semibold text-content/90">{agent.name}</span>
       {live ? title : <span className="min-w-0 truncate text-content/45 transition-colors duration-200 group-hover:text-content/80">{title}</span>}
-      {model ? <span className="shrink-0 text-content/30">· {model}</span> : null}
       {at != null ? (
         <time dateTime={new Date(at).toISOString()} title={new Date(at).toLocaleString()} className="ml-auto shrink-0 pl-2 text-[11.5px] tabular-nums text-content/30">{formatClockTime(at)}</time>
       ) : null}
@@ -1004,7 +994,6 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
   const settled = !live && Boolean(done || errors.length);
   const settledAt = done?.ts ?? errors.at(-1)?.ts ?? turn.items.at(-1)?.ts;
   const elapsedMs = done?.meta?.durationMs ?? errors.at(-1)?.meta?.durationMs ?? (settledAt ? settledAt - turn.startedAt : null);
-  const who = useModelName(agent);
   // The fold line is the turn's status line from the first token to the last. It never moves, so a
   // turn settling does not shuffle the layout around the answer.
   const showFoldLine = live || items.length > 0 || settled;
@@ -1035,7 +1024,6 @@ function TurnView({ turn, agent, live, waiting, approvals, workOpen, onToggleWor
           expandable={Boolean(fold)}
           open={Boolean(fold) && workOpen}
           onToggle={onToggleWork}
-          model={who}
           at={settled ? settledAt : undefined}
           title={live
             ? <LiveFoldTitle startedAt={agent.turnStartedAt ?? turn.startedAt} paused={waiting} />
