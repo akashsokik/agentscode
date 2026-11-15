@@ -1,7 +1,8 @@
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { cksum } from './cksum.ts';
 
 /**
  * The force-push rule (ALL-D9), enforced where git runs, not in task text. Every agent process
@@ -245,12 +246,6 @@ function isGuardFile(file: string): boolean {
   } catch {
     return false;
   } finally { if (fd !== null) fs.closeSync(fd); }
-}
-
-/** cksum's output for a text, as the shim compares it. */
-function cksum(text: string): string {
-  const out = spawnSync('cksum', { input: text, encoding: 'utf8' });
-  return out.stdout.trim();
 }
 
 interface Installed { dir: string; url: string; realGit: string }
