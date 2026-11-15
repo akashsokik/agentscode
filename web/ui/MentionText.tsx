@@ -3,7 +3,7 @@ import { findMentions, type MentionRef } from '../../shared/mentions.ts';
 import { open, setProject } from '../layout.ts';
 import { useApp } from '../store.ts';
 import { AgentAvatar } from './Avatar.tsx';
-import { withRefChips } from '../notes/RefChip.tsx';
+import { ReferenceChip, withRefChips } from '../notes/RefChip.tsx';
 import { useNotes } from '../notes/refsState.ts';
 
 /**
@@ -39,12 +39,11 @@ export function MentionText({ text, refs, agentId }: { text: string; refs?: Ment
   return <>{parts}</>;
 }
 
-const LIVE = 'rounded bg-mention/10 px-0.5 font-medium text-mention';
 
 function Chip({ mention, shown, agentId }: { mention: MentionRef; shown: string; agentId?: string }) {
   const agent = useApp(s => (mention.kind === 'agent' ? s.snapshot?.agents.find(a => a.id === mention.id) : undefined));
   const project = useApp(s => (mention.kind === 'project' ? s.snapshot?.projects.find(p => p.id === mention.id) : undefined));
-  if (mention.kind === 'everyone') return <span className={LIVE}>{shown}</span>;
+  if (mention.kind === 'everyone') return <ReferenceChip kind="Audience" label={shown} static />;
 
   let go: (() => void) | undefined;
   let title: string;
@@ -59,17 +58,7 @@ function Chip({ mention, shown, agentId }: { mention: MentionRef; shown: string;
     go = root ? () => open({ kind: 'file', root, path: mention.path.replace(/\/$/, '') }) : undefined;
     title = go ? `Open ${mention.path}` : mention.path;
   }
-  // Something that no longer exists keeps its words, greyed, and does nothing on click.
-  if (!go) return <span title={title} className="rounded bg-content/6 px-0.5 font-medium text-content/45">{shown}</span>;
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={(event) => { event.stopPropagation(); go!(); }}
-      className={`${LIVE} cursor-pointer transition-colors duration-150 hover:bg-mention/20`}
-    >
-      {agent ? <AgentAvatar agent={agent} animate={false} className="mr-0.5 inline-block size-[1em] align-[-0.15em]" /> : null}
-      {shown}
-    </button>
-  );
+  return <ReferenceChip kind={mention.kind === 'agent' ? 'Agent' : mention.kind === 'project' ? 'Project' : 'File'} label={shown}
+    static={!go} replaced={!go} onOpen={go} glyph={agent ? <AgentAvatar agent={agent} animate={false} className="size-3" /> : undefined}
+    cardContent={<><div className="text-[11px] text-content/55">{mention.kind}</div><h3 className="mt-2 text-[13px] font-semibold">{title}</h3>{agent ? <p className="mt-1 text-[12px] text-content/55">{agent.role} · {agent.status}</p> : null}</>} />;
 }

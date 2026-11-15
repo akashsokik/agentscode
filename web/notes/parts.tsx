@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { RefState, RefSummary } from '../../shared/refs.ts';
+import { ReferenceChip } from './RefChip.tsx';
 import { useApp } from '../store.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
 
@@ -25,20 +26,10 @@ export function kindWord(kind: 'D' | 'N'): string {
   return kind === 'D' ? 'Decision' : 'Note';
 }
 
-/** The chip's look: its kind, and quiet when replaced. */
-export function chipClass(summary: Pick<RefSummary, 'kind' | 'state'> | undefined, id: string, small = false): string {
-  const note = summary ? summary.kind === 'N' : /-N\d+$/.test(id);
-  return ['ref-chip', note ? 'ref-note' : '', summary?.state === 'replaced' ? 'ref-old' : '', small ? 'ref-small' : ''].filter(Boolean).join(' ');
-}
-
-/** A chip that only shows (a row in the list): no hover, no button. */
-export function StaticChip({ summary, small = true, glyph = true }: { summary: RefSummary; small?: boolean; /** List rows drop the glyph: the section already says the kind (ACH-D37 amends ACH-D13). */ glyph?: boolean }) {
-  return (
-    <span className={chipClass(summary, summary.id, small)}>
-      <KindGlyph kind={summary.kind} show={glyph} />
-      {summary.id}
-    </span>
-  );
+/** A display-only reference in a parent row. One size, with optional context glyph (ACH-D37). */
+export function StaticChip({ summary, glyph = true }: { summary: RefSummary; /** Compatibility: all references now use the one 20px size. */ small?: boolean; glyph?: boolean }) {
+  return <ReferenceChip kind={kindWord(summary.kind)} label={summary.id} static replaced={summary.state === 'replaced'}
+    glyph={glyph ? <span className={summary.kind === 'N' ? 'text-warning' : 'text-[var(--link-color)]'}><KindGlyph kind={summary.kind} /></span> : undefined} />;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

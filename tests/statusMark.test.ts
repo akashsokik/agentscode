@@ -55,7 +55,7 @@ test('ACH-D48: stopped is the cancel mark, a gone tab is a dashed circle, decisi
   assert.match(parts, /if \(!show\) return null;/);
   const chip = read('web/notes/RefChip.tsx');
   assert.match(chip, /glyph = true \}: \{/, 'RefChip takes glyph, on by default');
-  assert.equal(chip.match(/<KindGlyph kind=\{summary\.kind\} show=\{glyph\} \/>/g)?.length, 2, 'both the inert span and the button honour it');
+  assert.match(chip, /glyph=\{glyph \? <span/, 'the thin variant honours context glyphs for both modes through the base');
 });
 
 test('the pending chips on delegations and threads use the shared mark, with their own words (ACH-39)', () => {

@@ -57,3 +57,46 @@ test('the issue card: the gist of a description in plain words, and when it chan
   assert.equal(updated('5m'), 'Updated 5m ago');
   assert.equal(updated('4h 36m'), 'Updated 4h 36m ago');
 });
+
+// All resolved reference variants must share rendering and interaction (ACH-58 / ACH-D76).
+import { readFileSync } from 'node:fs';
+const source = (file: string) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+
+test('reference variants delegate to the existing RefChip module base; only it owns hover wiring', () => {
+  const ref = source('web/notes/RefChip.tsx');
+  const issue = source('web/ui/IssueKeyChip.tsx');
+  const mention = source('web/ui/MentionText.tsx');
+  const parts = source('web/notes/parts.tsx');
+  for (const name of ['RefChip', 'PullRequestChip', 'CommitChip', 'BranchChip']) {
+    const body = ref.slice(ref.indexOf(`export function ${name}(`));
+    assert.match(body.slice(0, body.indexOf('\n}\n') + 3), /<ReferenceChip\b/, `${name} uses the base`);
+  }
+  for (const [name, text] of [['issue', issue], ['mention', mention], ['static row', parts]]) {
+    assert.match(text, /<ReferenceChip\b/, name);
+    assert.doesNotMatch(text, /useHoverCard|<HoverCard\b|className="ref-chip"/, `${name} cannot fork interactions or styling`);
+  }
+  const base = ref.slice(ref.indexOf('export function ReferenceChip'), ref.indexOf('/** Explicit, resolved'));
+  assert.equal(base.match(/useHoverCard\(/g)?.length, 1);
+  assert.equal(base.match(/<HoverCard\b/g)?.length, 1);
+  assert.match(base, /inert \? \(/);
+  assert.match(base, /aria-label=\{`\$\{kind\} \$\{label\}`\}/, 'short name; the card describes the rest');
+  assert.match(base, /event\.key === 'Escape'/);
+  assert.match(base, /event\.stopPropagation\(\); event\.preventDefault\(\)/, 'nested row clicks stay within their target');
+});
+
+test('all reference labels have the same class and content colour, with only a shared replaced state', () => {
+  const ref = source('web/notes/RefChip.tsx');
+  assert.equal(ref.match(/className="ref-chip-label"/g)?.length, 1);
+  const css = source('web/styles.css');
+  const chip = css.slice(css.indexOf('.ref-chip {'), css.indexOf('.ref-mark {'));
+  assert.match(chip, /height: 20px/);
+  assert.match(chip, /padding: 0 6px/);
+  assert.match(chip, /border-radius: 5px/);
+  assert.match(chip, /font: 500 11\.5px\/1 var\(--font-mono\)/);
+  assert.match(chip, /color: var\(--color-content\)/);
+  assert.match(chip, /\.ref-chip-label \{ color: inherit;/);
+  assert.doesNotMatch(chip, /ref-note|ref-small|--ref-hue/);
+  assert.match(chip, /\.ref-chip\.ref-old/);
+  assert.doesNotMatch(source('web/ui/IssueKeyChip.tsx'), /ref-old|replaced=/, 'cancel is a status, not replacement');
+  assert.match(source('web/ui/MentionText.tsx'), /<AgentAvatar agent=\{agent\}/, 'avatar setting stays authoritative');
+});
