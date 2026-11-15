@@ -52,6 +52,16 @@ test('the Agents row: the fitted avatar, bold only when unread, no dot, one slot
   assert.doesNotMatch(row, /UnreadDot|TerminalSpinner|AgentStateMark/, 'no dot, no spinner of its own');
   assert.match(row, /\{slot\.state \? <StatusMark state=\{slot\.state\} label=\{slot\.words\}/);
   assert.match(row, /compactAgo\(agent\.lastActiveAt, now\)/);
-  assert.match(row, /flex w-6 shrink-0 items-center justify-end/, 'one fixed slot, right-aligned');
+  assert.match(row, /flex h-5 w-6 shrink-0 items-center justify-end/, 'one fixed slot, right-aligned');
   assert.match(src, /'flex h-\[30px\] w-full min-w-0 items-center gap-2 rounded-md px-2 text-left/, 'every sidebar row a touch tighter');
+});
+
+test('the slot never moves: the row keeps one padding in every state, and the slot only goes invisible under the ... button (ACH-52)', () => {
+  const src = fs.readFileSync(new URL('../web/sidebar/Sidebar.tsx', import.meta.url), 'utf8');
+  const row = src.slice(src.indexOf('function AgentRailRow('), src.indexOf('function ChannelRailRow('));
+  assert.match(row, /className=\{cx\(railSlotRow\(\), railRowState\(selected \|\| Boolean\(menu\)\)\)\}/, 'not railRow: its group-hover/focus-within pr-7 shifted the slot');
+  const fixed = src.slice(src.indexOf('function railSlotRow('), src.indexOf('function railRowState('));
+  assert.doesNotMatch(fixed, /pr-7|group-hover|group-focus-within|padding/, 'no padding that changes with hover or focus');
+  assert.match(row, /flex h-5 w-6 shrink-0 items-center justify-end leading-none group-hover:invisible group-has-\[\[data-card-more\]:focus-visible\]:invisible', menu && 'invisible'/, 'the slot keeps its 24px under the ... button');
+  assert.doesNotMatch(row, /group-hover:hidden/);
 });

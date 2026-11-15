@@ -406,6 +406,16 @@ function railRow(reserve: boolean): string {
   );
 }
 
+/**
+ * A rail row with a fixed slot at its end (the Agents list, ACH-D66): its padding never changes, so
+ * the slot keeps one right edge in every state. The slot hides under the ... button (visibility only,
+ * keeping its width) instead of the row making room for the button. railRow's group-focus-within:pr-7
+ * kept a clicked row 20px narrower after the pointer left, which shifted its slot left (ACH-52).
+ */
+function railSlotRow(): string {
+  return 'flex h-[30px] w-full min-w-0 items-center gap-2 rounded-md px-2 text-left transition-colors duration-150';
+}
+
 function railRowState(selected: boolean): string {
   return selected ? 'bg-selection-strong text-content' : 'text-content/65 hover:bg-content/5 hover:text-content';
 }
@@ -488,7 +498,7 @@ function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: bo
         onClick={e => openRailAgent(agent, e)}
         title={`${agent.name}, works across all projects. Click to open, ${MOD_CLICK} to open beside, right-click for more.`}
         aria-current={selected ? 'page' : undefined}
-        className={cx(railRow(Boolean(menu)), railRowState(selected || Boolean(menu)))}
+        className={cx(railSlotRow(), railRowState(selected || Boolean(menu)))}
       >
         {/* One box, every shape at the same visual size and centred in it (ACH-49). */}
         <AgentAvatar agent={agent} fit className="size-5" />
@@ -496,7 +506,7 @@ function AgentRailRow({ agent, selected, actions }: { agent: Agent; selected: bo
         <span className={cx('min-w-0 flex-1 truncate text-sm leading-tight', agent.unread ? 'font-semibold text-content' : 'font-normal')}>{agent.name}</span>
         {/* One slot at the right, aligned on every row: the status mark while it works, needs you or
             failed (ACH-D45); otherwise how long ago it was active, in one unit. The ... button takes it on hover. */}
-        <span title={slot.words} className={cx('flex w-6 shrink-0 items-center justify-end group-hover:hidden group-has-[[data-card-more]:focus-visible]:hidden', menu && 'hidden')}>
+        <span title={slot.words} className={cx('flex h-5 w-6 shrink-0 items-center justify-end leading-none group-hover:invisible group-has-[[data-card-more]:focus-visible]:invisible', menu && 'invisible')}>
           {slot.state ? <StatusMark state={slot.state} label={slot.words} className="size-3.5" />
             : <span className="text-[11px] tabular-nums text-content/40">{compactAgo(agent.lastActiveAt, now)}</span>}
         </span>
