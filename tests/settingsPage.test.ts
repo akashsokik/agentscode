@@ -176,7 +176,7 @@ test('wiring: every way in opens the page; the modal path is gone', () => {
   assert.match(page, /Group|Row|Segmented|Toggle/);
   const sidebar = read('web/sidebar/Sidebar.tsx');
   assert.match(sidebar, /<HeaderButton data-settings-gear icon=\{Settings\}/, 'the gear in the foot row');
-  assert.match(sidebar, /<RailAction icon=\{ArrowLeft\} label="Back" onClick=\{closeSettings\} \/>/, 'Back where the gear was, as a rail row, with no Esc hint (ACH-D81)');
+  assert.match(sidebar, /<RailAction settings icon=\{ArrowLeft\} label="Back" onClick=\{closeSettings\} \/>/, 'Back where the gear was, as a rail row, with no Esc hint (ACH-D81)');
   const nav = sidebar.slice(sidebar.indexOf('function SettingsNav'), sidebar.indexOf('\n}\n', sidebar.indexOf('function SettingsNav')));
   assert.doesNotMatch(nav, /hint=|Kbd|Mod\+/, 'no shortcut hints anywhere in the Settings navigation');
   assert.doesNotMatch(read('web/panes/SettingsPage.tsx'), /<Kbd|SHORTCUT/, 'nor on the page');
@@ -239,40 +239,48 @@ test('every setting has one row in the index, in a known section, with one line 
   for (const id of ids) assert.ok(page.includes(`'${id}'`) || /^(theme|avatars|awareness|autonomy|pause|version|updates|engine-|ask-)/.test(id), `${id} has a control`);
 });
 
-test('Search settings: every word must match, across sections, in sidebar order', () => {
-  const ids = (q: string) => searchSettings(q).flatMap(hit => hit.rows.map(r => r.id));
+test('Search settings: rows then whole sections, as MonoCode lists them; every word must match', () => {
+  const ids = (q: string) => searchSettings(q, 50).filter(r => r.settingId).map(r => r.settingId);
   assert.deepEqual(ids('budget'), ['message-budget', 'daily-budget']);
-  assert.deepEqual(searchSettings('budget').map(h => h.label), ['Messaging', 'Limits']);
+  assert.deepEqual(searchSettings('budget').map(r => r.sectionLabel), ['Messaging', 'Limits'], 'each says its section');
   assert.deepEqual(ids('DARK'), ['theme'], 'any case, keywords included');
   assert.deepEqual(ids('quiet hours'), ['quiet-hours']);
   assert.ok(ids('superagent').includes('autonomy') && ids('superagent').includes('super-wake'), 'the group name finds its rows');
-  assert.deepEqual(ids('zzz'), []);
+  const pages = searchSettings('messaging').filter(r => r.settingId === null);
+  assert.deepEqual(pages.map(r => r.section), ['messaging'], 'a section matches by name, as a Page result after the rows');
+  assert.ok(searchSettings('a').length <= 8, 'at most eight, as MonoCode');
+  assert.deepEqual(searchSettings('zzz'), []);
   assert.deepEqual(searchSettings('   '), [], 'blank is no search');
 });
 
-test('the query lives in the layout, is cleared by picking a section or leaving, and is never saved', () => {
-  setup();
-  L.openSettings('appearance');
-  L.setSettingsQuery('budget');
-  assert.equal(L.getLayout().settingsQuery, 'budget');
-  assert.equal(JSON.parse(saved.get('podcode:layout') ?? '{}').settingsQuery, undefined);
-  L.setSettingsSection('engines');
-  assert.equal(L.getLayout().settingsQuery, '', 'picking a section clears it');
-  L.setSettingsQuery('theme');
-  L.closeSettings();
-  assert.equal(L.getLayout().settingsQuery, '', 'leaving clears it');
-});
-
-test('the look: the reference column and title, one-line rows, Selects for few options, no hints, flat', () => {
+test('ACH-D83: Settings in MonoCode\'s own UI', () => {
   const page = read('web/panes/SettingsPage.tsx');
-  assert.match(page, /max-w-\[664px\] px-8/, '600px of content');
-  assert.match(page, /<h1 className="pb-6 text-\[20px\] font-semibold/);
-  assert.match(page, /<Row id=\{e\.id\} oneLine /, 'rows take the one-line layout');
-  assert.doesNotMatch(page, /Segmented/, 'two or three options are a Select');
-  assert.match(read('web/mono/settings.tsx'), /oneLine \? "items-center py-3" : "items-start py-3\.5"/, 'Row is extended, not replaced');
+  // The shell (SettingsView.tsx): the 40px header bar with the breadcrumb and the search at its end.
+  assert.match(page, /className="flex h-10 shrink-0 select-none items-center border-b border-stroke"/);
+  assert.match(page, /<span className="shrink-0 text-content\/45">Settings<\/span>/);
+  assert.match(page, /<SettingsSearch onReveal=\{onReveal\} \/>/);
+  assert.match(page, /className="flex h-7 w-48 items-center gap-2 rounded-md border border-content\/10 px-2 text-content\/45 focus-within:border-content\/20"/);
+  assert.match(page, /className="mx-auto w-full max-w-5xl px-5 py-6 pb-16 @min-\[560px\]\/settings:px-8 @min-\[560px\]\/settings:py-8"/);
+  // PageHeader.
+  assert.match(page, /<h1 className="text-\[20px\] font-semibold leading-tight text-content">/);
+  assert.match(page, /className="mt-1\.5 max-w-xl text-\[13px\] leading-relaxed text-content\/45"/);
+  // Segmented for small option sets, never a Select swap.
+  assert.doesNotMatch(page, /<Select\b|Choice/);
+  for (const label of ['Theme', 'Avatars', 'Autonomy']) assert.match(page, new RegExp(`<Segmented<\\w+> label="${label}"`), label);
+  // Group and Row: MonoCode's classes, with its reveal flash.
+  const mono = read('web/mono/settings.tsx');
+  assert.match(mono, /className=\{`settings-row flex items-start gap-6 border-b border-content\/5 px-4 py-3\.5 transition-colors last:border-b-0 \$\{\n\s*flash \? "bg-accent\/10" : ""/);
+  assert.match(mono, /className=\{`overflow-hidden rounded-xl border bg-content\/3 transition-colors \$\{\n\s*flash \? "border-accent\/60" : "border-content\/10"/);
+  assert.match(mono, /const flash = id != null && revealed === id;/);
+  assert.doesNotMatch(mono, /oneLine/);
+  // The nav: MonoCode's SettingsNav and NavRow.
   const sidebar = read('web/sidebar/Sidebar.tsx');
   const nav = sidebar.slice(sidebar.indexOf('function SettingsNav'), sidebar.indexOf('\n}\n', sidebar.indexOf('function SettingsNav')));
-  assert.match(nav, /placeholder="Search settings"/);
-  assert.match(nav, /<RailAction compact icon=/);
+  assert.match(nav, /flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-none px-2 py-3/);
+  assert.match(nav, /px-2 pb-1 text-xs font-semibold text-content\/35/);
+  assert.match(nav, /<RailAction settings icon=\{ArrowLeft\} label="Back" onClick=\{closeSettings\} \/>/, 'Back as a NavRow at the foot');
+  assert.match(sidebar, /settings \? 'py-1\.5'/);
+  assert.match(sidebar, /'text-content\/50 hover:bg-content\/5 hover:text-content'/);
+  assert.doesNotMatch(nav, /Search settings/, 'search lives in the header bar, as in MonoCode');
   assert.doesNotMatch(nav + page, /hint=|<Kbd|SHORTCUT|shadow/, 'no shortcut hints, no shadows (ACH-D81)');
 });

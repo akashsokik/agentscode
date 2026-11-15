@@ -53,17 +53,18 @@ export function sectionForKey<T extends string = AgentSettingsSection>(
 
 /**
  * The app's Settings page sections (ACH-D77, ACH-D82), in the order the sidebar lists them, under
- * their group headers ('' for none). No shortcuts pick them (ACH-D81).
+ * their group headers ('' for none), each with the line under its page title (MonoCode's
+ * PageHeader, ACH-D83). No shortcuts pick them (ACH-D81).
  */
 export type AppSettingsSection = 'appearance' | 'messaging' | 'engines' | 'autonomy' | 'limits' | 'about';
 
-export const APP_SECTIONS: { id: AppSettingsSection; label: string; group: string }[] = [
-  { id: 'appearance', label: 'Appearance', group: '' },
-  { id: 'messaging', label: 'Messaging', group: 'Agents' },
-  { id: 'engines', label: 'Engines', group: 'Agents' },
-  { id: 'autonomy', label: 'Autonomy', group: 'SuperAgent' },
-  { id: 'limits', label: 'Limits', group: 'SuperAgent' },
-  { id: 'about', label: 'About', group: 'PodCode' },
+export const APP_SECTIONS: { id: AppSettingsSection; label: string; group: string; description: string }[] = [
+  { id: 'appearance', label: 'Appearance', group: '', description: 'The theme, and how agents are drawn.' },
+  { id: 'messaging', label: 'Messaging', group: 'Agents', description: 'How agents see and message each other.' },
+  { id: 'engines', label: 'Engines', group: 'Agents', description: 'The agent CLIs on this machine and the models they offer.' },
+  { id: 'autonomy', label: 'Autonomy', group: 'SuperAgent', description: 'How much the SuperAgent does without asking you. It never edits code; agents do the work.' },
+  { id: 'limits', label: 'Limits', group: 'SuperAgent', description: 'What stops the work it starts on its own. Your own messages, and the work you asked for, always go.' },
+  { id: 'about', label: 'About', group: 'PodCode', description: 'This build, its updates and what changed.' },
 ];
 
 export const APP_SECTION_IDS: readonly AppSettingsSection[] = APP_SECTIONS.map(s => s.id);

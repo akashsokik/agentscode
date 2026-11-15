@@ -4,6 +4,8 @@
  * settings-search highlight.
  */
 import {
+  createContext,
+  useContext,
   useEffect,
   useId,
   useRef,
@@ -307,6 +309,12 @@ export function Segmented<T extends string>({
   );
 }
 
+/**
+ * The setting a search result just revealed, as MonoCode's RevealedSetting: its Group or Row
+ * flashes the accent for a moment. The Settings page provides it (web/panes/SettingsPage.tsx).
+ */
+export const RevealedSetting = createContext<string | null>(null);
+
 /** A titled card of related settings. */
 export function Group({
   id,
@@ -322,7 +330,8 @@ export function Group({
   action?: ReactNode;
   children: ReactNode;
 }) {
-  const flash = false;
+  const revealed = useContext(RevealedSetting);
+  const flash = id != null && revealed === id;
 
   return (
     <section
@@ -356,37 +365,29 @@ export function Row({
   id,
   label,
   description,
-  oneLine = false,
   children,
 }: {
   /** Matches a `SETTINGS_INDEX` id so search can scroll here. */
   id?: string;
   label: ReactNode;
   description?: string;
-  /**
-   * The Settings page's row (ACH-D82): the title and a one-line muted description on the left, the
-   * control centred beside them on the right. A longer description is cut, with the rest on hover.
-   */
-  oneLine?: boolean;
   children?: ReactNode;
 }) {
-  const flash = false;
+  const revealed = useContext(RevealedSetting);
+  const flash = id != null && revealed === id;
 
   return (
     <div
       id={id}
       data-setting-id={id}
-      className={`settings-row flex gap-6 border-b border-content/5 px-4 transition-colors last:border-b-0 ${oneLine ? "items-center py-3" : "items-start py-3.5"} ${
+      className={`settings-row flex items-start gap-6 border-b border-content/5 px-4 py-3.5 transition-colors last:border-b-0 ${
         flash ? "bg-accent/10" : ""
       }`}
     >
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-medium text-content">{label}</div>
         {description ? (
-          <p
-            title={oneLine ? description : undefined}
-            className={`text-[12px] text-content/45 ${oneLine ? "mt-0.5 truncate" : "mt-1 leading-relaxed"}`}
-          >
+          <p className="mt-1 text-[12px] leading-relaxed text-content/45">
             {description}
           </p>
         ) : null}

@@ -59,20 +59,33 @@ export function sectionRows(section: AppSettingsSection): { group: string; rows:
   return [...new Set(rows.map(e => e.group))].map(group => ({ group, rows: rows.filter(e => e.group === group) }));
 }
 
+/** One "Search settings" result (MonoCode's SettingsSearchResult): a row, or a whole section. */
+export interface SettingsSearchResult {
+  section: AppSettingsSection;
+  sectionLabel: string;
+  /** The row to reveal, or null for the section itself. */
+  settingId: string | null;
+  label: string;
+}
+
 /**
- * The rows "Search settings" finds, grouped by section in sidebar order. Every word of the query must
- * appear in the row's title, description, keywords, group, section or section group, in any case.
+ * What "Search settings" lists (ACH-D83, MonoCode's searchSettings): rows, then whole sections, at
+ * most `limit`, in sidebar order. Every word of the query must appear in the row's title,
+ * description, keywords, group or section, in any case; a section matches on its name and line.
  */
-export function searchSettings(query: string): { section: AppSettingsSection; label: string; rows: SettingEntry[] }[] {
+export function searchSettings(query: string, limit = 8): SettingsSearchResult[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return [];
-  return APP_SECTIONS.map(s => ({
-    section: s.id,
-    label: s.label,
-    rows: SETTINGS_INDEX.filter(e => {
-      if (e.section !== s.id) return false;
-      const text = `${e.title} ${e.description} ${e.keywords ?? ''} ${e.group} ${s.label} ${s.group}`.toLowerCase();
-      return words.every(w => text.includes(w));
-    }),
-  })).filter(hit => hit.rows.length);
+  const has = (text: string) => words.every(w => text.toLowerCase().includes(w));
+  const rows: SettingsSearchResult[] = [];
+  const sections: SettingsSearchResult[] = [];
+  for (const s of APP_SECTIONS) {
+    for (const e of SETTINGS_INDEX) {
+      if (e.section === s.id && has(`${e.title} ${e.description} ${e.keywords ?? ''} ${e.group} ${s.label} ${s.group}`)) {
+        rows.push({ section: s.id, sectionLabel: s.label, settingId: e.id, label: e.title });
+      }
+    }
+    if (has(`${s.label} ${s.group} ${s.description}`)) sections.push({ section: s.id, sectionLabel: s.label, settingId: null, label: s.label });
+  }
+  return [...rows, ...sections].slice(0, limit);
 }

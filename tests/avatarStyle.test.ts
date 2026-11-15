@@ -42,8 +42,8 @@ test('the SuperAgent follows the switch too: its violet Block with dark pills in
 test('the switch sits in Appearance, kept like the theme; pickers keep colour; the Work graph keeps owner colours', () => {
   const read = (path: string) => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
   const settings = read('../web/panes/SettingsPage.tsx');
-  // Settings > Appearance (ACH-D82): a Select, as two or three options are on the Settings page.
-  assert.match(settings, /<Choice<AvatarStyle> label="Avatars" value=\{avatars\} onChange=\{setAvatarStyle\} options=\{\[\{ value: 'colour', label: 'Colour' \}, \{ value: 'ink', label: 'Ink' \}\]\}/);
+  // Settings > Appearance: MonoCode's Segmented (ACH-D83).
+  assert.match(settings, /<Segmented<AvatarStyle> label="Avatars" value=\{avatars\} onChange=\{setAvatarStyle\} options=\{\[\{ value: 'colour', label: 'Colour' \}, \{ value: 'ink', label: 'Ink' \}\]\}/);
   assert.match(read('../web/avatarStyle.ts'), /const KEY = 'podcode:avatars';/, 'stored in this browser, like the theme');
   const avatar = read('../web/ui/Avatar.tsx');
   assert.match(avatar, /const ink = alwaysInk \|\| \(useAvatarStyle\(\) === 'ink' && !colour\);/);
