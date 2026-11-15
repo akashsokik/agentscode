@@ -4,7 +4,7 @@ import { rolePreset } from '../../shared/roles.ts';
 import { api, type Root } from '../api.ts';
 import { modelLabel, relativeTime, shortPath } from '../format.ts';
 import { compactAgo } from '../panelList.ts';
-import { closeSettings, closeTab, focusedAgentId, focusedChannelId, focusedKind, open, openToSide, setProject, setRail, setSectionFolded, setSettingsSection, setSidebarView, useLayout, type Layout, type RailSectionKey } from '../layout.ts';
+import { closeSettings, closeTab, focusedAgentId, focusedChannelId, focusedKind, open, openToSide, setProject, setRail, setSectionFolded, setWorkspaceColumn, setSettingsSection, setSidebarView, useLayout, type Layout, type RailSectionKey } from '../layout.ts';
 import { ChangesView } from '../right/RightPanel.tsx';
 import { attempt, useApp } from '../store.ts';
 import { whereabouts } from '../whereabouts.ts';
@@ -821,6 +821,7 @@ function WorkspaceColumn({ actions, project, titleBarAbove }: { actions: Sidebar
         </div>
         <HeaderButton icon={MoreHorizontal} label={`${project.name} actions`} aria-haspopup="menu" aria-expanded={Boolean(menu)} onClick={e => toggleMenu(e, setMenu)} />
         <HeaderButton icon={Plus} label={`New agent in ${project.name}`} onClick={() => actions.newAgent(project.id)} />
+        <HeaderButton icon={PanelLeft} label={`Hide project column (${SHORTCUTS.workspace})`} onClick={() => setWorkspaceColumn(false)} />
       </div>
       {menu ? <ProjectMenu project={project} agentCount={mine.length} anchor={menu} actions={actions} onClose={() => setMenu(null)} /> : null}
       <div role="radiogroup" aria-label="Workspace view" className="flex h-9 shrink-0 items-center gap-px border-b border-stroke px-2">
@@ -1088,7 +1089,8 @@ export function Sidebars({ actions, titleBarAbove, part }: { actions: SidebarAct
   const full = useNavFull();
   // `part`: App places the two columns apart while Settings can cover the workspace column (ACH-D77).
   const nav = part === 'workspace' ? null : full ? <NavRail actions={actions} projectId={project?.id} /> : <CompactRail actions={actions} projectId={project?.id} titleBarAbove={titleBarAbove} />;
-  const workspace = part === 'nav' ? null : showsWorkspace(agents ?? [], project?.id) ? <WorkspaceColumn actions={actions} project={project} titleBarAbove={titleBarAbove} /> : null;
+  // Collapsed (ACH-D80): the tab strip offers it back (offersProjectColumn).
+  const workspace = part === 'nav' || layout.workspace === false ? null : showsWorkspace(agents ?? [], project?.id) ? <WorkspaceColumn actions={actions} project={project} titleBarAbove={titleBarAbove} /> : null;
   if (!nav && !workspace) return null;
   return (
     <div className="flex h-full shrink-0">
