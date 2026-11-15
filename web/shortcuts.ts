@@ -6,7 +6,7 @@ import { useEffect } from 'react';
 import { openBrowser } from './browser.ts';
 import { formatClick, formatKeys, type KeySpec } from './keys.ts';
 import { shortcutFor } from './shortcutMap.ts';
-import { closeOtherTabs, closeTab, getLayout, open, setRightPanel, setSidebar, toggleMaximize } from './layout.ts';
+import { closeOtherTabs, closeTab, getLayout, goBack, goForward, open, setRightPanel, setSidebar, toggleMaximize } from './layout.ts';
 import { IS_MAC } from './platform.ts';
 import { isConfirmingClose, toggleTerminal } from './terminal/actions.ts';
 import { isTerminalToggle } from './terminal/keys.ts';
@@ -31,6 +31,9 @@ export const SHORTCUT_KEYS = {
   terminal: 'Mod+J',
   browser: 'Shift+Mod+B',
   maximize: 'Shift+Mod+Enter',
+  /** Back and Forward through the tabs you focused (ACH-31, ACH-D69); with Shift, [ and ] cycle tabs. */
+  back: 'Mod+[',
+  forward: 'Mod+]',
   /** The SuperAgent's quick bar; the desktop app also takes it system-wide. Never Cmd+J, the terminal's. */
   superQuick: 'Shift+Mod+Space',
 } as const satisfies Record<string, KeySpec>;
@@ -92,6 +95,8 @@ export function runShortcut(e: KeyboardEvent): boolean {
     case 'settings': handlers.settings(); break;
     case 'closeTab': if (pane?.tabId) closeTab(pane.tabId); break;
     case 'cycle': cycleTab(action.step); break;
+    case 'back': goBack(); break;
+    case 'forward': goForward(); break;
     case 'pickTab': {
       const tab = action.n === 9 ? layout.tabs.at(-1) : layout.tabs[action.n - 1];
       if (tab) open(tab.content);
