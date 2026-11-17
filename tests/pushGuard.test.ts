@@ -208,12 +208,25 @@ test('without the server, a changed pre-push stops the push rather than letting 
   assert.match(r.stderr, /push check was changed/);
 });
 
-test('PodCode\'s git stays first in login shells (bash -l, zsh -l, which Claude Code and Codex use); your own BASH_ENV and ZDOTDIR still run', () => {
+test('PodCode\'s git stays first in login shells (bash -l, zsh -l, which Claude Code and Codex use); your own BASH_ENV and ZDOTDIR still run', async t => {
   const s = setup();
   const shim = path.join(s.hooks, 'bin', 'git');
-  for (const shell of [['bash', '-c'], ['bash', '-lc'], ['zsh', '-c'], ['zsh', '-lc'], ['zsh', '-ic'], ['sh', '-c']]) {
-    const r = spawnSync(shell[0], [shell[1], 'command -v git'], { cwd: s.app, env: { ...s.agentEnv, HOME: s.dir }, encoding: 'utf8' });
-    assert.equal(r.stdout.trim().split('\n').pop(), shim, shell.join(' '));
+  const checkShell = async (shell: string, flag: string, command: string, env: NodeJS.ProcessEnv, expected: string, name: string, cwd?: string) => {
+    await t.test(name, sub => {
+      const r = spawnSync(shell, [flag, command], { cwd, env, encoding: 'utf8' });
+      // Linux runners need not install zsh. Only an absent executable skips; shell failures
+      // and a missing/wrong shim must still fail, with the spawn error and exit status visible.
+      if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') {
+        sub.skip(`${shell} is not installed: ${r.error.message} (status=${r.status})`);
+        return;
+      }
+      assert.ifError(r.error);
+      assert.equal(r.status, 0, `${shell} ${flag}: status=${r.status}; ${r.stderr}`);
+      assert.equal(r.stdout.trim().split('\n').pop(), expected, `${shell} ${flag}`);
+    });
+  };
+  for (const [shell, flag] of [['bash', '-c'], ['bash', '-lc'], ['zsh', '-c'], ['zsh', '-lc'], ['zsh', '-ic'], ['sh', '-c']]) {
+    await checkShell(shell, flag, 'command -v git', { ...s.agentEnv, HOME: s.dir }, shim, `${shell} ${flag} keeps the shim first`, s.app);
   }
   // The BASH_ENV file puts the shim back first after anything reset PATH.
   const r = spawnSync('sh', ['-c', `PATH=/usr/bin:/bin; . "$BASH_ENV"; command -v git`], { env: s.agentEnv, encoding: 'utf8' });
@@ -222,8 +235,8 @@ test('PodCode\'s git stays first in login shells (bash -l, zsh -l, which Claude 
   fs.writeFileSync(path.join(user, '.zshenv'), 'export MINE=zshenv\n');
   fs.writeFileSync(path.join(s.dir, 'mybashenv'), 'export MINE=bashenv\n');
   const env = pushGuardEnv({ ...BASE, ZDOTDIR: user, BASH_ENV: path.join(s.dir, 'mybashenv') }, s.hooks);
-  assert.equal(spawnSync('zsh', ['-c', 'echo $MINE'], { env, encoding: 'utf8' }).stdout.trim(), 'zshenv');
-  assert.equal(spawnSync('bash', ['-c', 'echo $MINE'], { env, encoding: 'utf8' }).stdout.trim(), 'bashenv');
+  await checkShell('zsh', '-c', 'echo $MINE', env, 'zshenv', 'zsh runs the user ZDOTDIR');
+  await checkShell('bash', '-c', 'echo $MINE', env, 'bashenv', 'bash runs the user BASH_ENV');
   assert.deepEqual(pushGuardEnv({ PATH: '/usr/bin' }, '/h').PATH, '/h/bin:/usr/bin');
   assert.equal(pushGuardEnv(pushGuardEnv({ PATH: '/usr/bin' }, '/h'), '/h').PATH, '/h/bin:/usr/bin', 'not added twice');
 });
