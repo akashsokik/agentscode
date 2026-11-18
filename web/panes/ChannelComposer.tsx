@@ -86,7 +86,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
       query: query.query,
       everyone: members.length > 1,
     });
-  }, [open, query?.query, members, agents, projects, folders]);
+  }, [open, query?.query, members, agents, projects, issues, folders]);
   const active = Math.min(highlight, Math.max(0, options.length - 1));
   useEffect(() => { setHighlight(0); }, [query?.query]);
 
