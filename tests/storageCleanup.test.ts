@@ -306,3 +306,25 @@ test('routes require an explicit selection and true confirmation before emptying
   await handlers.get('POST /api/storage/backups/empty')!(req({ confirm: true }), res);
   assert.deepEqual(json, { freedBytes: 0 });
 });
+
+test('route invalidation runs after cleanup and backup emptying, never on reads or refused confirmation', async t => {
+  const f = fixture(t), agent = f.owner(); f.output(f.workspace(agent));
+  type Handler = (req: Request, res: Response) => Promise<void>;
+  const handlers = new Map<string, Handler>();
+  const app = {
+    get: (route: string, handler: Handler) => handlers.set(`GET ${route}`, handler),
+    post: (route: string, handler: Handler) => handlers.set(`POST ${route}`, handler),
+  } as unknown as Express;
+  let invalidated = 0;
+  registerStorageCleanupRoutes(app, { ...f.deps, onChange: () => { invalidated++; } });
+  const res = { json: () => {} } as unknown as Response;
+  await handlers.get('GET /api/storage/cleanup/candidates')!({} as Request, res);
+  assert.equal(invalidated, 0);
+  const candidates = await listStorageCleanupCandidates(f.deps);
+  await handlers.get('POST /api/storage/cleanup')!({ body: { ids: [candidates[0].id] } } as Request, res);
+  assert.equal(invalidated, 1);
+  await assert.rejects(handlers.get('POST /api/storage/backups/empty')!({ body: { confirm: false } } as Request, res));
+  assert.equal(invalidated, 1);
+  await handlers.get('POST /api/storage/backups/empty')!({ body: { confirm: true } } as Request, res);
+  assert.equal(invalidated, 2);
+});
