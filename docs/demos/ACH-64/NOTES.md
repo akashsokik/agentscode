@@ -1,5 +1,22 @@
 # ACH-64 — Settings / Storage, phase 1
 
+## Current design: ACH-D89 rework
+
+This revision supersedes the first row-led preview (262cd2c). One horizontal stacked bar shows the entire recorded14.45GiB total, with a large total above and a wrapping inline dot/name/size legend beneath. Each agent uses its actual saved avatar colour, derived read-only from current state metadata through shared/avatar.ts agentLook(agent) and AVATAR_FILL, including saved avatar overrides and the SuperAgent role. Bar segments, legend dots and row dots share that exact colour. Shared data and unassigned worktrees use quiet greys. The bar’s Other groups project metadata,state.json and other app data; their separate rows remain below. Free disk space is not shown.
+
+Agents are quiet dot/name/size disclosure rows, collapsed initially; opening shows home/memory, workspace and worktrees. There is no per-row bar or main table. The existing MonoCode Settings shell, PageHeader and supporting groups remain unchanged.
+
+Segments are proportional to exact bytes, with no artificial minimum width: tiny categories can be subpixel. The inline legend preserves every category and its size, including Channels0B; only nonzero categories draw a segment. There are17legend items and16nonzero segments, whose byte sum equals the overall total. Hover or keyboard focus shows category/name and size; Escape dismisses it.
+
+References: ACH-D89 (user redirect); [Apple Storage settings](https://support.apple.com/guide/mac-help/change-storage-settings-mchl3d437fbc/mac) and [Apple storage overview](https://support.apple.com/en-us/102624). The user requested the one-bar/legend feel, while D83 remains the Settings shell reference.
+
+Production reuse additions: inline flex segment markup within the existing Storage view, with shared/avatar.ts agentLook/AVATAR_FILL for colours; web/ui/HoverCard.tsx for hover/focus placement, delay and Escape; web/mono/RevealHeight.tsx for existing expansion mechanics if animated. No new generic component is proposed. Standalone HTML uses native details and a small tooltip simulation only; no production component was added.
+
+Rework validation: one bar,0tables,all11agent disclosures initially closed,16positive-byte segments and17legend entries,proportions sum100%; agent colours equal the saved-avatar colour source. Hover/Fen reads Fen·4.71GiB, keyboard focus also exposes it and Escape hides it. Expansion, search (Fen=>1agent), Refresh, proposal modals and dark/light previews work. No page errors, no horizontal overflow at390/768/1280px,0computed shadows. Arithmetic/source checks and node --check pass. No app tests run for this documentation-only rework.
+
+Current images: storage-overview.png (bar/legend/quiet rows),storage-expanded.png (Fen open),storage-hover.png (segment hover),storage-light.png,storage-shared.png,manage-proposal.png and full-page storage.png. All initial PNG paths have been refreshed; they no longer show the superseded primary table-like layout.
+
+
 Demo only. Base: `92638f7ca8f2da8729a4406ded733ba778b26b6c` (main and origin/main matched after `git fetch origin --tags` and `git merge --ff-only origin/main`). Branch: `feat/ACH-64-settings-storage`. Issue-key branch naming takes precedence over the task's shorter `feat/settings-storage` example. No application source changed. No push, merge, restart or deletion.
 
 Open `storage.html` directly in a browser. It is standalone, with inline CSS, inline avatars/icons, and no external requests. `?theme=light` previews light mode. Search filters settings rows. Refresh explains that this is a recorded snapshot, without falsifying the measured timestamp. Reveal and clean up open proposal previews; neither accesses the file system. Back/other nav items explain that this preview includes Storage only.
@@ -24,7 +41,7 @@ Phase2 reuses these existing files/components (ACH-N40/N41/N42):
 - `web/mono/settings.tsx`: Group and Row, unchanged.
 - `web/mono/SecondaryButton.tsx`: Refresh, Reveal and review actions.
 - `web/ui/common.tsx`: HeaderButton if a compact reveal action is needed.
-- `web/ui/Avatar.tsx`: AgentAvatar, unchanged; source avatar geometry comes from `shared/avatar.ts`.
+- `shared/avatar.ts`: agentLook and AVATAR_FILL for the agent-colour dots; no avatar face in the quiet row (D89).
 - `web/mono/icons.tsx`: FolderTree, FolderOpen, RefreshCw, Archive, all existing.
 - `web/mono/Modal.tsx`: proposal/confirmation dialog; no separate dialog primitive.
 - `web/ui/StatusMark.tsx`: pending state while a live scan is running; no new spinner.
@@ -66,7 +83,7 @@ Both are proposals, not implemented cleanup or disk actions. A backup retains di
 
 ## Validation and screenshots
 
-Browser opened the standalone file directly; no server needed. Search for Fen returns one row, Refresh retains the original timestamp, both proposal dialogs open, Close/Escape dismiss. No page errors after fixes. Horizontal scrollWidth equals clientWidth at390/768/1280px. Eleven agent rows, zero computed box shadows, zero kbd hints, zero external assets. Arithmetic validation: all agent subcategories reconcile, ordering descending and overall total exact. Full application tests were not run because no application source changed.
+Browser opened the standalone file directly; no server needed. Search for Fen returns one agent row, Refresh retains the original timestamp, both proposal dialogs open, Close/Escape dismiss. No page errors after fixes. Horizontal scrollWidth equals clientWidth at390/768/1280px. Eleven agent rows, zero computed box shadows, zero kbd hints, zero external assets. Arithmetic validation: all agent subcategories and stacked-bar parts reconcile, ordering descending and overall total exact. Full application tests were not run because no application source changed.
 
 - `storage.png`: full dark page.
 - `storage-overview.png`:1280x1000 overview and largest agents.

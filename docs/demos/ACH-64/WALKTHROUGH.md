@@ -1,27 +1,27 @@
-# Settings / Storage — approval preview
+# Storage — one colour bar, approval preview
 
-## Overall storage and the largest agents
+## The whole picture in one bar
 
 Image: `storage-overview.png`
 
-A Storage section under PodCode, using MonoCode's existing Settings rail and flat row cards. The read-only snapshot totals14.45GiB. Agent folders, worktrees and shared data are counted once. Agents are sorted by size, with home/memory, workspace and worktrees separately labelled.
+14.45GiB used by PodCode. One segment per agent uses its actual saved avatar colour. Shared data and unassigned worktrees use quiet greys. The inline legend names every part and size; free disk space is not shown. The MonoCode Settings shell stays the same.
 
-## Shared data and honest ownership
+## Details only when you open a row
 
-Image: `storage-shared.png`
+Image: `storage-expanded.png`
 
-Transcripts, channels, attachments, archive, project notes, state.json and other app data remain visible. This snapshot has253.8MiB of worktrees without a current agent owner record, so the preview shows them as unassigned instead of guessing. Every per-agent worktree count is0B in this measured snapshot.
+Quiet dot/name/size rows, largest first. Open Fen to see home/memory,workspace and worktrees. There are no per-row bars and no main table. The folder action is still a proposal.
 
-## Proposed management actions
+## Hover or focus for a size
 
-Image: `manage-proposal.png`
+Image: `storage-hover.png`
 
-Reveal in Finder would only open a folder. Review clean up is a proposal: review selected merged worktrees/build outputs, ask first, and verify a backup before removing anything. No filesystem actions run in this demo.
+Hover a segment for its name and size. Keyboard focus on a segment or legend item gives the same information. Tiny categories retain their true proportion and remain named in the legend.
 
-## Light appearance
+## Light mode
 
 Image: `storage-light.png`
 
-The same Settings layout follows the existing light theme. Search, Refresh and proposal previews are interactive. Refresh explains that this standalone file is a recorded snapshot.
+The same bar, legend and quiet rows in the existing light theme.
 
-Approval request: approve the layout and which manage proposal(s), then implement live async measurement and the approved actions. No app change is live yet.
+Manage actions remain proposals: Reveal in Finder, or a cleanup review that asks first and verifies a backup. Nothing removes or changes disk data in this demo. Ready for design approval before app implementation.
