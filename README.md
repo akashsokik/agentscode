@@ -300,9 +300,9 @@ status, then priority, then order. Each issue has a key from its project's code 
 (Needs you, In review, In progress, Waiting, Todo, Backlog, Done or Canceled), a priority, an
 assignee, a due date, labels, sub-issues and relations. Open one for its properties and history; the
 same list sits in the SuperAgent's right panel. A key in any reply or message is a chip: hover it for
-the issue, click it to open it. A commit that names a key links it to the issue. A merged branch
-named for it, or a merged pull request whose branch names it or that says Fixes, Closes or Resolves
-with its key, closes it.
+the issue, click it to open it. Commits on a branch named for it (feat/KEY-...) are linked to it. A
+merged branch named for it, or a merged pull request whose branch names it or that says Fixes,
+Closes or Resolves with its key, closes it.
 
 ### Notes and decisions
 
@@ -369,9 +369,9 @@ OrcaCode (on Codex its commands run in the read-only sandbox), and every change 
 agent it delegates to. Open it from **SuperAgent** in the sidebar.
 
 - **What it does on its own.** It watches your agents (it wakes when one finishes, fails, gets
-  stuck or waits for you), works an issues backlog (by status, then priority, then order), creates agents and channels, adds or
-  removes channel members, delegates, nudges a stuck agent, starts a new session and stops a runaway
-  turn. Each command carries a short reason.
+  stuck or waits for you), works an issues backlog (by status, then priority, then order), creates
+  agents and channels, adds or removes channel members, delegates, nudges a stuck agent, starts a
+  new session and stops a runaway turn. Each command carries a short reason.
 - **What it does without asking, and what it asks first.** **Settings > Autonomy** sets one level:
   - **Full** (the default): it does every undoable step itself, each through an agent and logged in
     Decisions with how to undo it: merge approved branches into main, rebuild and restart PodCode,
@@ -394,10 +394,10 @@ agent it delegates to. Open it from **SuperAgent** in the sidebar.
     which agent is on it.
   - **Routines**: things it should do on a schedule (daily at a time, or every few hours). Routines
     it proposes wait until you confirm them.
-- **Limits that only stop its own work.** In **Settings > Limits** (in the SuperAgent group): whether it wakes on updates,
-  wake-ups an hour, a daily budget in dollars, agents it may create a day, quiet hours, and
-  notifications. These hold back only what it starts on its own; your own messages to it, and the
-  work you asked for, always go.
+- **Limits that only stop its own work.** In **Settings > Limits** (in the SuperAgent group):
+  whether it wakes on updates, wake-ups an hour, a daily budget in dollars, agents it may create a
+  day, quiet hours, and notifications. These hold back only what it starts on its own; your own
+  messages to it, and the work you asked for, always go.
 - **Eyes.** The SuperAgent, reviewers and testers get read-only tools: GitHub and CI through the
   `gh` CLI (open PRs, a PR's checks and reviews, CI runs and a run's failed log, open issues),
   `run_check` for read-only git commands in a project (and its test, typecheck and lint scripts, only
