@@ -701,7 +701,7 @@ function NavRail({ actions, projectId }: { actions: SidebarActions; projectId: s
   );
 }
 
-const SECTION_ICONS: Record<AppSettingsSection, IconComponent> = { appearance: Palette, messaging: MessageMultiple, engines: Bot, autonomy: Sparkles, limits: Clock, about: Info };
+const SECTION_ICONS: Record<AppSettingsSection, IconComponent> = { appearance: Palette, messaging: MessageMultiple, engines: Bot, autonomy: Sparkles, limits: Clock, storage: Folder, about: Info };
 
 /**
  * The navigation column's body while Settings are open: MonoCode's SettingsNav (SettingsRail.tsx,

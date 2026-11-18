@@ -208,7 +208,7 @@ test('sections: grouped as in the demo, with Agent communication renamed Messagi
     ['', ['Appearance']],
     ['Agents', ['Messaging', 'Engines']],
     ['SuperAgent', ['Autonomy', 'Limits']],
-    ['PodCode', ['About']],
+    ['PodCode', ['Storage', 'About']],
   ]);
   assert.ok(!APP_SECTIONS.some(s => s.label === 'Agent communication'));
 });
@@ -236,7 +236,8 @@ test('every setting has one row in the index, in a known section, with one line 
   for (const field of ['awareness', 'messageLimit', 'shareActivity', 'autoTeamContext', 'browserEval', 'superAutonomy', 'superAskFirst', 'superPaused', 'superWake', 'superMaxWakesPerHour', 'superNotify', 'superDailyBudgetUsd', 'superMaxCreatesPerDay', 'superQuietFrom', 'superQuietTo', 'refreshModels', 'setTheme', 'setAvatarStyle']) {
     assert.match(page, new RegExp(`\\b${field}\\b`), field);
   }
-  for (const id of ids) assert.ok(page.includes(`'${id}'`) || /^(theme|avatars|awareness|autonomy|pause|version|updates|engine-|ask-)/.test(id), `${id} has a control`);
+  const storage = read('web/panes/StorageSettings.tsx');
+  for (const id of ids) assert.ok(page.includes(`'${id}'`) || storage.includes(`"${id}"`) || /^(theme|avatars|awareness|autonomy|pause|version|updates|engine-|ask-)/.test(id), `${id} has a control`);
 });
 
 test('Search settings: rows then whole sections, as MonoCode lists them; every word must match', () => {

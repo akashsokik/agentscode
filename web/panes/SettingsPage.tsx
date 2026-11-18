@@ -1,3 +1,4 @@
+import { StorageSettings } from './StorageSettings.tsx';
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { ENGINES, type EngineKind, type Settings } from '../../shared/types.ts';
 import { buildLabel, channelLabel } from '../../shared/buildInfo.ts';
@@ -255,7 +256,7 @@ export function SettingsPage({ section }: { section: AppSettingsSection }) {
     );
   };
 
-  const groups = sectionRows(section).map(g => ({ heading: g.group, rows: g.rows.filter(present) })).filter(g => g.rows.length);
+  const groups = (section === 'storage' ? [] : sectionRows(section)).map(g => ({ heading: g.group, rows: g.rows.filter(present) })).filter(g => g.rows.length);
   const info = APP_SECTIONS.find(s => s.id === section);
   return (
     <div role="region" aria-label="Settings" className="flex min-h-0 min-w-0 flex-1 flex-col text-content">
@@ -275,6 +276,7 @@ export function SettingsPage({ section }: { section: AppSettingsSection }) {
           <div className="mx-auto w-full max-w-5xl px-5 py-6 pb-16 @min-[560px]/settings:px-8 @min-[560px]/settings:py-8">
             <PageHeader title={info?.label ?? 'Settings'} description={info?.description ?? ''} />
             <div>
+              {section === 'storage' ? <StorageSettings /> : null}
               {groups.map(g => <Group key={g.heading} title={g.heading}>{g.rows.map(row)}</Group>)}
             </div>
           </div>

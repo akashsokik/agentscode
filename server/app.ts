@@ -1,3 +1,4 @@
+import { registerStorageRoutes } from './storageRoutes.ts';
 import { ensurePushGuard, redeemOverride } from './pushGuard.ts';
 import { isOpenRoute, LOGIN_MAX_AGE_S, safeNext, USER_COOKIE, UserKey, type UserAuth } from './userAuth.ts';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
@@ -480,6 +481,8 @@ export function createApp(
   app.patch('/api/settings', (req, res) => {
     res.json(manager.updateSettings(req.body ?? {}));
   });
+
+  registerStorageRoutes(app, () => manager.storageSource());
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Not found.' });

@@ -591,6 +591,11 @@ export class AgentManager {
     return this.engines;
   }
 
+  /** Read-only inputs for the user-only Storage settings service. */
+  storageSource() {
+    return { dataDir: this.store.dataDir, worktreesRoot: this.worktreesRoot, agents: [...this.store.agents.values()].map(({ id, name, role, avatar, worktree, home, status }) => ({ id, name, role, avatar, worktree, home, status })), projects: [...this.store.projects.values()].map(({ path }) => ({ path })) };
+  }
+
   snapshot(): Snapshot {
     this.refreshProjects();
     return {

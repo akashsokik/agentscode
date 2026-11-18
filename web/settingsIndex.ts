@@ -47,6 +47,11 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { id: 'creates-per-day', section: 'limits', group: 'Spending', title: 'Agents it may create a day', description: 'A cap on new agents it starts on its own', keywords: 'create agents' },
   { id: 'quiet-hours', section: 'limits', group: 'Quiet hours', title: 'Quiet hours', description: 'No wake-ups or notifications; the same time twice turns them off', keywords: 'night sleep' },
 
+  { id: 'storage-usage', section: 'storage', group: 'Storage', title: 'Disk usage', description: 'Space used by PodCode', keywords: 'disk storage size bar' },
+  { id: 'storage-agents', section: 'storage', group: 'Storage', title: 'Agent folders', description: 'Home, memory, workspace and worktrees', keywords: 'disk size' },
+  { id: 'storage-shared', section: 'storage', group: 'Storage', title: 'Shared data', description: 'Transcripts, attachments and backups', keywords: 'disk' },
+  { id: 'storage-manage', section: 'storage', group: 'Storage', title: 'Manage storage', description: 'Reveal folders and review clean up', keywords: 'backups empty cleanup delete' },
+
   { id: 'version', section: 'about', group: 'PodCode', title: 'Version', description: 'This build', keywords: 'build release channel' },
   { id: 'updates', section: 'about', group: 'PodCode', title: 'Updates', description: 'Updates are managed by the desktop app', keywords: 'update check install' },
   { id: 'install-command', section: 'about', group: 'PodCode', title: 'Install or update from Terminal', description: 'This build is not signed yet, so it cannot replace itself', keywords: 'terminal command unsigned' },
