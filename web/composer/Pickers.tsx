@@ -5,7 +5,7 @@
  * the skill creation form and notes are left out.
  */
 import { Fragment, useEffect, useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import type { Agent, Project } from '../../shared/types.ts';
+import type { Agent, IssueStatus, Project } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { shortPath } from '../format.ts';
 import { projectLabel } from '../projects.ts';
@@ -15,6 +15,7 @@ import { Bot, File, Folder } from '../mono/icons.tsx';
 import { useLockOverscroll } from '../mono/useLockOverscroll.ts';
 import { pickGroup, type MentionPick } from './tokens.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
+import { StatusIcon } from '../issues/issueParts.tsx';
 
 /** Fuzzy-matched text with the matched characters accented. */
 export function MatchText({ text, positions, active }: { text: string; positions: number[]; active: boolean }): ReactNode {
@@ -161,7 +162,7 @@ export function MentionPicker({ picks, query, active, loading, truncated, label 
     <div data-mention-picker className="popover-open overflow-hidden rounded-lg border border-content/10 bg-content/5 backdrop-blur-xl" data-popover-side="top">
       {picks.length === 0 ? (
         <p className="px-3 py-2.5 text-[12px] text-content/50">
-          {loading ? 'Indexing files…' : searching ? 'No matching agents, projects or files' : 'Nothing to mention yet'}
+          {loading ? 'Indexing files…' : searching ? 'No matching agents, projects, issues or files' : 'Nothing to mention yet'}
         </p>
       ) : (
         <div
@@ -211,6 +212,17 @@ export function MentionPicker({ picks, query, active, loading, truncated, label 
                   <span className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-content/40">{shortPath(pick.project.path, home)}</span>
                 </>
               );
+            } else if (pick.kind === 'issue') {
+              // An issue (ACH-62): its status mark, its key, its title, and its project at the right.
+              const project = projects?.find(p => p.id === pick.issue.projectId);
+              body = (
+                <>
+                  <StatusIcon status={pick.issue.status as IssueStatus} className="size-3.5" />
+                  <span className={`shrink-0 font-mono text-[12px] ${highlighted ? 'text-mention' : 'text-content/70'}`}><MatchText text={pick.issue.key} positions={pick.keyPositions} active={searching} /></span>
+                  <span className={`min-w-0 shrink truncate ${highlighted ? 'text-mention' : ''}`}><MatchText text={pick.issue.title} positions={pick.titlePositions} active={searching} /></span>
+                  <span className="min-w-0 flex-1 truncate text-right text-[11px] text-content/40">{project?.name ?? ''}</span>
+                </>
+              );
             } else {
               const file = pick.file;
               const slash = file.relative.lastIndexOf('/');
@@ -233,7 +245,7 @@ export function MentionPicker({ picks, query, active, loading, truncated, label 
                 </>
               );
             }
-            const key = pick.kind === 'agent' ? `a:${pick.agent.id}` : pick.kind === 'project' ? `p:${pick.project.id}` : pick.kind === 'everyone' ? 'all' : `${pick.file.isDir ? 'd' : 'f'}:${pick.file.relative}`;
+            const key = pick.kind === 'agent' ? `a:${pick.agent.id}` : pick.kind === 'project' ? `p:${pick.project.id}` : pick.kind === 'everyone' ? 'all' : pick.kind === 'issue' ? `i:${pick.issue.id}` : `${pick.file.isDir ? 'd' : 'f'}:${pick.file.relative}`;
             return (
               <Fragment key={`${pick.best ? 'best:' : ''}${key}`}>
                 {header ? <p role="presentation" className="px-2 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-content/40 first:pt-0.5">{header}</p> : null}

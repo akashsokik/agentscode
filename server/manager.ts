@@ -1,5 +1,5 @@
 import { agentLook, assignLooks, cleanLook, freshLook, isSuperPair, migrateLooks } from '../shared/avatar.ts';
-import { alignHints, findMentions, mentionContext, parseHints, type MentionAgent, type MentionProject, type MentionRef } from '../shared/mentions.ts';
+import { alignHints, findMentions, mentionContext, parseHints, type MentionAgent, type MentionIssue, type MentionProject, type MentionRef } from '../shared/mentions.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -949,7 +949,8 @@ export class AgentManager {
     // The engines need some text with an image: Claude refuses an empty text block, Codex an empty prompt.
     // An @mention of an agent or project is a reference: the agent is told exactly who or what it is.
     const mentions = findMentions(text, { ...this.mentionLookup(), hints: alignHints(text, parseHints(rawHints)) });
-    const context = mentionContext(mentions, { ...this.mentionLookup(), roleName: role => rolePreset(role as Agent['role']).name });
+    // Issue keys in it, picked from the @ picker or typed, are explained as well (ACH-62).
+    const context = mentionContext(mentions, { ...this.mentionLookup(), roleName: role => rolePreset(role as Agent['role']).name }, text);
     const base = this.withSkills(id, text) || `(The user sent ${pictures} with no text.)`;
     const prompt = context ? `${base}\n\n${context}` : base;
     const summary = text ? clip(text.replace(/\s+/g, ' '), 280) : `Sent ${pictures}`;
@@ -965,11 +966,12 @@ export class AgentManager {
     return this.attachments.file(this.agent(id).id, file);
   }
 
-  /** Everyone and every project a mention can name, for shared/mentions.ts. */
-  mentionLookup(): { agents: MentionAgent[]; projects: MentionProject[] } {
+  /** Everyone, every project and every issue a mention can name, for shared/mentions.ts. */
+  mentionLookup(): { agents: MentionAgent[]; projects: MentionProject[]; issues: MentionIssue[] } {
     return {
       agents: [...this.store.agents.values()].map(a => ({ id: a.id, name: a.name, role: a.role, projectIds: a.projectIds })),
       projects: [...this.store.projects.values()].map(p => ({ id: p.id, name: p.name, path: p.path })),
+      issues: this.superStore.issues().map(i => ({ key: i.key, title: i.title, status: i.status, projectId: i.projectId })),
     };
   }
 

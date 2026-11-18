@@ -12,9 +12,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { ENGINES, type Agent, type EngineKind, type Entry, type SuperAsk } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { useAgentFiles, useProjectsFiles } from '../composer/catalog.ts';
-import { mentionNames, useMentionHints } from '../composer/mentionHints.ts';
+import { mentionNames, mentionPhrases, useMentionHints } from '../composer/mentionHints.ts';
 import { MentionPicker } from '../composer/Pickers.tsx';
-import { mentionTokenAt, pickValue, rankMentions, replaceToken, withFolders, type MentionPick } from '../composer/tokens.ts';
+import { applyMention, mentionTokenAt, rankMentions, withFolders, type MentionPick } from '../composer/tokens.ts';
 import { IS_MAC } from '../platform.ts';
 import { attempt, loadEntries, useApp } from '../store.ts';
 import { projectLabel } from '../projects.ts';
@@ -96,7 +96,8 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
   const [highlight, setHighlight] = useState(0);
   const hints = useMentionHints();
   const caretAfter = useRef<number | null>(null);
-  const token = picker === null && snapshot ? mentionTokenAt(draft, caret, mentionNames(agents, snapshot.projects)) : null;
+  const phrases = useMemo(() => mentionPhrases(snapshot?.super.issues), [snapshot?.super.issues]);
+  const token = picker === null && snapshot ? mentionTokenAt(draft, caret, mentionNames(agents, snapshot.projects), phrases) : null;
   const mentionOpen = Boolean(token) && token?.start !== dismissedAt;
   const agentFiles = useAgentFiles(replyId ?? '', mentionOpen && Boolean(replyId));
   const newProjects = useMemo(() => (live.kind === 'new' && project ? [project] : []), [live.kind, project]);
@@ -108,14 +109,14 @@ export function QuickComposer({ mode, onDismiss, onOpenAgent, onHeight, register
     return withFolders(files);
   }, [replyId, agentFiles.value, projectFiles.value, project]);
   const picks = useMemo(() => (mentionOpen && token
-    ? rankMentions({ agents: agents.filter(a => a.id !== replyId), projects: snapshot?.projects ?? [], files: folders, query: token.query })
-    : []), [mentionOpen, token?.query, agents, replyId, snapshot?.projects, folders]); // eslint-disable-line react-hooks/exhaustive-deps
+    ? rankMentions({ agents: agents.filter(a => a.id !== replyId), projects: snapshot?.projects ?? [], issues: snapshot?.super.issues ?? [], files: folders, query: token.query })
+    : []), [mentionOpen, token?.query, agents, replyId, snapshot?.projects, snapshot?.super.issues, folders]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = Math.min(highlight, Math.max(0, picks.length - 1));
   useEffect(() => { setHighlight(0); }, [token?.query]);
   const pickMention = (choice: MentionPick) => {
     if (!token) return;
     hints.add(choice, token.start);
-    const next = replaceToken(draft, token, '@', pickValue(choice));
+    const next = applyMention(draft, token, choice);
     caretAfter.current = next.caret;
     setDraft(next.text);
     setCaret(next.caret);

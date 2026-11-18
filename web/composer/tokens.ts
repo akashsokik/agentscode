@@ -135,8 +135,32 @@ export function isLeading(text: string, token: Token): boolean {
  * The `@mention` the caret is in, if the user is mentioning an agent, project or file. An @ inside
  * code, an email or a path is not one (mentionStart).
  */
-export function mentionTokenAt(text: string, cursor: number, names: readonly string[] = []): Token | null {
-  return spacedMentionAt(text, cursor, names) ?? wordMentionAt(text, cursor);
+export function mentionTokenAt(text: string, cursor: number, names: readonly string[] = [], phrases: readonly string[] = []): Token | null {
+  return spacedMentionAt(text, cursor, names, phrases) ?? wordMentionAt(text, cursor);
+}
+
+/** The words of a text, lowercased, with where each starts: issue titles are matched word by word. */
+function titleWords(text: string): { at: number; word: string }[] {
+  return [...text.matchAll(/[\p{L}\p{N}_]+/gu)].map(m => ({ at: m.index ?? 0, word: m[0].toLowerCase() }));
+}
+
+/**
+ * Where each typed word starts a word of `title`, in order ("dup hand" in "Duplicate handling:
+ * mark…"): the matched positions in the title, or null. A trailing space is a word still to come.
+ */
+export function titleWordPositions(query: string, title: string): number[] | null {
+  const parts = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!parts.length) return null;
+  const words = titleWords(title);
+  const positions: number[] = [];
+  let from = 0;
+  for (const part of parts) {
+    const index = words.findIndex((w, i) => i >= from && w.word.startsWith(part));
+    if (index < 0) return null;
+    for (let k = 0; k < part.length; k++) positions.push(words[index].at + k);
+    from = index + 1;
+  }
+  return positions;
 }
 
 function wordMentionAt(text: string, cursor: number): Token | null {
@@ -152,9 +176,9 @@ function wordMentionAt(text: string, cursor: number): Token | null {
  * the same line, and what follows it is the start of such a name. Once a whole name is typed and a
  * space follows ("@Ada " where Ada is a name of its own), it is done, so the picker does not come back.
  */
-function spacedMentionAt(text: string, cursor: number, names: readonly string[]): Token | null {
+function spacedMentionAt(text: string, cursor: number, names: readonly string[], phrases: readonly string[] = []): Token | null {
   const spaced = names.filter(n => /\s/.test(n)).map(n => n.toLowerCase());
-  if (!spaced.length) return null;
+  if (!spaced.length && !phrases.length) return null;
   const caret = Math.min(text.length, Math.max(0, cursor));
   const lineStart = text.lastIndexOf('\n', caret - 1) + 1;
   for (let at = caret - 1; at >= Math.max(lineStart, caret - 121); at--) {
@@ -163,7 +187,11 @@ function spacedMentionAt(text: string, cursor: number, names: readonly string[])
     if (!mentionStart(text, at) || !/\s/.test(typed) || typed.includes('@')) return null;
     const lower = typed.toLowerCase();
     if (/\s$/.test(typed) && names.some(n => n.toLowerCase() === lower.trimEnd())) return null;
-    if (!spaced.some(n => n.startsWith(lower))) return null;
+    // A name with spaces typed so far, or words that each start a word of an issue title (ACH-62).
+    // Not titles once the first word is a whole agent or project name: "@Bo p" stays @Bo, never an
+    // issue that has a word starting "bo" (Rhea's M1).
+    const named = names.some(n => n.toLowerCase() === lower.split(/\s+/)[0]);
+    if (!spaced.some(n => n.startsWith(lower)) && (named || !phrases.some(p => titleWordPositions(typed, p)))) return null;
     return { start: at, end: wordAround(text, caret).end, query: typed };
   }
   return null;
@@ -265,15 +293,18 @@ export function mentionValue(file: RankedFile): string {
   return file.isDir ? `${file.relative}/` : file.relative;
 }
 
-// ---- one @ picker: agents, projects and files ------------------------------------
+// ---- one @ picker: agents, projects, issues and files ------------------------------
 
 export interface PickAgent { id: string; name: string }
 export interface PickProject { id: string; name: string; path: string }
+/** An issue as the picker needs it (a SuperIssue fits). */
+export interface PickIssue { id: string; key: string; title: string; status: string; projectId?: string | null; updatedAt?: number }
 
 export type MentionPick = (
   | { kind: 'agent'; agent: PickAgent; positions: number[] }
   | { kind: 'project'; project: PickProject; positions: number[] }
   | { kind: 'everyone'; positions: number[] }
+  | { kind: 'issue'; issue: PickIssue; keyPositions: number[]; titlePositions: number[] }
   | { kind: 'file'; file: RankedFile }
 ) & {
   /** Named exactly as typed: listed first, under its own header. */
@@ -282,13 +313,58 @@ export type MentionPick = (
 
 const MAX_AGENTS = 8;
 const MAX_PROJECTS = 6;
+const MAX_ISSUES = 6;
 
-/** What a pick writes after the @. */
+/** What a pick writes in place of the @token: a name or path after the @, or an issue's bare key. */
 export function pickValue(pick: MentionPick): string {
   if (pick.kind === 'agent') return pick.agent.name;
   if (pick.kind === 'project') return pick.project.name;
   if (pick.kind === 'everyone') return 'all';
+  if (pick.kind === 'issue') return pick.issue.key;
   return mentionValue(pick.file);
+}
+
+/**
+ * The text with a pick in place of the @token, and the caret after it. An issue goes in as its bare
+ * key with no @ (ACH-62): the key is how issues are cited everywhere, and a sent message shows it as
+ * the issue chip. Everything else keeps its @.
+ */
+export function applyMention(text: string, token: Token, pick: MentionPick): { text: string; caret: number } {
+  if (pick.kind !== 'issue') return replaceToken(text, token, '@', pickValue(pick));
+  const rest = text.slice(token.end);
+  const spacer = rest.startsWith(' ') ? '' : ' ';
+  const key = pick.issue.key;
+  return { text: `${text.slice(0, token.start)}${key}${spacer}${rest}`, caret: token.start + key.length + 1 };
+}
+
+const CLOSED = new Set(['done', 'canceled']);
+
+/**
+ * Issues for the @ picker (ACH-62): none until something is typed. Then open issues whose key starts
+ * with the query ("ach-2", "ach2"), or whose title has a word starting with each query word ("filt",
+ * "dup hand"), at most six. An exact key lists its issue even when it is closed. Keys first, nearest
+ * number first; then titles by how early the match starts, the most recently updated first.
+ */
+export function rankIssues(issues: readonly PickIssue[], query: string, limit = MAX_ISSUES): { issue: PickIssue; keyPositions: number[]; titlePositions: number[] }[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const bare = needle.replace(/-/g, '');
+  const scored: { issue: PickIssue; keyPositions: number[]; titlePositions: number[]; score: number }[] = [];
+  for (const issue of issues) {
+    const key = issue.key.toLowerCase();
+    const exact = key === needle;
+    if (!exact && CLOSED.has(issue.status)) continue;
+    const num = Number(key.slice(key.lastIndexOf('-') + 1)) || 0;
+    if (key.startsWith(needle) || key.replace(/-/g, '').startsWith(bare)) {
+      const shown = key.startsWith(needle) ? needle.length : Math.min(key.length, bare.length + 1);
+      scored.push({ issue, keyPositions: [...Array(shown).keys()], titlePositions: [], score: (exact ? 1e9 : 1e6) - num });
+      continue;
+    }
+    const titlePositions = titleWordPositions(query, issue.title);
+    if (titlePositions) scored.push({ issue, keyPositions: [], titlePositions, score: 1e3 - titlePositions[0] + (issue.updatedAt ?? 0) / 1e13 });
+  }
+  scored.sort((a, b) => b.score - a.score || a.issue.key.localeCompare(b.issue.key));
+  return scored.slice(0, limit).map(({ issue, keyPositions, titlePositions }) => ({ issue, keyPositions, titlePositions }));
 }
 
 function rankNamed<T extends { name: string }>(items: T[], query: string, limit: number): { item: T; positions: number[]; score: number }[] {
@@ -304,24 +380,25 @@ function rankNamed<T extends { name: string }>(items: T[], query: string, limit:
 }
 
 /**
- * The @ picker's rows, in groups: agents, then projects, then files, each ranked by the same fuzzy
+ * The @ picker's rows, in groups: agents, then projects, then issues (ACH-62), then files, each ranked by the same fuzzy
  * match as before (rankFiles for files). A name typed exactly ("@ada" for Ada) leads, whatever its
  * group. `everyone` offers @all (channels with more than one member).
  */
-export function rankMentions(input: { agents: PickAgent[]; projects: PickProject[]; files: RankedFile[]; query: string; everyone?: boolean }): MentionPick[] {
+export function rankMentions(input: { agents: PickAgent[]; projects: PickProject[]; issues?: readonly PickIssue[]; files: RankedFile[]; query: string; everyone?: boolean }): MentionPick[] {
   const needle = input.query.trim().toLowerCase();
   const agents: MentionPick[] = rankNamed(input.agents, input.query, MAX_AGENTS).map(r => ({ kind: 'agent', agent: r.item, positions: r.positions }));
   const projects: MentionPick[] = rankNamed(input.projects, input.query, MAX_PROJECTS).map(r => ({ kind: 'project', project: r.item, positions: r.positions }));
   const everyone: MentionPick[] = input.everyone && 'all'.startsWith(needle) ? [{ kind: 'everyone', positions: [] }] : [];
+  const issues: MentionPick[] = rankIssues(input.issues ?? [], input.query).map(r => ({ kind: 'issue', ...r }));
   const files: MentionPick[] = rankFiles(input.files, input.query).map(file => ({ kind: 'file', file }));
-  const all = [...agents, ...everyone, ...projects, ...files];
+  const all = [...agents, ...everyone, ...projects, ...issues, ...files];
   if (!needle) return all;
   const exact = all.filter(p => pickValue(p).replace(/\/$/, '').toLowerCase() === needle);
   return [...exact.map(p => ({ ...p, best: true })), ...all.filter(p => !exact.includes(p))];
 }
 
 /** The group a pick is listed under, for the picker's headers. */
-export function pickGroup(pick: MentionPick): 'Best match' | 'Agents' | 'Projects' | 'Files' {
+export function pickGroup(pick: MentionPick): 'Best match' | 'Agents' | 'Projects' | 'Issues' | 'Files' {
   if (pick.best) return 'Best match';
-  return pick.kind === 'agent' || pick.kind === 'everyone' ? 'Agents' : pick.kind === 'project' ? 'Projects' : 'Files';
+  return pick.kind === 'agent' || pick.kind === 'everyone' ? 'Agents' : pick.kind === 'project' ? 'Projects' : pick.kind === 'issue' ? 'Issues' : 'Files';
 }

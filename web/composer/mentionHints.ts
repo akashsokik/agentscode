@@ -30,3 +30,11 @@ export function useMentionHints() {
 export function mentionNames(agents: readonly { name: string }[] | undefined, projects: readonly { name: string }[] | undefined): string[] {
   return [...(agents ?? []), ...(projects ?? [])].map(n => n.name);
 }
+
+/**
+ * The titles of open issues, for the @ token: typing words that start words of a title ("@dup hand")
+ * keeps the picker open past a space (ACH-62).
+ */
+export function mentionPhrases(issues: readonly { title: string; status: string }[] | undefined): string[] {
+  return (issues ?? []).filter(i => i.status !== 'done' && i.status !== 'canceled').map(i => i.title);
+}
