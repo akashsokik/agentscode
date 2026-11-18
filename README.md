@@ -26,7 +26,7 @@ By [Orca](https://orcapods.ai) · [podcode.orcapods.ai](https://podcode.orcapods
 
 <br />
 
-<img src="docs/screenshots/hero.webp" alt="PodCode: the SuperAgent's conversation with its issues in the right panel, and the floating quick window in front with its @ picker open" width="100%" />
+<img src="docs/screenshots/hero.webp" alt="PodCode: the SuperAgent hands API-1 testing to Kai and MOB-1 to Mia, citing decisions as chips, with the open issues by status in the right panel and three agents working" width="100%" />
 
 </div>
 
@@ -54,14 +54,24 @@ PodCode was called AgentsCode until 0.3.0. Your agents, projects and settings ca
 - **Channels.** Slack-style rooms with agents from any project. `@mention` an agent to start it on
   your post; its reply lands in the thread.
 - **SuperAgent.** One read-only agent that runs the team across every project: it watches your
-  agents, works a issues backlog, messages and delegates, and asks you about the rest. Talk to it from
+  agents, works an issues backlog, messages and delegates, and asks you about the rest. Talk to it from
   anywhere with the quick window (Shift+Cmd+Space). See [SuperAgent](#superagent).
 - **Memory, soul and dreams.** Each agent keeps standing instructions (its soul) and what it learned
   (its memory), and reviews its own sessions to propose small updates. A shared user profile tells
   every agent how you like to work.
-- **@-mentions.** One picker in every composer for agents, projects and files.
+- **Issues.** A backlog with keys such as WEB-12, statuses, priorities, assignees and due dates,
+  on its own page and in the SuperAgent's panel. `@` an issue in any composer to cite it as a chip.
+- **Notes and decisions.** Each project keeps the rules and lessons the team agreed on, with ids
+  such as WEB-D3. Agents record and read them with their tools, and an id in any reply is a chip
+  you can hover.
+- **@-mentions.** One picker in every composer for agents, projects, issues and files.
 - **Safe parallel work.** Optional per-agent git worktrees, four autonomy levels from plan-only to
   full access, inline approvals, and a message budget that stops ping-pong loops.
+- **Work graph and pull requests.** Each project's branches as a graph, with who owns a branch, its
+  review and the files it changed; and the open and recently merged pull requests across your
+  projects, read from GitHub.
+- **Walkthroughs.** Ask an agent for one and it publishes a guided tour of its work: notes, code,
+  diffs, commands it ran, screenshots and diagrams.
 - **A real terminal and a browser.** Ghostty's emulator, compiled to WebAssembly, with per-project
   tabs and Ghostty-style splits and keys; and, in the desktop app, browser tabs for localhost previews
   that agents can drive too.
@@ -72,18 +82,32 @@ PodCode was called AgentsCode until 0.3.0. Your agents, projects and settings ca
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/comms.webp" alt="Comms: the conversation list with each agent's avatar, beside a delegation's timeline from request to review to report" /></td>
-    <td width="50%"><img src="docs/screenshots/agent.webp" alt="An agent session: the transcript and composer, and the Overview panel with the agent's avatar, context and handoffs" /></td>
+    <td width="50%"><img src="docs/screenshots/comms.webp" alt="Comms: four delegations across the team, one opened from request to report to review, with each agent's live status in the Overview panel" /></td>
+    <td width="50%"><img src="docs/screenshots/agent.webp" alt="An agent session: Ada's task from the SuperAgent, her report citing a decision, and the Overview panel with her handoff, walkthrough and spend" /></td>
   </tr>
   <tr>
     <td align="center"><b>Comms</b>: every agent-to-agent conversation as a timeline</td>
     <td align="center"><b>Agent session</b>: transcript, composer and Overview</td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/screenshots/channel.webp" alt="A channel: a post that mentions every member, with its reply thread open beside it" /></td>
+    <td colspan="2"><img src="docs/screenshots/channel.webp" alt="A channel: #release with two posts, one thread open and six agents answering with their time and cost" /></td>
   </tr>
   <tr>
     <td colspan="2" align="center"><b>Channels</b>: mention agents from any project, and their replies come back in the thread</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/superagent.webp" alt="Issues: the backlog by status with keys such as WEB-1, an issue open with its properties, and the SuperAgent's actions in the right panel" /></td>
+    <td width="50%"><img src="docs/screenshots/work.webp" alt="The Work graph: a project's commits and agent branches, with one commit's owner and changed files" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Issues</b>: the backlog the SuperAgent works</td>
+    <td align="center"><b>Work graph</b>: branches, owners and changed files</td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/build.webp" alt="An agent beside a browser tab on the project's localhost page, with the project's tests running in the terminal below" /></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><b>Terminal and browser</b>: the project's tests in a real shell, and its localhost page beside the agent</td>
   </tr>
 </table>
 
@@ -210,17 +234,21 @@ npm run dist:mac   # release/PodCode-mac-<arch>.dmg and .zip (also dist:win, dis
 9. **Preview in the browser.** In the desktop app, **Shift+Cmd+B** opens a browser tab. A localhost
    link in a reply opens in a browser tab beside you when you click it, and agents have browser tools
    (open, snapshot, screenshot, console, click, type) to check web work in their own tabs.
+10. **Get around.** Cmd+[ and Cmd+] go back and forward through the tabs you focused, as in a
+    browser. The project column (Agents, Files and Changes) collapses from its header or with Cmd+\.
 
 ### @-mentions
 
 Type `@` in any composer (an agent's, a channel's, the quick window's) for one picker with
-**Agents**, **Projects** and **Files**.
+**Agents**, **Projects**, **Issues** and **Files**.
 
 - In an agent's composer, `@Agent` and `@project` are references: the agent is told exactly who or
   what you mean (an agent's id, role and project; a project's path). Mentioning an agent there does
   not message it. `@path` is a file or folder in the agent's workspace.
 - In a channel, `@Agent` also starts that member on your post, and `@all`, `@channel` or `@here`
   start every member. Files there are written `project/path`.
+- `@` an issue by its key (WEB-12) or its title to cite it: it shows as a chip with its status, and
+  the agent is told which issue you mean.
 - A name inside backticks or a code block is not a mention. Names with spaces work, and when an agent
   and a project share a name, the one you picked from the picker is the one you get.
 
@@ -265,6 +293,40 @@ agents you want in it. Change members later from the channel's member list or it
 - A channel cannot be deleted while a member is still working on one of its posts. Removing an agent
   takes it out of every channel.
 
+### Issues
+
+**Issues** in the sidebar is your backlog across every project, the one the SuperAgent works by
+status, then priority, then order. Each issue has a key from its project's code (WEB-12), a status
+(Needs you, In review, In progress, Waiting, Todo, Backlog, Done or Canceled), a priority, an
+assignee, a due date, labels, sub-issues and relations. Open one for its properties and history; the
+same list sits in the SuperAgent's right panel. A key in any reply or message is a chip: hover it for
+the issue, click it to open it. Commits on a branch named for it (feat/KEY-...) are linked to it. A
+merged branch named for it, or a merged pull request whose branch names it or that says Fixes,
+Closes or Resolves with its key, closes it.
+
+### Notes and decisions
+
+Each project keeps its own notes (lessons, how-tos) and decisions (rules the team agreed on), with ids
+from its code: WEB-N4 for a note, WEB-D3 for a decision, ALL-D1 for one that covers every project.
+Agents record them with `note_add` and `decision_add` and look them up with `ref_get` and
+`ref_search`, so a rule you set once is followed by every agent after. The right panel's **Notes**
+tab lists them, and an id in any reply is a chip with a hover card.
+
+### Work graph and pull requests
+
+- **Work** shows each project's branches as a graph: agent branches beside main, with recent commits.
+  Pick a branch or a commit to see who owns it, its review and the files it changed, and clean up
+  branches that were merged.
+- **Pull requests** lists the open and recently merged pull requests across your projects, read
+  through the `gh` CLI, with their checks and reviews, and each one's files and commits. It only
+  reads; nothing is posted to GitHub.
+
+### Walkthroughs
+
+When you ask for one, an agent publishes a walkthrough: a guided tour of its work in steps (a note,
+lines of code, a file's diff, a command it ran with its real output, a screenshot, a diagram). Open
+it from the agent's transcript or its Overview panel.
+
 ### Terminal
 
 A terminal panel opens under the panes with **Cmd+J** (or Ctrl+\`), the **Terminal** button in the
@@ -307,14 +369,23 @@ OrcaCode (on Codex its commands run in the read-only sandbox), and every change 
 agent it delegates to. Open it from **SuperAgent** in the sidebar.
 
 - **What it does on its own.** It watches your agents (it wakes when one finishes, fails, gets
-  stuck or waits for you), works a issues backlog top down, creates agents and channels, adds or
-  removes channel members, delegates, nudges a stuck agent, starts a new session and stops a runaway
-  turn. Each command carries a short reason.
-- **What it asks you first.** Merging, pushing or deploying, deleting anything, removing an agent,
-  adding a project, and large or costly work. Its questions appear above its composer, as desktop
-  notifications, and in the quick window, with the choices to click. It bases its decisions on About
-  you, so what you tell it there (for example, which of these it may do without asking) is what it
-  goes by.
+  stuck or waits for you), works an issues backlog (by status, then priority, then order), creates
+  agents and channels, adds or removes channel members, delegates, nudges a stuck agent, starts a
+  new session and stops a runaway turn. Each command carries a short reason.
+- **What it does without asking, and what it asks first.** **Settings > Autonomy** sets one level:
+  - **Full** (the default): it does every undoable step itself, each through an agent and logged in
+    Decisions with how to undo it: merge approved branches into main, rebuild and restart PodCode,
+    push main (fast-forward only), tag and publish a release, deploy, clean up merged branches and
+    worktrees, add a project you named, and start large or costly work within your budget.
+  - **Standard**: it merges approved branches into local main, rebuilds and restarts PodCode, and
+    cleans up merged branches; it asks you before the rest.
+  - **Ask**: it asks you before every one of these.
+
+  At every level, four **Ask me first** switches (all on by default) hold back what can't be undone:
+  **Delete files or data**, **Change outside accounts**, **Remove agents you made** and
+  **Force-push a feature branch**. It never rewrites or force-pushes main, the default branch or a
+  tag. Its questions appear above its composer, as desktop notifications, and in the quick window,
+  with the choices to click.
 - **Morning brief.** Once a day, the first time it may wake after quiet hours, it tells you what
   happened since yesterday, what is stuck, and what it proposes next.
 - **The right panel.** With the SuperAgent focused, the panel has three more tabs:
@@ -323,10 +394,10 @@ agent it delegates to. Open it from **SuperAgent** in the sidebar.
     which agent is on it.
   - **Routines**: things it should do on a schedule (daily at a time, or every few hours). Routines
     it proposes wait until you confirm them.
-- **Limits that only stop its own work.** In **Settings > SuperAgent**: whether it wakes on updates,
-  wake-ups an hour, a daily budget in dollars, agents it may create a day, quiet hours, and
-  notifications. These hold back only what it starts on its own; your own messages to it, and the
-  work you asked for, always go.
+- **Limits that only stop its own work.** In **Settings > Limits** (in the SuperAgent group):
+  whether it wakes on updates, wake-ups an hour, a daily budget in dollars, agents it may create a
+  day, quiet hours, and notifications. These hold back only what it starts on its own; your own
+  messages to it, and the work you asked for, always go.
 - **Eyes.** The SuperAgent, reviewers and testers get read-only tools: GitHub and CI through the
   `gh` CLI (open PRs, a PR's checks and reviews, CI runs and a run's failed log, open issues),
   `run_check` for read-only git commands in a project (and its test, typecheck and lint scripts, only
@@ -341,14 +412,15 @@ agent it delegates to. Open it from **SuperAgent** in the sidebar.
 
 ## Settings
 
-**Settings** (Cmd+,) has:
+**Settings** (Cmd+,) opens as a full-window page, with its sections in the sidebar:
 
-- **Appearance**: Dark, Light or System.
-- **Agent communication**: who agents can message (nobody, same project, all projects), the message
-  budget, whether `list_agents` shares current tasks, whether tasks start with a team snapshot, and
-  whether agents may run their own scripts in their browser tabs.
-- **SuperAgent**: the limits above.
+- **Appearance**: Dark, Light or System, and how agents are drawn: each in its own colour, or all in
+  ink.
+- **Messaging**: who agents can message (nobody, same project, all projects), the message budget,
+  whether `list_agents` shares current tasks, whether tasks start with a team snapshot, and whether
+  agents may run their own scripts in their browser tabs.
 - **Engines**: which CLIs were found, with each one's version and path, and **Refresh models**.
+- **Autonomy** and **Limits**: what the SuperAgent may do without asking, and the limits above.
 - **About**: the version and build, updates, and the release notes.
 
 Each agent's own settings (the gear in its header) are in sections: **General** (its folder, name,
@@ -366,9 +438,12 @@ Cmd on macOS is Ctrl on Windows and Linux.
 | Cmd+, | Settings |
 | Cmd+W | Close the focused tab |
 | Cmd+1 to Cmd+8, Cmd+9 | That tab; Cmd+9 is the last |
+| Cmd+[ and Cmd+] | Back and forward through the tabs you focused |
 | Cmd+Shift+[ and Cmd+Shift+], Ctrl+Shift+Tab and Ctrl+Tab | Previous and next tab |
 | Cmd+B | Show or hide the sidebar |
 | Option+Cmd+B | Show or hide the right panel |
+| Option+Cmd+W | Close every unpinned tab but the focused one |
+| Cmd+\ or Option+Cmd+\ | Show or hide the project column |
 | Cmd+J or Ctrl+\` | Show or hide the terminal |
 | Shift+Cmd+B | Open a browser tab |
 | Shift+Cmd+Enter | Maximize or restore the focused pane |
@@ -414,6 +489,8 @@ transcripts still show their calls as Comms):
 | `read_channel` | Recent posts in one of its channels |
 | `post_to_channel` | Post in a channel; members in `mention_agent_ids` get a turn to answer |
 | `remember`, `forget` | Save or remove a memory entry; scope `user` writes to the shared user profile |
+| `note_add`, `decision_add` | Record a project note or decision (WEB-N4, WEB-D3) |
+| `ref_get`, `ref_search` | Read a note or decision by id, or search them |
 | `create_walkthrough` | Publish a guided tour of the agent's work, only when you ask for one |
 | `openui_guide` | How to reply with interactive UI (buttons, tables, charts) |
 
