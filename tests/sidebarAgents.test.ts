@@ -65,3 +65,16 @@ test('the slot never moves: the row keeps one padding in every state, and the sl
   assert.match(row, /flex h-5 w-6 shrink-0 items-center justify-end leading-none group-hover:invisible group-has-\[\[data-card-more\]:focus-visible\]:invisible', menu && 'invisible'/, 'the slot keeps its 24px under the ... button');
   assert.doesNotMatch(row, /group-hover:hidden/);
 });
+
+test('a project card keeps one header line with a visible name and fixed status slot (ACH-53)', () => {
+  const src = fs.readFileSync(new URL('../web/sidebar/Sidebar.tsx', import.meta.url), 'utf8');
+  const card = src.slice(src.indexOf('function AgentCard('), src.indexOf('function TreeNode('));
+  assert.match(card, /className="flex min-w-0 items-center gap-1\.5"/);
+  assert.match(card, /min-w-0 truncate text-\[13px\]/, 'short names keep their natural width');
+  assert.match(card, /min-w-0 shrink-\[999\] truncate text-\[11\.5px\]/, 'the role gives way before the name');
+  assert.match(card, /ml-auto flex shrink-0 items-center/, 'the status stays visible');
+  assert.match(card, /agent\.queued > 99 \? '99\+' : agent\.queued/, 'cap the queue label');
+  assert.match(card, /title=\{`\$\{agent\.queued\}/, 'retain the full queue count');
+  assert.doesNotMatch(card, /flex-wrap|gap-y-/, 'no second header line');
+  assert.doesNotMatch(card, /overflow-hidden|overflow-x-hidden/, 'do not conceal an over-wide header');
+});

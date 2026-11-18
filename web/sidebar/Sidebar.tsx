@@ -177,12 +177,13 @@ function AgentCard({ agent, selected, now, actions }: { agent: Agent; selected: 
       >
         <AgentAvatar agent={agent} className="mt-px size-7" />
         <span className="flex min-w-0 flex-col">
+          {/* Keep the name visible; the role gives way to the fixed status slot (ACH-53). */}
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="min-w-0 truncate text-[13px] font-semibold leading-[18px] text-content">{agent.name}</span>
-            <span className="shrink-0 text-[11.5px] text-content/40">{rolePreset(agent.role).name}</span>
+            <span className="min-w-0 shrink-[999] truncate text-[11.5px] text-content/40">{rolePreset(agent.role).name}</span>
             {/* The ... button takes this spot on hover. */}
             <span className={cx('ml-auto flex shrink-0 items-center gap-1.5 pl-1.5 group-hover:invisible group-has-[[data-card-more]:focus-visible]:invisible', menu && 'invisible')}>
-              {agent.queued > 0 ? <span className="rounded-full bg-content/10 px-1.5 text-[10px] tabular-nums text-content/70" title={`${agent.queued} ${agent.queued === 1 ? 'message' : 'messages'} waiting`}>{agent.queued}</span> : null}
+              {agent.queued > 0 ? <span className="rounded-full bg-content/10 px-1.5 text-[10px] tabular-nums text-content/70" title={`${agent.queued} ${agent.queued === 1 ? 'message' : 'messages'} waiting`}>{agent.queued > 99 ? '99+' : agent.queued}</span> : null}
               <AgentStateMark agent={agent} pending={pending} now={now} />
             </span>
           </span>
