@@ -42,3 +42,11 @@ need a new overlay component. Asking before building one (ACH-N40, ACH-D23).
 5. **server/manager.ts `send`** and **server/comms/channels.ts:** pass issues to the lookup.
    - Every composer reaches one of these: the Quick window via `api.send` and `createAgent`, which calls `send`.
 6. **Tests** for ranking, insert, chip and context.
+
+## Built (Phase 2)
+
+Screenshots of the real built web UI on a temp data dir (OSI-N5: PODCODE_HOME and HOME in a temp
+folder, fake runners, seeded WEB-1 to WEB-5): `after-picker-we-{dark,light}.png` ("@we": the project,
+then four open issues; WEB-5 is done and left out) and `after-sent-chip-{dark,light}.png` (WEB-1 and
+WEB-2 as issue chips, the hover card open). "@filter" lists WEB-2 alone, and Enter leaves "Can you
+look at WEB-2 " in the composer.

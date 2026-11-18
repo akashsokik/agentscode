@@ -6,9 +6,9 @@ import type { Agent, Channel } from '../../shared/types.ts';
 import { channelRecipients, findMentions } from '../../shared/mentions.ts';
 import { api } from '../api.ts';
 import { useProjectsFiles } from '../composer/catalog.ts';
-import { mentionNames, useMentionHints } from '../composer/mentionHints.ts';
+import { mentionNames, mentionPhrases, useMentionHints } from '../composer/mentionHints.ts';
 import { MentionPicker } from '../composer/Pickers.tsx';
-import { mentionTokenAt, pickValue, rankMentions, replaceToken, withFolders, type MentionPick } from '../composer/tokens.ts';
+import { applyMention, mentionTokenAt, rankMentions, withFolders, type MentionPick } from '../composer/tokens.ts';
 import { someNames } from '../format.ts';
 import { attempt, useApp } from '../store.ts';
 import { settleDraft } from '../threads.ts';
@@ -65,7 +65,9 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
 
   // The same @ picker as the agent composer: members first (a mention starts them), then other agents,
   // projects, and files in the members' projects as project/path.
-  const query = mentionTokenAt(text, caret, mentionNames(agents, projects));
+  const issues = useApp(s => s.snapshot?.super.issues);
+  const phrases = useMemo(() => mentionPhrases(issues), [issues]);
+  const query = mentionTokenAt(text, caret, mentionNames(agents, projects), phrases);
   const open = Boolean(query) && query?.start !== dismissedAt;
   const memberProjects = useMemo(() => {
     const ids = new Set(members.flatMap(m => m.projectIds ?? []));
@@ -79,6 +81,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
     return rankMentions({
       agents: [...members, ...(agents ?? []).filter(a => !memberIds.has(a.id))],
       projects: projects ?? [],
+      issues: issues ?? [],
       files: folders,
       query: query.query,
       everyone: members.length > 1,
@@ -116,7 +119,7 @@ export function ChannelComposer({ channel, members, threadId }: { channel: Chann
   const pick = (choice: MentionPick) => {
     if (!query) return;
     hints.add(choice, query.start);
-    const next = replaceToken(text, query, '@', pickValue(choice));
+    const next = applyMention(text, query, choice);
     caretAfter.current = next.caret;
     setText(next.text);
     drafts.set(draftKey, next.text);

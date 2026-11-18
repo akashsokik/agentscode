@@ -9,15 +9,15 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, 
 import type { ComposerCommand } from '../../shared/composer.ts';
 import { noProjectFolder, type Agent, type Approval, type AgentPatch, type Project } from '../../shared/types.ts';
 import { useAgentCommands, useAgentFiles } from '../composer/catalog.ts';
-import { mentionNames, useMentionHints } from '../composer/mentionHints.ts';
+import { mentionNames, mentionPhrases, useMentionHints } from '../composer/mentionHints.ts';
 import { ModelPicker } from '../composer/ModelPicker.tsx';
 import { CommandPicker, MentionPicker } from '../composer/Pickers.tsx';
 import {
+  applyMention,
   BUILTIN_COMMANDS,
   builtinCommand,
   isLeading,
   mentionTokenAt,
-  pickValue,
   rankCommands,
   rankMentions,
   replaceToken,
@@ -160,15 +160,18 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
   // One @ picker: other agents and projects (references the agent is told about), then files.
   const allAgents = useApp(s => s.snapshot?.agents);
   const allProjects = useApp(s => s.snapshot?.projects);
+  const allIssues = useApp(s => s.snapshot?.super.issues);
+  const phrases = useMemo(() => mentionPhrases(allIssues), [allIssues]);
   const hints = useMentionHints();
   const picks = useMemo(() => (mentionOpen
     ? rankMentions({
       agents: (allAgents ?? []).filter(a => a.id !== agent.id),
       projects: allProjects ?? [],
+      issues: allIssues ?? [],
       files: folders,
       query: mention?.query ?? '',
     })
-    : []), [mentionOpen, allAgents, allProjects, agent.id, folders, mention?.query]);
+    : []), [mentionOpen, allAgents, allProjects, allIssues, agent.id, folders, mention?.query]);
   const pickerLength = slashOpen ? commands.length : mentionOpen ? picks.length : 0;
 
   // A new query starts the highlight from the top.
@@ -184,7 +187,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
     }
     const nextSlash = slashTokenAt(el.value, cursor);
     setSlash(nextSlash);
-    setMention(nextSlash ? null : mentionTokenAt(el.value, cursor, mentionNames(allAgents, allProjects)));
+    setMention(nextSlash ? null : mentionTokenAt(el.value, cursor, mentionNames(allAgents, allProjects), phrases));
   };
 
   // A pick moves the caret past what it wrote, once the new text is in the field.
@@ -228,7 +231,7 @@ export function Composer({ agent, project, question, onSettings }: { agent: Agen
     if (!mention) return;
     closePickers();
     hints.add(pick, mention.start);
-    const next = replaceToken(text, mention, '@', pickValue(pick));
+    const next = applyMention(text, mention, pick);
     caretAfter.current = next.caret;
     setText(next.text);
   };

@@ -1,6 +1,6 @@
 import { isAllProjects, startProjectId } from '../../shared/agentProjects.ts';
 import { randomUUID } from 'node:crypto';
-import { alignHints, findMentions, mentionContext, type MentionAgent, type MentionHint, type MentionProject, type MentionRef } from '../../shared/mentions.ts';
+import { alignHints, findMentions, mentionContext, type MentionAgent, type MentionHint, type MentionIssue, type MentionProject, type MentionRef } from '../../shared/mentions.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { ALL_PROJECTS, ENGINE_LABELS, noProjectFolder } from '../../shared/types.ts';
 import type {
@@ -27,7 +27,7 @@ export interface ChannelHost {
   /** Start a user-priority task in an agent's session, the way a direct message does, with the post's images. */
   startUserTask(agentId: string, text: string, prompt: string, task: AgentTask, channel: { id: string; postId: string }, images: PostImage[], mentions?: MentionRef[]): void;
   /** Every agent and project a mention can name. */
-  mentionLookup?(): { agents: MentionAgent[]; projects: MentionProject[] };
+  mentionLookup?(): { agents: MentionAgent[]; projects: MentionProject[]; issues?: MentionIssue[] };
 }
 
 /** An image on a user post: what the post shows, and the stored file the agents are sent. */
@@ -467,10 +467,10 @@ export class Channels {
     ].filter(Boolean);
   }
 
-  /** Who and what a user post mentioned, with ids and absolute paths (shared/mentions.ts). */
+  /** Who and what a user post mentioned, with ids and absolute paths, and the issues its keys name (shared/mentions.ts, ACH-62). */
   private mentionLines(post: ChannelPost): string[] {
-    if (!post.mentions?.length || !this.host.mentionLookup) return [];
-    const context = mentionContext(post.mentions, { ...this.host.mentionLookup(), channel: true, roleName: role => rolePreset(role as Agent['role']).name });
+    if (!this.host.mentionLookup) return [];
+    const context = mentionContext(post.mentions ?? [], { ...this.host.mentionLookup(), channel: true, roleName: role => rolePreset(role as Agent['role']).name }, post.text);
     return context ? ['', context] : [];
   }
 

@@ -5,6 +5,30 @@ import { useApp } from '../store.ts';
 import { AgentAvatar } from './Avatar.tsx';
 import { ReferenceChip, withRefChips } from '../notes/RefChip.tsx';
 import { useNotes } from '../notes/refsState.ts';
+import { findIssueKeys } from '../../shared/issueKeys.ts';
+import { IssueKeyChip, isKnownIssueKey, useIssueKeysKey } from './IssueKeyChip.tsx';
+
+/**
+ * Plain text with the chips it can carry: issue keys of issues PodCode has (IssueKeyChip, ACH-57,
+ * ACH-62), then note and decision ids (withRefChips). Unknown keys (UTF-8, a removed issue) stay text.
+ */
+function withPlainChips(text: string, prefix = ''): ReactNode[] {
+  const keys = findIssueKeys(text).filter(k => isKnownIssueKey(k.key));
+  if (!keys.length) return withRefChips(text, prefix);
+  const parts: ReactNode[] = [];
+  let last = 0;
+  // findIssueKeys lists each key once: chip every place it appears.
+  const spots = keys.flatMap(k => [...text.matchAll(new RegExp(`(?<![A-Za-z0-9])${k.code}-0*${k.num}(?![A-Za-z0-9])`, 'g'))].map(m => ({ key: k.key, at: m.index ?? 0, end: (m.index ?? 0) + m[0].length })))
+    .sort((a, b) => a.at - b.at);
+  for (const spot of spots) {
+    if (spot.at < last) continue;
+    if (spot.at > last) parts.push(...withRefChips(text.slice(last, spot.at), `${prefix}${last}:`));
+    parts.push(<IssueKeyChip key={`${prefix}i${spot.at}`} issueKey={spot.key} />);
+    last = spot.end;
+  }
+  if (last < text.length) parts.push(...withRefChips(text.slice(last), `${prefix}${last}:`));
+  return parts;
+}
 
 /**
  * Plain text with its @mentions as quiet inline chips: agents, projects, files, and @all, @channel
@@ -17,25 +41,26 @@ import { useNotes } from '../notes/refsState.ts';
 export function MentionText({ text, refs, agentId }: { text: string; refs?: MentionRef[]; agentId?: string }) {
   const agents = useApp(s => s.snapshot?.agents);
   const projects = useApp(s => s.snapshot?.projects);
-  // Note and decision ids in the plain parts become chips once the known ids are loaded.
+  // Issue keys, note and decision ids in the plain parts become chips once the known ones are loaded.
   useNotes(s => s.idsKey);
+  useIssueKeysKey();
   const mentions = useMemo(() => {
     const found = refs ?? findMentions(text, { agents: agents ?? [], projects: projects ?? [], channel: !agentId });
     // Stored refs index the text they were made from; drop any that no longer line up.
     return found.filter(m => m.start >= 0 && m.end <= text.length && text[m.start] === '@').sort((a, b) => a.start - b.start);
   }, [text, refs, agents, projects, agentId]);
-  if (!mentions.length) return <>{withRefChips(text)}</>;
+  if (!mentions.length) return <>{withPlainChips(text)}</>;
 
   const parts: ReactNode[] = [];
   let last = 0;
   for (const mention of mentions) {
     if (mention.start < last) continue;
-    if (mention.start > last) parts.push(...withRefChips(text.slice(last, mention.start), `${last}:`));
+    if (mention.start > last) parts.push(...withPlainChips(text.slice(last, mention.start), `${last}:`));
     const shown = text.slice(mention.start, mention.end);
     parts.push(<Chip key={mention.start} mention={mention} shown={shown} agentId={agentId} />);
     last = mention.end;
   }
-  if (last < text.length) parts.push(...withRefChips(text.slice(last), `${last}:`));
+  if (last < text.length) parts.push(...withPlainChips(text.slice(last), `${last}:`));
   return <>{parts}</>;
 }
 
