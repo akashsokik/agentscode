@@ -295,13 +295,14 @@ agents you want in it. Change members later from the channel's member list or it
 
 ### Issues
 
-**Issues** in the sidebar is your backlog across every project, the one the SuperAgent works top
-down. Each issue has a key from its project's code (WEB-12), a status
+**Issues** in the sidebar is your backlog across every project, the one the SuperAgent works by
+status, then priority, then order. Each issue has a key from its project's code (WEB-12), a status
 (Needs you, In review, In progress, Waiting, Todo, Backlog, Done or Canceled), a priority, an
 assignee, a due date, labels, sub-issues and relations. Open one for its properties and history; the
 same list sits in the SuperAgent's right panel. A key in any reply or message is a chip: hover it for
-the issue, click it to open it. Work that names a key on its branch or in a commit is linked to it,
-and merged work closes it.
+the issue, click it to open it. A commit that names a key links it to the issue. A merged branch
+named for it, or a merged pull request whose branch names it or that says Fixes, Closes or Resolves
+with its key, closes it.
 
 ### Notes and decisions
 
@@ -368,14 +369,23 @@ OrcaCode (on Codex its commands run in the read-only sandbox), and every change 
 agent it delegates to. Open it from **SuperAgent** in the sidebar.
 
 - **What it does on its own.** It watches your agents (it wakes when one finishes, fails, gets
-  stuck or waits for you), works a issues backlog top down, creates agents and channels, adds or
+  stuck or waits for you), works an issues backlog (by status, then priority, then order), creates agents and channels, adds or
   removes channel members, delegates, nudges a stuck agent, starts a new session and stops a runaway
   turn. Each command carries a short reason.
-- **What it asks you first.** Merging, pushing or deploying, deleting anything, removing an agent,
-  adding a project, and large or costly work. Its questions appear above its composer, as desktop
-  notifications, and in the quick window, with the choices to click. It bases its decisions on About
-  you, so what you tell it there (for example, which of these it may do without asking) is what it
-  goes by.
+- **What it does without asking, and what it asks first.** **Settings > Autonomy** sets one level:
+  - **Full** (the default): it does every undoable step itself, each through an agent and logged in
+    Decisions with how to undo it: merge approved branches into main, rebuild and restart PodCode,
+    push main (fast-forward only), tag and publish a release, deploy, clean up merged branches and
+    worktrees, add a project you named, and start large or costly work within your budget.
+  - **Standard**: it merges approved branches into local main, rebuilds and restarts PodCode, and
+    cleans up merged branches; it asks you before the rest.
+  - **Ask**: it asks you before every one of these.
+
+  At every level, four **Ask me first** switches (all on by default) hold back what can't be undone:
+  **Delete files or data**, **Change outside accounts**, **Remove agents you made** and
+  **Force-push a feature branch**. It never rewrites or force-pushes main, the default branch or a
+  tag. Its questions appear above its composer, as desktop notifications, and in the quick window,
+  with the choices to click.
 - **Morning brief.** Once a day, the first time it may wake after quiet hours, it tells you what
   happened since yesterday, what is stuck, and what it proposes next.
 - **The right panel.** With the SuperAgent focused, the panel has three more tabs:
@@ -384,7 +394,7 @@ agent it delegates to. Open it from **SuperAgent** in the sidebar.
     which agent is on it.
   - **Routines**: things it should do on a schedule (daily at a time, or every few hours). Routines
     it proposes wait until you confirm them.
-- **Limits that only stop its own work.** In **Settings > SuperAgent**: whether it wakes on updates,
+- **Limits that only stop its own work.** In **Settings > Limits** (in the SuperAgent group): whether it wakes on updates,
   wake-ups an hour, a daily budget in dollars, agents it may create a day, quiet hours, and
   notifications. These hold back only what it starts on its own; your own messages to it, and the
   work you asked for, always go.
@@ -432,6 +442,7 @@ Cmd on macOS is Ctrl on Windows and Linux.
 | Cmd+Shift+[ and Cmd+Shift+], Ctrl+Shift+Tab and Ctrl+Tab | Previous and next tab |
 | Cmd+B | Show or hide the sidebar |
 | Option+Cmd+B | Show or hide the right panel |
+| Option+Cmd+W | Close every unpinned tab but the focused one |
 | Cmd+\ or Option+Cmd+\ | Show or hide the project column |
 | Cmd+J or Ctrl+\` | Show or hide the terminal |
 | Shift+Cmd+B | Open a browser tab |
