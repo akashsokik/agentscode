@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Agent, Project } from '../shared/types.ts';
 import type { StorageCleanupCandidate, StorageCleanupResult } from '../shared/storageCleanup.ts';
 import { HttpError } from './errors.ts';
-import { gitRun } from './projects.ts';
+import { gitEnv } from './envHygiene.ts';
 
 export interface StorageCleanupDeps {
   dataDir: string;
@@ -18,6 +19,53 @@ type WorktreeState = { head: string; branch: string; repoRoot: string };
 const OUTPUT = /^(?:node_modules|dist|out|\.vite|build-.+)$/;
 const BACKUP = /^storage-cleanup-\d{13}-[a-f0-9]{16}$/;
 const queues = new Map<string, Promise<unknown>>();
+// Same program/optional-lock protections as work.ts readGit, also for backup ref writes.
+// These internal commands never push; repository-supplied hooks must not run in the server.
+const GIT_FLAGS = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.untrackedCache=false', '-c', 'diff.submodule=short', '-c', 'status.submoduleSummary=false'];
+const GIT_EXTRA = { GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GIT_LITERAL_PATHSPECS: '1' };
+
+/** A configured data directory may itself be a link; links below that boundary stay forbidden. */
+function canonicalDeps(deps: StorageCleanupDeps): StorageCleanupDeps {
+  const configured = path.resolve(deps.dataDir);
+  const dataDir = fs.realpathSync(configured);
+  const mapped = (file: string) => {
+    const absolute = path.resolve(file);
+    return absolute === configured || within(configured, absolute) ? path.join(dataDir, path.relative(configured, absolute)) : absolute;
+  };
+  return {
+    ...deps, dataDir,
+    agents: () => [...deps.agents()].map(owner => ({
+      ...owner, home: mapped(owner.home),
+      worktree: owner.worktree ? { ...owner.worktree, path: mapped(owner.worktree.path), cwd: mapped(owner.worktree.cwd), repoRoot: mapped(owner.worktree.repoRoot), gitDir: mapped(owner.worktree.gitDir) } : null,
+    })),
+    projects: () => [...deps.projects()].map(project => {
+      const declared = mapped(project.path);
+      // Canonicalize declared original-folder aliases for protection only; never scan them.
+      try { return { ...project, path: fs.realpathSync(declared) }; } catch { return { ...project, path: declared }; }
+    }),
+  };
+}
+
+function execGit(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string; code?: string | number }> {
+  return new Promise(resolve => {
+    execFile('git', [...GIT_FLAGS, ...args], { cwd, env: gitEnv(GIT_EXTRA), timeout: 120_000, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+      resolve({ ok: !error, stdout: String(stdout ?? ''), stderr: String(stderr ?? ''), ...(error ? { code: error.code } : {}) });
+    });
+  });
+}
+
+async function gitRun(cwd: string, args: string[]) {
+  if (args[0] !== 'status') return execGit(cwd, args);
+  // Even status can launch clean/process filters. Enumerate names safely, then disable all
+  // configured drivers. Never fall back to status if the config cannot be read.
+  const filters = await execGit(cwd, ['config', '--includes', '--null', '--name-only', '--get-regexp', '^filter\\.']);
+  if (!filters.ok && filters.code !== 1) return filters;
+  const drivers = new Set(filters.stdout.split('\0').filter(Boolean).map(key => key.slice(0, key.lastIndexOf('.'))));
+  const overrides = [...drivers].flatMap(driver => ['-c', `${driver}.clean=`, '-c', `${driver}.process=`, '-c', `${driver}.required=false`]);
+  // A submodule has its own program config. Refuse worktrees with submodules below, and never
+  // recurse into a newly added submodule if another process changes the index during a check.
+  return execGit(cwd, [...overrides, 'status', '--ignore-submodules=all', ...args.slice(1)]);
+}
 
 function within(root: string, file: string): boolean {
   const rel = path.relative(root, file);
@@ -101,13 +149,23 @@ function identity(dataDir: string, file: string, agentId: string, kind: Item['ki
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
-  const result = await gitRun(cwd, args, 120_000);
+  const result = await gitRun(cwd, args);
   if (!result.ok) throw new Error((result.stderr || result.stdout || 'Git refused the operation.').trim().slice(0, 500));
   return result.stdout.trim();
 }
 
 function samePath(left: string, right: string): boolean {
   return fs.realpathSync(left) === fs.realpathSync(right);
+}
+
+async function noSubmodules(cwd: string): Promise<void> {
+  if (fs.existsSync(path.join(cwd, '.gitmodules')) || (await git(cwd, ['ls-files', '--stage', '-z'])).split('\0').some(entry => entry.startsWith('160000 '))) {
+    throw new Error('Repositories with submodules require manual cleanup.');
+  }
+  for (const flag of ['--git-dir', '--git-common-dir']) {
+    const dir = await git(cwd, ['rev-parse', '--path-format=absolute', flag]);
+    if (fs.existsSync(path.join(dir, 'modules'))) throw new Error('Repositories with registered submodules require manual cleanup.');
+  }
 }
 
 async function worktreeState(item: Item, deps: StorageCleanupDeps): Promise<WorktreeState> {
@@ -124,6 +182,7 @@ async function worktreeState(item: Item, deps: StorageCleanupDeps): Promise<Work
   if (!branch || branch === 'main' || branch !== worktree.branch) throw new Error('The worktree branch changed or is main/detached.');
   const head = await git(item.absolute, ['rev-parse', '--verify', 'HEAD^{commit}']);
   await git(item.absolute, ['merge-base', '--is-ancestor', head, 'refs/heads/main']);
+  await noSubmodules(item.absolute);
   // Ignored files (for example .env) are not recoverable from a Git ref either.
   if (await git(item.absolute, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored=matching'])) {
     throw new Error('The worktree has modified, untracked or ignored files.');
@@ -152,6 +211,7 @@ async function buildOutputCheck(item: Item, deps: StorageCleanupDeps): Promise<v
     current = path.dirname(current);
   }
   if (repo) {
+    await noSubmodules(repo);
     if (await git(repo, ['status', '--porcelain=v1', '--untracked-files=all'])) throw new Error('The workspace repository is dirty.');
     if (await git(repo, ['ls-files', '-z', '--', path.relative(repo, item.absolute)])) throw new Error('Tracked files are not disposable build outputs.');
   } else if (!regular(dataDir, path.join(path.dirname(item.absolute), 'package.json'))) {
@@ -179,7 +239,7 @@ async function discover(deps: StorageCleanupDeps): Promise<Item[]> {
         id: identity(dataDir, absolute, owner.id, kind), agentId: owner.id, kind,
         label: kind === 'worktree' ? `${owner.name}: ${owner.worktree!.branch}` : `${owner.name}: ${path.basename(absolute)}`,
         relPath: path.relative(dataDir, absolute), absolute, root, owner, bytes: 0,
-        reason: kind === 'worktree' ? 'Clean branch merged into main; a backup ref is kept.' : 'Build output; moved to backups, freeing no space until backups are emptied.',
+        reason: kind === 'worktree' ? 'Clean branch merged into main; a backup ref is kept.' : 'Build output; moved to backups, freeing no space until backups are emptied. Refresh afterward for merged worktrees blocked by ignored outputs.',
       };
       await eligible(item, deps);
       item.bytes = bytes(absolute, kind === 'build-output');
@@ -208,7 +268,7 @@ async function discover(deps: StorageCleanupDeps): Promise<Item[]> {
 }
 
 export async function listStorageCleanupCandidates(deps: StorageCleanupDeps): Promise<StorageCleanupCandidate[]> {
-  return (await discover(deps)).map(({ absolute: _absolute, root: _root, owner: _owner, ...candidate }) => candidate);
+  return (await discover(canonicalDeps(deps))).map(({ absolute: _absolute, root: _root, owner: _owner, ...candidate }) => candidate);
 }
 
 /** Serialize destructive requests, including emptying backups, within this server process. */
@@ -237,6 +297,7 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
   if (!Array.isArray(ids) || ids.length > 500 || ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id))) {
     throw new HttpError(400, 'Choose at most 500 candidate ids from the cleanup list.');
   }
+  deps = canonicalDeps(deps);
   return exclusive(deps, async () => {
     const dataDir = path.resolve(deps.dataDir);
     const available = new Map((await discover(deps)).map(item => [item.id, item]));
@@ -252,12 +313,23 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
       fs.writeFileSync(temporary, JSON.stringify(manifest, null, 2), { flag: 'wx', mode: 0o600 });
       fs.renameSync(temporary, path.join(result.backupDir, 'manifest.json'));
     };
+    const outcome = (entry: Record<string, unknown>, state: string, reason?: string) => {
+      entry.outcome = state;
+      if (reason) entry.reason = reason;
+      try { save(); } catch (error) {
+        // If a final manifest write fails, its pre-operation 'pending' record prevents automatic
+        // emptying. The backed-up data stays recoverable, and the API still reports what happened.
+        console.error('[storage-cleanup] Could not record backup outcome.', error);
+      }
+    };
     for (const id of new Set(ids)) {
       const item = available.get(id);
       if (!item) {
         result.skipped.push({ id, reason: 'No longer eligible or no longer exists; refresh the cleanup list.' });
         continue;
       }
+      let entry: Record<string, unknown> | undefined;
+      let persisted = false;
       try {
         await eligible(item, deps);
         let measured = bytes(item.absolute, item.kind === 'build-output');
@@ -268,18 +340,23 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
           if (existing.ok && existing.stdout.trim() !== state.head) backupRef += `-storage-cleanup-${randomBytes(8).toString('hex')}`;
           // CAS: never replace an earlier backup, even if another process races this request.
           await git(state.repoRoot, ['update-ref', backupRef, state.head, existing.ok && existing.stdout.trim() === state.head ? state.head : '0'.repeat(state.head.length)]);
-          manifest.items.push({ id, kind: item.kind, relPath: item.relPath, bytes: measured, ...state, backupRef });
+          entry = { id, kind: item.kind, relPath: item.relPath, bytes: measured, ...state, backupRef, outcome: 'pending' };
+          manifest.items.push(entry);
           save();
+          persisted = true;
           const afterBackup = await worktreeState(item, deps);
           if (afterBackup.head !== state.head) throw new Error('The worktree HEAD changed during backup.');
           measured = bytes(item.absolute);
           ownerCheck(item, deps);
+          if (identity(dataDir, item.absolute, item.agentId!, item.kind) !== item.id) throw new Error('The worktree directory was replaced.');
           // No --force: Git remains the last check on changes or a locked worktree.
           await git(state.repoRoot, ['worktree', 'remove', item.absolute]);
           result.freedBytes += measured;
         } else {
-          manifest.items.push({ id, kind: item.kind, relPath: item.relPath, bytes: measured });
+          entry = { id, kind: item.kind, relPath: item.relPath, bytes: measured, outcome: 'pending' };
+          manifest.items.push(entry);
           save();
+          persisted = true;
           const destination = path.join(result.backupDir!, item.relPath);
           mkdirSafe(dataDir, path.dirname(destination));
           await eligible(item, deps);
@@ -287,11 +364,36 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
           manifest.items[manifest.items.length - 1].bytes = measured;
           save();
           ownerCheck(item, deps);
+          const checked = safe(dataDir, item.absolute);
+          if (identity(dataDir, item.absolute, item.agentId!, item.kind) !== item.id) throw new Error('The output directory was replaced.');
           fs.renameSync(item.absolute, destination); // same volume only; no copy/delete fallback
+          try {
+            const moved = safe(dataDir, destination);
+            if (!moved.isDirectory() || moved.dev !== checked.dev || moved.ino !== checked.ino) throw new Error('The directory changed during the move.');
+          } catch {
+            // Another local process can race a rename. Restore only through checked parents and
+            // never overwrite something that appeared at the original name in the meantime.
+            try {
+              safe(dataDir, path.dirname(destination));
+              safe(dataDir, path.dirname(item.absolute));
+              let exists = false;
+              try { fs.lstatSync(item.absolute); exists = true; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+              if (exists) throw new Error('The original name is occupied.');
+              fs.renameSync(destination, item.absolute);
+            } catch {
+              entry.outcome = 'quarantined';
+              throw new Error('Directory identity changed; retained in the backup for manual inspection.');
+            }
+            throw new Error('Directory identity changed; the move was rolled back.');
+          }
         }
         result.removed.push({ id, bytes: measured });
+        entry.bytes = measured;
+        outcome(entry, item.kind === 'worktree' ? 'removed' : 'moved');
       } catch (error) {
-        result.skipped.push({ id, reason: (error as Error).message });
+        const reason = (error as Error).message;
+        if (entry && persisted) outcome(entry, entry.outcome === 'quarantined' ? 'quarantined' : 'skipped', reason);
+        result.skipped.push({ id, reason });
       }
     }
     return result;
@@ -300,6 +402,7 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
 
 /** Only storage-cleanup backups are disposable here. Other backups and Git refs stay intact. */
 export async function emptyStorageBackups(deps: StorageCleanupDeps): Promise<{ freedBytes: number }> {
+  deps = canonicalDeps(deps);
   return exclusive(deps, async () => {
     const dataDir = path.resolve(deps.dataDir);
     const backupRoot = path.join(dataDir, 'backups');
@@ -311,6 +414,8 @@ export async function emptyStorageBackups(deps: StorageCleanupDeps): Promise<{ f
       try {
         const manifest = JSON.parse(fs.readFileSync(path.join(file, 'manifest.json'), 'utf8'));
         if (manifest.version !== 1 || manifest.kind !== 'podcode-storage-cleanup' || !Array.isArray(manifest.items)) continue;
+        if (manifest.items.some((item: { outcome?: string } | null) => !item || item.outcome === 'pending' || item.outcome === 'quarantined')) continue;
+        if ([...deps.projects()].some(project => project.path === file || within(project.path, file) || within(file, project.path))) continue;
         const measured = bytes(file);
         safe(dataDir, file);
         fs.rmSync(file, { recursive: true }); // child symlinks are unlinked, never traversed
