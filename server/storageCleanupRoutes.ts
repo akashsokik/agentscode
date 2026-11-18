@@ -20,14 +20,18 @@ export function registerStorageCleanupRoutes(app: Express, deps: StorageCleanupR
   });
   app.post('/api/storage/cleanup', async (req, res) => {
     if (!req.body || !Array.isArray(req.body.ids)) throw new HttpError(400, 'Choose candidate ids.');
-    const result = await cleanupStorage(req.body.ids, deps);
-    changed();
-    res.json(result);
+    try {
+      res.json(await cleanupStorage(req.body.ids, deps));
+    } finally {
+      changed();
+    }
   });
   app.post('/api/storage/backups/empty', async (req, res) => {
     if (req.body?.confirm !== true) throw new HttpError(400, 'Confirm before permanently emptying storage-cleanup backups.');
-    const result = await emptyStorageBackups(deps);
-    changed();
-    res.json(result);
+    try {
+      res.json(await emptyStorageBackups(deps));
+    } finally {
+      changed();
+    }
   });
 }
