@@ -20,12 +20,12 @@ function StoragePart({ part, total, bar = false }: { part: Part; total: number; 
   const anchor = useRef<HTMLButtonElement>(null), hover = useHoverCard();
   return <>
     <button ref={anchor} type="button" {...hover.chipEvents} aria-label={`${part.label}: ${storageSize(part.bytes)}`} aria-describedby={hover.open ? hover.cardId : undefined}
-      className={bar ? 'h-full min-w-0 shrink-0 hover:brightness-110 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-content' : 'inline-flex items-center gap-1.5 rounded text-[12px] leading-[18px] text-content/75 hover:text-content'}
+      className={bar ? 'h-full min-w-0 shrink-0 hover:brightness-110 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-content' : 'inline-flex min-w-0 max-w-full items-center gap-1.5 rounded text-[12px] leading-[18px] text-content/75 hover:text-content'}
       style={bar ? { width: `${total ? part.bytes / total * 100 : 0}%`, background: part.color } : undefined}>
-      {!bar ? <><Dot color={part.color} /><span>{part.label}</span><span className="tabular-nums text-content/40">{storageSize(part.bytes)}</span></> : null}
+      {!bar ? <><Dot color={part.color} /><span className="min-w-0 truncate">{part.label}</span><span className="shrink-0 tabular-nums text-content/40">{storageSize(part.bytes)}</span></> : null}
     </button>
     {hover.open ? <HoverCard id={hover.cardId} anchor={anchor.current} width={220} padding="px-3 py-2" onEnter={hover.onCardEnter} onLeave={hover.onCardLeave} onClose={hover.close}>
-      <span className="flex items-center gap-2 text-[12px]"><Dot color={part.color} />{part.label}<span className="ml-auto tabular-nums text-content/60">{storageSize(part.bytes)}</span></span>
+      <span className="flex items-center gap-2 text-[12px]"><Dot color={part.color} /><span className="min-w-0 flex-1 break-words">{part.label}</span><span className="shrink-0 tabular-nums text-content/60">{storageSize(part.bytes)}</span></span>
     </HoverCard> : null}
   </>;
 }
@@ -133,14 +133,14 @@ function StorageCleanupDialog({ onClose, onChanged }: { onClose: () => void; onC
   };
   return <Modal title={result ? 'Clean up result' : confirm ? 'Confirm selected items' : 'Review clean up'} size="md" fitViewport onClose={() => { if (!busy) onClose(); }}
     footer={<div className="flex justify-end gap-2"><SecondaryButton disabled={busy} onClick={onClose}>{result ? 'Done' : 'Cancel'}</SecondaryButton>{!result ? <SecondaryButton danger={confirm} disabled={loading || busy || !chosen.length || Boolean(error)} onClick={() => confirm ? void run() : setConfirm(true)}>{busy ? <StatusMark state="pending" label="Backing up selected items" /> : null}{confirm ? 'Back up and remove selected' : `Review ${chosen.length} selected`}</SecondaryButton> : null}</div>}>
-    <p className="text-[13px] leading-relaxed text-content/60">Build outputs move to backups and free space only after Empty backups. Clean merged worktrees are removed after their Git backup reference and recovery manifest are saved. Every selected item is checked again before removal.</p>
+    <div className="px-4 py-4"><p className="text-[13px] leading-relaxed text-content/60">Build outputs move to backups and free space only after Empty backups. Clean merged worktrees are removed after their Git backup reference and recovery manifest are saved. Every selected item is checked again before removal.</p>
     {error ? <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p> : null}
     {loading ? <div className="mt-4 flex items-center gap-2 text-[12px] text-content/50"><StatusMark state="pending" label="Finding cleanup candidates" />Finding candidates</div> : null}
     {!loading && !result ? <>
       {!candidates.length && !error ? <p className="mt-4 text-[13px] text-content/50">No eligible clean, idle worktrees or build outputs.</p> : null}
       <div className="mt-4 divide-y divide-stroke">{(confirm ? chosen : candidates).map(c => <label key={c.id} className="flex items-start gap-3 py-3">
         {!confirm ? <input type="checkbox" checked={selected.has(c.id)} onChange={event => setSelected(previous => { const next = new Set(previous); event.target.checked ? next.add(c.id) : next.delete(c.id); return next; })} className="mt-1 size-3.5 shrink-0 accent-current" /> : null}
-        <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium">{c.label}</span><span className="mt-1 block break-words text-[12px] text-content/45">{c.relPath}</span><span className="mt-1 block text-[12px] text-content/45">{c.reason}</span></span><span className="shrink-0 text-[12px] tabular-nums text-content/60">{storageSize(c.bytes)}</span>
+        <span className="min-w-0 flex-1"><span className="block break-words text-[13px] font-medium">{c.label}</span><span className="mt-1 block break-words text-[12px] text-content/45">{c.relPath}</span><span className="mt-1 block text-[12px] text-content/45">{c.reason}</span></span><span className="shrink-0 text-[12px] tabular-nums text-content/60">{storageSize(c.bytes)}</span>
       </label>)}</div>
       {confirm && chosen.length ? <p className="mt-4 text-[12px] text-content/60">Only these {chosen.length} selected items will be processed. Backups are kept in PodCode’s backups folder. Nothing is removed automatically.</p> : null}
       {confirm ? <div className="mt-3"><SecondaryButton disabled={busy} onClick={() => { setConfirm(false); setError(''); }}>Change selection</SecondaryButton></div> : null}
@@ -151,6 +151,7 @@ function StorageCleanupDialog({ onClose, onChanged }: { onClose: () => void; onC
       {result.skipped.map(s => <p key={s.id}>{s.reason}</p>)}
       <p>Build outputs still occupy disk space in backups. Empty backups has a separate confirmation.</p>
     </div> : null}
+    </div>
   </Modal>;
 }
 
@@ -163,7 +164,8 @@ function EmptyBackupsDialog({ onClose, onChanged }: { onClose: () => void; onCha
     finally { setBusy(false); }
   };
   return <Modal title={done ? 'Storage-cleanup backups emptied' : 'Permanently empty backups?'} size="sm" onClose={() => { if (!busy) onClose(); }} footer={<div className="flex justify-end gap-2"><SecondaryButton disabled={busy} onClick={onClose}>{done ? 'Done' : 'Cancel'}</SecondaryButton>{!done ? <SecondaryButton danger disabled={busy} onClick={() => void run()}>{busy ? <StatusMark state="pending" label="Emptying backups" /> : null}Permanently empty backups</SecondaryButton> : null}</div>}>
-    <p className="text-[13px] leading-relaxed text-content/60">{done ? 'The request finished. Other backups and Git backup references are kept. Refresh shows the remaining disk usage.' : 'This permanently removes recognised storage-cleanup backup folders. Build outputs in those backups cannot be restored afterwards. Other backups and Git backup references are kept.'}</p>
+    <div className="px-4 py-4"><p className="text-[13px] leading-relaxed text-content/60">{done ? 'The request finished. Other backups and Git backup references are kept. Refresh shows the remaining disk usage.' : 'This permanently removes recognised storage-cleanup backup folders. Build outputs in those backups cannot be restored afterwards. Other backups and Git backup references are kept.'}</p>
     {error ? <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p> : null}
+    </div>
   </Modal>;
 }
