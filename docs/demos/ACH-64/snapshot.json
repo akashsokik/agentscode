@@ -1,0 +1,94 @@
+{
+  "measuredAt": "2026-11-18T21:34:19.237792+00:00",
+  "basis": "allocated bytes (du -sk x1024), symlinks not followed",
+  "total": 15520436224,
+  "agents": [
+    {
+      "name": "Fen",
+      "home": 20873216,
+      "workspace": 5031919616,
+      "worktrees": 0,
+      "total": 5052792832
+    },
+    {
+      "name": "Hal",
+      "home": 28672,
+      "workspace": 4779159552,
+      "worktrees": 0,
+      "total": 4779188224
+    },
+    {
+      "name": "Ada",
+      "home": 9977856,
+      "workspace": 2595852288,
+      "worktrees": 0,
+      "total": 2605830144
+    },
+    {
+      "name": "Cy",
+      "home": 15921152,
+      "workspace": 1563418624,
+      "worktrees": 0,
+      "total": 1579339776
+    },
+    {
+      "name": "Rhea",
+      "home": 1441792,
+      "workspace": 874332160,
+      "worktrees": 0,
+      "total": 875773952
+    },
+    {
+      "name": "Dee",
+      "home": 1187840,
+      "workspace": 129208320,
+      "worktrees": 0,
+      "total": 130396160
+    },
+    {
+      "name": "SuperAgent",
+      "home": 95256576,
+      "workspace": 4096,
+      "worktrees": 0,
+      "total": 95260672
+    },
+    {
+      "name": "Gus",
+      "home": 4943872,
+      "workspace": 0,
+      "worktrees": 0,
+      "total": 4943872
+    },
+    {
+      "name": "Ivy",
+      "home": 24576,
+      "workspace": 36864,
+      "worktrees": 0,
+      "total": 61440
+    },
+    {
+      "name": "Bo",
+      "home": 20480,
+      "workspace": 0,
+      "worktrees": 0,
+      "total": 20480
+    },
+    {
+      "name": "Eli",
+      "home": 12288,
+      "workspace": 0,
+      "worktrees": 0,
+      "total": 12288
+    }
+  ],
+  "unassignedWorktrees": 266166272,
+  "shared": {
+    "transcripts": 107536384,
+    "channels": 0,
+    "attachments": 9105408,
+    "archive": 5017600,
+    "projects": 217088,
+    "state.json": 5730304
+  },
+  "otherShared": 3043328
+}
