@@ -1,3 +1,5 @@
+import type { StorageSnapshot } from '../shared/storage.ts';
+import type { StorageCleanupCandidate, StorageCleanupResult } from '../shared/storageCleanup.ts';
 import './isolate.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -7,6 +9,7 @@ import test from 'node:test';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
 import { scanStorage, StorageUsage, type StorageSource } from '../server/storage.ts';
+import { registerStorageCleanupRoutes } from '../server/storageCleanupRoutes.ts';
 import { registerStorageRoutes } from '../server/storageRoutes.ts';
 import type { Agent } from '../shared/types.ts';
 
@@ -120,4 +123,40 @@ test('an unreadable subtree is partial, not silently zero, and I/O concurrency s
     assert.ok(peak > 1 && peak <= 8, `peak=${peak}`);
     assert.ok(result.agents[0].workspace > 0);
   } finally { t.mock.restoreAll(); await f.close(); }
+});
+
+
+test('combined routes invalidate sizes after selected cleanup and require a separate empty-backups confirmation', async () => {
+  const f = await fixture();
+  const app = express(); app.use(express.json());
+  const usage = registerStorageRoutes(app, () => f.source, async () => {});
+  registerStorageCleanupRoutes(app, { dataDir: f.root, agents: () => f.source.agents.map(a => ({ ...a, home: path.join(f.root, 'agents', a.id), status: 'idle' as const })), projects: () => [], onChange: () => usage.invalidate() });
+  app.use((err: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => { res.status(err.status ?? 500).json({ error: err.message }); });
+  const server = app.listen(0, '127.0.0.1'); await new Promise<void>(resolve => server.once('listening', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const post = (route: string, body: unknown) => fetch(url + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  try {
+    await f.file('agents/a/workspace/package.json', 2);
+    await f.file('agents/a/workspace/node_modules/bundle', 16384);
+    await f.file('agents/a/workspace/dist/bundle', 8192);
+    await f.file('backups/user-kept/file', 4096);
+    const before = await (await fetch(url + '/api/storage')).json() as StorageSnapshot;
+    const { candidates } = await (await fetch(url + '/api/storage/cleanup/candidates')).json() as { candidates: StorageCleanupCandidate[] };
+    assert.equal(candidates.length, 2);
+    const chosen = candidates.find(c => c.relPath.endsWith('node_modules'));
+    assert.ok(chosen);
+    const response = await post('/api/storage/cleanup', { ids: [chosen.id] }); assert.equal(response.status, 200);
+    const result = await response.json() as StorageCleanupResult; assert.equal(result.removed.length, 1); assert.equal(result.freedBytes, 0); assert.ok(result.backupDir);
+    await assert.rejects(fs.stat(path.join(f.root, 'agents/a/workspace/node_modules')));
+    assert.ok((await fs.stat(path.join(f.root, 'agents/a/workspace/dist'))).isDirectory());
+    const after = await (await fetch(url + '/api/storage')).json() as StorageSnapshot;
+    assert.ok(after.agents[0].workspace < before.agents[0].workspace);
+    assert.ok(after.shared.backups > before.shared.backups);
+    assert.equal((await post('/api/storage/backups/empty', { confirm: false })).status, 400);
+    assert.ok((await fs.stat(result.backupDir!)).isDirectory());
+    assert.equal((await post('/api/storage/backups/empty', { confirm: true })).status, 200);
+    assert.ok((await fs.stat(path.join(f.root, 'backups/user-kept/file'))).isFile());
+    await assert.rejects(fs.stat(result.backupDir));
+    const emptied = await (await fetch(url + '/api/storage')).json() as StorageSnapshot; assert.ok(emptied.shared.backups < after.shared.backups);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); await f.close(); }
 });

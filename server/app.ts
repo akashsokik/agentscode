@@ -1,3 +1,4 @@
+import { registerStorageCleanupRoutes } from './storageCleanupRoutes.ts';
 import { registerStorageRoutes } from './storageRoutes.ts';
 import { ensurePushGuard, redeemOverride } from './pushGuard.ts';
 import { isOpenRoute, LOGIN_MAX_AGE_S, safeNext, USER_COOKIE, UserKey, type UserAuth } from './userAuth.ts';
@@ -482,7 +483,13 @@ export function createApp(
     res.json(manager.updateSettings(req.body ?? {}));
   });
 
-  registerStorageRoutes(app, () => manager.storageSource());
+  const storage = registerStorageRoutes(app, () => manager.storageSource());
+  registerStorageCleanupRoutes(app, {
+    dataDir: manager.storageSource().dataDir,
+    agents: () => manager.storageSource().agents,
+    projects: () => manager.storageSource().projects,
+    onChange: () => storage.invalidate(),
+  });
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Not found.' });

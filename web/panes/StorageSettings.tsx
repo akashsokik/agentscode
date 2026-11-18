@@ -1,9 +1,11 @@
+import { agentLook, AVATAR_FILL } from '../../shared/avatar.ts';
+import { useApp } from '../store.ts';
 import type { StorageCleanupCandidate, StorageCleanupResult } from '../../shared/storageCleanup.ts';
 import { Modal } from '../mono/Modal.tsx';
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { storageSize, type StorageSnapshot } from '../../shared/storage.ts';
 import { api } from '../api.ts';
-import { Group, Row } from '../mono/settings.tsx';
+import { Group, Row, RevealedSetting } from '../mono/settings.tsx';
 import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { FolderOpen, RefreshCw, ChevronRight, Archive } from '../mono/icons.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
@@ -30,6 +32,12 @@ function StoragePart({ part, total, bar = false }: { part: Part; total: number; 
 
 export function StorageSettings() {
   const [data, setData] = useState<StorageSnapshot | null>(null);
+  const liveAgents = useApp(s => s.snapshot?.agents);
+  const revealed = useContext(RevealedSetting);
+  useEffect(() => {
+    if (data && revealed?.startsWith('storage-')) document.getElementById(revealed)?.scrollIntoView({ block: 'center' });
+  }, [data, revealed]);
+  const colorOf = (id: string, fallback: string) => { const agent = liveAgents?.find(a => a.id === id); return agent ? AVATAR_FILL[agentLook(agent).color] : fallback; };
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [opened, setOpened] = useState<Set<string>>(new Set());
   const [clean, setClean] = useState(false), [empty, setEmpty] = useState(false);
@@ -47,7 +55,7 @@ export function StorageSettings() {
   const toggle = (id: string) => setOpened(previous => { const next = new Set(previous); next.has(id) ? next.delete(id) : next.add(id); return next; });
   const shared = data?.shared;
   const parts: Part[] = data ? [
-    ...data.agents.map(a => ({ key: a.id, label: a.name, bytes: a.total, color: a.color })),
+    ...data.agents.map(a => ({ key: a.id, label: a.name, bytes: a.total, color: colorOf(a.id, a.color) })),
     { key: 'unassignedWorktrees', label: 'Unassigned worktrees', bytes: data.shared.unassignedWorktrees, color: '#77777d' },
     { key: 'unassignedAgents', label: 'Unassigned agent folders', bytes: data.shared.unassignedAgents, color: '#8b8b92' },
     { key: 'transcripts', label: 'Transcripts', bytes: data.shared.transcripts, color: '#a0a0a5' },
@@ -76,7 +84,7 @@ export function StorageSettings() {
       <Group id="storage-agents" title="Agents" description="Largest first. Open an agent to see its folders.">
         {data.agents.length ? data.agents.map(a => <div key={a.id} className="border-b border-content/5 last:border-b-0">
           <button type="button" onClick={() => toggle(a.id)} aria-expanded={opened.has(a.id)} aria-controls={`storage-agent-${a.id}`} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-[13px] font-medium hover:bg-content/3">
-            <Dot color={a.color} /><span className="min-w-0 truncate">{a.name}</span><span className="ml-auto shrink-0 text-[12px] font-normal tabular-nums text-content/60">{storageSize(a.total)}</span><ChevronRight className={`ml-1 size-3.5 shrink-0 text-content/35 ${opened.has(a.id) ? 'rotate-90' : ''}`} />
+            <Dot color={colorOf(a.id, a.color)} /><span className="min-w-0 truncate">{a.name}</span><span className="ml-auto shrink-0 text-[12px] font-normal tabular-nums text-content/60">{storageSize(a.total)}</span><ChevronRight className={`ml-1 size-3.5 shrink-0 text-content/35 ${opened.has(a.id) ? 'rotate-90' : ''}`} />
           </button>
           <RevealHeight open={opened.has(a.id)}><div id={`storage-agent-${a.id}`} className="px-10 pb-4 text-[12px] text-content/50">
             {([['Home / memory', a.home], ['Workspace', a.workspace], ['Worktrees', a.worktrees]] as const).map(([label, size]) => <div key={label} className="flex justify-between gap-4 py-1.5"><span>{label}</span><span className="tabular-nums">{storageSize(size)}</span></div>)}
