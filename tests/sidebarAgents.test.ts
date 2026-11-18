@@ -65,3 +65,11 @@ test('the slot never moves: the row keeps one padding in every state, and the sl
   assert.match(row, /flex h-5 w-6 shrink-0 items-center justify-end leading-none group-hover:invisible group-has-\[\[data-card-more\]:focus-visible\]:invisible', menu && 'invisible'/, 'the slot keeps its 24px under the ... button');
   assert.doesNotMatch(row, /group-hover:hidden/);
 });
+
+test('a project card wraps its crowded header rather than pushing status past the edge (ACH-53)', () => {
+  const src = fs.readFileSync(new URL('../web/sidebar/Sidebar.tsx', import.meta.url), 'utf8');
+  const card = src.slice(src.indexOf('function AgentCard('), src.indexOf('function TreeNode('));
+  assert.match(card, /className="flex min-w-0 flex-wrap items-center gap-x-1\.5 gap-y-0\.5"/,
+    'the name, role and non-shrinking queue/status cluster need another line when they cannot fit');
+  assert.doesNotMatch(card, /overflow-hidden|overflow-x-hidden/, 'do not conceal an over-wide header');
+});

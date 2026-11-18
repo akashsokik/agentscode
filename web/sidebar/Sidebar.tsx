@@ -177,7 +177,8 @@ function AgentCard({ agent, selected, now, actions }: { agent: Agent; selected: 
       >
         <AgentAvatar agent={agent} className="mt-px size-7" />
         <span className="flex min-w-0 flex-col">
-          <span className="flex min-w-0 items-center gap-1.5">
+          {/* A crowded role/status cluster moves down instead of widening the card (ACH-53). */}
+          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
             <span className="min-w-0 truncate text-[13px] font-semibold leading-[18px] text-content">{agent.name}</span>
             <span className="shrink-0 text-[11.5px] text-content/40">{rolePreset(agent.role).name}</span>
             {/* The ... button takes this spot on hover. */}
