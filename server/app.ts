@@ -1,3 +1,5 @@
+import { registerStorageCleanupRoutes } from './storageCleanupRoutes.ts';
+import { registerStorageRoutes } from './storageRoutes.ts';
 import { ensurePushGuard, redeemOverride } from './pushGuard.ts';
 import { isOpenRoute, LOGIN_MAX_AGE_S, safeNext, USER_COOKIE, UserKey, type UserAuth } from './userAuth.ts';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
@@ -479,6 +481,14 @@ export function createApp(
   });
   app.patch('/api/settings', (req, res) => {
     res.json(manager.updateSettings(req.body ?? {}));
+  });
+
+  const storage = registerStorageRoutes(app, () => manager.storageSource());
+  registerStorageCleanupRoutes(app, {
+    dataDir: manager.storageSource().dataDir,
+    agents: () => manager.storageSource().agents,
+    projects: () => manager.storageSource().projects,
+    onChange: () => storage.invalidate(),
   });
 
   app.use('/api', (_req, res) => {

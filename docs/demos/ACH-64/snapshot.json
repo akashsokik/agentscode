@@ -1,0 +1,209 @@
+{
+  "measuredAt": "2026-11-18T21:34:19.237792+00:00",
+  "basis": "allocated bytes (du -sk x1024), symlinks not followed",
+  "total": 15520436224,
+  "agents": [
+    {
+      "name": "Fen",
+      "home": 20873216,
+      "workspace": 5031919616,
+      "worktrees": 0,
+      "total": 5052792832,
+      "color": "#df7a36"
+    },
+    {
+      "name": "Hal",
+      "home": 28672,
+      "workspace": 4779159552,
+      "worktrees": 0,
+      "total": 4779188224,
+      "color": "#a6549c"
+    },
+    {
+      "name": "Ada",
+      "home": 9977856,
+      "workspace": 2595852288,
+      "worktrees": 0,
+      "total": 2605830144,
+      "color": "#d9a02f"
+    },
+    {
+      "name": "Cy",
+      "home": 15921152,
+      "workspace": 1563418624,
+      "worktrees": 0,
+      "total": 1579339776,
+      "color": "#93a23a"
+    },
+    {
+      "name": "Rhea",
+      "home": 1441792,
+      "workspace": 874332160,
+      "worktrees": 0,
+      "total": 875773952,
+      "color": "#737c9c"
+    },
+    {
+      "name": "Dee",
+      "home": 1187840,
+      "workspace": 129208320,
+      "worktrees": 0,
+      "total": 130396160,
+      "color": "#d85c47"
+    },
+    {
+      "name": "SuperAgent",
+      "home": 95256576,
+      "workspace": 4096,
+      "worktrees": 0,
+      "total": 95260672,
+      "color": "#8b5cd6"
+    },
+    {
+      "name": "Gus",
+      "home": 4943872,
+      "workspace": 0,
+      "worktrees": 0,
+      "total": 4943872,
+      "color": "#3b8dd0"
+    },
+    {
+      "name": "Ivy",
+      "home": 24576,
+      "workspace": 36864,
+      "worktrees": 0,
+      "total": 61440,
+      "color": "#5b63d3"
+    },
+    {
+      "name": "Bo",
+      "home": 20480,
+      "workspace": 0,
+      "worktrees": 0,
+      "total": 20480,
+      "color": "#4a9f63"
+    },
+    {
+      "name": "Eli",
+      "home": 12288,
+      "workspace": 0,
+      "worktrees": 0,
+      "total": 12288,
+      "color": "#d24b7f"
+    }
+  ],
+  "unassignedWorktrees": 266166272,
+  "shared": {
+    "transcripts": 107536384,
+    "channels": 0,
+    "attachments": 9105408,
+    "archive": 5017600,
+    "projects": 217088,
+    "state.json": 5730304
+  },
+  "otherShared": 3043328,
+  "segments": [
+    {
+      "name": "Fen",
+      "bytes": 5052792832,
+      "color": "#df7a36",
+      "kind": "agent"
+    },
+    {
+      "name": "Hal",
+      "bytes": 4779188224,
+      "color": "#a6549c",
+      "kind": "agent"
+    },
+    {
+      "name": "Ada",
+      "bytes": 2605830144,
+      "color": "#d9a02f",
+      "kind": "agent"
+    },
+    {
+      "name": "Cy",
+      "bytes": 1579339776,
+      "color": "#93a23a",
+      "kind": "agent"
+    },
+    {
+      "name": "Rhea",
+      "bytes": 875773952,
+      "color": "#737c9c",
+      "kind": "agent"
+    },
+    {
+      "name": "Dee",
+      "bytes": 130396160,
+      "color": "#d85c47",
+      "kind": "agent"
+    },
+    {
+      "name": "SuperAgent",
+      "bytes": 95260672,
+      "color": "#8b5cd6",
+      "kind": "agent"
+    },
+    {
+      "name": "Gus",
+      "bytes": 4943872,
+      "color": "#3b8dd0",
+      "kind": "agent"
+    },
+    {
+      "name": "Ivy",
+      "bytes": 61440,
+      "color": "#5b63d3",
+      "kind": "agent"
+    },
+    {
+      "name": "Bo",
+      "bytes": 20480,
+      "color": "#4a9f63",
+      "kind": "agent"
+    },
+    {
+      "name": "Eli",
+      "bytes": 12288,
+      "color": "#d24b7f",
+      "kind": "agent"
+    },
+    {
+      "name": "Unassigned worktrees",
+      "bytes": 266166272,
+      "color": "#77777d",
+      "kind": "shared"
+    },
+    {
+      "name": "Transcripts",
+      "bytes": 107536384,
+      "color": "#a0a0a5",
+      "kind": "shared"
+    },
+    {
+      "name": "Channels",
+      "bytes": 0,
+      "color": "#b0b0b5",
+      "kind": "shared"
+    },
+    {
+      "name": "Attachments",
+      "bytes": 9105408,
+      "color": "#66666d",
+      "kind": "shared"
+    },
+    {
+      "name": "Archive",
+      "bytes": 5017600,
+      "color": "#bcbcc1",
+      "kind": "shared"
+    },
+    {
+      "name": "Other",
+      "bytes": 8990720,
+      "color": "#93939a",
+      "kind": "shared"
+    }
+  ]
+}

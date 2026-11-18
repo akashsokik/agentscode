@@ -1,3 +1,5 @@
+import type { StorageCleanupCandidate, StorageCleanupResult } from '../shared/storageCleanup.ts';
+import type { StorageSnapshot } from '../shared/storage.ts';
 import type {
   Agent,
   AgentPatch,
@@ -106,6 +108,11 @@ function rootQuery(root: Root, extra: Record<string, string> = {}): string {
 }
 
 export const api = {
+  storageCandidates: () => request<{ candidates: StorageCleanupCandidate[] }>('GET', '/api/storage/cleanup/candidates'),
+  cleanupStorage: (ids: string[]) => request<StorageCleanupResult>('POST', '/api/storage/cleanup', { ids }),
+  emptyStorageBackups: () => request<{ freedBytes: number }>('POST', '/api/storage/backups/empty', { confirm: true }),
+  storage: (refresh = false) => request<StorageSnapshot>('GET', `/api/storage${refresh ? '?refresh=true' : ''}`),
+  revealStorage: (body: { agentId: string } | { target: 'data' | 'backups' }) => request<{ opened: boolean }>('POST', '/api/storage/reveal', body),
   state: () => request<Snapshot>('GET', '/api/state'),
   refs: () => request<RefsIndex>('GET', '/api/refs'),
   /** The Pull requests page (read only); `fresh` reads GitHub again instead of the minute-long cache. */
