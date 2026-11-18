@@ -188,7 +188,10 @@ function spacedMentionAt(text: string, cursor: number, names: readonly string[],
     const lower = typed.toLowerCase();
     if (/\s$/.test(typed) && names.some(n => n.toLowerCase() === lower.trimEnd())) return null;
     // A name with spaces typed so far, or words that each start a word of an issue title (ACH-62).
-    if (!spaced.some(n => n.startsWith(lower)) && !phrases.some(p => titleWordPositions(typed, p))) return null;
+    // Not titles once the first word is a whole agent or project name: "@Bo p" stays @Bo, never an
+    // issue that has a word starting "bo" (Rhea's M1).
+    const named = names.some(n => n.toLowerCase() === lower.split(/\s+/)[0]);
+    if (!spaced.some(n => n.startsWith(lower)) && (named || !phrases.some(p => titleWordPositions(typed, p)))) return null;
     return { start: at, end: wordAround(text, caret).end, query: typed };
   }
   return null;
