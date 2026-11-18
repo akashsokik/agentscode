@@ -10,7 +10,10 @@ import { SecondaryButton } from '../mono/SecondaryButton.tsx';
 import { FolderOpen, RefreshCw, ChevronRight, Archive } from '../mono/icons.tsx';
 import { RevealHeight } from '../mono/RevealHeight.tsx';
 import { HoverCard, useHoverCard } from '../ui/HoverCard.tsx';
+import { IS_MAC } from '../platform.ts';
 import { StatusMark } from '../ui/StatusMark.tsx';
+
+const revealLabel = IS_MAC ? 'Reveal in Finder' : 'Show in folder';
 
 interface Part { key: string; label: string; bytes: number; color: string }
 const Dot = ({ color }: { color: string }) => <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: color }} />;
@@ -19,7 +22,7 @@ const Dot = ({ color }: { color: string }) => <span aria-hidden className="size-
 function StoragePart({ part, total, bar = false }: { part: Part; total: number; bar?: boolean }) {
   const anchor = useRef<HTMLButtonElement>(null), hover = useHoverCard();
   return <>
-    <button ref={anchor} type="button" {...hover.chipEvents} aria-label={`${part.label}: ${storageSize(part.bytes)}`} aria-describedby={hover.open ? hover.cardId : undefined}
+    <button ref={anchor} type="button" {...hover.chipEvents} tabIndex={bar ? -1 : 0} aria-label={`${part.label}: ${storageSize(part.bytes)}`} aria-describedby={hover.open ? hover.cardId : undefined}
       className={bar ? 'h-full min-w-0 shrink-0 hover:brightness-110 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-content' : 'inline-flex min-w-0 max-w-full items-center gap-1.5 rounded text-[12px] leading-[18px] text-content/75 hover:text-content'}
       style={bar ? { width: `${total ? part.bytes / total * 100 : 0}%`, background: part.color } : undefined}>
       {!bar ? <><Dot color={part.color} /><span className="min-w-0 truncate">{part.label}</span><span className="shrink-0 tabular-nums text-content/40">{storageSize(part.bytes)}</span></> : null}
@@ -88,7 +91,7 @@ export function StorageSettings() {
           </button>
           <RevealHeight open={opened.has(a.id)}><div id={`storage-agent-${a.id}`} className="px-10 pb-4 text-[12px] text-content/50">
             {([['Home / memory', a.home], ['Workspace', a.workspace], ['Worktrees', a.worktrees]] as const).map(([label, size]) => <div key={label} className="flex justify-between gap-4 py-1.5"><span>{label}</span><span className="tabular-nums">{storageSize(size)}</span></div>)}
-            <div className="mt-2"><SecondaryButton onClick={() => void reveal({ agentId: a.id })}><FolderOpen className="size-3.5" />Reveal in Finder</SecondaryButton></div>
+            <div className="mt-2"><SecondaryButton onClick={() => void reveal({ agentId: a.id })}><FolderOpen className="size-3.5" />{revealLabel}</SecondaryButton></div>
           </div></RevealHeight>
         </div>) : <p className="px-4 py-3.5 text-[12px] text-content/45">No agent folders yet.</p>}
       </Group>
@@ -101,7 +104,7 @@ export function StorageSettings() {
         {([['Transcripts', shared!.transcripts], ['Channels', shared!.channels], ['Attachments', shared!.attachments], ['Archive', shared!.archive], ['Projects', shared!.projects], ['state.json', shared!.state], ['Backups', shared!.backups], ['Other', shared!.other]] as const).map(([label, size]) => <Row key={label} label={label}><span className="text-[13px] tabular-nums">{storageSize(size)}</span></Row>)}
       </Group>
       <Group id="storage-manage" title="Manage storage" description="Nothing is removed automatically.">
-        <Row label="Reveal in Finder" description="Open PodCode’s data folder."><SecondaryButton onClick={() => void reveal({ target: 'data' })}><FolderOpen className="size-3.5" />Reveal</SecondaryButton></Row>
+        <Row label={revealLabel} description="Open PodCode’s data folder."><SecondaryButton onClick={() => void reveal({ target: 'data' })}><FolderOpen className="size-3.5" />Reveal</SecondaryButton></Row>
         <Row label="Review clean up" description="Review merged worktrees and build outputs. Back up before removing anything."><SecondaryButton onClick={() => setClean(true)}><Archive className="size-3.5" />Review</SecondaryButton></Row>
         <Row label="Empty backups" description="Permanently remove storage-cleanup backups. Other backups are kept."><SecondaryButton disabled={!shared!.backups} onClick={() => setEmpty(true)}>Empty backups</SecondaryButton></Row>
       </Group>

@@ -64,7 +64,7 @@ export const APP_SECTIONS: { id: AppSettingsSection; label: string; group: strin
   { id: 'engines', label: 'Engines', group: 'Agents', description: 'The agent CLIs on this machine and the models they offer.' },
   { id: 'autonomy', label: 'Autonomy', group: 'SuperAgent', description: 'How much the SuperAgent does without asking you. It never edits code; agents do the work.' },
   { id: 'limits', label: 'Limits', group: 'SuperAgent', description: 'What stops the work it starts on its own. Your own messages, and the work you asked for, always go.' },
-  { id: 'storage', label: 'Storage', group: 'PodCode', description: 'Space used by agents, their workspaces and shared data on this Mac.' },
+  { id: 'storage', label: 'Storage', group: 'PodCode', description: 'Space used by agents, their workspaces and shared data on this device.' },
   { id: 'about', label: 'About', group: 'PodCode', description: 'This build, its updates and what changed.' },
 ];
 

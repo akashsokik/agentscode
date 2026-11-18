@@ -33,16 +33,23 @@ export async function scanStorage(source: StorageSource): Promise<StorageSnapsho
   const startedAt = new Date().toISOString();
   const shared = Object.fromEntries(categories.map(key => [key, 0])) as Record<StorageCategory, number>;
   const agents: StorageAgent[] = source.agents.map(a => ({ id: a.id, name: a.name, color: AVATAR_FILL[agentLook(a).color], home: 0, workspace: 0, worktrees: 0, total: 0 }));
-  const data = path.resolve(source.dataDir), worktrees = path.resolve(source.worktreesRoot);
+  const configuredData = path.resolve(source.dataDir);
+  // Resolve the explicitly configured root once. Walk its children with lstat.
+  const data = await fs.realpath(configuredData).catch(() => configuredData);
+  const rooted = (entry: string) => {
+    const resolved = path.resolve(entry);
+    return inside(configuredData, resolved) ? path.join(data, path.relative(configuredData, resolved)) : resolved;
+  };
+  const worktrees = rooted(source.worktreesRoot);
   const homes = new Map(agents.map(a => [a.id, a]));
   // Only registered worktrees inside the configured worktree root or an agent's private workspace.
   const owned = source.agents.flatMap(a => {
     if (!a.worktree) return [];
-    const root = path.resolve(a.worktree.path);
+    const root = rooted(a.worktree.path);
     return inside(worktrees, root) || inside(path.join(data, 'agents', a.id, 'workspace'), root) ? [{ root, agent: homes.get(a.id)! }] : [];
   }).sort((a, b) => b.root.length - a.root.length);
   let errors = 0, rootFailed = false, total = 0;
-  const seen = new Set<string>();
+  const seenDirectories = new Set<string>();
   const links = new Map<string, { file: string; bytes: number }>();
   const assign = (file: string, bytes: number) => {
     total += bytes;
@@ -60,41 +67,59 @@ export async function scanStorage(source: StorageSource): Promise<StorageSnapsho
     shared[group] += bytes;
   };
   const roots = [data, ...(!inside(data, worktrees) ? [worktrees] : [])];
-  const queue = [...roots];
-  // Eight outstanding filesystem operations at most; yielding between batches keeps UI requests responsive.
-  for (let offset = 0; offset < queue.length;) {
-    const batch = queue.slice(offset, offset + 8);
-    offset += batch.length;
-    await Promise.all(batch.map(async file => {
-      try {
-        const stat = await fs.lstat(file);
-        if (stat.isSymbolicLink()) { if (roots.includes(file)) { errors++; if (file === data) rootFailed = true; } return; }
+  const directories: string[] = [];
+  function recordError(file: string, error: unknown) {
+    if (file === worktrees && file !== data && (error as NodeJS.ErrnoException)?.code === 'ENOENT') return;
+    errors++;
+    if (file === data) rootFailed = true;
+  }
+
+  async function measure(file: string) {
+    try {
+      const stat = await fs.lstat(file);
+      if (stat.isSymbolicLink()) {
+        if (roots.includes(file)) recordError(file, undefined);
+        return;
+      }
+      const bytes = process.platform === 'win32' && !stat.blocks ? stat.size : typeof stat.blocks === 'number' ? stat.blocks * 512 : stat.size;
+      if (stat.isDirectory()) {
         const key = `${stat.dev}:${stat.ino}`;
-        const bytes = process.platform === 'win32' && !stat.blocks ? stat.size : typeof stat.blocks === 'number' ? stat.blocks * 512 : stat.size;
-        if (seen.has(key)) {
-          const previous = links.get(key);
-          // Stable attribution when parallel stats encounter aliases in a different order.
-          if (previous && file < previous.file) {
-            assign(previous.file, -previous.bytes); assign(file, previous.bytes);
-            links.set(key, { file, bytes: previous.bytes });
+        if (seenDirectories.has(key)) return;
+        seenDirectories.add(key);
+        directories.push(file);
+      } else if (stat.nlink > 1) {
+        const key = `${stat.dev}:${stat.ino}`;
+        const previous = links.get(key);
+        if (previous) {
+          if (file < previous.file) {
+            assign(previous.file, -previous.bytes);
+            assign(file, previous.bytes);
+            previous.file = file;
           }
           return;
         }
-        seen.add(key);
-        if (stat.isFile() && stat.nlink > 1) links.set(key, { file, bytes });
-        assign(file, bytes);
-        if (stat.isDirectory()) {
-          const dir = await fs.opendir(file);
-          for await (const entry of dir) queue.push(path.join(file, entry.name));
-        }
-      } catch (error) {
-        // Missing optional worktree root is normal. Missing data root is a real scan error.
-        if (file === worktrees && file !== data && (error as NodeJS.ErrnoException).code === 'ENOENT') return;
-        errors++;
-        if (file === data) rootFailed = true;
+        links.set(key, { file, bytes });
       }
-    }));
-    await new Promise<void>(resolve => setImmediate(resolve));
+      assign(file, bytes);
+    } catch (error) { recordError(file, error); }
+  }
+
+  await Promise.all(roots.map(measure));
+  // Keep only pending directories and one batch of file stats, even in a wide directory.
+  while (directories.length) {
+    const folder = directories.pop()!;
+    const batch: Promise<void>[] = [];
+    try {
+      const dir = await fs.opendir(folder);
+      for await (const entry of dir) {
+        batch.push(measure(path.join(folder, entry.name)));
+        if (batch.length === 8) {
+          await Promise.all(batch);
+          batch.length = 0;
+        }
+      }
+    } catch (error) { recordError(folder, error); }
+    await Promise.all(batch);
   }
   for (const a of agents) a.total = a.home + a.workspace + a.worktrees;
   agents.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));

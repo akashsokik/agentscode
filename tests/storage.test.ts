@@ -51,6 +51,56 @@ test('storage never follows symlinks and deduplicates hardlinks across categorie
   } finally { await f.close(); }
 });
 
+test('a linked data root preserves attribution and skips links below that root', async () => {
+  const f = await fixture();
+  const alias = path.join(f.root, 'alias');
+  try {
+    await f.file('agents/a/workspace/notes');
+    await f.file('worktrees/owned/build');
+    await fs.symlink(f.root, alias, 'dir');
+    f.source.agents[0].worktree = { path: path.join(f.root, 'worktrees/owned') } as Agent['worktree'];
+    const direct = await scanStorage(f.source);
+    const linked = await scanStorage({ ...f.source, dataDir: alias, worktreesRoot: path.join(alias, 'worktrees'),
+      agents: [{ ...f.source.agents[0], worktree: { ...f.source.agents[0].worktree!, path: path.join(alias, 'worktrees/owned') } }] });
+    assert.equal(linked.status, 'complete');
+    assert.equal(linked.total, direct.total);
+    assert.deepEqual(linked.agents, direct.agents);
+    assert.ok(linked.agents[0].worktrees >= 8192);
+  } finally { await f.close(); }
+});
+
+test('a wide directory streams bounded batches without retaining ordinary file identities', async t => {
+  const f = await fixture();
+  try {
+    for (let i = 0; i < 64; i++) await f.file(`wide/file-${i}`, 1);
+    const opendir = fs.opendir, lstat = fs.lstat;
+    let yielded = 0, measured = 0, peakAhead = 0, identityReads = 0;
+    t.mock.method(fs, 'opendir', async (folder: string) => {
+      const dir = await opendir(folder);
+      if (path.basename(folder) !== 'wide') return dir;
+      return { async *[Symbol.asyncIterator]() {
+        for await (const entry of dir) {
+          peakAhead = Math.max(peakAhead, ++yielded - measured);
+          yield entry;
+        }
+      } };
+    });
+    t.mock.method(fs, 'lstat', async (file: string) => {
+      const stat = await lstat(file);
+      if (!stat.isFile()) return stat;
+      measured++;
+      return new Proxy(stat, { get(target, key) {
+        if (key === 'ino' || key === 'dev') identityReads++;
+        return Reflect.get(target, key);
+      } });
+    });
+    assert.equal((await scanStorage(f.source)).status, 'complete');
+    assert.equal(measured, 64);
+    assert.equal(identityReads, 0);
+    assert.ok(peakAhead <= 8, `entries buffered ahead of measurement: ${peakAhead}`);
+  } finally { t.mock.restoreAll(); await f.close(); }
+});
+
 test('a nested registered worktree is subtracted from workspace and counted once', async () => {
   const f = await fixture();
   try {
@@ -95,6 +145,7 @@ test('Reveal accepts only known managed folders and rejects symlink escapes and 
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const post = (body: unknown) => fetch(url + '/api/storage/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   try {
+    assert.equal((await post({ target: 'backups' })).status, 404);
     assert.equal((await post({ path: outside })).status, 400);
     assert.equal((await post({ agentId: '../outside' })).status, 404);
     await fs.mkdir(path.join(f.root, 'agents'), { recursive: true }); await fs.symlink(outside, path.join(f.root, 'agents/a'));

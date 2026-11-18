@@ -20,7 +20,11 @@ export function registerStorageRoutes(app: Express, source: () => StorageSource,
     } else if (req.body?.target === 'data') target = input.dataDir;
     else if (req.body?.target === 'backups') target = path.join(input.dataDir, 'backups');
     else throw new HttpError(400, 'Choose a PodCode folder.');
-    const root = await fs.realpath(input.dataDir), resolved = await fs.realpath(target);
+    const root = await fs.realpath(input.dataDir);
+    const resolved = await fs.realpath(target).catch(error => {
+      if (error.code === 'ENOENT') throw new HttpError(404, 'The requested folder does not exist.');
+      throw error;
+    });
     const rel = path.relative(root, resolved);
     if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel) || !(await fs.stat(resolved)).isDirectory()) throw new HttpError(403, 'Only folders inside PodCode data can be opened.');
     await reveal(resolved);
