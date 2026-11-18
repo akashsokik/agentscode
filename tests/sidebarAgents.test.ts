@@ -66,10 +66,15 @@ test('the slot never moves: the row keeps one padding in every state, and the sl
   assert.doesNotMatch(row, /group-hover:hidden/);
 });
 
-test('a project card wraps its crowded header rather than pushing status past the edge (ACH-53)', () => {
+test('a project card keeps one header line with a visible name and fixed status slot (ACH-53)', () => {
   const src = fs.readFileSync(new URL('../web/sidebar/Sidebar.tsx', import.meta.url), 'utf8');
   const card = src.slice(src.indexOf('function AgentCard('), src.indexOf('function TreeNode('));
-  assert.match(card, /className="flex min-w-0 flex-wrap items-center gap-x-1\.5 gap-y-0\.5"/,
-    'the name, role and non-shrinking queue/status cluster need another line when they cannot fit');
+  assert.match(card, /className="flex min-w-0 items-center gap-1\.5"/);
+  assert.match(card, /min-w-\[3\.5ch\] truncate text-\[13px\]/, 'the name never disappears');
+  assert.match(card, /min-w-0 shrink-\[4\] truncate text-\[11\.5px\]/, 'the role shrinks first');
+  assert.match(card, /ml-auto flex shrink-0 items-center/, 'the status stays visible');
+  assert.match(card, /agent\.queued > 99 \? '99\+' : agent\.queued/, 'cap the queue label');
+  assert.match(card, /title=\{`\$\{agent\.queued\}/, 'retain the full queue count');
+  assert.doesNotMatch(card, /flex-wrap|gap-y-/, 'no second header line');
   assert.doesNotMatch(card, /overflow-hidden|overflow-x-hidden/, 'do not conceal an over-wide header');
 });
