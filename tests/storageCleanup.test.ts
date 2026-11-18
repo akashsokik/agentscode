@@ -28,8 +28,13 @@ function repo(dir: string): void {
   git(dir, 'add', '.');
   git(dir, '-c', 'commit.gpgsign=false', 'commit', '-m', 'fixture');
 }
+function program(file: string, marker: string, body = 'exit 0'): string {
+  write(file, `#!/bin/sh\nprintf ran >> "${marker}"\n${body}\n`);
+  fs.chmodSync(file, 0o755);
+  return file;
+}
 function fixture(t: TestContext) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'podcode-cleanup-'));
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'podcode-cleanup-')));
   const dataDir = path.join(base, '.podcode');
   fs.mkdirSync(dataDir);
   const previous = process.env.PODCODE_HOME;
@@ -327,4 +332,127 @@ test('route invalidation runs after cleanup and backup emptying, never on reads 
   assert.equal(invalidated, 1);
   await handlers.get('POST /api/storage/backups/empty')!({ body: { confirm: true } } as Request, res);
   assert.equal(invalidated, 2);
+});
+
+test('candidate reads never execute a repository-configured fsmonitor', async t => {
+  const f = fixture(t), agent = f.owner(), workspace = f.workspace(agent);
+  repo(workspace);
+  write(path.join(workspace, '.gitignore'), 'dist/\n');
+  git(workspace, 'add', '.'); git(workspace, '-c', 'commit.gpgsign=false', 'commit', '-m', 'ignore dist');
+  write(path.join(workspace, 'dist', 'bundle.js'));
+  const marker = path.join(f.base, 'fsmonitor-ran');
+  git(workspace, 'config', 'core.fsmonitor', program(path.join(f.base, 'fsmonitor'), marker));
+  assert.equal((await listStorageCleanupCandidates(f.deps)).length, 1);
+  assert.equal(fs.existsSync(marker), false);
+});
+
+test('candidate status never executes clean or process filters from config and attributes', async t => {
+  const f = fixture(t), agent = f.owner(), workspace = f.workspace(agent);
+  repo(workspace);
+  write(path.join(workspace, '.gitignore'), 'dist/\n');
+  write(path.join(workspace, '.gitattributes'), 'source.txt filter=trap\n');
+  git(workspace, 'add', '.'); git(workspace, '-c', 'commit.gpgsign=false', 'commit', '-m', 'attributes');
+  const marker = path.join(f.base, 'filter-ran');
+  git(workspace, 'config', 'filter.trap.clean', program(path.join(f.base, 'clean-filter'), marker, 'cat'));
+  git(workspace, 'config', 'filter.trap.process', program(path.join(f.base, 'process-filter'), marker, 'exit 1'));
+  write(path.join(workspace, 'source.txt'), 'source'); // force Git to compare through the driver
+  write(path.join(workspace, 'dist', 'bundle.js'));
+  assert.equal((await listStorageCleanupCandidates(f.deps)).length, 1);
+  assert.equal(fs.existsSync(marker), false);
+});
+
+test('backup refs and worktree removal never execute repository hooks', async t => {
+  const f = fixture(t), agent = f.owner(), { original, target } = f.worktree(agent);
+  const selected = (await listStorageCleanupCandidates(f.deps))[0];
+  const marker = path.join(f.base, 'hook-ran'), hooks = path.join(f.base, 'hooks');
+  program(path.join(hooks, 'reference-transaction'), marker);
+  git(original, 'config', 'core.hooksPath', hooks);
+  const result = await cleanupStorage([selected.id], f.deps);
+  assert.equal(result.removed.length, 1);
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.existsSync(marker), false);
+});
+
+test('a configured symlink data root works but links below it remain excluded', async t => {
+  const f = fixture(t), agent = f.owner(), output = f.output(f.workspace(agent));
+  const alias = path.join(f.base, 'data-alias'); fs.symlinkSync(f.dataDir, alias, 'dir');
+  const aliasAgent = { ...agent, home: path.join(alias, 'agents', agent.id) };
+  const deps: StorageCleanupDeps = { ...f.deps, dataDir: alias, agents: () => [aliasAgent] };
+  fs.symlinkSync(output, path.join(f.workspace(agent), 'dist'), 'dir');
+  const candidates = await listStorageCleanupCandidates(deps);
+  assert.equal(candidates.length, 1);
+  const result = await cleanupStorage([candidates[0].id], deps);
+  assert.equal(result.removed.length, 1);
+  assert.ok(result.backupDir?.startsWith(fs.realpathSync(f.dataDir)));
+  assert.ok((await emptyStorageBackups(deps)).freedBytes > 0);
+});
+
+test('a refused Git removal records a skipped manifest outcome and keeps the worktree', async t => {
+  const f = fixture(t), agent = f.owner(), { original, target } = f.worktree(agent);
+  const selected = (await listStorageCleanupCandidates(f.deps))[0];
+  git(original, 'worktree', 'lock', target);
+  const result = await cleanupStorage([selected.id], f.deps);
+  assert.equal(result.removed.length, 0); assert.equal(result.skipped.length, 1);
+  assert.ok(fs.existsSync(target));
+  const manifest = JSON.parse(fs.readFileSync(path.join(result.backupDir!, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.items[0].outcome, 'skipped');
+  assert.match(manifest.items[0].reason, /locked/i);
+  assert.equal(git(original, 'rev-parse', 'backup/topic'), agent.worktree!.baseCommit);
+});
+
+test('a raced directory replacement is rolled back after the move and never reported removed', async t => {
+  const f = fixture(t), agent = f.owner(), output = f.output(f.workspace(agent));
+  const selected = (await listStorageCleanupCandidates(f.deps))[0];
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from: fs.PathLike, to: fs.PathLike) => {
+    if (String(from) === output && String(to).includes('storage-cleanup-')) {
+      rename(output, `${output}-original`);
+      write(path.join(output, 'replacement.txt'), 'replacement');
+    }
+    return rename(from, to);
+  });
+  const result = await cleanupStorage([selected.id], f.deps);
+  assert.equal(result.removed.length, 0); assert.equal(result.skipped.length, 1);
+  assert.match(result.skipped[0].reason, /rolled back/);
+  assert.equal(fs.readFileSync(path.join(output, 'replacement.txt'), 'utf8'), 'replacement');
+  assert.equal(fs.readFileSync(path.join(`${output}-original`, 'file.txt'), 'utf8'), 'payload');
+  const manifest = JSON.parse(fs.readFileSync(path.join(result.backupDir!, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.items[0].outcome, 'skipped');
+});
+
+test('a replacement that cannot be restored stays quarantined and empty-backups leaves it intact', async t => {
+  const f = fixture(t), agent = f.owner(), output = f.output(f.workspace(agent));
+  const selected = (await listStorageCleanupCandidates(f.deps))[0];
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from: fs.PathLike, to: fs.PathLike) => {
+    if (String(from) === output && String(to).includes('storage-cleanup-')) {
+      rename(output, `${output}-original`);
+      write(path.join(output, 'replacement.txt'), 'replacement');
+      rename(from, to);
+      write(path.join(output, 'occupied.txt'), 'do not overwrite');
+      return;
+    }
+    return rename(from, to);
+  });
+  const result = await cleanupStorage([selected.id], f.deps);
+  assert.equal(result.removed.length, 0); assert.match(result.skipped[0].reason, /manual inspection/);
+  const manifest = JSON.parse(fs.readFileSync(path.join(result.backupDir!, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.items[0].outcome, 'quarantined');
+  assert.equal((await emptyStorageBackups(f.deps)).freedBytes, 0);
+  assert.ok(fs.existsSync(result.backupDir!));
+  assert.equal(fs.readFileSync(path.join(output, 'occupied.txt'), 'utf8'), 'do not overwrite');
+});
+
+test('original projects declared through aliases, including a restored backup, stay protected', async t => {
+  const f = fixture(t), agent = f.owner(), workspace = f.workspace(agent);
+  f.output(workspace);
+  const alias = path.join(f.base, 'project-alias'); fs.symlinkSync(workspace, alias, 'dir');
+  f.projects.push({ path: alias });
+  assert.deepEqual(await listStorageCleanupCandidates(f.deps), []);
+  f.projects.length = 0;
+  const selected = (await listStorageCleanupCandidates(f.deps))[0];
+  const result = await cleanupStorage([selected.id], f.deps);
+  f.projects.push({ path: path.join(result.backupDir!, selected.relPath) });
+  assert.equal((await emptyStorageBackups(f.deps)).freedBytes, 0);
+  assert.ok(fs.existsSync(path.join(result.backupDir!, selected.relPath, 'file.txt')));
 });
