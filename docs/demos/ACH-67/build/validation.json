@@ -3,7 +3,7 @@
   "typecheck": "passed",
   "build": "passed",
   "full_suite": {
-    "passed": 1144,
+    "passed": 1145,
     "failed": 0,
     "skipped": 0
   },
@@ -52,5 +52,31 @@
     "productSourceChanged": false,
     "fixtureTypecheck": "passed",
     "productTypecheck": "passed"
+  },
+  "wholeTabLabels": {
+    "widths": [
+      260,
+      320,
+      372
+    ],
+    "agentCases": 15,
+    "superAgentCases": 21,
+    "sampledAnimationFrames": 504,
+    "clippedLabels": 0,
+    "pageExceptions": [],
+    "focusedTests": {
+      "passed": 12,
+      "failed": 0
+    },
+    "fullSuite": {
+      "passed": 1145,
+      "failed": 0,
+      "skipped": 0
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "providerCalls": 0,
+    "fixture": "real createServer on temporary HOME/PODCODE_HOME",
+    "preFix": "Notes text 33.40625px clipped by its 0.8671875..27.765625px animated container"
   }
 }

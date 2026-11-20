@@ -70,6 +70,21 @@ test('a count makes the open name wider, so other tabs move into "…" sooner; t
   assert.ok(counted.overflow.length > 0 && counted.visible.includes('decisions'));
 });
 
+test('multi-digit badges reserve their full width at the fit boundary', () => {
+  assert.ok(labelWidth('Notes', 12) > labelWidth('Notes', 9));
+  assert.ok(labelWidth('Notes', 99999) > labelWidth('Notes', 12));
+  const tabs = AGENT.map(t => t.view === 'notes' ? { ...t, count: 99999 } : t);
+  const namedMinimum = TAB_ICON_WIDTH + labelWidth('Notes', 99999) + TAB_GAP + MORE_WIDTH;
+  const named = fitPanelTabs(tabs, 'notes', namedMinimum);
+  assert.equal(named.activeLabelled, true);
+  assert.deepEqual(named.visible, ['notes']);
+  assert.ok(used(tabs, named, 'notes') <= namedMinimum);
+  const icons = fitPanelTabs(tabs, 'notes', namedMinimum - 1);
+  assert.equal(icons.activeLabelled, false, 'the whole name drops when one pixel short');
+  assert.ok(icons.visible.includes('notes'));
+  assert.ok(used(tabs, icons, 'notes') <= namedMinimum - 1);
+});
+
 test('a tab you open shows its name from the panel\'s narrowest (260px, a 214px strip) up, for every tab (ACH-D35, ACH-D36)', () => {
   // The bug: at a usual width, opening a tab often left it an icon, because its name folded before
   // any other tab moved into the "…" menu.

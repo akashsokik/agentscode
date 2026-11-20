@@ -305,8 +305,10 @@ export function RightPanel() {
   const superTabs = useSuperTabs(isSuper ? view : '');
   const column = useColumnWidth('panel', 320, 260, 0.4);
   const list = useRef<HTMLDivElement>(null);
-  // How the tabs fit the strip's real width (panelTabsFit.ts): names first, then the open tab's
-  // name, then the last tabs go into a "…" menu. The strip never reaches the collapse button.
+  // How tabs fit (panelTabsFit.ts): other names fold first, then other tabs go into "…",
+  // then the open name folds only if it still cannot fit. Explicit showLabel makes IconTab switch the
+  // whole word at once; a width animation would cut glyphs even when the final fit is correct.
+  // The strip never reaches the collapse button.
   // Measured on the area that holds the tabs and the "…" button, so that button is counted once.
   const area = useRef<HTMLDivElement>(null);
   const stripWidth = useElementWidth(area);
