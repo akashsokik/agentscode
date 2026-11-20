@@ -65,7 +65,7 @@ test('the engine lets the SuperAgent use take_action (Claude policy), and nobody
 
 test('its instructions follow the level and switches, replace the old always-ask rule, and say when it is paused', () => {
   const full = autonomyInstructions('full', ALL_ASK_FIRST, false);
-  assert.match(full, /Autonomy \(Settings, SuperAgent\): Full\. This replaces the "Always ask the user first" rule/);
+  assert.match(full, /Autonomy \(Settings, SuperAgent\): Full\. It says which steps you take on your own and which you ask about first\./);
   assert.match(full, /without ask_user, through take_action/);
   assert.match(full, /push main \(fast-forward only\)/);
   assert.match(full, /Always ask first, before: deleting files or data.*outside accounts.*removing agents the user made.*force-pushing/);
