@@ -96,7 +96,8 @@ test('all reference labels have the same class and content colour, with only a s
   assert.match(chip, /color: var\(--color-content\)/);
   assert.match(chip, /\.ref-chip-label \{ color: inherit;/);
   assert.doesNotMatch(chip, /ref-note|ref-small|--ref-hue/);
-  assert.match(chip, /\.ref-chip\.ref-old/);
+  assert.match(chip, /\.ref-chip\.ref-old \.ref-chip-glyph \{ opacity: 0\.45; \}/);
+  assert.doesNotMatch(chip, /\.ref-old [^{]*\.ref-chip-glyph[^{]*\{[^}]*\bcolor:/, 'fading preserves the decision or note glyph colour');
   assert.doesNotMatch(source('web/ui/IssueKeyChip.tsx'), /ref-old|replaced=/, 'cancel is a status, not replacement');
   assert.match(source('web/ui/MentionText.tsx'), /<AgentAvatar agent=\{agent\}/, 'avatar setting stays authoritative');
 });

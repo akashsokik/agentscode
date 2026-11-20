@@ -1938,7 +1938,7 @@ html.layout-inset.theme-light .dialog-scrim {
 .ref-chip-glyph { display: inline-flex; width: 12px; height: 12px; flex: none; }
 .ref-chip-glyph svg { width: 12px; height: 12px; flex: none; }
 .ref-chip.ref-old { color: color-mix(in srgb, var(--color-content) 45%, transparent); background: color-mix(in srgb, var(--color-content) 5%, transparent); }
-.ref-chip.ref-old .ref-chip-glyph * { color: inherit; }
+.ref-chip.ref-old .ref-chip-glyph { opacity: 0.45; }
 button.ref-chip, span.ref-chip[data-ref-inert] { cursor: pointer; }
 .ref-chip:is(button, [data-ref-inert]):hover, button.ref-chip[aria-expanded="true"] { background: color-mix(in srgb, var(--color-content) 15%, transparent); }
 .ref-chip.ref-old:is(button, [data-ref-inert]):hover, button.ref-chip.ref-old[aria-expanded="true"] { background: color-mix(in srgb, var(--color-content) 10%, transparent); }
