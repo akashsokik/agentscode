@@ -797,7 +797,7 @@ export function updatePrompt(events: SuperEvent[], openAsks: SuperAsk[], now: nu
   const shownIssues = open.slice(0, 8);
   const backlog = open.length ? [
     '',
-    'Open issues, in order (give the next todo one to a free agent: mark it in_progress with update_issue, then delegate_task with its issue):',
+    'Open issues, in order (give the next todo one to a free agent that fits, from list_agents: mark it in_progress with update_issue, then delegate_task with its issue):',
     ...shownIssues.map((g, i) => `${i + 1}. [${g.id}] ${g.key} ${g.status}${g.priority !== 'none' ? `, ${g.priority}` : ''}${g.dueDate ? `, due ${g.dueDate}` : ''}: ${g.title}`),
     ...(open.length > shownIssues.length ? [`(${open.length - shownIssues.length} more; list_issues has them all)`] : []),
   ] : [];
