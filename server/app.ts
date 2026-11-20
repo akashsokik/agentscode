@@ -9,7 +9,7 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import type { Hub } from './hub.ts';
 import type { WorktreeCleanup } from '../shared/types.ts';
-import { DEV_WEB_PORT, IN_DESKTOP_APP, PORT } from './config.ts';
+import { DEV_WEB_PORT, IN_DESKTOP_APP, NODE_RUNTIME, PORT } from './config.ts';
 import { HttpError } from './errors.ts';
 import { BRIDGE_HEADER, bridgeTokenMatches } from './browserBridge.ts';
 import type { AgentManager } from './manager.ts';
@@ -485,6 +485,7 @@ export function createApp(
 
   const storage = registerStorageRoutes(app, () => manager.storageSource());
   registerStorageCleanupRoutes(app, {
+    desktopExecutable: IN_DESKTOP_APP ? NODE_RUNTIME.command : undefined,
     dataDir: manager.storageSource().dataDir,
     agents: () => manager.storageSource().agents,
     projects: () => manager.storageSource().projects,

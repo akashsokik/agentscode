@@ -5,10 +5,12 @@ import path from 'node:path';
 import type { Agent, Project } from '../shared/types.ts';
 import type { StorageCleanupCandidate, StorageCleanupResult } from '../shared/storageCleanup.ts';
 import { HttpError } from './errors.ts';
+import { storageAppProtection } from './storageAppProtection.ts';
 import { gitEnv } from './envHygiene.ts';
 
 export interface StorageCleanupDeps {
   dataDir: string;
+  desktopExecutable?: string;
   agents: () => Iterable<Pick<Agent, 'id' | 'name' | 'home' | 'status' | 'worktree'>>;
   projects: () => Iterable<Pick<Project, 'path'>>;
 }
@@ -143,6 +145,13 @@ function ownerCheck(item: Item, deps: StorageCleanupDeps): Owner {
   return owner;
 }
 
+async function checkBeforeRemoval(item: Item, deps: StorageCleanupDeps): Promise<void> {
+  const protection = storageAppProtection(deps.desktopExecutable);
+  const reason = await protection(item.absolute, item.root);
+  if (reason) throw new Error(reason);
+  ownerCheck(item, deps);
+}
+
 function identity(dataDir: string, file: string, agentId: string, kind: Item['kind']): string {
   const stat = safe(dataDir, file);
   return createHash('sha256').update(JSON.stringify([kind, agentId, path.relative(dataDir, file), stat.dev, stat.ino])).digest('hex');
@@ -228,7 +237,8 @@ async function eligible(item: Item, deps: StorageCleanupDeps): Promise<void> {
   else await buildOutputCheck(item, deps);
 }
 
-async function discover(deps: StorageCleanupDeps): Promise<Item[]> {
+async function discover(deps: StorageCleanupDeps, skipped?: Map<string, string>): Promise<Item[]> {
+  const protection = storageAppProtection(deps.desktopExecutable);
   const dataDir = path.resolve(deps.dataDir);
   const result: Item[] = [];
   const seen = new Set<string>();
@@ -241,6 +251,11 @@ async function discover(deps: StorageCleanupDeps): Promise<Item[]> {
         relPath: path.relative(dataDir, absolute), absolute, root, owner, bytes: 0,
         reason: kind === 'worktree' ? 'Clean branch merged into main; a backup ref is kept.' : 'Build output; moved to backups, freeing no space until backups are emptied. Refresh afterward for merged worktrees blocked by ignored outputs.',
       };
+      const reason = await protection(absolute, root);
+      if (reason) {
+        skipped?.set(item.id, reason);
+        return;
+      }
       await eligible(item, deps);
       item.bytes = bytes(absolute, kind === 'build-output');
       result.push(item);
@@ -300,7 +315,8 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
   deps = canonicalDeps(deps);
   return exclusive(deps, async () => {
     const dataDir = path.resolve(deps.dataDir);
-    const available = new Map((await discover(deps)).map(item => [item.id, item]));
+    const protectedIds = new Map<string, string>();
+    const available = new Map((await discover(deps, protectedIds)).map(item => [item.id, item]));
     const result: StorageCleanupResult = { backupDir: null, removed: [], skipped: [], freedBytes: 0 };
     const manifest: { version: 1; kind: string; items: Record<string, unknown>[] } = { version: 1, kind: 'podcode-storage-cleanup', items: [] };
     const save = () => {
@@ -325,7 +341,7 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
     for (const id of new Set(ids)) {
       const item = available.get(id);
       if (!item) {
-        result.skipped.push({ id, reason: 'No longer eligible or no longer exists; refresh the cleanup list.' });
+        result.skipped.push({ id, reason: protectedIds.get(id) ?? 'No longer eligible or no longer exists; refresh the cleanup list.' });
         continue;
       }
       let entry: Record<string, unknown> | undefined;
@@ -347,7 +363,7 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
           const afterBackup = await worktreeState(item, deps);
           if (afterBackup.head !== state.head) throw new Error('The worktree HEAD changed during backup.');
           measured = bytes(item.absolute);
-          ownerCheck(item, deps);
+          await checkBeforeRemoval(item, deps);
           if (identity(dataDir, item.absolute, item.agentId!, item.kind) !== item.id) throw new Error('The worktree directory was replaced.');
           // No --force: Git remains the last check on changes or a locked worktree.
           await git(state.repoRoot, ['worktree', 'remove', item.absolute]);
@@ -363,7 +379,7 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
           measured = bytes(item.absolute, true);
           manifest.items[manifest.items.length - 1].bytes = measured;
           save();
-          ownerCheck(item, deps);
+          await checkBeforeRemoval(item, deps);
           const checked = safe(dataDir, item.absolute);
           if (identity(dataDir, item.absolute, item.agentId!, item.kind) !== item.id) throw new Error('The output directory was replaced.');
           fs.renameSync(item.absolute, destination); // same volume only; no copy/delete fallback

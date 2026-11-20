@@ -456,3 +456,103 @@ test('original projects declared through aliases, including a restored backup, s
   assert.equal((await emptyStorageBackups(f.deps)).freedBytes, 0);
   assert.ok(fs.existsSync(path.join(result.backupDir!, selected.relPath, 'file.txt')));
 });
+
+test('both POST routes invalidate after a partial filesystem change followed by a service rejection', t => {
+  const f = fixture(t), agent = f.owner(), output = f.output(f.workspace(agent));
+  const script = path.join(f.base, 'route-failure.mjs');
+  // Isolate Node's experimental ESM mocks in this child only; the ordinary suite needs no flags.
+  // Actual moves/deletions happen solely in the temp PODCODE_HOME fixture.
+  write(script, `
+    import assert from 'node:assert/strict';
+    import fs from 'node:fs';
+    import { mock } from 'node:test';
+    const source = ${JSON.stringify(new URL('../server/storageCleanup.ts', import.meta.url).href)};
+    const actual = await import(source);
+    const output = ${JSON.stringify(output)};
+    const backup = output + '-backup';
+    mock.module(source, { cache: true, namedExports: {
+      ...actual,
+      cleanupStorage: async () => { fs.renameSync(output, backup); throw new Error('cleanup failed after move'); },
+      emptyStorageBackups: async () => { fs.rmSync(backup, { recursive: true }); throw new Error('empty failed after removal'); },
+    }});
+    const { registerStorageCleanupRoutes } = await import(${JSON.stringify(new URL('../server/storageCleanupRoutes.ts', import.meta.url).href)});
+    const handlers = new Map();
+    const app = { get: (url, fn) => handlers.set('GET ' + url, fn), post: (url, fn) => handlers.set('POST ' + url, fn) };
+    let invalidated = 0;
+    registerStorageCleanupRoutes(app, { dataDir: ${JSON.stringify(f.dataDir)}, agents: () => [], projects: () => [], onChange: () => { invalidated++; } });
+    const res = { json: () => assert.fail('An operation error must propagate instead of sending success JSON') };
+    await assert.rejects(handlers.get('POST /api/storage/cleanup')({ body: { ids: ['a'.repeat(64)] } }, res), /cleanup failed after move/);
+    assert.equal(fs.existsSync(output), false);
+    assert.equal(fs.existsSync(backup), true);
+    assert.equal(invalidated, 1);
+    await assert.rejects(handlers.get('POST /api/storage/backups/empty')({ body: { confirm: true } }, res), /empty failed after removal/);
+    assert.equal(fs.existsSync(backup), false);
+    assert.equal(invalidated, 2);
+  `);
+  execFileSync(process.execPath, ['--experimental-test-module-mocks', script], { env: gitEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+});
+
+test('a running build protects its entire worktree and rejects a previously listed worktree id', async t => {
+  const f = fixture(t), agent = f.owner(), { target } = f.worktree(agent);
+  const other = f.output(f.workspace(agent));
+  const prior = await listStorageCleanupCandidates(f.deps);
+  const tree = prior.find(item => item.kind === 'worktree')!;
+  const executable = path.join(target, 'release/mac-arm64/PodCode.app/Contents/MacOS/PodCode');
+  write(executable);
+  f.deps.desktopExecutable = executable;
+  const output = f.output(target);
+  const listed = await listStorageCleanupCandidates(f.deps);
+  assert.deepEqual(listed.map(item => item.relPath), [path.relative(f.dataDir, other)]);
+  const result = await cleanupStorage([tree.id], f.deps);
+  assert.match(result.skipped[0].reason, /running PodCode app/);
+  assert.ok(fs.existsSync(output) && fs.existsSync(executable));
+});
+
+test('the running bundle protects candidate ancestors, descendants and sibling build outputs', async t => {
+  const f = fixture(t), workspace = f.workspace(f.owner());
+  const checkout = path.join(workspace, 'restart-build');
+  const target = f.output(checkout);
+  const release = path.join(checkout, 'release');
+  const enclosing = f.output(release, 'build-mac');
+  const sibling = f.output(path.join(workspace, 'separate'));
+  const prior = await listStorageCleanupCandidates(f.deps);
+  const ids = prior.filter(item => [target, enclosing].includes(path.join(f.dataDir, item.relPath))).map(item => item.id);
+  assert.equal(ids.length, 2);
+  const executable = path.join(enclosing, 'PodCode.app/Contents/MacOS/PodCode');
+  write(executable);
+  f.deps.desktopExecutable = executable;
+  assert.deepEqual((await listStorageCleanupCandidates(f.deps)).map(item => item.relPath), [path.relative(f.dataDir, sibling)]);
+  const result = await cleanupStorage(ids, f.deps);
+  assert.equal(result.skipped.length, 2);
+  assert.ok(result.skipped.every(item => /running PodCode app/.test(item.reason)));
+  assert.ok(fs.existsSync(executable) && fs.existsSync(target));
+});
+
+test('unknown build source protects outputs beside packaged apps even when the bundle is inside another output', async t => {
+  const f = fixture(t), workspace = f.workspace(f.owner());
+  const output = f.output(workspace);
+  const separate = f.output(f.workspace(f.owner('another')));
+  const selected = (await listStorageCleanupCandidates(f.deps)).find(item => path.join(f.dataDir, item.relPath) === output)!;
+  write(path.join(workspace, 'dist/PodCode.app/Contents/MacOS/PodCode'));
+  f.deps.desktopExecutable = path.join(f.base, 'unavailable');
+  assert.deepEqual((await listStorageCleanupCandidates(f.deps)).map(item => item.relPath), [path.relative(f.dataDir, separate)]);
+  const result = await cleanupStorage([selected.id], f.deps);
+  assert.match(result.skipped[0].reason, /location is unknown.*packaged app/);
+  assert.ok(fs.existsSync(output));
+});
+
+test('an installed copy protects the recorded source after the packaged output is gone', { skip: process.platform !== 'darwin' }, async t => {
+  const f = fixture(t), workspace = f.workspace(f.owner());
+  const source = path.join(workspace, 'restart-build');
+  const output = f.output(source);
+  const bundle = path.join(f.base, 'Applications/PodCode.app');
+  const executable = path.join(bundle, 'Contents/MacOS/PodCode');
+  write(executable);
+  const selected = (await listStorageCleanupCandidates(f.deps))[0];
+  execFileSync('/usr/bin/xattr', ['-w', 'com.podcode.build-root', source, bundle]);
+  f.deps.desktopExecutable = executable;
+  assert.deepEqual(await listStorageCleanupCandidates(f.deps), []);
+  const result = await cleanupStorage([selected.id], f.deps);
+  assert.match(result.skipped[0].reason, /running PodCode app/);
+  assert.ok(fs.existsSync(output));
+});

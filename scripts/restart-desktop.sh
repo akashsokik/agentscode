@@ -122,6 +122,16 @@ restart() {
     open "$APP"
     return 1
   fi
+  # Remember the physical source of this local installation without changing signed files.
+  # Older or externally installed builds use the cleanup service's packaged-app fallback.
+  source_dir=$(cd -P "$NEW" && cd -P .. && pwd -P)
+  case "${source_dir%/*}" in
+    */release) source_dir=${source_dir%/release/*} ;;
+    *) while [ -n "$source_dir" ] && [ ! -e "$source_dir/.git" ]; do source_dir=${source_dir%/*}; done ;;
+  esac
+  if [ -n "$source_dir" ]; then
+    /usr/bin/xattr -w com.podcode.build-root "$source_dir" "$APP" 2>/dev/null || true
+  fi
   open "$APP"
   i=0; while [ "$i" -lt 30 ] && ! running; do wait_ticks 1; i=$((i + 1)); done
   if ! running; then say "Opened $APP, but it is not running yet."; return 0; fi
