@@ -194,7 +194,7 @@ export function Decisions({ links: state }: { links: IssueLinksState }) {
       <div className="flex flex-col">
         {ids.map(id => (
           <div key={id} className="flex h-[30px] min-w-0 items-center gap-2 px-1.5 font-sans text-[12.5px]">
-            <RefChip id={id} glyph={false} />
+            <RefChip id={id} />
             <span className="min-w-0 flex-1 truncate text-content/80">{byId.get(id)?.title ?? ''}</span>
           </div>
         ))}

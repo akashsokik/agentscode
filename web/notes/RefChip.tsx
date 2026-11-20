@@ -81,7 +81,7 @@ export function openInNotes(id: string): void {
 export function RefChip({ id, fade, inert = false, glyph = true }: {
   id: string;
   fade?: boolean;
-  /** false inside a section that already names the kind, such as a "Decisions" list (ACH-D37, ACH-D48). */
+  /** Hide only when an identical glyph already appears beside this chip. */
   glyph?: boolean;
   /** Inside another control (a row that is itself a button): a span that still shows its card on hover and opens on click, without being a second tab stop. */
   inert?: boolean;

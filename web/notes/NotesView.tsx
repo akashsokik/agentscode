@@ -114,7 +114,7 @@ function Row({ entry, words = [] }: { entry: RefSummary; words?: readonly string
   return (
     <PanelRow
       id={entry.id}
-      title={<span className="flex min-w-0 items-center gap-2"><StaticChip summary={entry} glyph={false} /><span className="min-w-0 flex-1 truncate"><Highlight text={entry.title} words={words} /></span></span>}
+      title={<span className="flex min-w-0 items-center gap-2"><StaticChip summary={entry} /><span className="min-w-0 flex-1 truncate"><Highlight text={entry.title} words={words} /></span></span>}
       label={`${kindWord(entry.kind)} ${entry.id}: ${entry.title}${status}${entry.by ? `, by ${entry.by}` : ''}, ${shortDate(entry.date)}${entry.replacedBy ? `, ${entry.kind === 'N' ? 'outdated' : 'replaced'} by ${entry.replacedBy}` : entry.replaces ? `, replaces ${entry.replaces}` : ''}`}
       dim={old}
       meta={old && entry.replacedBy
