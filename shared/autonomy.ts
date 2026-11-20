@@ -77,20 +77,20 @@ const ASK_FIRST_TEXT: Record<keyof AskFirst, string> = {
 };
 
 /**
- * The SuperAgent's instructions for its level. It replaces the old "Always ask the user first" rule
- * in its role text, so a session started before reads the change as it happens.
+ * The SuperAgent's instructions for its level: what it does on its own and what it asks first. A
+ * session started before reads a change as it happens.
  */
 export function autonomyInstructions(level: SuperAutonomy, askFirst: AskFirst, paused: boolean): string {
   const asks = ASK_FIRST_KEYS.filter(k => askFirst[k]).map(k => ASK_FIRST_TEXT[k]);
   const acts = level === 'full' ? FULL_ACTIONS.map(a => a.label.toLowerCase())
     : level === 'standard' ? ['merge approved branches into local main', 'rebuild and restart PodCode', 'clean up merged branches'] : [];
   return [
-    `Autonomy (Settings, SuperAgent): ${level === 'full' ? 'Full' : level === 'standard' ? 'Standard' : 'Ask'}. This replaces the "Always ask the user first" rule in your role instructions.`,
+    `Autonomy (Settings, SuperAgent): ${level === 'full' ? 'Full' : level === 'standard' ? 'Standard' : 'Ask'}. It says which steps you take on your own and which you ask about first.`,
     paused ? 'The user PAUSED you: start nothing on your own (no take_action, no new agents, no handing out issues) until they resume. Their own messages and the work they asked for still go.' : '',
     acts.length ? `Do these yourself, without ask_user, through take_action (it hands the step to an agent, checks the rules and logs it in Decisions with how to undo it): ${acts.join('; ')}.` : 'Ask the user with ask_user before every merge, restart, push, release, deploy, cleanup, new project or costly work; then do it with take_action and the answered question id.',
     level !== 'full' && acts.length ? 'Ask with ask_user before anything else of that kind (push, release, deploy, new projects, costly work); then use take_action with the answered question id.' : '',
     asks.length ? `Always ask first, before: ${asks.join('; ')}. Use ask_user with for_action {kind, target, task}; PodCode adds Yes and No and shows the task; the user\'s Yes is good for that one step and task text, once, within a day; then take_action with approved_ask_id and the same task.` : '',
-    'At every level, never: rewrite or force-push main, the default branch or a tag. Every agent\'s git runs PodCode\'s push check, which refuses a push that overwrites or deletes what the remote has; the one exception is a force_push the user approved, for one named feature branch of one project, once (ALL-D13: take_action gives the agent a one-time token). Tasks you send that ask for it are refused early too. Before cleanup or deletion, make a backup (a backup/… ref that holds the commit, or a copy in a backups folder) and name it; take_action checks it. A merge names its project, branch and the exact commit a reviewer the user made passed, in answer to a review request for that branch and commit; take_action checks the branch is still at that commit. Never restart an agent the user stopped; stay within the daily budget, which counts the work you start on your own. Push fast-forward only.',
+    'At every level, never: rewrite or force-push main, the default branch or a tag. Every agent\'s git runs PodCode\'s push check, which refuses a push that overwrites or deletes what the remote has; the one exception is a force_push the user approved, for one named feature branch of one project, once (take_action gives the agent a one-time token). Tasks you send that ask for it are refused early too. Before cleanup or deletion, make a backup (a backup/… ref that holds the commit, or a copy in a backups folder) and name it; take_action checks it. A merge names its project, branch and the exact commit a reviewer the user made passed, in answer to a review request for that branch and commit; take_action checks the branch is still at that commit. Never restart an agent the user stopped; stay within the daily budget, which counts the work you start on your own. Push fast-forward only.',
     'Log nothing yourself: take_action records each step in Decisions, with why and how to undo it, and the user can undo it or pause you there.',
   ].filter(Boolean).join('\n');
 }
