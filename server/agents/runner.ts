@@ -1,4 +1,4 @@
-import { noProjectFolder, type Agent, type AgentTask, type ApprovalDecision, type Autonomy, type Entry, type ImageMediaType, type MemoryEntry, type ProfileEntry, type Project, type Question, type TurnUsage } from '../../shared/types.ts';
+import { noProjectFolder, type Agent, type AgentPlan, type AgentTask, type ApprovalDecision, type Autonomy, type Entry, type ImageMediaType, type MemoryEntry, type ProfileEntry, type Project, type PlanStep, type Question, type TurnUsage } from '../../shared/types.ts';
 import { roleInstructions } from '../../shared/roles.ts';
 import { COMMS_INSTRUCTIONS } from '../comms/tools.ts';
 
@@ -73,6 +73,8 @@ export interface RunnerHooks {
   activity(text: string): void;
   /** Paths a tool call pointed at, absolute, so the manager can tell which codebase the agent is in. */
   touched?(paths: string[]): void;
+  /** The plan the engine reported (ACH-73), already normalised; null when it reported an empty one. */
+  plan?(plan: { steps: PlanStep[]; engine: AgentPlan['engine'] } | null): void;
   turnStart(task?: AgentTask): void;
   turnEnd(result: TurnResult): void;
   ready?(): void;

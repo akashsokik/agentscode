@@ -35,6 +35,7 @@ import {
   type Snapshot,
   type SuperAction,
   type SuperAsk,
+  type AgentProduced,
   type SuperIssue,
   type SuperState,
   type TurnMeta,
@@ -77,6 +78,7 @@ import { HttpError } from './errors.ts';
 import type { Broadcaster } from './hub.ts';
 import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, emptyModels } from './models.ts';
 import { gitRun, isDirectory, isInsideGitRepo, normalizeDir } from './projects.ts';
+import { agentProduced } from './produced.ts';
 import { locate, type Place } from './whereabouts.ts';
 import { openuiGuide } from './openuiGuide.ts';
 import { ALL_CODE, ALL_INDEXES_LIMIT, decisionHint, deriveCode, isActive, isCode, isCurrent, matchDecisions, ProjectRefs, type RefEntry } from './projectRefs.ts';
@@ -1043,6 +1045,7 @@ export class AgentManager {
     delete agent.context;
     delete agent.threadUsage;
     agent.currentTask = null;
+    agent.plan = null;
     agent.status = 'idle';
     agent.activity = '';
     agent.error = null;
@@ -2654,6 +2657,12 @@ export class AgentManager {
         this.hub.broadcast({ type: 'agent', agent });
       },
       touched: (paths) => this.noteWhereabouts(agentId, paths),
+      plan: (plan) => {
+        const agent = live();
+        if (!agent) return;
+        agent.plan = plan ? { ...plan, updatedAt: Date.now() } : null;
+        this.emitAgent(agent);
+      },
       turnStart: (task) => {
         const agent = live();
         if (!agent) return;
@@ -2670,6 +2679,8 @@ export class AgentManager {
         agent.turnStartedAt = Date.now();
         agent.lastActiveAt = agent.turnStartedAt;
         agent.error = null;
+        // A plan belongs to the turn that reported it (ACH-73): a new turn starts without one.
+        agent.plan = null;
         this.seedWhereabouts(agent);
         this.emitAgent(agent);
       },
@@ -2994,6 +3005,12 @@ export class AgentManager {
 
   walkthroughs(agentId: string) {
     return listWalkthroughs(this.walkthroughDir(this.agent(agentId).id));
+  }
+
+  /** What the agent produced recently, for the Overview (ACH-73): read-only, on request. */
+  produced(agentId: string): Promise<AgentProduced> {
+    const agent = this.agent(agentId);
+    return agentProduced({ agent, home: this.homes.path(agent.id), messages: this.store.messages, walkthroughs: this.walkthroughs(agent.id) });
   }
 
   walkthrough(agentId: string, id: string) {

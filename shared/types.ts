@@ -122,6 +122,41 @@ export interface Agent {
    * worktree of one, and the branch checked out there (null outside git). Absent until known.
    */
   workingIn?: WorkingIn;
+  /**
+   * The plan the agent itself reported this turn (ACH-73): Claude's TodoWrite todos or Codex's
+   * plan. Kept after the turn ends, cleared when the next turn or a new session starts. Absent or
+   * null when none was reported; never inferred.
+   */
+  plan?: AgentPlan | null;
+}
+
+export type PlanStepStatus = 'done' | 'active' | 'pending';
+export interface PlanStep { text: string; status: PlanStepStatus }
+export interface AgentPlan {
+  steps: PlanStep[];
+  updatedAt: number;
+  /** The engine that reported it. Codex reports no step in progress, so its steps are done or pending. */
+  engine: 'claude' | 'codex';
+}
+
+/**
+ * What an agent produced recently, for the Overview (ACH-73, GET /api/agents/:id/produced). Read on
+ * request from git, its walkthroughs and its reports; each item carries its own time. A source that
+ * is missing gives [] or null, never a guess.
+ */
+export interface AgentProduced {
+  /** When this was read. */
+  at: number;
+  /** The folder it works in and the branch there; `own` is its own worktree, not a shared project checkout. */
+  where: { folder: string; branch: string | null; own: boolean } | null;
+  /** Commits on its own branch that are not on the base branch, newest first. [] on the base branch or a shared checkout. */
+  commits: { hash: string; subject: string; at: number }[];
+  /** Uncommitted changes there now (a snapshot, not attributed to the agent when `own` is false); null outside git. */
+  uncommitted: { files: number; added: number; removed: number } | null;
+  /** Walkthroughs it published, newest first. */
+  walkthroughs: { id: string; title: string; createdAt: number; branch?: string; commit?: string }[];
+  /** Results it sent with report_result, newest first. */
+  reports: { messageId: string; conversationId: string; toAgentId: string; toName: string; outcome: Report['outcome']; summary: string; at: number }[];
 }
 
 export interface WorkingIn {
