@@ -113,13 +113,22 @@ test('L1: new files count their lines, so a change never reads "+0"; binary ones
   const { home, wt } = repo();
   git(wt, 'mv', 'b.txt', 'c.txt');
   fs.writeFileSync(path.join(wt, 'three.txt'), 'x\ny\nz');
-  fs.writeFileSync(path.join(wt, 'blob.bin'), Buffer.from([0, 1, 2, 10, 10]));
+  fs.writeFileSync(path.join(wt, 'blob.bin'), Buffer.concat([Buffer.alloc(8191, 10), Buffer.from([0, 10])]));
   fs.mkdirSync(path.join(wt, 'dir'));
   fs.writeFileSync(path.join(wt, 'dir', 'inner.txt'), 'in\n');
   const agent: Agent = { ...baseAgent, workingIn: { projectId: 'p1', root: wt, branch: 'feat/x', at: 1 } };
   const out = await agentProduced({ agent, home, messages: [], walkthroughs: [] });
   // a.txt +2; new.txt +1; three.txt +3 (no final newline); dir/inner.txt +1; blob.bin 0; the rename b -> c counts once.
   assert.deepEqual(out.uncommitted, { files: 6, added: 7, removed: 0 });
+});
+
+test('the untracked byte budget bounds line counting but keeps the full changed-file count', async () => {
+  const { home, main } = repo();
+  const contents = Buffer.alloc(1024 * 1024, 120);
+  for (let i = 0; i < 17; i++) fs.writeFileSync(path.join(main, `file-${i}`), contents);
+  const agent: Agent = { ...baseAgent, workingIn: { projectId: 'p1', root: main, branch: 'main', at: 1 } };
+  const out = await agentProduced({ agent, home, messages: [], walkthroughs: [] });
+  assert.deepEqual(out.uncommitted, { files: 17, added: 16, removed: 0 });
 });
 
 test('L2: an agent with its own worktree shows that worktree, even after it read the user\'s checkout', async () => {
@@ -167,10 +176,11 @@ test('L4: the git half is read once per agent until the turn ends, the panel ask
   assert.equal(calls, used, 'reused, also by callers at the same time');
   assert.deepEqual(a.commits, first.commits);
   assert.deepEqual(b.uncommitted, first.uncommitted);
-  const withReport = await read({ messages: [message({ id: 'r', ts: 2, report: { outcome: 'done', summary: 'New.', evidence: '' } })] });
+  const withReport = await read({ now: 1250, messages: [message({ id: 'r', ts: 2, report: { outcome: 'done', summary: 'New.', evidence: '' } })] });
+  assert.equal(withReport.at, first.at, 'a cache hit keeps the time of the original git reading');
   assert.equal(withReport.reports.length, 1, 'reports are always current');
   assert.equal(calls, used, 'and cost no git');
-  await read({ fresh: true });
+  assert.equal((await read({ fresh: true, now: 1500 })).at, 1500);
   assert.equal(calls, used * 2, 'the panel opening reads again');
   cache.invalidate(agent.id);
   await read();

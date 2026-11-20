@@ -29,7 +29,7 @@ function real(p: string): string {
 }
 
 function within(parent: string, child: string): boolean {
-  const rel = path.relative(real(parent), real(child));
+  const rel = path.relative(parent, child);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
@@ -42,7 +42,7 @@ function whereOf(agent: Agent, home: string | null): { folder: string; own: bool
   if (wt) return { folder: wt.path, own: true, base: wt.base, baseCommit: /^[0-9a-f]{40}$/.test(wt.baseCommit) ? wt.baseCommit : null };
   const folder = agent.workingIn?.root ?? null;
   if (!folder) return null;
-  return { folder, own: Boolean(home && within(home, folder)), base: null, baseCommit: null };
+  return { folder, own: Boolean(home && within(real(home), real(folder))), base: null, baseCommit: null };
 }
 
 /** A branch name as a ref that exists here: the local branch, else origin's copy of it. */
@@ -72,19 +72,51 @@ async function baseRef(git: GitRunner, folder: string, place: { base: string | n
 const UNTRACKED_LINE_FILES = 200;
 const UNTRACKED_LINE_BYTES = 1024 * 1024;
 
-/** An untracked file's lines, as git would count them once added: a symlink is one, binary or huge counts none. */
-function untrackedLines(folder: string, file: string): number {
-  const full = path.join(folder, file);
-  if (!within(folder, path.dirname(full))) return 0;
-  try {
-    const stat = fs.lstatSync(full);
-    if (stat.isSymbolicLink()) return 1;
-    if (!stat.isFile() || stat.size === 0 || stat.size > UNTRACKED_LINE_BYTES) return 0;
-    const data = fs.readFileSync(full);
-    if (data.subarray(0, 8000).includes(0)) return 0;
-    const newlines = data.reduce((n, byte) => n + (byte === 10 ? 1 : 0), 0);
-    return newlines + (data[data.length - 1] === 10 ? 0 : 1);
-  } catch { return 0; }
+const UNTRACKED_TOTAL_BYTES = 16 * UNTRACKED_LINE_BYTES;
+const BINARY_PREFIX_BYTES = 8192;
+
+/** Count complete files only. Reuse one buffer and yield to I/O between chunks, even for dense newlines. */
+async function untrackedLines(folder: string, files: string[]): Promise<number> {
+  let remaining = UNTRACKED_TOTAL_BYTES;
+  let total = 0;
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  const root = await fs.promises.realpath(folder).catch(() => null);
+  if (!root) return 0;
+  for (const file of files.slice(0, UNTRACKED_LINE_FILES)) {
+    const full = path.join(folder, file);
+    let handle: fs.promises.FileHandle | undefined;
+    try {
+      const parent = await fs.promises.realpath(path.dirname(full));
+      if (!within(root, parent)) continue;
+      const entry = await fs.promises.lstat(full);
+      if (entry.isSymbolicLink()) { total++; continue; }
+      if (!entry.isFile() || !entry.size || entry.size > Math.min(remaining, UNTRACKED_LINE_BYTES)) continue;
+      handle = await fs.promises.open(full, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > Math.min(remaining, UNTRACKED_LINE_BYTES)) continue;
+
+      let offset = 0;
+      let lines = 0;
+      let lastByte = 0;
+      while (offset < stat.size) {
+        const limit = offset < BINARY_PREFIX_BYTES ? BINARY_PREFIX_BYTES - offset : buffer.length;
+        const { bytesRead } = await handle.read(buffer, 0, Math.min(limit, stat.size - offset), offset);
+        if (!bytesRead) break;
+        remaining -= bytesRead;
+        const chunk = buffer.subarray(0, bytesRead);
+        if (offset < BINARY_PREFIX_BYTES && chunk.includes(0)) break;
+        for (let i = chunk.indexOf(10); i !== -1; i = chunk.indexOf(10, i + 1)) lines++;
+        lastByte = chunk[bytesRead - 1];
+        offset += bytesRead;
+      }
+      if (offset && offset === stat.size) total += lines + (lastByte === 10 ? 0 : 1);
+    } catch {
+      // An untracked path may disappear or become unreadable during discovery.
+    } finally {
+      await handle?.close();
+    }
+  }
+  return total;
 }
 
 /** Worktree setup links (a node_modules or .venv symlink) are not changes. */
@@ -124,7 +156,7 @@ async function uncommitted(git: GitRunner, folder: string): Promise<AgentProduce
     }
   }
   // New files are changes too: count their lines, as `git add` then `git diff` would.
-  for (const file of untracked.slice(0, UNTRACKED_LINE_FILES)) added += untrackedLines(folder, file);
+  if (untracked.length) added += await untrackedLines(folder, untracked);
   return { files: paths.size, added, removed };
 }
 
@@ -164,12 +196,12 @@ export const PRODUCED_TTL_MS = 60_000;
  * opening) or it is a minute old. Callers at the same time share one reading.
  */
 export class ProducedCache {
-  private entries = new Map<string, { key: string; at: number; value: Promise<GitPart> }>();
+  private entries = new Map<string, { key: string; at: number; value: Promise<GitPart & { at: number }> }>();
 
-  get(agentId: string, key: string, now: number, fresh: boolean, read: () => Promise<GitPart>): Promise<GitPart> {
+  get(agentId: string, key: string, now: number, fresh: boolean, read: () => Promise<GitPart>): Promise<GitPart & { at: number }> {
     const hit = this.entries.get(agentId);
     if (hit && hit.key === key && !fresh && now - hit.at < PRODUCED_TTL_MS) return hit.value;
-    const value = read();
+    const value = read().then(part => ({ ...part, at: now }));
     this.entries.set(agentId, { key, at: now, value });
     // A failed reading is not kept.
     value.catch(() => { if (this.entries.get(agentId)?.value === value) this.entries.delete(agentId); });
