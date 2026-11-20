@@ -163,7 +163,7 @@ export function InGit({ issue, links: state }: { issue: SuperIssue; links: Issue
                   {git.commits.map(c => (
                     <span key={c.sha} className="flex min-h-7 min-w-0 items-center">
                       <span className="mr-2 shrink-0"><CommitChip sha={c.sha} title={c.subject} /></span>
-                      <span className="truncate text-content/80">{c.subject}</span>
+                      <span className="min-w-0 flex-1 truncate text-content/80">{c.subject}</span>
                     </span>
                   ))}
                 </span>
@@ -195,7 +195,7 @@ export function Decisions({ links: state }: { links: IssueLinksState }) {
         {ids.map(id => (
           <div key={id} className="flex h-[30px] min-w-0 items-center gap-2 px-1.5 font-sans text-[12.5px]">
             <RefChip id={id} glyph={false} />
-            <span className="truncate text-content/80">{byId.get(id)?.title ?? ''}</span>
+            <span className="min-w-0 flex-1 truncate text-content/80">{byId.get(id)?.title ?? ''}</span>
           </div>
         ))}
       </div>

@@ -100,3 +100,14 @@ test('all reference labels have the same class and content colour, with only a s
   assert.doesNotMatch(source('web/ui/IssueKeyChip.tsx'), /ref-old|replaced=/, 'cancel is a status, not replacement');
   assert.match(source('web/ui/MentionText.tsx'), /<AgentAvatar agent=\{agent\}/, 'avatar setting stays authoritative');
 });
+
+test('reference IDs keep their natural width and the neighbouring Notes title ellipsizes', () => {
+  const ref = source('web/notes/RefChip.tsx');
+  assert.match(ref, /const className = `ref-chip shrink-0/);
+  const css = source('web/styles.css');
+  for (const selector of ['.ref-chip {', '.ref-chip-label {']) {
+    const rules = css.split(selector)[1].split('}')[0];
+    assert.doesNotMatch(rules, /max-width|overflow\s*:|text-overflow/);
+  }
+  assert.match(source('web/notes/NotesView.tsx'), /<StaticChip[^>]+\/>\s*<span className="min-w-0 flex-1 truncate">/);
+});
