@@ -6,13 +6,14 @@ import type { Root } from '../api.ts';
 import { rolePreset } from '../../shared/roles.ts';
 import { cost, relativeTime } from '../format.ts';
 import { refreshGit, useGitStatus } from '../git.ts';
-import { focusedAgentId, focusedChannelId, focusedKind, keepsSuperPanel, open, openToSide, setRightPanel, setRightView, setSuperView, SUPER_VIEWS, useLayout, type Layout, type SuperView } from '../layout.ts';
+import { focusedAgentId, focusedChannelId, focusedKind, keepsSuperPanel, open, openToSide, setPanelTabs, setRightPanel, setRightView, setSuperView, SUPER_VIEWS, useLayout, type Layout, type SuperView } from '../layout.ts';
 import { ALL_PROJECTS } from '../projects.ts';
 import { useApp } from '../store.ts';
 import { AgentStatus } from '../ui/AgentStatus.tsx';
 import { ResizeHandle, useColumnWidth } from '../ui/ResizeHandle.tsx';
 import { Empty, HeaderButton, IconTab, Loading, MenuRow, TextButton } from '../ui/common.tsx';
-import { ContextMenu, type MenuAnchor } from '../ui/ContextMenu.tsx';
+import { ContextMenu, openContextMenu, type MenuAnchor } from '../ui/ContextMenu.tsx';
+import { enabledPanelTabs, visiblePanelTabs, togglePanelTab } from './panelTabVisibility.ts';
 import { fitPanelTabs, stripKeyTarget } from './panelTabsFit.ts';
 import { useElementWidth } from '../ui/useElementWidth.ts';
 import { Bot, CheckCircle, CircleDot, Clock, DashboardSquare, FileDiff, Folder, GitBranch, ListBullet, MessageMultiple, MoreHorizontal, PanelRight, RefreshCw, StickyNote, type IconComponent } from '../mono/icons.tsx';
@@ -240,7 +241,7 @@ function TeamOverview() {
 
 /** The Overview tab: the focused agent, or the team when no agent has focus. */
 function OverviewView({ agent, git }: { agent: Agent | undefined; git: GitStatus | null }) {
-  return agent ? <AgentOverview key={agent.id} agent={agent} git={git} /> : <TeamOverview />;
+  return agent ? <AgentOverview key={agent.id} agent={agent} git={git} team={agent.role === 'super'} /> : <TeamOverview />;
 }
 
 type PanelView = Layout['rightView'] | SuperView;
@@ -291,10 +292,15 @@ export function RightPanel() {
   const root = useMemo(() => changesRoot(agent), [agent?.id, agent?.projectIds?.[0]]);
   const { status: git } = useGitStatus(root, agent ? `${agent.status}:${agent.turns}` : undefined);
   const isSuper = agent?.role === 'super';
-  const tabs: { view: PanelView; label: string; icon: IconComponent }[] = isSuper ? SUPER_PANEL_TABS : PANEL_TABS;
+  const allTabs: { view: PanelView; label: string; icon: IconComponent }[] = isSuper ? SUPER_PANEL_TABS : PANEL_TABS;
   const view: PanelView = isSuper
     ? superPanelView(layout.superView, SUPER_VIEWS)
     : PANEL_TABS.some(t => t.view === layout.rightView) ? layout.rightView : 'overview';
+  const panelType = isSuper ? 'super' : 'agent';
+  const enabled = enabledPanelTabs(panelType, layout.panelTabs?.[panelType]);
+  const visible = visiblePanelTabs(panelType, layout.panelTabs?.[panelType], view);
+  const tabs = allTabs.filter(t => visible.includes(t.view));
+  const [customAnchor, setCustomAnchor] = useState<MenuAnchor | null>(null);
   const pick = (next: PanelView) => (isSuper ? setSuperView(next as SuperView) : setRightView(next as Layout['rightView']));
   const superTabs = useSuperTabs(isSuper ? view : '');
   const column = useColumnWidth('panel', 320, 260, 0.4);
@@ -345,7 +351,7 @@ export function RightPanel() {
     <aside aria-label="Panel" style={{ width: column.width }} className="body-glass relative flex shrink-0 flex-col max-xl:absolute max-xl:inset-y-0 max-xl:right-0 max-xl:z-20 max-xl:border-l max-xl:border-stroke">
       {/* One gap between every tab and before the collapse button (ACH-D30); the strip is clipped, so
           it can never reach under that button. */}
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke pl-2 pr-1.5">
+      <div onContextMenu={e => { setMoreAnchor(null); openContextMenu(e, setCustomAnchor); }} className="flex h-9 shrink-0 items-center gap-1 pl-2 pr-1.5">
         <div ref={area} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
         <div ref={list} role="tablist" aria-label="Panel" onKeyDown={onKeyDown} className="flex min-w-0 items-center gap-1">
           {shown.map(tab => {
@@ -385,12 +391,24 @@ export function RightPanel() {
         ) : null}
         </div>
         <HeaderButton icon={PanelRight} label="Hide panel" onClick={() => setRightPanel(false)} />
+        {customAnchor ? (
+          <ContextMenu anchor={customAnchor} onClose={() => setCustomAnchor(null)} label={`Show ${isSuper ? 'SuperAgent' : 'agent'} panel tabs`}>
+            <p className="px-2 pb-1 pt-1 text-[11px] text-content/45">Show tabs · {isSuper ? 'SuperAgent' : 'Agent'}</p>
+            {allTabs.map(tab => <MenuRow key={tab.view} role="menuitemcheckbox" density="compact" icon={tab.icon} title={tab.label}
+              checked={enabled.includes(tab.view) || view === tab.view} hint={view === tab.view ? 'Open' : undefined}
+              disabled={view === tab.view || (enabled.length === 1 && enabled.includes(tab.view))}
+              onSelect={() => setPanelTabs(panelType, togglePanelTab(panelType, layout.panelTabs?.[panelType], view, tab.view))} />)}
+            <MenuRow title="Reset to default" density="compact" onSelect={() => { setPanelTabs(panelType); setCustomAnchor(null); }} />
+            <p className="px-2 py-1 text-[11px] text-content/40">Hidden tabs are in the command palette.</p>
+          </ContextMenu>
+        ) : null}
         {moreAnchor && hidden.length ? (
           <ContextMenu anchor={moreAnchor} onClose={() => setMoreAnchor(null)} label="More panel tabs" width={200}>
             {hidden.map(tab => {
               const n = count(tab.view);
               return <MenuRow key={tab.view} icon={tab.icon} title={n ? `${tab.label} (${n})` : tab.label} onSelect={() => { setMoreAnchor(null); pick(tab.view); }} />;
             })}
+            <MenuRow title="Customize tabs…" onSelect={() => { setCustomAnchor(moreAnchor); setMoreAnchor(null); }} />
           </ContextMenu>
         ) : null}
       </div>

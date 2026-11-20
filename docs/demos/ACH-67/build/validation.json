@@ -1,0 +1,36 @@
+{
+  "base": "a9157e0",
+  "typecheck": "passed",
+  "build": "passed",
+  "full_suite": {
+    "passed": 1146,
+    "failed": 0,
+    "skipped": 0
+  },
+  "rendering": {
+    "working": true,
+    "waiting": true,
+    "idle": true,
+    "team": true,
+    "pageExceptions": [],
+    "producedSource": "ACH-73 contract fixtures, not integrated backend",
+    "planSource": "seeded optional Agent.plan contract"
+  },
+  "real_temp_api": {
+    "approvalStatus": 200,
+    "answer": "Keep the helpful hint",
+    "messageFocus": true,
+    "diffOpened": true
+  },
+  "tabs": {
+    "checkboxRoles": true,
+    "activeGuard": true,
+    "keyboard": true,
+    "persisted": true,
+    "paletteTransientReveal": true,
+    "reset": true,
+    "overflowExcludesHidden": true
+  },
+  "providerCalls": 0,
+  "temporaryServerStopped": true
+}

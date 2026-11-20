@@ -1,3 +1,4 @@
+import { PANEL_VIEWS, PANEL_VIEW_LABELS, enabledPanelTabs } from '../right/panelTabVisibility.ts';
 /**
  * The command palette (Cmd+K): jump to an agent, a channel or a project, or run an app action,
  * by typing a few letters. It is a Modal, so App treats it as one more dialog: other shortcuts
@@ -9,7 +10,7 @@ import { rolePreset } from '../../shared/roles.ts';
 import { api } from '../api.ts';
 import { openBrowser } from '../browser.ts';
 import { shortPath } from '../format.ts';
-import { canCloseTab, closeTab, currentProjectId, focusedAgentId, focusedChannelId, open, openToSide, setProject, setRightPanel, setSidebar, setSidebarView, useLayout } from '../layout.ts';
+import { canCloseTab, closeTab, currentProjectId, focusedAgentId, focusedChannelId, open, openToSide, setProject, setRightPanel, setRightView, setSuperView, focusedKind, keepsSuperPanel, setSidebar, setSidebarView, useLayout } from '../layout.ts';
 import { rankCommands } from '../paletteMatch.ts';
 import { IS_MAC } from '../platform.ts';
 import { SHORTCUT_KEYS, SHORTCUTS } from '../shortcuts.ts';
@@ -147,6 +148,14 @@ function useCommands(actions: PaletteActions): Command[] {
     if (pane?.tabId && canCloseTab(pane.tabId)) action({ id: 'close-tab', title: 'Close tab', icon: X, shortcut: SHORTCUT_KEYS.closeTab, priority: 1, run: () => closeTab(pane.tabId!) });
     action({ id: 'sidebar', title: layout.sidebar ? 'Hide sidebar' : 'Show sidebar', keywords: 'toggle navigation', icon: PanelLeft, shortcut: SHORTCUT_KEYS.sidebar, priority: 1, run: () => setSidebar(!layout.sidebar) });
     action({ id: 'panel', title: layout.rightPanel ? 'Hide panel' : 'Show panel', keywords: 'toggle right overview', icon: PanelRight, shortcut: SHORTCUT_KEYS.panel, priority: 1, run: () => setRightPanel(!layout.rightPanel) });
+    const panelAgent = keepsSuperPanel(focusedKind(layout)) ? snapshot.agents.find(a => a.role === 'super') : snapshot.agents.find(a => a.id === focusedAgentId(layout));
+    const panelType = panelAgent?.role === 'super' ? 'super' : 'agent';
+    const enabledTabs = enabledPanelTabs(panelType, layout.panelTabs?.[panelType]);
+    for (const view of PANEL_VIEWS[panelType]) {
+      action({ id: `panel-view:${view}`, title: `Open ${PANEL_VIEW_LABELS[view]} panel tab`, keywords: 'right panel hidden view',
+        hint: enabledTabs.includes(view) ? undefined : 'Hidden tab', icon: PanelRight, priority: 1,
+        run: () => panelType === 'super' ? setSuperView(view as import('../layout.ts').SuperView) : setRightView(view as import('../layout.ts').Layout['rightView']) });
+    }
     action({ id: 'browser', title: 'New browser tab', keywords: 'web preview localhost url page open site', icon: Globe, shortcut: SHORTCUT_KEYS.browser, priority: 1, run: side => openBrowser('', side) });
     const terminalProject = snapshot.projects.find(p => p.id === (layout.projectId ?? snapshot.projects[0]?.id)) ?? snapshot.projects[0];
     if (terminalProject) {

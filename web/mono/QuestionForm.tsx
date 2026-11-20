@@ -17,12 +17,13 @@ import {
 } from "./userQuestion.ts";
 
 type Props = {
+  compact?: boolean;
   prompt: UserQuestionPrompt;
   onReply: (requestId: number, reply: UserQuestionReply) => void;
   onInteraction?: (requestId: number) => void;
 };
 
-export function QuestionForm({ prompt, onReply, onInteraction }: Props) {
+export function QuestionForm({ prompt, onReply, onInteraction, compact = false }: Props) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
@@ -96,7 +97,7 @@ export function QuestionForm({ prompt, onReply, onInteraction }: Props) {
 
   return (
     <div
-      className="px-1.5 pb-1.5"
+      className={compact ? "min-w-0" : "px-1.5 pb-1.5"}
       data-question-form
       onPointerDownCapture={interact}
       onClickCapture={interact}
@@ -105,7 +106,7 @@ export function QuestionForm({ prompt, onReply, onInteraction }: Props) {
       onChangeCapture={interact}
     >
       <form
-        className="rounded-lg border border-content/10 bg-content/3 px-3 py-2.5"
+        className={compact ? "min-w-0" : "rounded-lg border border-content/10 bg-content/3 px-3 py-2.5"}
         onSubmit={(event) => {
           event.preventDefault();
           continueCurrent();
@@ -134,6 +135,7 @@ export function QuestionForm({ prompt, onReply, onInteraction }: Props) {
         </div>
         <div className="mt-2">
           <QuestionFields
+            compact={compact}
             key={question.id}
             question={question}
             selected={answers[question.id] ?? []}
@@ -203,12 +205,14 @@ export function QuestionForm({ prompt, onReply, onInteraction }: Props) {
 }
 
 function QuestionFields({
+  compact = false,
   question,
   selected,
   custom,
   onSelect,
   onCustom,
 }: {
+  compact?: boolean;
   question: UserQuestion;
   selected: string[];
   custom: string;
@@ -312,7 +316,7 @@ function QuestionFields({
                     setHighlighted(optionIndex);
                     onSelect(option.id);
                   }}
-                  className={`flex w-full items-start gap-2 rounded-md border px-2 py-1.5 text-left ${
+                  className={`flex w-full items-start gap-2 rounded-md ${compact ? "" : "border"} px-2 py-1.5 text-left ${
                     active
                       ? "border-content/35 bg-selection"
                       : "border-content/10 hover:bg-content/5"

@@ -192,7 +192,7 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
   /** A keyboard shortcut at the end of the row, as a quiet key chip (ACH-D26). */
   shortcut?: KeySpec;
   /** Defaults to MenuRowRole: 'menuitem' inside a ContextMenu, 'option' in pickers. */
-  role?: 'option' | 'menuitem';
+  role?: 'option' | 'menuitem' | 'menuitemcheckbox';
   /** The chosen value, with a check mark and the quiet fill. */
   selected?: boolean;
   /** Multi-select: a check mark without a fill, so the keyboard row stays readable. */
@@ -216,6 +216,7 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
       type="button"
       role={role}
       aria-selected={role === 'option' ? selected ?? checked ?? current : undefined}
+      aria-checked={role === 'menuitemcheckbox' ? Boolean(checked) : undefined}
       aria-current={role === 'menuitem' && current ? 'true' : undefined}
       disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}

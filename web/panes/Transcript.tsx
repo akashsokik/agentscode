@@ -748,7 +748,7 @@ function inView(el: Element | null, scroller: Element | null): boolean {
  * Enter allows and Esc denies, for the first approval of the pane you are in while it is on screen
  * (approvalKeyAction says when). Deny by its button can carry a note.
  */
-function ApprovalRow({ approval }: { approval: Approval }) {
+export function ApprovalRow({ approval, compact = false }: { approval: Approval; compact?: boolean }) {
   const [noting, setNoting] = useState(false);
   const [note, setNote] = useState('');
   const [details, setDetails] = useState(false);
@@ -797,17 +797,17 @@ function ApprovalRow({ approval }: { approval: Approval }) {
   }, [approval.id]);
 
   // Inside a chip button the key reads quietly, as the chip's own text (ACH-D26).
-  const key = (spec: KeySpec) => <Kbd spec={spec} quiet className="font-normal opacity-80" />;
+  const key = (spec: KeySpec) => compact ? null : <Kbd spec={spec} quiet className="font-normal opacity-80" />;
   return (
-    <div ref={root} data-approval={approval.id} className={cx(GUTTER, 'px-4 py-1.5 font-sans')}>
-      <AgentAvatar agent={agent ?? { id: approval.agentId }} className="size-[22px]" />
+    <div ref={root} data-approval={approval.id} className={compact ? 'min-w-0 font-sans' : cx(GUTTER, 'px-4 py-1.5 font-sans')}>
+      {!compact ? <AgentAvatar agent={agent ?? { id: approval.agentId }} className="size-[22px]" /> : null}
       <div role="group" aria-label={plan ? 'Plan waiting for your approval' : 'Action waiting for your approval'} className="flex min-w-0 flex-col items-start">
         <div className="flex h-[22px] w-full min-w-0 items-center gap-1.5 text-[12.5px]">
           {agent ? <span className="shrink-0 font-semibold text-content/90">{agent.name}</span> : null}
           <span className="min-w-0 truncate text-warning">{plan ? 'has a plan for your OK' : 'needs your OK'}</span>
           <time dateTime={new Date(approval.createdAt).toISOString()} title={new Date(approval.createdAt).toLocaleString()} className="ml-auto shrink-0 pl-2 text-[11.5px] tabular-nums text-content/30">{formatClockTime(approval.createdAt)}</time>
         </div>
-        <div className="mt-1 w-fit min-w-[min(100%,22rem)] max-w-[min(100%,40rem)] rounded-xl bg-content/[0.055] px-3 py-2.5">
+        <div className={compact ? "mt-1 min-w-0 w-full" : "mt-1 w-fit min-w-[min(100%,22rem)] max-w-[min(100%,40rem)] rounded-xl bg-content/[0.055] px-3 py-2.5"}>
           <p className="min-w-0 break-words text-sm leading-5.5 text-content" title={approval.title}>
             {text.target ? <>{text.lead} <span className="font-semibold">{text.target}</span>?</> : text.lead}
           </p>

@@ -29,7 +29,7 @@ import {
 import { api } from '../api.ts';
 import { shortPath } from '../format.ts';
 import { attempt, useApp } from '../store.ts';
-import { MenuLabel, MenuRow } from '../ui/common.tsx';
+import { ChipButton, TextButton, MenuLabel, MenuRow } from '../ui/common.tsx';
 import { AccessPicker } from '../mono/AccessPicker.tsx';
 import { ContextMeter } from '../mono/ContextMeter.tsx';
 import { contextPercent } from '../../shared/contextUsage.ts';
@@ -37,7 +37,7 @@ import { APPROVAL_KEY_GUARD_MS } from '../approvalText.ts';
 import { ArrowUp, Folder, GitBranch, ImagePlus, MoreHorizontal, RotateCcw, Settings, Square } from '../mono/icons.tsx';
 import { Popover } from '../mono/Popover.tsx';
 import { QuestionForm } from '../mono/QuestionForm.tsx';
-import { questionsFromUnknown, selectedAnswerLabels, type UserQuestionReply } from '../mono/userQuestion.ts';
+import { isOtherOption, questionsFromUnknown, selectedAnswerLabels, type UserQuestionReply } from '../mono/userQuestion.ts';
 import { imageFiles, MAX_IMAGES, pastedImages } from '../attachments.ts';
 import { AttachmentChip } from './ImageViews.tsx';
 import { useComposerImages } from './useComposerImages.ts';
@@ -88,7 +88,8 @@ function ComposerAction({ busy, hasValue, onSend, onStop }: { busy: boolean; has
 }
 
 /** Answers a Claude AskUserQuestion through MonoCode's QuestionForm. */
-function QuestionPrompt({ approval }: { approval: Approval }) {
+export function QuestionPrompt({ approval, compact = false }: { approval: Approval; compact?: boolean }) {
+  const [fullQuestion, setFullQuestion] = useState(false);
   const questions = useMemo(() => questionsFromUnknown({ questions: approval.questions ?? [] }), [approval.questions]);
   const prompt = useMemo(() => ({ requestId: 0, title: approval.title, questions }), [approval.title, questions]);
   const onReply = (_requestId: number, reply: UserQuestionReply) => {
@@ -103,7 +104,14 @@ function QuestionPrompt({ approval }: { approval: Approval }) {
     }
     void attempt(() => api.resolveApproval(approval.id, { allow: true, answers }));
   };
-  return <QuestionForm prompt={prompt} onReply={onReply} />;
+  const one = questions[0];
+  if (compact && !fullQuestion && questions.length === 1 && one && !one.multiSelect && one.options.length > 0 && one.options.length <= 3 && one.options.every(o => !o.description)) {
+    return <div><p className="text-[13px] leading-relaxed">{one.prompt}</p><div className="mt-2.5 flex flex-wrap gap-1.5">
+      {one.options.map(o => <ChipButton key={o.id} onClick={() => isOtherOption(o) ? setFullQuestion(true) : onReply(0, {kind:'answered',answers:{[one.id]:[o.id]}})}>{o.label}</ChipButton>)}
+      {one.allowCustom ? <TextButton onClick={() => setFullQuestion(true)}>Another answer</TextButton> : null}
+    </div></div>;
+  }
+  return <QuestionForm prompt={prompt} onReply={onReply} compact={compact} />;
 }
 
 export function Composer({ agent, project, question, onSettings }: { agent: Agent; project: Project | undefined; question?: Approval; onSettings: () => void }) {

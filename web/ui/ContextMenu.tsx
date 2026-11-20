@@ -19,7 +19,7 @@ export function ContextMenu({ anchor, onClose, label, width = 232, children }: {
   children: ReactNode;
 }) {
   const surface = useRef<HTMLDivElement | null>(null);
-  const items = () => [...(surface.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+  const items = () => [...(surface.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled), [role="menuitemcheckbox"]:not(:disabled)') ?? [])];
 
   // What had focus when the menu opened (a terminal, a tab): it gets focus back on close, unless
   // the chosen action moved focus somewhere on purpose (menuFocus.ts).
