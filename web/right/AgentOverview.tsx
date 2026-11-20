@@ -24,12 +24,11 @@ function Label({ children, trailing, attention = false }: { children: ReactNode;
   return <h3 className={`mb-2 flex items-center justify-between gap-2 text-[11px] font-medium ${attention ? 'text-warning' : 'text-content/50'}`}>{children}<span className="font-normal text-content/40">{trailing}</span></h3>;
 }
 
-function NeedsYou({ approvals, blocked, waiting = [] }: { approvals: Approval[]; blocked: OverviewOutputView[]; waiting?: Agent[] }) {
+function NeedsYou({ approvals, waiting = [], askers }: { approvals: Approval[]; waiting?: Agent[]; askers?: Agent[] }) {
   return <section className="mt-[25px]" aria-label="Needs you">
     <Label attention={approvals.length > 0 || waiting.length > 0} trailing={approvals.length ? `${approvals.length} waiting` : undefined}>Needs you</Label>
-    {approvals.length ? <div className="space-y-5">{approvals.map(a => <div key={a.id}>{a.type === 'question' ? <QuestionPrompt approval={a} compact /> : <ApprovalRow approval={a} compact />}</div>)}</div>
-      : blocked.length ? blocked.map(item => <div key={item.id} className="mb-3"><p className="text-[13px] leading-relaxed text-warning">{item.title}</p><TextButton onClick={item.open}>Read the blocked report</TextButton></div>)
-        : waiting.length ? waiting.map(a => <p key={a.id} className="text-[12px] text-content/55">{a.name} is waiting for your response. <TextButton onClick={()=>message(a)}>Open conversation</TextButton></p>) : <p className="text-[12px] text-content/40">Nothing waiting on you.</p>}
+    {approvals.length ? <div className="space-y-5">{approvals.map(a => <div key={a.id}>{a.type === 'question' ? <QuestionPrompt approval={a} compact asker={askers?.find(agent=>agent.id===a.agentId)} /> : <ApprovalRow approval={a} compact />}</div>)}</div>
+      : waiting.length ? waiting.map(a => <p key={a.id} className="text-[12px] text-content/55">{a.name} is waiting for your response. <TextButton onClick={()=>message(a)}>Open conversation</TextButton></p>) : <p className="text-[12px] text-content/40">Nothing waiting on you.</p>}
   </section>;
 }
 
@@ -87,7 +86,7 @@ export function AgentOverview({ agent, git, team = false }: { agent: Agent; git:
         <h2 className="my-2.5 break-words text-[21px] font-medium leading-[1.35] tracking-[-.35px]">{current.title}</h2>
         {current.activity ? <p className="break-words text-[12px] leading-relaxed text-content/50">{current.activity}</p> : null}
       </>}
-      <NeedsYou approvals={approvals} blocked={data.produced.filter(i => i.needsUser)} waiting={(team ? [...members,agent] : [agent]).filter(a=>a.status==='waiting')} />
+      <NeedsYou approvals={approvals} askers={team?snapshot?.agents:undefined} waiting={(team ? [...members,agent] : [agent]).filter(a=>a.status==='waiting')} />
       {team ? <section className="mt-[25px]" aria-label="Team work">{members.map(a => <button type="button" key={a.id} className={`${ROW} py-[9px]`} onClick={() => open({kind:'agent',agentId:a.id})}>
         <AgentAvatar agent={a} className="mt-0.5 size-[18px]" /><span className="min-w-0 flex-1"><span className="text-[12.5px] font-medium">{a.name}</span><span className="mt-0.5 block line-clamp-2 text-[12px] text-content/55">{overviewNow(a, now).title}</span><span className="mt-0.5 block text-[10.5px] text-content/40">{a.status === 'waiting' ? 'Waiting for you' : a.activity || 'Idle'}</span></span><StatusMark state={a.status === 'working' ? 'pending' : a.status === 'waiting' ? 'warn' : 'pass'} quiet className="mt-0.5 size-3" />
       </button>)}</section> : null}

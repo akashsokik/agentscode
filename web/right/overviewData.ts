@@ -5,7 +5,7 @@ import { open, openToSide, setProject } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { setWorkUi } from '../work/workData.ts';
 
-import { outputRecords, type OverviewTarget, type ProducedSnapshot, type OverviewOutputRecord } from './overviewModel.ts';
+import { overviewOutputRecords, type OverviewTarget, type ProducedSnapshot, type OverviewOutputRecord } from './overviewModel.ts';
 export type OverviewOutputView = OverviewOutputRecord & {open:()=>void};
 function navigate(target:OverviewTarget){
   if(target.kind==='diff')return void attempt(async()=>{const git=await api.gitStatus({agent:target.agentId});if(git.files[0])openToSide({kind:'diff',root:{agent:target.agentId},path:git.files[0].path});});
@@ -24,7 +24,6 @@ export function useOverviewData(agent:Agent,team:boolean):{produced:OverviewOutp
     let alive=true,running=false;
     const scope=`${team?'team':'agent'}:${agent.id}`;
     if(opened.current.scope!==scope)opened.current={scope,ids:new Set()};
-    setSnapshots({});
     const load=async()=>{
       if(running)return;running=true;
       const next:Record<string,ProducedSnapshot>={};let cursor=0;
@@ -46,9 +45,7 @@ export function useOverviewData(agent:Agent,team:boolean):{produced:OverviewOutp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[agent.id,team,signature]);
   const produced=useMemo(()=>{
-    const found=new Map<string,OverviewOutputView>();
-    for(const a of list){const source=snapshots[a.id];if(!source)continue;for(const item of outputRecords(a,source)){if(!found.has(item.id))found.set(item.id,{...item,open:()=>navigate(item.target)});}}
-    return [...found.values()].sort((a,b)=>b.at-a.at).slice(0,12);
-  },[snapshots,signature]);
+    return overviewOutputRecords(list,snapshots,team).map(item=>({...item,open:()=>navigate(item.target)}));
+  },[snapshots,signature,team]);
   return {produced};
 }

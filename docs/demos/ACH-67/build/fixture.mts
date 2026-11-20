@@ -18,7 +18,9 @@ const hub=new Hub();const engines=Object.fromEntries(['claude','codex','orcacode
 const manager=new AgentManager(store,hub,engines,{createRunner:ctx=>new FakeRunner(ctx),dreamEngine:async()=>({text:'{}',tokens:0,costUsd:0}),worktreesRoot:path.join(home,'worktrees')});manager.init();
 UsageTracker.prototype.usage=async engine=>({engine,windows:[],fetchedAt:Date.now()});
 const repo=path.join(home,'search-app');fs.mkdirSync(repo,{recursive:true});
-function git(args:string[]){return execFileSync('git',args,{cwd:repo,env:gitEnv(),encoding:'utf8'}).trim()}
+// Identical branch changes deliberately share one real commit object for the team dedupe check.
+const fixtureCommitDate=new Date(Date.now()-480_000).toISOString();
+function git(args:string[]){return execFileSync('git',args,{cwd:repo,env:{...gitEnv(),GIT_AUTHOR_DATE:fixtureCommitDate,GIT_COMMITTER_DATE:fixtureCommitDate},encoding:'utf8'}).trim()}
 git(['init','-b','main']);git(['config','user.name','Demo']);git(['config','user.email','demo@example.invalid']);fs.writeFileSync(path.join(repo,'SearchView.tsx'),'export const selected = false;\n');git(['add','.']);git(['commit','-m','Initial search view']);
 const project=manager.addProject({path:repo,name:'Search app'});
 const ids:Record<string,string>={};

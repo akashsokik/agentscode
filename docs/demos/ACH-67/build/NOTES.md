@@ -1,6 +1,6 @@
 # ACH-67: approved Work sheet implementation
 
-Current status: integrated Produced-only ACH-73 tip `e922f4b` on this feature branch; uses shared AgentProduced with fresh-on-open requests. Real-backend fixture validation and 1,156 tests passed. No plans, main merge, restart or push. See final integration section below.
+Current status: integrated Produced-only ACH-73 tip `e922f4b` on this feature branch; uses shared AgentProduced with fresh-on-open requests. Real-backend fixture validation and 1,158 tests passed, including the team review fixes below. No plans, main merge, restart or push. See final integration section below.
 
 Base: local main `a9157e0` (six commits ahead of origin at start). Fetched origin before branching `feat/ACH-67-overview-build`; did not reset or push local main. Demo reference: `954b55c`, concept A (ACH-D98), updated by the later ACH-D100 decision: no plan steps or step bars. This implements the real web panel and retains the approved tab menu (ACH-D92). Initial implementation 9da5158 is superseded by the D100 follow-up; integrate the branch tip, not 9da alone.
 
@@ -112,3 +112,19 @@ Verified: fresh=1 request on Overview open and reopen; real endpoint own=true, o
 Current built captures: integrated-{working,waiting,idle,team}-{app,panel}.png. Integrated-comparison-{working,waiting,idle,team}.png and their HTML pages compare the real-backend UI with the earlier A reference (D100 intentionally removes its bar). Initial contract-fixture screenshots remain as historical evidence; these integrated captures supersede their backend limitation.
 
 Final combined source checks: typecheck exit 0, build exit 0, full Node suite 1,156 passed/0 failed/0 skipped. Logs /tmp/ach67-combined-{typecheck,build,tests}.log. Separate hook lifecycle browser check: 7 passed/0 failed. Temporary server stopped; no real data or provider calls, app restart, main merge or push. Independent review remains.
+
+## Review fixes after e987800
+
+One follow-up commit on e987800, with no rebase.
+
+- M1: team Needs you passes the asking agent into the existing compact QuestionPrompt. Both its inline choices and its QuestionForm fallback say “Rowan asks: …”. Display-only attribution never changes the original question text used as the API answer key. Individual Overview questions retain their existing presentation.
+- M2: the shared selector now deduplicates team commits by full hash, walkthroughs by walkthrough ID and reports by message ID. Changes remain distinct per folder. One known source is labeled “Ellis’s branch”; a shared hash lists the known branches. AgentProduced supplies no commit-author field, so the UI does not invent who authored a shared commit. Individual output identities remain unchanged.
+- Produced retains the prior snapshot while a reload is pending. A delayed-response hook regression proves the existing output stays visible until the replacement arrives. Selection changes still only render the selected agents' snapshots.
+- Removed the unreachable blocked-report Needs you branch and the unused needsUser field. Reports remain in Produced.
+- Divider comparison: the approved demo 954b55c, docs/demos/ACH-67/round2/index.html, has `.strip{height:36px;display:flex;align-items:center;gap:4px;padding:0 6px}` with no border. The MonoCode reference's MonoSidebarHeader in src/features/monos/ui/MonoSidebar.tsx:87 uses `border-b border-stroke`. The approved demo intentionally drops that divider, consistent with the requested flat style, so this follow-up keeps the strip borderless and records that difference explicitly.
+
+Tests: two new Node selector regressions cover hash dedupe across different worktree folders, branch-source attribution without invented authors, stable walkthrough/report IDs and distinct diff folders. The actual React question/approval harness now passes 9 scenarios in full/compact variants, including the team asker's display and unchanged answer key. The hook harness passes 8 lifecycle scenarios, including retention during a held response. Both harnesses were typechecked explicitly. These browser harnesses remain separate from the Node npm test suite.
+
+Real temporary backend capture: the fixture deliberately creates the same actual Git commit object on three branches. Three server responses reported a59e9fc339989c0de2350d7accf944b70a78aa9a; the team UI showed exactly one commit row, labeled Branches: Ellis, Rowan, June. The team question showed Rowan asks. Clicking its real inline answer returned HTTP 200 and sent answers['Which empty state should the search use?'], with no asker prefix in the key. No response fulfillment or provider calls. Updated integrated-team-app.png, integrated-team-panel.png and integrated-comparison-team.png document the result.
+
+Final checks: typecheck 0, full suite 1,158 passed/0 failed/0 skipped, build 0, git diff --check clean. Logs: /tmp/ach67-review-{typecheck,tests,build}.log. Temporary server stopped. No server/shared or RefChip edits, main merge, rebase or push.

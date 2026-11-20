@@ -3,7 +3,7 @@
   "typecheck": "passed",
   "build": "passed",
   "full_suite": {
-    "passed": 1156,
+    "passed": 1158,
     "failed": 0,
     "skipped": 0
   },
@@ -43,7 +43,7 @@
   "temporaryServerStopped": true,
   "decision": "ACH-D100",
   "approvalVariantRegression": {
-    "passed": 8,
+    "passed": 9,
     "failed": 0,
     "variantsPerScenario": 2,
     "pageExceptions": [],
@@ -131,5 +131,32 @@
     },
     "temporaryServerStopped": true,
     "providerCalls": 0
+  },
+  "reviewFixes": {
+    "base": "e987800",
+    "askerShown": true,
+    "originalQuestionAnswerKeyPreserved": true,
+    "realApprovalStatus": 200,
+    "teamCommitDedupe": {
+      "serverCopies": 3,
+      "uiRows": 1,
+      "sharedHash": "a59e9fc339989c0de2350d7accf944b70a78aa9a",
+      "attribution": "known branches; author not supplied by API"
+    },
+    "keepOutputDuringReload": true,
+    "deadBlockedReportBranchRemoved": true,
+    "divider": "no border in approved 954b55c demo; retained borderless",
+    "newNodeSelectorTests": 2,
+    "questionApprovalBrowserScenarios": 9,
+    "hookLifecycleBrowserScenarios": 8,
+    "typecheck": "passed",
+    "build": "passed",
+    "fullSuite": {
+      "passed": 1158,
+      "failed": 0,
+      "skipped": 0
+    },
+    "pageExceptions": [],
+    "temporaryServerStopped": true
   }
 }

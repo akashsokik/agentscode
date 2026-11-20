@@ -88,10 +88,11 @@ function ComposerAction({ busy, hasValue, onSend, onStop }: { busy: boolean; has
 }
 
 /** Answers a Claude AskUserQuestion through MonoCode's QuestionForm. */
-export function QuestionPrompt({ approval, compact = false }: { approval: Approval; compact?: boolean }) {
+export function QuestionPrompt({ approval, compact = false, asker }: { approval: Approval; compact?: boolean; asker?: Pick<Agent,'name'> }) {
   const [fullQuestion, setFullQuestion] = useState(false);
   const questions = useMemo(() => questionsFromUnknown({ questions: approval.questions ?? [] }), [approval.questions]);
-  const prompt = useMemo(() => ({ requestId: 0, title: approval.title, questions }), [approval.title, questions]);
+  // Display attribution only: reply keys must remain the agent's original question text.
+  const prompt = useMemo(() => ({ requestId: 0, title: approval.title, questions: asker ? questions.map(q=>({...q,prompt:`${asker.name} asks: ${q.prompt}`})) : questions }), [approval.title, questions, asker?.name]);
   const onReply = (_requestId: number, reply: UserQuestionReply) => {
     if (reply.kind === 'skipped') {
       void attempt(() => api.resolveApproval(approval.id, { allow: false, message: 'The user skipped the question.' }));
@@ -106,7 +107,7 @@ export function QuestionPrompt({ approval, compact = false }: { approval: Approv
   };
   const one = questions[0];
   if (compact && !fullQuestion && questions.length === 1 && one && !one.multiSelect && one.options.length > 0 && one.options.length <= 3 && one.options.every(o => !o.description)) {
-    return <div><p className="text-[13px] leading-relaxed">{one.prompt}</p><div className="mt-2.5 flex flex-wrap gap-1.5">
+    return <div><p className="text-[13px] leading-relaxed">{asker ? `${asker.name} asks: ` : ''}{one.prompt}</p><div className="mt-2.5 flex flex-wrap gap-1.5">
       {one.options.map(o => <ChipButton key={o.id} onClick={() => isOtherOption(o) ? setFullQuestion(true) : onReply(0, {kind:'answered',answers:{[one.id]:[o.id]}})}>{o.label}</ChipButton>)}
       {one.allowCustom ? <TextButton onClick={() => setFullQuestion(true)}>Another answer</TextButton> : null}
     </div></div>;

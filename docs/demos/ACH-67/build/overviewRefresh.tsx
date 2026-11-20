@@ -15,10 +15,16 @@ window.setInterval = ((fn: () => void, ms: number) => {
 }) as typeof window.setInterval;
 window.clearInterval = (id: number | undefined) => { if (id !== undefined) timers.delete(id); };
 const empty: AgentProduced = { at: 1, where: null, commits: [], uncommitted: null, walkthroughs: [], reports: [] };
-globalThis.fetch = async url => { calls.push(String(url)); return new Response(JSON.stringify(empty)); };
+const previous: AgentProduced={...empty,commits:[{hash:'old',subject:'Previous output',at:1}]};
+let holdNext=false,finishReload:((response:Response)=>void)|undefined;
+globalThis.fetch = async url => {
+  calls.push(String(url));
+  if(holdNext){holdNext=false;return new Promise<Response>(resolve=>{finishReload=resolve;});}
+  return new Response(JSON.stringify(previous));
+};
 function Probe({ agent }: { agent: Agent }) {
   const data = useOverviewData(agent, false);
-  return <div>{data.produced.length} outputs</div>;
+  return <div>{data.produced.length} outputs {data.produced.map(r=>r.title).join(', ')}</div>;
 }
 const pause = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 async function render(agent: Agent) { flushSync(() => root.render(<Probe agent={agent} />)); await pause(); await pause(); }
@@ -30,8 +36,13 @@ async function run() {
   equal(calls, ['/api/agents/a/produced?fresh=1']);
   await render({ ...a, activity: 'Reading another file' });
   equal(calls.length, 1); // activity updates must not start another git read
+  holdNext=true;
   await render({ ...a, status: 'done', turns: 2 });
   equal(calls.at(-1), '/api/agents/a/produced');
+  equal(host.textContent,'1 outputs Previous output');
+  finishReload!(new Response(JSON.stringify({...previous,commits:[{hash:'new',subject:'Updated output',at:2}]})));
+  await pause();await pause();
+  equal(host.textContent,'1 outputs Updated output');
   for (const tick of timers.values()) tick();
   await pause(); await pause();
   equal(calls.at(-1), '/api/agents/a/produced'); equal(calls.length, 3);
@@ -43,7 +54,7 @@ async function run() {
   await render(a);
   equal(calls.at(-1), '/api/agents/a/produced?fresh=1'); equal(calls.length, 6);
   flushSync(() => root.render(null)); root.unmount(); equal(timers.size, 0);
-  return { passed: 7, failed: 0, checks: ['fresh on open', 'no reload for activity', 'cached at turn end', 'cached on timer', 'fresh on selection change', 'fresh on return', 'fresh on remount; timer cleaned up'], calls };
+  return { passed: 8, failed: 0, checks: ['fresh on open', 'no reload for activity', 'cached at turn end', 'keep previous output during delayed reload', 'cached on timer', 'fresh on selection change', 'fresh on return', 'fresh on remount; timer cleaned up'], calls };
 }
 run().then(result => { document.body.dataset.result = 'passed'; document.body.textContent = JSON.stringify(result, null, 2); })
   .catch(error => { document.body.dataset.result = 'failed'; document.body.textContent = String(error.stack || error); });

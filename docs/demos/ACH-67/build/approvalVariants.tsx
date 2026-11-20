@@ -66,6 +66,12 @@ async function run() {
     compact => <QuestionPrompt approval={question} compact={compact} />,
     async compact => { await click('Helpful hint'); if (!compact) await click('Continue'); },
     { allow: true, answers: { 'Which empty state?': 'Helpful hint' } }));
+  passed.push(await parity('team question names the asker without changing the original answer key',
+    compact => <QuestionPrompt approval={question} compact={compact} asker={{name:'Rowan'}} />,
+    async compact => {
+      if(!host.textContent?.includes('Rowan asks: Which empty state?'))throw new Error('Missing team question asker');
+      await click('Helpful hint'); if(!compact)await click('Continue');
+    }, { allow: true, answers: { 'Which empty state?': 'Helpful hint' } }));
   passed.push(await parity('custom answer uses the existing QuestionForm and answer action',
     compact => <QuestionPrompt approval={question} compact={compact} />,
     async compact => {
