@@ -556,3 +556,56 @@ test('an installed copy protects the recorded source after the packaged output i
   assert.match(result.skipped[0].reason, /running PodCode app/);
   assert.ok(fs.existsSync(output));
 });
+
+for (const mode of ['headless', 'installed without provenance'] as const) {
+  test(`Electron dependencies stay eligible in a workspace and a merged worktree (${mode})`, async t => {
+    const f = fixture(t);
+    const workspace = f.workspace(f.owner('workspace'));
+    const { target, original } = f.worktree(f.owner('worktree'));
+    write(path.join(original, '.git/info/exclude'), 'node_modules/\n');
+    write(path.join(workspace, 'package.json'), '{}');
+    for (const root of [workspace, target]) {
+      write(path.join(root, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'));
+    }
+    if (mode !== 'headless') {
+      f.deps.desktopExecutable = path.join(f.base, 'Applications/PodCode.app/Contents/MacOS/PodCode');
+      write(f.deps.desktopExecutable);
+    }
+    const listed = await listStorageCleanupCandidates(f.deps);
+    assert.deepEqual(listed.map(c => path.join(f.dataDir, c.relPath)).sort(),
+      [workspace, target].map(root => path.join(root, 'node_modules')).sort());
+    const result = await cleanupStorage(listed.map(c => c.id), f.deps);
+    assert.equal(result.removed.length, 2);
+    assert.deepEqual(result.skipped, []);
+  });
+}
+
+test('a nested checkout hosting the running app leaves its sibling eligible', async t => {
+  const f = fixture(t);
+  const workspace = f.workspace(f.owner());
+  const sibling = f.output(workspace);
+  const source = path.join(f.base, 'source');
+  fs.mkdirSync(path.join(f.base, '.git'));
+  fs.mkdirSync(path.join(source, '.git'), { recursive: true });
+  f.deps.desktopExecutable = path.join(source, 'release/mac-arm64/PodCode.app/Contents/MacOS/PodCode');
+  write(f.deps.desktopExecutable);
+  const listed = await listStorageCleanupCandidates(f.deps);
+  const actual = listed.map(c => path.join(f.dataDir, c.relPath));
+  assert.deepEqual(actual, [sibling]);
+});
+
+test('invalid recorded build roots keep the packaged-app fallback active', { skip: process.platform !== 'darwin' }, async t => {
+  const f = fixture(t), workspace = f.workspace(f.owner());
+  f.output(workspace);
+  const bundle = path.join(f.base, 'Applications/PodCode.app');
+  f.deps.desktopExecutable = path.join(bundle, 'Contents/MacOS/PodCode');
+  write(f.deps.desktopExecutable);
+  const [selected] = await listStorageCleanupCandidates(f.deps);
+  write(path.join(workspace, 'release/mac-arm64/PodCode.app/Contents/MacOS/PodCode'));
+  for (const recorded of ['relative', path.join(f.base, 'missing'), f.deps.desktopExecutable]) {
+    execFileSync('/usr/bin/xattr', ['-w', 'com.podcode.build-root', recorded, bundle]);
+    assert.deepEqual(await listStorageCleanupCandidates(f.deps), []);
+    const result = await cleanupStorage([selected.id], f.deps);
+    assert.match(result.skipped[0].reason, /location is unknown.*packaged app/);
+  }
+});

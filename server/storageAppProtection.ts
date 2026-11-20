@@ -3,10 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 function enclosingCheckout(dir: string, boundary = path.parse(dir).root): string | undefined {
-  let checkout: string | undefined;
   for (let current = dir; ; current = path.dirname(current)) {
-    if (fs.existsSync(path.join(current, '.git'))) checkout = current;
-    if (current === boundary) return checkout;
+    if (fs.existsSync(path.join(current, '.git'))) return current;
+    if (current === boundary) return;
   }
 }
 
@@ -23,9 +22,12 @@ function physicalPath(file: string): string | undefined {
   } catch { return; }
 }
 
+// Electron itself ships a .app under node_modules on macOS.
+const dependencyDirs = new Set(['node_modules', '.pnpm-store', 'bower_components', '.venv']);
+
 async function containsApp(dir: string): Promise<boolean> {
   for await (const entry of await fs.promises.opendir(dir)) {
-    if (!entry.isDirectory() || entry.name === '.git') continue;
+    if (!entry.isDirectory() || entry.name === '.git' || dependencyDirs.has(entry.name)) continue;
     if (/\.app$/i.test(entry.name) || await containsApp(path.join(dir, entry.name))) return true;
   }
   return false;
@@ -35,7 +37,7 @@ function overlaps(a: string, b: string): boolean {
   return a === b || a.startsWith(path.join(b, path.sep)) || b.startsWith(path.join(a, path.sep));
 }
 
-/** One snapshot per discovery, and a fresh one immediately before each removal. */
+/** Resolve the running app once per pass and scan each checkout at most once in that pass. */
 export function storageAppProtection(desktopExecutable?: string) {
   const executable = physicalPath(desktopExecutable ?? process.execPath);
   // An Electron utility process may be inside a nested Helper.app. Protect the outer bundle.
@@ -49,7 +51,7 @@ export function storageAppProtection(desktopExecutable?: string) {
       const recorded = execFileSync('/usr/bin/xattr', ['-p', 'com.podcode.build-root', bundle], {
         encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 1000,
       }).replace(/\n$/, '');
-      if (path.isAbsolute(recorded)) source = fs.realpathSync(recorded);
+      if (path.isAbsolute(recorded) && fs.statSync(recorded).isDirectory()) source = fs.realpathSync.native(recorded);
     } catch { /* Older installations have no provenance. */ }
   }
   const packaged = new Map<string, boolean>();

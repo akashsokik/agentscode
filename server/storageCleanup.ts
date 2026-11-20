@@ -145,8 +145,7 @@ function ownerCheck(item: Item, deps: StorageCleanupDeps): Owner {
   return owner;
 }
 
-async function checkBeforeRemoval(item: Item, deps: StorageCleanupDeps): Promise<void> {
-  const protection = storageAppProtection(deps.desktopExecutable);
+async function checkBeforeRemoval(item: Item, deps: StorageCleanupDeps, protection: ReturnType<typeof storageAppProtection>): Promise<void> {
   const reason = await protection(item.absolute, item.root);
   if (reason) throw new Error(reason);
   ownerCheck(item, deps);
@@ -338,6 +337,7 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
         console.error('[storage-cleanup] Could not record backup outcome.', error);
       }
     };
+    const removalProtection = storageAppProtection(deps.desktopExecutable);
     for (const id of new Set(ids)) {
       const item = available.get(id);
       if (!item) {
@@ -363,7 +363,7 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
           const afterBackup = await worktreeState(item, deps);
           if (afterBackup.head !== state.head) throw new Error('The worktree HEAD changed during backup.');
           measured = bytes(item.absolute);
-          await checkBeforeRemoval(item, deps);
+          await checkBeforeRemoval(item, deps, removalProtection);
           if (identity(dataDir, item.absolute, item.agentId!, item.kind) !== item.id) throw new Error('The worktree directory was replaced.');
           // No --force: Git remains the last check on changes or a locked worktree.
           await git(state.repoRoot, ['worktree', 'remove', item.absolute]);
@@ -379,7 +379,7 @@ export async function cleanupStorage(ids: readonly string[], deps: StorageCleanu
           measured = bytes(item.absolute, true);
           manifest.items[manifest.items.length - 1].bytes = measured;
           save();
-          await checkBeforeRemoval(item, deps);
+          await checkBeforeRemoval(item, deps, removalProtection);
           const checked = safe(dataDir, item.absolute);
           if (identity(dataDir, item.absolute, item.agentId!, item.kind) !== item.id) throw new Error('The output directory was replaced.');
           fs.renameSync(item.absolute, destination); // same volume only; no copy/delete fallback
