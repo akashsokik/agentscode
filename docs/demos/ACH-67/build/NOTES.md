@@ -72,3 +72,17 @@ With dependencies installed, build the app, then run `node docs/demos/ACH-67/bui
 ## Latest decision update
 
 ACH-D100 was discovered in current refs during handoff and read in full before finishing. It supersedes the step-bar part of ACH-D98. Final screenshots were regenerated from the rebuilt no-plan UI. Comparisons intentionally label the old A demo as a historical reference; its steps/bar are not part of the final approved implementation. Full suite re-run after removal: 1,144/1,144, typecheck/build passed.
+
+## Compact/full action parity follow-up
+
+`approvalVariants.tsx` mounts the actual exported QuestionPrompt, QuestionForm and ApprovalRow in real React/DOM. Only `api.resolveApproval` is replaced by a recorder; unexpected network calls fail. Eight scenarios run with both compact=false and compact=true: short option, custom answer, skipped question, Allow, Always allow, denial with a trimmed note, plan approval and multiselect form submission. Checks assert identical approval IDs and decisions, no action on mount, and no early decision while a denial note or multiselect answer is being entered. Existing approval of a proposed plan is separate from the removed agent progress-plan collection.
+
+Replay without a server:
+
+```sh
+node tests/ui/buildApprovalVariants.mts /tmp/ach67-approval-variants
+```
+
+Open the printed local file in a browser. An automation client must wait for `body[data-result]`, assert `data-result="passed"`, and parse the body's JSON. A failed assertion reports `data-result="failed"` and its error. This is a browser regression, separate from the Node `npm test` suite. The fixture is outside tests/ so the server-only TypeScript project does not treat DOM/JSX as server code; its builder is checked by the server project. The fixture itself was checked with `tsc --ignoreConfig --noEmit --target es2022 --lib es2023,dom,dom.iterable --module esnext --moduleResolution bundler --jsx react-jsx --strict --allowImportingTsExtensions --skipLibCheck --types vite/client docs/demos/ACH-67/build/approvalVariants.tsx`.
+
+Fresh isolated browser result: 8 passed, 0 failed; each scenario exercises both variants; no page exceptions. Product typecheck and the fixture's explicit typecheck passed. No product source or RefChip changes in this follow-up. The preceding 1,144-test suite/build result still covers the identical product tree.

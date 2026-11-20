@@ -41,5 +41,16 @@
   },
   "providerCalls": 0,
   "temporaryServerStopped": true,
-  "decision": "ACH-D100"
+  "decision": "ACH-D100",
+  "approvalVariantRegression": {
+    "passed": 8,
+    "failed": 0,
+    "variantsPerScenario": 2,
+    "pageExceptions": [],
+    "source": "actual React components with api.resolveApproval recorder",
+    "runner": "tests/ui/buildApprovalVariants.mts",
+    "productSourceChanged": false,
+    "fixtureTypecheck": "passed",
+    "productTypecheck": "passed"
+  }
 }
