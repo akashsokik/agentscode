@@ -35,6 +35,7 @@ import {
   type Snapshot,
   type SuperAction,
   type SuperAsk,
+  type AgentProduced,
   type SuperIssue,
   type SuperState,
   type TurnMeta,
@@ -77,6 +78,7 @@ import { HttpError } from './errors.ts';
 import type { Broadcaster } from './hub.ts';
 import { discoverClaudeModels, discoverCodexModels, discoverOrcacodeModels, emptyModels } from './models.ts';
 import { gitRun, isDirectory, isInsideGitRepo, normalizeDir } from './projects.ts';
+import { agentProduced, ProducedCache } from './produced.ts';
 import { locate, type Place } from './whereabouts.ts';
 import { openuiGuide } from './openuiGuide.ts';
 import { ALL_CODE, ALL_INDEXES_LIMIT, decisionHint, deriveCode, isActive, isCode, isCurrent, matchDecisions, ProjectRefs, type RefEntry } from './projectRefs.ts';
@@ -246,6 +248,8 @@ export class AgentManager {
   private models: Record<EngineKind, EngineModels> = { claude: emptyModels('claude'), codex: emptyModels('codex'), orcacode: emptyModels('orcacode') };
   /** Claude reports cost cumulatively per process; remember the last figure to get each turn's share. */
   private processCost = new Map<string, number>();
+  /** The git half of each agent's produced work (ACH-73), reused until its turn ends. */
+  private producedCache = new ProducedCache();
   /** Credentials of side answers in flight, each for the agent it answers for; they reach only SUPER_SIDE_COMMS. */
   private sideTokens = new Map<string, string>();
   private shuttingDown = false;
@@ -2996,6 +3000,12 @@ export class AgentManager {
     return listWalkthroughs(this.walkthroughDir(this.agent(agentId).id));
   }
 
+  /** What the agent produced recently, for the Overview (ACH-73): read-only, on request. */
+  produced(agentId: string, fresh = false): Promise<AgentProduced> {
+    const agent = this.agent(agentId);
+    return agentProduced({ agent, home: this.homes.path(agent.id), messages: this.store.messages, walkthroughs: this.walkthroughs(agent.id), cache: this.producedCache, fresh });
+  }
+
   walkthrough(agentId: string, id: string) {
     return readWalkthrough(this.walkthroughDir(this.agent(agentId).id), id);
   }
@@ -3111,6 +3121,7 @@ export class AgentManager {
   }
 
   private onTurnEnd(agentId: string, result: TurnResult): void {
+    this.producedCache.invalidate(agentId);
     const agent = this.store.agents.get(agentId);
     if (!agent) return;
     // The turn may have switched branches; ask git again.
