@@ -79,10 +79,14 @@ export function IconTab({ icon: Icon, label, selected, count, dot = false, label
   dot?: boolean;
   /** There is room for every tab's name, so none folds to its icon. */
   labelled?: boolean;
-  /** Overrides both: false folds even the open tab to its icon, when its strip is short of room (ACH-D30). */
+  /** A measured strip decides whole label or icon-only. Explicit fits never animate through clipped letters (ACH-D30). */
   showLabel?: boolean;
 }) {
   const open = showLabel ?? (selected || labelled);
+  const words = <span data-tab-label className={cx('flex items-center gap-1.5 whitespace-nowrap', showLabel === undefined ? 'min-w-0 overflow-hidden' : 'shrink-0')}>
+    <span className="pl-1.5">{label}</span>
+    {count ? <span className="min-w-4 rounded bg-accent px-1 text-center text-[10px] font-medium leading-4 tabular-nums text-white">{count}</span> : null}
+  </span>;
   return (
     <button
       type="button"
@@ -101,15 +105,12 @@ export function IconTab({ icon: Icon, label, selected, count, dot = false, label
           <span aria-hidden className="absolute -top-0.5 left-2.5 size-1.5 rounded-full bg-accent" />
         </span>
       ) : <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />}
-      <span
+      {showLabel !== undefined ? (open ? words : null) : <span
         aria-hidden={!open}
         className={cx('grid transition-[grid-template-columns,opacity] duration-200 ease-out motion-reduce:transition-none', open ? 'grid-cols-[1fr] opacity-100' : 'grid-cols-[0fr] opacity-0')}
       >
-        <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
-          <span className="pl-1.5">{label}</span>
-          {count ? <span className="min-w-4 rounded bg-accent px-1 text-center text-[10px] font-medium leading-4 tabular-nums text-white">{count}</span> : null}
-        </span>
-      </span>
+        {words}
+      </span>}
     </button>
   );
 }
@@ -192,7 +193,7 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
   /** A keyboard shortcut at the end of the row, as a quiet key chip (ACH-D26). */
   shortcut?: KeySpec;
   /** Defaults to MenuRowRole: 'menuitem' inside a ContextMenu, 'option' in pickers. */
-  role?: 'option' | 'menuitem';
+  role?: 'option' | 'menuitem' | 'menuitemcheckbox';
   /** The chosen value, with a check mark and the quiet fill. */
   selected?: boolean;
   /** Multi-select: a check mark without a fill, so the keyboard row stays readable. */
@@ -216,6 +217,7 @@ export function MenuRow({ icon: Icon, title, hint, shortcut, selected, checked, 
       type="button"
       role={role}
       aria-selected={role === 'option' ? selected ?? checked ?? current : undefined}
+      aria-checked={role === 'menuitemcheckbox' ? Boolean(checked) : undefined}
       aria-current={role === 'menuitem' && current ? 'true' : undefined}
       disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}

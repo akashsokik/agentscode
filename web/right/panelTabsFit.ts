@@ -32,7 +32,10 @@ export interface TabsFit<V extends string> {
 
 /** A name's width at the strip's 12px, generous on purpose: wrongly too wide only folds earlier. */
 export function labelWidth(label: string, count?: number): number {
-  return 6 + Math.ceil(label.length * 7) + (count ? 22 : 0);
+  // Badge: 6px gap, at least 16px including padding, otherwise every digit plus 8px padding.
+  // A fixed one-digit allowance undercounts 12, 999, etc. and can push a label under the clip.
+  const badge = count ? 6 + Math.max(16, Math.ceil(String(count).length * 7) + 8) : 0;
+  return 6 + Math.ceil(label.length * 7) + badge;
 }
 
 function width(n: number): number {

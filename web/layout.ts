@@ -1,3 +1,4 @@
+import type { PanelTabPreferences, PanelType } from './right/panelTabVisibility.ts';
 import { useSyncExternalStore } from 'react';
 import type { Root } from './api.ts';
 import { closedWeights, prunedWeights, weightOf } from './paneSizes.ts';
@@ -68,6 +69,7 @@ export interface Layout {
   folded?: Partial<Record<RailSectionKey, boolean>>;
   /** Column widths the user dragged to, in px; a column without one uses its default. */
   widths?: Partial<Record<ColumnKey, number>>;
+  panelTabs?: PanelTabPreferences;
   rightPanel: boolean;
   rightView: 'overview' | 'comms' | 'changes' | 'notes' | 'work';
   /** The right panel's tab while the SuperAgent has focus, the last one picked; Decisions until then. */
@@ -553,6 +555,12 @@ export function setSectionFolded(key: RailSectionKey, folded: boolean): void {
   set({ ...layout, folded: next });
 }
 export function setProject(projectId: string): void { if (layout.projectId !== projectId) set({ ...layout, projectId }); }
+export function setPanelTabs(type: PanelType, tabs?: readonly string[]): void {
+  const panelTabs = { ...layout.panelTabs };
+  if (tabs) panelTabs[type] = [...tabs];
+  else delete panelTabs[type];
+  set({ ...layout, panelTabs });
+}
 export function setRightPanel(rightPanel: boolean): void { set({ ...layout, rightPanel }); }
 export function setSuperView(superView: SuperView): void { set({ ...layout, rightPanel: true, superView, superPanelShown: true }); }
 /** The first time the SuperAgent opens, show the right panel (where its Decisions, Issues and Routines are); never again after. */

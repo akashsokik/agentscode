@@ -1,0 +1,162 @@
+{
+  "base": "a9157e0",
+  "typecheck": "passed",
+  "build": "passed",
+  "full_suite": {
+    "passed": 1158,
+    "failed": 0,
+    "skipped": 0
+  },
+  "rendering": {
+    "working": true,
+    "waiting": true,
+    "idle": true,
+    "team": true,
+    "pageExceptions": [],
+    "producedSource": "ACH-73 contract fixtures, not integrated backend",
+    "noPlanMeterEveryState": true,
+    "noPlanStepTextEveryState": true,
+    "captureGuards": [
+      "isolated browser context",
+      "layout injected before startup",
+      "expected header for each state",
+      "372px panel width",
+      "both comparison images loaded"
+    ]
+  },
+  "real_temp_api": {
+    "approvalStatus": 200,
+    "answer": "Keep the helpful hint",
+    "messageFocus": true,
+    "diffOpened": true
+  },
+  "tabs": {
+    "checkboxRoles": true,
+    "activeGuard": true,
+    "keyboard": true,
+    "persisted": true,
+    "paletteTransientReveal": true,
+    "reset": true,
+    "overflowExcludesHidden": true
+  },
+  "providerCalls": 0,
+  "temporaryServerStopped": true,
+  "decision": "ACH-D100",
+  "approvalVariantRegression": {
+    "passed": 9,
+    "failed": 0,
+    "variantsPerScenario": 2,
+    "pageExceptions": [],
+    "source": "actual React components with api.resolveApproval recorder",
+    "runner": "tests/ui/buildApprovalVariants.mts",
+    "productSourceChanged": false,
+    "fixtureTypecheck": "passed",
+    "productTypecheck": "passed"
+  },
+  "wholeTabLabels": {
+    "widths": [
+      260,
+      320,
+      372
+    ],
+    "agentCases": 15,
+    "superAgentCases": 21,
+    "sampledAnimationFrames": 504,
+    "clippedLabels": 0,
+    "pageExceptions": [],
+    "focusedTests": {
+      "passed": 12,
+      "failed": 0
+    },
+    "fullSuite": {
+      "passed": 1145,
+      "failed": 0,
+      "skipped": 0
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "providerCalls": 0,
+    "fixture": "real createServer on temporary HOME/PODCODE_HOME",
+    "preFix": "Notes text 33.40625px clipped by its 0.8671875..27.765625px animated container"
+  },
+  "integration": {
+    "serverTip": "e922f4b",
+    "sharedType": "AgentProduced",
+    "requestLifecycle": {
+      "passed": 7,
+      "failed": 0,
+      "freshOnOpen": true,
+      "cachedOnTurnAndTimer": true,
+      "noActivityReload": true
+    },
+    "responseFulfillment": false,
+    "source": "real Produced endpoint, temporary Git worktrees and synthetic persisted records",
+    "cacheProbe": {
+      "cached": {
+        "files": 1,
+        "added": 1,
+        "removed": 0
+      },
+      "fresh": {
+        "files": 2,
+        "added": 4,
+        "removed": 0
+      }
+    },
+    "states": [
+      "working",
+      "waiting",
+      "idle",
+      "team"
+    ],
+    "outputKinds": [
+      "diff",
+      "commit",
+      "walkthrough",
+      "report"
+    ],
+    "outputNavigation": [
+      "diff path",
+      "Work view",
+      "walkthrough id",
+      "Comms conversation id"
+    ],
+    "planCollection": false,
+    "typecheck": "passed",
+    "build": "passed",
+    "fullSuite": {
+      "passed": 1156,
+      "failed": 0,
+      "skipped": 0
+    },
+    "temporaryServerStopped": true,
+    "providerCalls": 0
+  },
+  "reviewFixes": {
+    "base": "e987800",
+    "askerShown": true,
+    "originalQuestionAnswerKeyPreserved": true,
+    "realApprovalStatus": 200,
+    "teamCommitDedupe": {
+      "serverCopies": 3,
+      "uiRows": 1,
+      "sharedHash": "a59e9fc339989c0de2350d7accf944b70a78aa9a",
+      "attribution": "known branches; author not supplied by API"
+    },
+    "keepOutputDuringReload": true,
+    "deadBlockedReportBranchRemoved": true,
+    "divider": "no border in approved 954b55c demo; retained borderless",
+    "newNodeSelectorTests": 2,
+    "questionApprovalBrowserScenarios": 9,
+    "hookLifecycleBrowserScenarios": 8,
+    "typecheck": "passed",
+    "build": "passed",
+    "fullSuite": {
+      "passed": 1158,
+      "failed": 0,
+      "skipped": 0
+    },
+    "pageExceptions": [],
+    "temporaryServerStopped": true
+  }
+}

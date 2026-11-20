@@ -1,274 +1,103 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { outcomeTone, outcomeWords } from '../peerText.ts';
-import type { Agent, PeerMessage, WalkthroughSummary } from '../../shared/types.ts';
-import { api } from '../api.ts';
+import type { ReactNode } from 'react';
+import type { Agent, Approval, GitStatus } from '../../shared/types.ts';
 import { rolePreset } from '../../shared/roles.ts';
-import { cost, duration, modelLabel, relativeTime, tokenCount } from '../format.ts';
-import type { GitStatus } from '../../shared/types.ts';
-import { open, openToSide } from '../layout.ts';
-import { memoryDate } from '../memory.ts';
+import { api } from '../api.ts';
+import { duration, relativeTime } from '../format.ts';
+import { open, openToSide, setProject } from '../layout.ts';
 import { projectLabel } from '../projects.ts';
-import { loadMemory, useApp } from '../store.ts';
-import { AgentStatus } from '../ui/AgentStatus.tsx';
-import { StatusLabel } from '../ui/common.tsx';
-import { ENGINE_NAMES } from '../ui/EngineIcon.tsx';
-import { useNow } from '../ui/useNow.ts';
-import { Folder, GitBranch, Route } from '../mono/icons.tsx';
-import { whereabouts, type Whereabouts } from '../whereabouts.ts';
+import { attempt, useApp } from '../store.ts';
 import { AgentAvatar } from '../ui/Avatar.tsx';
-import { emptySections } from './overviewText.ts';
+import { StatusMark } from '../ui/StatusMark.tsx';
+import { TextButton } from '../ui/common.tsx';
+import { ChevronRight, FileDiff, GitBranch, MessageMultiple, Route } from '../mono/icons.tsx';
+import { whereabouts } from '../whereabouts.ts';
+import { useNow } from '../ui/useNow.ts';
+import { QuestionPrompt } from '../panes/Composer.tsx';
+import { ApprovalRow } from '../panes/Transcript.tsx';
+import { setWorkUi } from '../work/workData.ts';
+import { overviewNow } from './overviewPresentation.ts';
+import { useOverviewData, type OverviewOutputView } from './overviewData.ts';
 
-const HANDOFFS = 4;
-const PEERS = 4;
-const MEMORIES = 3;
+const ROW = 'flex w-full min-w-0 items-start gap-[9px] rounded-md py-2 text-left hover:bg-content/5';
 
-
-/** The agent's walkthroughs, newest first; it makes them when you ask. Refreshed after each turn. */
-function useWalkthroughs(agent: Agent): WalkthroughSummary[] | null {
-  const [list, setList] = useState<WalkthroughSummary[] | null>(null);
-  useEffect(() => {
-    let live = true;
-    api.walkthroughs(agent.id).then(found => { if (live) setList(found); }, () => { if (live) setList([]); });
-    return () => { live = false; };
-  }, [agent.id, agent.turns]);
-  return list;
+function Label({ children, trailing, attention = false }: { children: ReactNode; trailing?: ReactNode; attention?: boolean }) {
+  return <h3 className={`mb-2 flex items-center justify-between gap-2 text-[11px] font-medium ${attention ? 'text-warning' : 'text-content/50'}`}>{children}<span className="font-normal text-content/40">{trailing}</span></h3>;
 }
 
-/**
- * The focused agent at a glance, with as few boxes as it takes: who it is and where it works, what
- * it is doing and for how long, how full its context is, then the work it handed off or took on,
- * who it works with, its walkthroughs and what it has learned. Sections with nothing in them yet
- * fold into one quiet line. Totals stay pinned at the foot.
- */
-export function AgentOverview({ agent, git }: { agent: Agent; git: GitStatus | null | undefined }) {
-  const models = useApp(s => s.snapshot?.models[agent.engine]);
-  const projects = useApp(s => s.snapshot?.projects);
-  const pending = useApp(s => Boolean(s.snapshot?.approvals.some(a => a.agentId === agent.id)));
-  const messages = useApp(s => s.snapshot?.messages);
-  const memory = useApp(s => s.memory[agent.id]);
+function NeedsYou({ approvals, waiting = [], askers }: { approvals: Approval[]; waiting?: Agent[]; askers?: Agent[] }) {
+  return <section className="mt-[25px]" aria-label="Needs you">
+    <Label attention={approvals.length > 0 || waiting.length > 0} trailing={approvals.length ? `${approvals.length} waiting` : undefined}>Needs you</Label>
+    {approvals.length ? <div className="space-y-5">{approvals.map(a => <div key={a.id}>{a.type === 'question' ? <QuestionPrompt approval={a} compact asker={askers?.find(agent=>agent.id===a.agentId)} /> : <ApprovalRow approval={a} compact />}</div>)}</div>
+      : waiting.length ? waiting.map(a => <p key={a.id} className="text-[12px] text-content/55">{a.name} is waiting for your response. <TextButton onClick={()=>message(a)}>Open conversation</TextButton></p>) : <p className="text-[12px] text-content/40">Nothing waiting on you.</p>}
+  </section>;
+}
+
+function Produced({ items }: { items: OverviewOutputView[] }) {
+  if (!items.length) return null;
+  return <section className="mt-[25px]" aria-label="Produced">
+    <Label trailing="Recent">Produced</Label>
+    {items.map(item => <button key={item.id} type="button" onClick={item.open} className={ROW}>
+      {item.kind === 'diff' ? <FileDiff className="mt-0.5 size-3.5 shrink-0 text-content/50" /> : item.kind === 'commit' ? <GitBranch className="mt-0.5 size-3.5 shrink-0 text-content/50" /> : item.kind === 'walkthrough' ? <Route className="mt-0.5 size-3.5 shrink-0 text-content/50" /> : <StatusMark state={item.outcome === 'failed' ? 'fail' : item.outcome === 'blocked' ? 'warn' : 'pass'} quiet className="mt-0.5 size-3.5" />}
+      <span className="min-w-0 flex-1"><span className="block break-words text-[12.5px] leading-[1.45]">{item.title}</span><span className="mt-0.5 block break-words text-[11px] text-content/40">{item.detail}{item.kind !== 'diff' ? ` · ${relativeTime(item.at)} ago` : ''}</span></span>
+      <ChevronRight className="size-3 shrink-0 self-center text-content/45" />
+    </button>)}
+  </section>;
+}
+
+function message(agent: Agent) {
+  open({ kind: 'agent', agentId: agent.id });
+  requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('section[data-pane-focused] [data-composer] textarea')?.focus());
+}
+
+/** ACH-D98/D100 Work sheet: task, elapsed, attention and output; no plan steps or bars. */
+export function AgentOverview({ agent, git, team = false }: { agent: Agent; git: GitStatus | null | undefined; team?: boolean }) {
+  const snapshot = useApp(s => s.snapshot);
+  const data = useOverviewData(agent, team);
   const now = useNow(agent.status === 'working' ? 1000 : 30_000);
-  useEffect(() => { void loadMemory(agent.id); }, [agent.id]);
-  const walkthroughs = useWalkthroughs(agent);
-
-  const mine = useMemo(() => (messages ?? []).filter(m => m.fromAgentId === agent.id || m.toAgentId === agent.id), [messages, agent.id]);
-  const delegations = useMemo(() => mine.filter(m => m.delegation), [mine]);
-  const handoffs = useMemo(() => {
-    const reports = new Map<string, PeerMessage>();
-    for (const m of mine) if (m.report && m.replyTo) reports.set(m.replyTo, m);
-    return delegations.slice(-HANDOFFS).reverse().map(m => ({ message: m, report: reports.get(m.id)?.report }));
-  }, [mine, delegations]);
-  const allPeers = useMemo(() => {
-    const byPeer = new Map<string, { id: string; name: string; count: number; last: number; conversationId: string }>();
-    for (const m of mine) {
-      const outgoing = m.fromAgentId === agent.id;
-      const id = outgoing ? m.toAgentId : m.fromAgentId;
-      const entry = byPeer.get(id) ?? { id, name: outgoing ? m.toName : m.fromName, count: 0, last: 0, conversationId: m.conversationId };
-      entry.count += 1;
-      if (m.ts >= entry.last) { entry.last = m.ts; entry.conversationId = m.conversationId; }
-      byPeer.set(id, entry);
-    }
-    return [...byPeer.values()].sort((a, b) => b.last - a.last);
-  }, [mine, agent.id]);
-  const peers = allPeers.slice(0, PEERS);
-  const agents = useApp(s => s.snapshot?.agents);
-
-  const subtitle = [rolePreset(agent.role).name, ENGINE_NAMES[agent.engine], modelLabel(agent, models)].filter(Boolean).join(' · ');
-  const where = whereabouts(agent, projects);
-  // What is still empty, said once at the end instead of a heading and a sentence each.
-  const empty = emptySections({ handoffs: handoffs.length, peers: peers.length, walkthroughs: walkthroughs?.length, memories: memory?.length });
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col font-sans">
-      <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-        <div className="flex items-center gap-3 px-4 pt-[18px]">
-          <AgentAvatar agent={agent} className="size-11" />
-          <div className="min-w-0">
-            <p className="flex min-w-0 items-baseline gap-2" title={subtitle}>
-              <span className="truncate text-[15px] font-semibold leading-5 text-content">{agent.name}</span>
-              <span className="shrink-0 text-[12.5px] text-content/45">{rolePreset(agent.role).name}</span>
-            </p>
-            <WorkingIn agent={agent} where={where} home={projectLabel(agent.projectIds, projects, 'Removed')} now={now} />
-          </div>
+  const current = overviewNow(agent, now);
+  const where = whereabouts(agent, snapshot?.projects);
+  const members = team ? (snapshot?.agents ?? []).filter(a => a.id !== agent.id) : [];
+  const memberIds = new Set(members.map(a => a.id));
+  const approvals = (snapshot?.approvals ?? []).filter(a => team ? memberIds.has(a.agentId) || a.agentId === agent.id : a.agentId === agent.id);
+  const working = members.filter(a => a.status === 'working').length;
+  const waiting = [...members,agent].filter(a => a.status === 'waiting' || approvals.some(p => p.agentId === a.id)).length;
+  const branch = git?.branch || where?.branch || agent.worktree?.branch;
+  const project = where?.project || projectLabel(agent.projectIds, snapshot?.projects);
+  const openBranch = () => {
+    const projectId = agent.workingIn?.projectId || agent.projectIds?.[0];
+    const folder = agent.worktree?.path;
+    if (projectId) { setProject(projectId); if (folder) setWorkUi(projectId, { tab: 'active', selected: { kind: 'branch', id: folder } }); }
+    open({ kind: 'work' });
+  };
+  return <div className="min-h-0 flex-1 overflow-y-auto font-sans" data-overview-sheet>
+    <div className="px-[18px] pb-8 pt-5">
+      <header className="mb-6 flex min-w-0 items-center gap-[9px]">
+        <AgentAvatar agent={agent} className="size-[25px]" />
+        <div className="min-w-0 flex-1"><div className="flex min-w-0 items-baseline gap-1 text-[13px]"><span className="min-w-0 truncate font-semibold">{agent.name}</span><span className="min-w-0 shrink-[999] truncate text-content/50">{team ? 'Team' : rolePreset(agent.role).name}</span></div>
+          <p className="mt-0.5 flex min-w-0 gap-2 text-[11px] text-content/50"><span className="min-w-0 truncate">{project}</span>{!team && branch ? <span className="min-w-0 truncate">{branch}</span> : null}</p>
         </div>
-
-        <Now agent={agent} pending={pending} now={now} />
-        {agent.context ? <ContextLine used={agent.context.used} window={agent.context.window} /> : null}
-
-        {handoffs.length ? (
-          <Section title="Handoffs" count={delegations.length}>
-            <div className="flex flex-col gap-px px-2">
-              {handoffs.map(({ message, report }) => {
-                const outgoing = message.fromAgentId === agent.id;
-                const otherId = outgoing ? message.toAgentId : message.fromAgentId;
-                return (
-                  <button
-                    key={message.id}
-                    type="button"
-                    onClick={() => openToSide({ kind: 'comms', conversationId: message.conversationId })}
-                    className={`${ROW} items-start`}
-                  >
-                    <AgentAvatar agent={{ id: otherId, ...agents?.find(a => a.id === otherId) }} className="mt-px size-[18px]" />
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="flex min-w-0 items-center gap-1.5 text-[12px]">
-                        <span className="min-w-0 truncate text-content/55">{outgoing ? `To ${message.toName}` : `From ${message.fromName}`}</span>
-                        <span className="ml-auto shrink-0">
-                          {report
-                            ? <StatusLabel tone={outcomeTone(report.outcome, message.delegation?.kind)} className="text-[11.5px]">{outcomeWords(report.outcome, message.delegation?.kind)}</StatusLabel>
-                            : <StatusLabel tone="muted" quiet className="text-[11.5px]">Open</StatusLabel>}
-                        </span>
-                      </span>
-                      <span className="mt-px line-clamp-2 text-[12.5px] leading-[1.4] text-content/85">{message.delegation!.task}</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </Section>
-        ) : null}
-
-        {peers.length ? (
-          <Section title="Works with" count={allPeers.length}>
-            <div className="flex flex-col gap-px px-2">
-              {peers.map(peer => {
-                const teammate = agents?.find(a => a.id === peer.id);
-                return (
-                  <button
-                    key={peer.id}
-                    type="button"
-                    onClick={e => (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'comms', conversationId: peer.conversationId })}
-                    className={`${ROW} items-center`}
-                  >
-                    {teammate ? <AgentAvatar agent={teammate} className="size-[18px]" /> : <span className="size-[18px] shrink-0" />}
-                    <span className="min-w-0 truncate text-[12.5px] text-content/85">{peer.name}</span>
-                    <span className="shrink-0 text-[11.5px] text-content/45">{peer.count} {peer.count === 1 ? 'message' : 'messages'}</span>
-                    <span className="ml-auto shrink-0 text-[11.5px] tabular-nums text-content/35">{relativeTime(peer.last, now)}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </Section>
-        ) : null}
-
-        {walkthroughs?.length ? (
-          <Section title="Walkthroughs" count={walkthroughs.length}>
-            <div className="flex flex-col gap-px px-2">
-              {walkthroughs.slice(0, 5).map(w => (
-                <button
-                  key={w.id}
-                  type="button"
-                  onClick={e => (e.metaKey || e.ctrlKey ? openToSide : open)({ kind: 'walkthrough', agentId: agent.id, id: w.id, title: w.title })}
-                  className={`${ROW} items-center`}
-                >
-                  <Route className="size-3.5 shrink-0 text-content/45" strokeWidth={1.75} />
-                  <span className="min-w-0 truncate text-[12.5px] text-content/85">{w.title}</span>
-                  <span className="shrink-0 text-[11.5px] text-content/45">{w.stepCount} steps</span>
-                  <span className="ml-auto shrink-0 text-[11.5px] tabular-nums text-content/35">{relativeTime(w.createdAt, now)}</span>
-                </button>
-              ))}
-            </div>
-          </Section>
-        ) : null}
-
-        {memory?.length ? (
-          <Section title="Remembers" count={memory.length}>
-            <ul className="flex flex-col gap-2 px-4">
-              {memory.slice(-MEMORIES).reverse().map(entry => (
-                <li key={entry.id} className="flex min-w-0 gap-2 text-[12.5px] leading-snug">
-                  <span aria-hidden className="mt-[7px] size-1 shrink-0 rounded-full bg-content/30" />
-                  <span className="min-w-0 flex-1">
-                    <span className="line-clamp-2 text-content/75">{entry.text}</span>
-                    <span className="text-[11px] text-content/35">{memoryDate(entry.createdAt, now)}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        ) : null}
-
-        {empty ? <p className="px-4 pt-5 text-[12px] leading-relaxed text-content/40">No {empty} yet. They show up here once {agent.name} has some.</p> : null}
-      </div>
-
-      <p className="flex shrink-0 flex-wrap gap-x-3 gap-y-1 px-4 pb-3 pt-2.5 text-[11px] tabular-nums text-content/40">
-        <span>{agent.turns} {agent.turns === 1 ? 'turn' : 'turns'}</span>
-        <span>{cost(agent.costUsd) || '$0'}</span>
-        <span>{tokenCount(agent.tokens)} tokens</span>
-        {git?.isRepo ? <span className="ml-auto"><span className="text-diff-add-fg">+{git.added}</span> <span className="text-diff-del-fg">-{git.removed}</span></span> : null}
-      </p>
+      </header>
+      {team ? <>
+        <p className="text-[12px] text-content/50">Team now</p>
+        <h2 className="mt-2.5 text-[21px] font-medium leading-[1.35] tracking-[-.35px]">{working ? 'The team is working.' : 'The team is ready.'}{waiting ? <><br />{waiting === 1 ? 'One agent needs you.' : `${waiting} agents need you.`}</> : null}</h2>
+        <p className="mt-2 text-[12px] text-content/50">{working} working · {waiting} waiting for you</p>
+      </> : <>
+        <div className="flex items-center gap-[7px] text-[12px] text-content/50"><StatusMark state={agent.status === 'working' ? 'pending' : agent.status === 'waiting' ? 'warn' : agent.status === 'error' ? 'fail' : 'pass'} quiet className="size-3" /><span>{current.state}{current.elapsedMs !== null ? ` · ${duration(current.elapsedMs)} elapsed` : ` · ${relativeTime(agent.lastActiveAt, now)} ago`}</span></div>
+        <h2 className="my-2.5 break-words text-[21px] font-medium leading-[1.35] tracking-[-.35px]">{current.title}</h2>
+        {current.activity ? <p className="break-words text-[12px] leading-relaxed text-content/50">{current.activity}</p> : null}
+      </>}
+      <NeedsYou approvals={approvals} askers={team?snapshot?.agents:undefined} waiting={(team ? [...members,agent] : [agent]).filter(a=>a.status==='waiting')} />
+      {team ? <section className="mt-[25px]" aria-label="Team work">{members.map(a => <button type="button" key={a.id} className={`${ROW} py-[9px]`} onClick={() => open({kind:'agent',agentId:a.id})}>
+        <AgentAvatar agent={a} className="mt-0.5 size-[18px]" /><span className="min-w-0 flex-1"><span className="text-[12.5px] font-medium">{a.name}</span><span className="mt-0.5 block line-clamp-2 text-[12px] text-content/55">{overviewNow(a, now).title}</span><span className="mt-0.5 block text-[10.5px] text-content/40">{a.status === 'waiting' ? 'Waiting for you' : a.activity || 'Idle'}</span></span><StatusMark state={a.status === 'working' ? 'pending' : a.status === 'waiting' ? 'warn' : 'pass'} quiet className="mt-0.5 size-3" />
+      </button>)}</section> : null}
+      <Produced items={data.produced} />
+      <footer className="mt-6 flex flex-wrap items-center gap-1" aria-label="Overview actions">
+        <TextButton className="inline-flex items-center text-content" onClick={() => message(agent)}><MessageMultiple className="mr-1 size-3" />Message</TextButton>
+        {current.busy ? <TextButton onClick={() => void attempt(() => api.stop(agent.id))}>Stop</TextButton> : null}
+        {team && data.produced.some(i=>i.kind==='diff') ? <TextButton onClick={()=>data.produced.find(i=>i.kind==='diff')?.open()}>Open diff</TextButton> : null}
+        {!team && git?.isRepo ? <TextButton disabled={!git.files.length} onClick={() => { if (git.files[0]) openToSide({kind:'diff',root:{agent:agent.id},path:git.files[0].path}); }}>Open diff</TextButton> : null}
+        {branch || team ? <TextButton onClick={openBranch}>Open branch</TextButton> : null}
+      </footer>
     </div>
-  );
-}
-
-const ROW = 'flex w-full min-w-0 gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-content/5';
-
-/** Which codebase and branch the agent is in, under its name; while idle, where it was last. */
-function WorkingIn({ agent, where, home, now }: { agent: Agent; where: Whereabouts | null; home: string; now: number }) {
-  const recent = agent.status === 'working' || !agent.workingIn;
-  const project = where?.project || home;
-  const title = `${recent ? 'Working in' : 'Last in'} ${project}${where?.branch ? ` on ${where.branch}` : ''}${!recent && agent.workingIn ? `, ${relativeTime(agent.workingIn.at, now)} ago` : ''}`;
-  return (
-    <p className="mt-[3px] flex min-w-0 items-center gap-1.5 text-[12px] text-content/50" title={title}>
-      <Folder className="size-3.5 shrink-0 text-content/40" strokeWidth={1.75} />
-      <span className="min-w-0 truncate">{project}</span>
-      {where?.branch ? (
-        <>
-          <GitBranch className="ml-1 size-3 shrink-0 text-content/40" strokeWidth={1.75} />
-          <span className="min-w-0 truncate font-mono text-[11.5px]">{where.branch}</span>
-        </>
-      ) : null}
-    </p>
-  );
-}
-
-/** What the agent is doing, as plain text: its state and for how long, then the task or its last result. */
-function Now({ agent, pending, now }: { agent: Agent; pending: boolean; now: number }) {
-  const working = agent.status === 'working';
-  const task = agent.currentTask?.summary;
-  const ago = relativeTime(agent.lastActiveAt, now);
-  const since = working && agent.turnStartedAt ? `for ${duration(now - agent.turnStartedAt)}` : ago === 'now' ? 'just now' : `${ago} ago`;
-  return (
-    <div className="px-4 pt-4">
-      <div className="flex min-w-0 items-center gap-1.5 text-[12px]">
-        <AgentStatus agent={agent} pending={pending} className="min-w-0 text-[12px]" />
-        <span className="shrink-0 tabular-nums text-content/40">{since}</span>
-        {!task && agent.lastSummary ? <span className="shrink-0 text-content/30">· last result</span> : null}
-      </div>
-      {task ? (
-        <p className="mt-1.5 line-clamp-4 text-[13.5px] leading-normal text-content/90">{task}</p>
-      ) : agent.lastSummary ? (
-        <p className="mt-1.5 line-clamp-5 text-[13.5px] leading-normal text-content/80">{agent.lastSummary}</p>
-      ) : (
-        <p className="mt-1.5 text-[12.5px] text-content/45">Nothing yet. Send it a message to get started.</p>
-      )}
-      {agent.error && agent.status === 'error' ? <p className="mt-2 line-clamp-3 text-[12px] text-danger">{agent.error}</p> : null}
-      {agent.queued ? <p className="mt-2 text-[12px] text-content/45">{agent.queued} more waiting behind it</p> : null}
-    </div>
-  );
-}
-
-/** How full the context window is, on one thin line. */
-function ContextLine({ used, window }: { used: number; window?: number }) {
-  if (!window) return <p className="px-4 pt-3.5 text-[11.5px] tabular-nums text-content/45">Context · {tokenCount(used)} tokens</p>;
-  const share = Math.min(1, used / window);
-  const tone = share >= 0.9 ? 'bg-danger' : share >= 0.75 ? 'bg-warning' : 'bg-content/55';
-  return (
-    <div className="flex items-center gap-2.5 px-4 pt-3.5 text-[11.5px] tabular-nums text-content/45">
-      <span className="shrink-0">Context</span>
-      <div className="h-[3px] min-w-6 flex-1 overflow-hidden rounded-full bg-content/10" role="meter" aria-valuemin={0} aria-valuemax={window} aria-valuenow={used} aria-label="Context window used">
-        <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.max(2, share * 100)}%` }} />
-      </div>
-      <span className="shrink-0">{Math.round(share * 100)}% · {tokenCount(used)} of {tokenCount(window)}</span>
-    </div>
-  );
-}
-
-function Section({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
-  return (
-    <section className="pt-[22px]">
-      <h3 className="flex items-center px-4 pb-1.5 text-[11px] font-medium tracking-[0.02em] text-content/40">
-        {title}
-        {count ? <span className="ml-auto font-normal tabular-nums text-content/30">{count}</span> : null}
-      </h3>
-      {children}
-    </section>
-  );
+  </div>;
 }
