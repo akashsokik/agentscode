@@ -3,7 +3,7 @@
   "typecheck": "passed",
   "build": "passed",
   "full_suite": {
-    "passed": 1146,
+    "passed": 1144,
     "failed": 0,
     "skipped": 0
   },
@@ -14,7 +14,15 @@
     "team": true,
     "pageExceptions": [],
     "producedSource": "ACH-73 contract fixtures, not integrated backend",
-    "planSource": "seeded optional Agent.plan contract"
+    "noPlanMeterEveryState": true,
+    "noPlanStepTextEveryState": true,
+    "captureGuards": [
+      "isolated browser context",
+      "layout injected before startup",
+      "expected header for each state",
+      "372px panel width",
+      "both comparison images loaded"
+    ]
   },
   "real_temp_api": {
     "approvalStatus": 200,
@@ -32,5 +40,6 @@
     "overflowExcludesHidden": true
   },
   "providerCalls": 0,
-  "temporaryServerStopped": true
+  "temporaryServerStopped": true,
+  "decision": "ACH-D100"
 }

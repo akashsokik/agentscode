@@ -5,9 +5,7 @@ import { open, openToSide, setProject } from '../layout.ts';
 import { attempt, useApp } from '../store.ts';
 import { setWorkUi } from '../work/workData.ts';
 
-import { reportedPlan, outputRecords, type OverviewTarget, type OverviewPlanView, type ProducedSnapshot, type OverviewOutputRecord } from './overviewModel.ts';
-export { reportedPlan };
-export type { OverviewPlanView };
+import { outputRecords, type OverviewTarget, type ProducedSnapshot, type OverviewOutputRecord } from './overviewModel.ts';
 export type OverviewOutputView = OverviewOutputRecord & {open:()=>void};
 function navigate(target:OverviewTarget){
   if(target.kind==='diff')return void attempt(async()=>{const git=await api.gitStatus({agent:target.agentId});if(git.files[0])openToSide({kind:'diff',root:{agent:target.agentId},path:git.files[0].path});});
@@ -16,7 +14,7 @@ function navigate(target:OverviewTarget){
   else openToSide({kind:'comms',conversationId:target.conversationId});
 }
 /** Only while Overview is mounted; old/missing endpoints yield no invented output. */
-export function useOverviewData(agent:Agent,team:boolean):{plan:OverviewPlanView|null;produced:OverviewOutputView[]} {
+export function useOverviewData(agent:Agent,team:boolean):{produced:OverviewOutputView[]} {
   const agents=useApp(s=>s.snapshot?.agents);
   const list=team?(agents??[]):[agent];
   const signature=list.map(a=>`${a.id}:${a.status}:${a.turns}`).join('|');
@@ -46,5 +44,5 @@ export function useOverviewData(agent:Agent,team:boolean):{plan:OverviewPlanView
     for(const a of list){const source=snapshots[a.id];if(!source)continue;for(const item of outputRecords(a,source)){if(!found.has(item.id))found.set(item.id,{...item,open:()=>navigate(item.target)});}}
     return [...found.values()].sort((a,b)=>b.at-a.at).slice(0,12);
   },[snapshots,signature]);
-  return {plan:team?null:reportedPlan(agent),produced};
+  return {produced};
 }

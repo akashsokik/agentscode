@@ -1,7 +1,6 @@
 import type { Agent } from '../../shared/types.ts';
 export type OverviewTarget = {kind:'diff';agentId:string}|{kind:'commit';projectId:string|undefined;hash:string}|{kind:'walkthrough';agentId:string;id:string;title:string}|{kind:'report';conversationId:string};
 /** Structural ACH-73 fallback while the server/shared-types commit is integrated. */
-export interface PlanSource {steps:{text:string;status:'done'|'active'|'pending'}[];updatedAt:number;engine:'claude'|'codex'}
 export interface ProducedSnapshot {
   at:number;
   where:{folder:string;branch:string|null;own:boolean}|null;
@@ -10,14 +9,7 @@ export interface ProducedSnapshot {
   walkthroughs:{id:string;title:string;createdAt:number;branch?:string;commit?:string}[];
   reports:{messageId:string;conversationId:string;toAgentId:string;toName:string;outcome:'passed'|'failed'|'blocked'|'done';summary:string;at:number}[];
 }
-export interface OverviewPlanView {steps:{text:string;status:'completed'|'in_progress'|'pending'}[]}
 export interface OverviewOutputRecord {id:string;kind:'diff'|'commit'|'walkthrough'|'report';title:string;detail:string;at:number;outcome?:string;needsUser?:boolean;target:OverviewTarget}
-export function reportedPlan(agent:Agent):OverviewPlanView|null {
-  const plan=(agent as Agent&{plan?:PlanSource|null}).plan;
-  if (!plan || !Array.isArray(plan.steps) || !plan.steps.length || !Number.isFinite(plan.updatedAt) || (agent.turnStartedAt && plan.updatedAt < agent.turnStartedAt)) return null;
-  if (!plan.steps.every(s=>s && typeof s.text==='string'&&['done','active','pending'].includes(s.status))) return null;
-  return {steps:plan.steps.map(s=>({text:s.text,status:s.status==='done'?'completed':s.status==='active'?'in_progress':'pending'}))};
-}
 export function outputRecords(agent:Agent, source:ProducedSnapshot):OverviewOutputRecord[] {
   const projectId=agent.workingIn?.projectId || agent.projectIds?.[0];
   const place=source.where?.branch || 'Branch unknown';

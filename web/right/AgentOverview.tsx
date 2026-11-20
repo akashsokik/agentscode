@@ -16,30 +16,12 @@ import { QuestionPrompt } from '../panes/Composer.tsx';
 import { ApprovalRow } from '../panes/Transcript.tsx';
 import { setWorkUi } from '../work/workData.ts';
 import { overviewNow } from './overviewPresentation.ts';
-import { useOverviewData, reportedPlan, type OverviewPlanView, type OverviewOutputView } from './overviewData.ts';
+import { useOverviewData, type OverviewOutputView } from './overviewData.ts';
 
 const ROW = 'flex w-full min-w-0 items-start gap-[9px] rounded-md py-2 text-left hover:bg-content/5';
 
 function Label({ children, trailing, attention = false }: { children: ReactNode; trailing?: ReactNode; attention?: boolean }) {
   return <h3 className={`mb-2 flex items-center justify-between gap-2 text-[11px] font-medium ${attention ? 'text-warning' : 'text-content/50'}`}>{children}<span className="font-normal text-content/40">{trailing}</span></h3>;
-}
-
-function ReportedPlan({ plan }: { plan: OverviewPlanView }) {
-  const done = plan.steps.filter(s => s.status === 'completed').length;
-  if (!plan.steps.length) return null;
-  return <section aria-label="Reported plan" className="mt-[17px]">
-    <div role="meter" aria-label="Reported plan steps completed" aria-valuemin={0} aria-valuemax={plan.steps.length} aria-valuenow={done} className="flex gap-[5px]">
-      {plan.steps.map((s,i) => <span key={i} className={`h-1 min-w-0 flex-1 rounded-sm ${s.status === 'completed' ? 'bg-content/65' : s.status === 'in_progress' ? 'bg-content/30' : 'bg-content/8'}`} />)}
-    </div>
-    <p className="mt-[7px] text-[11.5px] text-content/50">{done} of {plan.steps.length} reported plan steps done</p>
-    <ul className="mt-[15px] space-y-2">
-      {plan.steps.map((s,i) => <li key={i} className={`flex min-w-0 items-start gap-2 text-[12px] ${s.status === 'in_progress' ? 'text-content' : 'text-content/55'}`}>
-        <StatusMark state={s.status === 'completed' ? 'pass' : s.status === 'in_progress' ? 'pending' : 'unknown'} quiet className="mt-0.5 size-3" />
-        <span className="min-w-0 flex-1 break-words">{s.text}</span>
-        <span className="shrink-0 pt-px text-[10px] text-content/40">{s.status === 'completed' ? 'Done' : s.status === 'in_progress' ? 'Now' : 'Next'}</span>
-      </li>)}
-    </ul>
-  </section>;
 }
 
 function NeedsYou({ approvals, blocked, waiting = [] }: { approvals: Approval[]; blocked: OverviewOutputView[]; waiting?: Agent[] }) {
@@ -68,7 +50,7 @@ function message(agent: Agent) {
   requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('section[data-pane-focused] [data-composer] textarea')?.focus());
 }
 
-/** Approved ACH-D98 Work sheet. Server-supplied plan/output may be absent on older builds. */
+/** ACH-D98/D100 Work sheet: task, elapsed, attention and output; no plan steps or bars. */
 export function AgentOverview({ agent, git, team = false }: { agent: Agent; git: GitStatus | null | undefined; team?: boolean }) {
   const snapshot = useApp(s => s.snapshot);
   const data = useOverviewData(agent, team);
@@ -104,11 +86,10 @@ export function AgentOverview({ agent, git, team = false }: { agent: Agent; git:
         <div className="flex items-center gap-[7px] text-[12px] text-content/50"><StatusMark state={agent.status === 'working' ? 'pending' : agent.status === 'waiting' ? 'warn' : agent.status === 'error' ? 'fail' : 'pass'} quiet className="size-3" /><span>{current.state}{current.elapsedMs !== null ? ` · ${duration(current.elapsedMs)} elapsed` : ` · ${relativeTime(agent.lastActiveAt, now)} ago`}</span></div>
         <h2 className="my-2.5 break-words text-[21px] font-medium leading-[1.35] tracking-[-.35px]">{current.title}</h2>
         {current.activity ? <p className="break-words text-[12px] leading-relaxed text-content/50">{current.activity}</p> : null}
-        {data.plan ? <ReportedPlan plan={data.plan} /> : null}
       </>}
       <NeedsYou approvals={approvals} blocked={data.produced.filter(i => i.needsUser)} waiting={(team ? [...members,agent] : [agent]).filter(a=>a.status==='waiting')} />
       {team ? <section className="mt-[25px]" aria-label="Team work">{members.map(a => <button type="button" key={a.id} className={`${ROW} py-[9px]`} onClick={() => open({kind:'agent',agentId:a.id})}>
-        <AgentAvatar agent={a} className="mt-0.5 size-[18px]" /><span className="min-w-0 flex-1"><span className="text-[12.5px] font-medium">{a.name}</span><span className="mt-0.5 block line-clamp-2 text-[12px] text-content/55">{overviewNow(a, now).title}</span><span className="mt-0.5 block text-[10.5px] text-content/40">{a.status === 'waiting' ? 'Waiting for you' : a.activity || 'Idle'}</span></span><span className="shrink-0 text-[11px] text-content/45">{reportedPlan(a) ? `${reportedPlan(a)!.steps.filter(s=>s.status==='completed').length} of ${reportedPlan(a)!.steps.length} steps` : <StatusMark state={a.status === 'working' ? 'pending' : a.status === 'waiting' ? 'warn' : 'pass'} quiet className="mt-0.5 size-3" />}</span>
+        <AgentAvatar agent={a} className="mt-0.5 size-[18px]" /><span className="min-w-0 flex-1"><span className="text-[12.5px] font-medium">{a.name}</span><span className="mt-0.5 block line-clamp-2 text-[12px] text-content/55">{overviewNow(a, now).title}</span><span className="mt-0.5 block text-[10.5px] text-content/40">{a.status === 'waiting' ? 'Waiting for you' : a.activity || 'Idle'}</span></span><StatusMark state={a.status === 'working' ? 'pending' : a.status === 'waiting' ? 'warn' : 'pass'} quiet className="mt-0.5 size-3" />
       </button>)}</section> : null}
       <Produced items={data.produced} />
       <footer className="mt-6 flex flex-wrap items-center gap-1" aria-label="Overview actions">
