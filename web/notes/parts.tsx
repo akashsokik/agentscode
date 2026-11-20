@@ -12,7 +12,7 @@ export function DecisionGlyph({ className }: { className?: string }) {
   return <svg aria-hidden viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinejoin="round" className={className}><path d="M4.5 3h3.2a4.8 5 0 0 1 0 10H4.5Z" /></svg>;
 }
 
-/** The kind glyph a chip shows, or none where the section already names the kind (ACH-D37, ACH-D48). */
+/** The kind glyph shown in reference chips. */
 export function KindGlyph({ kind, show = true }: { kind: 'D' | 'N'; show?: boolean }) {
   if (!show) return null;
   return kind === 'D' ? <DecisionGlyph /> : <NoteGlyph />;

@@ -23,7 +23,7 @@ export function ReferenceChip({ label, kind, glyph, cardContent, onOpen, inert =
   const card = useHoverCard();
   const activate = (event: MouseEvent) => { event.stopPropagation(); event.preventDefault(); card.close(); onOpen?.(); };
   const content = <>{glyph ? <span className="ref-chip-glyph" aria-hidden>{glyph}</span> : null}<span className="ref-chip-label">{label}</span></>;
-  const className = `ref-chip${replaced ? ' ref-old' : ''}`;
+  const className = `ref-chip shrink-0${replaced ? ' ref-old' : ''}`;
   return <>
     {displayOnly ? <span className={className}>{content}</span> : inert ? (
       <span ref={anchor} className={className} data-ref-inert onMouseEnter={cardContent ? card.chipEvents.onMouseEnter : undefined} onMouseLeave={card.chipEvents.onMouseLeave} onClick={onOpen ? activate : undefined}>{content}</span>
@@ -81,7 +81,7 @@ export function openInNotes(id: string): void {
 export function RefChip({ id, fade, inert = false, glyph = true }: {
   id: string;
   fade?: boolean;
-  /** false inside a section that already names the kind, such as a "Decisions" list (ACH-D37, ACH-D48). */
+  /** Hide only when an identical glyph already appears beside this chip. */
   glyph?: boolean;
   /** Inside another control (a row that is itself a button): a span that still shows its card on hover and opens on click, without being a second tab stop. */
   inert?: boolean;
