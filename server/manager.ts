@@ -1047,7 +1047,6 @@ export class AgentManager {
     delete agent.context;
     delete agent.threadUsage;
     agent.currentTask = null;
-    agent.plan = null;
     agent.status = 'idle';
     agent.activity = '';
     agent.error = null;
@@ -2659,12 +2658,6 @@ export class AgentManager {
         this.hub.broadcast({ type: 'agent', agent });
       },
       touched: (paths) => this.noteWhereabouts(agentId, paths),
-      plan: (plan) => {
-        const agent = live();
-        if (!agent) return;
-        agent.plan = plan ? { ...plan, updatedAt: Date.now() } : null;
-        this.emitAgent(agent);
-      },
       turnStart: (task) => {
         const agent = live();
         if (!agent) return;
@@ -2681,8 +2674,6 @@ export class AgentManager {
         agent.turnStartedAt = Date.now();
         agent.lastActiveAt = agent.turnStartedAt;
         agent.error = null;
-        // A plan belongs to the turn that reported it (ACH-73): a new turn starts without one.
-        agent.plan = null;
         this.seedWhereabouts(agent);
         this.emitAgent(agent);
       },

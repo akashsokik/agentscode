@@ -122,21 +122,6 @@ export interface Agent {
    * worktree of one, and the branch checked out there (null outside git). Absent until known.
    */
   workingIn?: WorkingIn;
-  /**
-   * The plan the agent itself reported this turn (ACH-73): Claude's TodoWrite todos or Codex's
-   * plan. Kept after the turn ends, cleared when the next turn or a new session starts. Absent or
-   * null when none was reported; never inferred.
-   */
-  plan?: AgentPlan | null;
-}
-
-export type PlanStepStatus = 'done' | 'active' | 'pending';
-export interface PlanStep { text: string; status: PlanStepStatus }
-export interface AgentPlan {
-  steps: PlanStep[];
-  updatedAt: number;
-  /** The engine that reported it. Codex reports no step in progress, so its steps are done or pending. */
-  engine: 'claude' | 'codex';
 }
 
 /**

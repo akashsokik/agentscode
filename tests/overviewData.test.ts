@@ -3,18 +3,13 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import type { query } from '@anthropic-ai/claude-agent-sdk';
-import { ClaudeRunner } from '../server/agents/claude.ts';
-import { CodexRunner } from '../server/agents/codex.ts';
-import { claudePlanSteps, codexPlanSteps } from '../server/agents/plan.ts';
-import type { RunnerHooks } from '../server/agents/runner.ts';
 import { agentProduced, PRODUCED_TTL_MS, ProducedCache } from '../server/produced.ts';
 import { readGit, type GitRunner } from '../server/work.ts';
-import type { Agent, AgentPlan, PeerMessage, WalkthroughSummary } from '../shared/types.ts';
-import { gitEnv, harness, projectDir, settle, tempDir } from './helpers.ts';
+import type { Agent, PeerMessage, WalkthroughSummary } from '../shared/types.ts';
+import { gitEnv, tempDir } from './helpers.ts';
 
-// ACH-73 (ACH-D98): the Overview's data. A plan is only what the engine reported; produced work is
-// read from git, walkthroughs and reports, and nothing is attributed from a shared checkout.
+// ACH-73 (ACH-D98, ACH-D100): the Overview's produced work, read from git, walkthroughs and
+// reports; nothing is attributed from a shared checkout. There are no plan steps (ACH-D100).
 
 const baseAgent: Agent = {
   id: 'a1', name: 'Ada', engine: 'claude', projectIds: ['p1'], worktree: null, home: '/tmp/podcode-test/agents/a1', dreaming: false, model: '', effort: '',
@@ -22,115 +17,6 @@ const baseAgent: Agent = {
   currentTask: null, sessionId: null, createdAt: 0, lastActiveAt: 0, turnStartedAt: null, unread: false,
   costUsd: 0, tokens: 0, turns: 0, queued: 0, lastSummary: '', error: null,
 };
-type Reported = { steps: AgentPlan['steps']; engine: AgentPlan['engine'] } | null;
-function planHooks(plans: Reported[]): RunnerHooks {
-  return {
-    session: () => {}, entry: () => {}, activity: () => {}, turnStart: () => {}, turnEnd: () => {},
-    approval: async () => ({ allow: true }), closed: () => {}, plan: plan => plans.push(plan),
-  };
-}
-
-test('Claude todos: completed is done, in_progress is active, anything else pending; no text, no step', () => {
-  assert.deepEqual(claudePlanSteps({ todos: [
-    { content: 'Read the code', status: 'completed', activeForm: 'Reading' },
-    { content: 'Write the fix', status: 'in_progress' },
-    { content: 'Run the tests', status: 'pending' },
-    { content: 'Odd status', status: 'whatever' },
-    { content: '  ', status: 'completed' },
-    { status: 'pending' },
-    'not a todo',
-  ] }), [
-    { text: 'Read the code', status: 'done' },
-    { text: 'Write the fix', status: 'active' },
-    { text: 'Run the tests', status: 'pending' },
-    { text: 'Odd status', status: 'pending' },
-  ]);
-  for (const junk of [undefined, null, {}, { todos: 'x' }, []]) assert.deepEqual(claudePlanSteps(junk), []);
-});
-
-test('Codex plan: completed is done, everything else pending, never active', () => {
-  assert.deepEqual(codexPlanSteps([{ text: 'Plan', completed: true }, { text: 'Build', completed: false }, { text: 'Ship' }, { completed: true }]), [
-    { text: 'Plan', status: 'done' }, { text: 'Build', status: 'pending' }, { text: 'Ship', status: 'pending' },
-  ]);
-  assert.deepEqual(codexPlanSteps(undefined), []);
-});
-
-test('the Claude runner reports its main loop\'s TodoWrite as the plan, not a helper\'s', async () => {
-  const plans: Reported[] = [];
-  const fake = (() => {
-    async function* run() {
-      yield { type: 'system', subtype: 'init', session_id: 's1' };
-      yield { type: 'assistant', uuid: 'h1', parent_tool_use_id: 'task-1', message: { content: [{ type: 'tool_use', id: 't0', name: 'TodoWrite', input: { todos: [{ content: 'Helper step', status: 'pending' }] } }] } };
-      yield { type: 'assistant', uuid: 'u1', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 't1', name: 'TodoWrite', input: { todos: [{ content: 'Fix it', status: 'in_progress' }, { content: 'Test it', status: 'pending' }] } }] } };
-      yield { type: 'assistant', uuid: 'u2', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 't2', name: 'TodoWrite', input: { todos: [] } }] } };
-      yield { type: 'result', subtype: 'success', is_error: false, result: 'Done.', total_cost_usd: 0 };
-      await new Promise(() => {});
-    }
-    return Object.assign(run(), { interrupt: async () => {}, setPermissionMode: async () => {}, setModel: async () => {}, applyFlagSettings: async () => {}, close: () => {} });
-  }) as unknown as typeof query;
-  const runner = new ClaudeRunner({ agent: () => baseAgent, project: null, cwd: '/tmp', binPath: '/usr/local/bin/claude', hooks: planHooks(plans) }, fake);
-  runner.send('Go');
-  await settle(10);
-  assert.deepEqual(plans, [
-    { steps: [{ text: 'Fix it', status: 'active' }, { text: 'Test it', status: 'pending' }], engine: 'claude' },
-    null,
-  ], 'the helper\'s todos are not the plan; an emptied list clears it');
-  runner.close();
-});
-
-test('the Codex runner reports its todo_list as the plan', async () => {
-  const dir = tempDir('codex-plan');
-  const bin = path.join(dir, 'codex');
-  fs.writeFileSync(bin, `#!/bin/sh
-cat > /dev/null
-echo '{"type":"thread.started","thread_id":"thread-1"}'
-echo '{"type":"item.completed","item":{"id":"p1","type":"todo_list","items":[{"text":"Read","completed":true},{"text":"Change","completed":false}]}}'
-echo '{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"Done."}}'
-echo '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}'
-`, { mode: 0o755 });
-  const plans: Reported[] = [];
-  const runner = new CodexRunner({ agent: () => ({ ...baseAgent, engine: 'codex' }), project: null, cwd: dir, binPath: bin, hooks: planHooks(plans) });
-  runner.send('Go');
-  for (let i = 0; i < 200 && runner.busy; i++) await new Promise(resolve => setTimeout(resolve, 10));
-  assert.deepEqual(plans.at(-1), { steps: [{ text: 'Read', status: 'done' }, { text: 'Change', status: 'pending' }], engine: 'codex' });
-});
-
-test('on the agent: a reported plan is kept after the turn, cleared by the next turn and a new session; none is made up', async () => {
-  const h = harness();
-  const project = h.manager.addProject({ path: projectDir(h.dir, 'app') });
-  const ada = await h.manager.create({ name: 'Ada', engine: 'claude', projectId: project.id });
-  const cy = await h.manager.create({ name: 'Cy', engine: 'codex', projectId: project.id });
-  const live = (id: string) => h.store.agents.get(id)!;
-
-  h.manager.send(ada.id, 'Fix it');
-  const runner = h.runner(ada.id);
-  assert.equal(live(ada.id).plan, null, 'a turn starts with no plan');
-  runner.ctx.hooks.plan!({ steps: [{ text: 'Fix', status: 'active' }], engine: 'claude' });
-  const plan = live(ada.id).plan!;
-  assert.deepEqual(plan.steps, [{ text: 'Fix', status: 'active' }]);
-  assert.equal(plan.engine, 'claude');
-  assert.ok(plan.updatedAt > 0);
-  runner.complete();
-  await settle();
-  assert.deepEqual(live(ada.id).plan?.steps, [{ text: 'Fix', status: 'active' }], 'kept after the turn, as last reported');
-
-  h.manager.send(ada.id, 'Next thing');
-  assert.equal(live(ada.id).plan, null, 'the next turn does not inherit it');
-  runner.ctx.hooks.plan!({ steps: [{ text: 'Again', status: 'pending' }], engine: 'claude' });
-  runner.ctx.hooks.plan!(null);
-  assert.equal(live(ada.id).plan, null, 'an emptied list clears it');
-  runner.ctx.hooks.plan!({ steps: [{ text: 'Again', status: 'pending' }], engine: 'claude' });
-  runner.complete();
-  await settle();
-  await h.manager.newSession(ada.id);
-  assert.equal(live(ada.id).plan, null, 'a new session clears it');
-
-  h.manager.send(cy.id, 'Go');
-  h.runner(cy.id).complete();
-  await settle();
-  assert.ok(!live(cy.id).plan, 'a turn that reports no plan has none');
-});
-
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, env: gitEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
 function repo() {
@@ -297,4 +183,16 @@ test('L4: the git half is read once per agent until the turn ends, the panel ask
   assert.match(manager, /private onTurnEnd\(agentId: string, result: TurnResult\): void \{\n    this\.producedCache\.invalidate\(agentId\);/);
   const app = fs.readFileSync(new URL('../server/app.ts', import.meta.url), 'utf8');
   assert.match(app, /manager\.produced\(param\(req, 'id'\), req\.query\.fresh === '1'\)/);
+});
+
+test('ACH-D100: no plan steps are captured or sent for any agent', () => {
+  assert.equal(fs.existsSync(new URL('../server/agents/plan.ts', import.meta.url)), false);
+  const types = fs.readFileSync(new URL('../shared/types.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(types, /AgentPlan|PlanStep/);
+  const agentType = types.slice(types.indexOf('export interface Agent {'), types.indexOf('\n}\n', types.indexOf('export interface Agent {')));
+  assert.ok(agentType.length > 100);
+  assert.doesNotMatch(agentType, /\bplan\?:/, 'the Agent has no plan field');
+  for (const file of ['claude.ts', 'codex.ts', 'runner.ts', 'scoped.ts']) {
+    assert.doesNotMatch(fs.readFileSync(new URL(`../server/agents/${file}`, import.meta.url), 'utf8'), /hooks\.plan|plan\?\(|PlanSteps/, file);
+  }
 });

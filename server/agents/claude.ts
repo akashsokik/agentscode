@@ -16,7 +16,6 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Agent, AgentTask, Autonomy, Question, ToolCall, TurnUsage } from '../../shared/types.ts';
 import { reservedHomeFile } from '../agentHome.ts';
-import { claudePlanSteps } from './plan.ts';
 import { approvalTitle, clip, resultSummary, toolActivity, toolDetail, toolResultText, toolSummary } from './describe.ts';
 import { toolPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerCommand, type RunnerContext, type RunnerImage, type RunnerInput, type SideOptions, type SideResult } from './runner.ts';
@@ -588,10 +587,6 @@ export class ClaudeRunner implements Runner {
             hooks.entry({ id: block.id, kind: 'tool', text: '', tool });
             hooks.activity(toolActivity(block.name, input));
             hooks.touched?.(toolPaths(block.name, input, this.ctx.cwd, os.homedir()));
-            if (block.name === 'TodoWrite') {
-              const steps = claudePlanSteps(input);
-              hooks.plan?.(steps.length ? { steps, engine: 'claude' } : null);
-            }
           } else if (block.type === 'thinking') {
             hooks.activity('Thinking');
           }

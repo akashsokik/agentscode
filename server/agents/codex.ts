@@ -10,7 +10,6 @@ import { usageSince, usageTotal } from '../../shared/turnUsage.ts';
 import { clip, mcpSummary, toolResultText } from './describe.ts';
 import { commandPaths } from '../whereabouts.ts';
 import { systemInstructions, type Runner, type RunnerContext, type RunnerImage, type RunnerInput } from './runner.ts';
-import { codexPlanSteps } from './plan.ts';
 import { codexCommsConfig, COMMS_INSTRUCTIONS, hasEyes } from '../comms/tools.ts';
 
 const SANDBOX: Record<Autonomy, string> = {
@@ -380,8 +379,6 @@ export class CodexRunner implements Runner {
       case 'todo_list': {
         const items = (Array.isArray(item.items) ? item.items : []) as { text?: string; completed?: boolean }[];
         const done = items.filter((t) => t.completed).length;
-        const steps = codexPlanSteps(item.items);
-        hooks.plan?.(steps.length ? { steps, engine: 'codex' } : null);
         hooks.entry({
           id: `${this.turnKey}-plan`,
           kind: 'tool',
