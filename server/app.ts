@@ -183,7 +183,8 @@ export function createApp(
   });
   // ACH-73: what the agent produced recently (commits, uncommitted changes, walkthroughs, reports).
   app.get('/api/agents/:id/produced', async (req, res) => {
-    res.json(await manager.produced(param(req, 'id')));
+    // ?fresh=1 when the Overview opens; otherwise a reading kept since the agent's last turn end.
+    res.json(await manager.produced(param(req, 'id'), req.query.fresh === '1'));
   });
   app.get('/api/agents/:id/walkthroughs', (req, res) => {
     res.json(manager.walkthroughs(param(req, 'id')));

@@ -8,7 +8,8 @@ import { ClaudeRunner } from '../server/agents/claude.ts';
 import { CodexRunner } from '../server/agents/codex.ts';
 import { claudePlanSteps, codexPlanSteps } from '../server/agents/plan.ts';
 import type { RunnerHooks } from '../server/agents/runner.ts';
-import { agentProduced } from '../server/produced.ts';
+import { agentProduced, PRODUCED_TTL_MS, ProducedCache } from '../server/produced.ts';
+import { readGit, type GitRunner } from '../server/work.ts';
 import type { Agent, AgentPlan, PeerMessage, WalkthroughSummary } from '../shared/types.ts';
 import { gitEnv, harness, projectDir, settle, tempDir } from './helpers.ts';
 
@@ -176,7 +177,7 @@ test('produced: its own worktree\'s commits and changes, its walkthroughs and re
   assert.deepEqual(out.commits.map(c => c.subject), ['Add b (X-1)'], 'only the branch\'s own commits, not main\'s');
   assert.match(out.commits[0].hash, /^[0-9a-f]{40}$/);
   assert.ok(out.commits[0].at > 1_000_000_000_000, 'in milliseconds');
-  assert.deepEqual(out.uncommitted, { files: 2, added: 2, removed: 0 }, 'a.txt and new.txt; the node_modules link is not a change');
+  assert.deepEqual(out.uncommitted, { files: 2, added: 3, removed: 0 }, 'a.txt (+2) and new.txt (+1); the node_modules link is not a change');
   assert.deepEqual(out.walkthroughs, [{ id: 'w2', title: 'Newer', createdAt: 20, branch: 'feat/x', commit: 'abc' }, { id: 'w1', title: 'Older', createdAt: 10 }]);
   assert.deepEqual(out.reports.map(r => [r.messageId, r.outcome]), [['r2', 'blocked'], ['r1', 'passed']]);
   assert.equal(out.reports[0].summary.length, 300);
@@ -220,4 +221,80 @@ test('produced is a read-only GET behind the app\'s own guards, and git runs thr
   const source = fs.readFileSync(new URL('../server/produced.ts', import.meta.url), 'utf8');
   assert.match(source, /git = input\.git \?\? readGit/);
   assert.doesNotMatch(source, /execFile|spawn|gitRun/);
+});
+
+test('L1: new files count their lines, so a change never reads "+0"; binary ones count none', async () => {
+  const { home, wt } = repo();
+  git(wt, 'mv', 'b.txt', 'c.txt');
+  fs.writeFileSync(path.join(wt, 'three.txt'), 'x\ny\nz');
+  fs.writeFileSync(path.join(wt, 'blob.bin'), Buffer.from([0, 1, 2, 10, 10]));
+  fs.mkdirSync(path.join(wt, 'dir'));
+  fs.writeFileSync(path.join(wt, 'dir', 'inner.txt'), 'in\n');
+  const agent: Agent = { ...baseAgent, workingIn: { projectId: 'p1', root: wt, branch: 'feat/x', at: 1 } };
+  const out = await agentProduced({ agent, home, messages: [], walkthroughs: [] });
+  // a.txt +2; new.txt +1; three.txt +3 (no final newline); dir/inner.txt +1; blob.bin 0; the rename b -> c counts once.
+  assert.deepEqual(out.uncommitted, { files: 6, added: 7, removed: 0 });
+});
+
+test('L2: an agent with its own worktree shows that worktree, even after it read the user\'s checkout', async () => {
+  const { wt, main } = repo();
+  const agent: Agent = {
+    ...baseAgent,
+    worktree: { path: wt, cwd: wt, branch: 'feat/x', base: 'main', baseCommit: '', repoRoot: main, gitDir: path.join(main, '.git') },
+    workingIn: { projectId: 'p1', root: main, branch: 'main', at: 1 },
+  };
+  const out = await agentProduced({ agent, home: null, messages: [], walkthroughs: [] });
+  assert.deepEqual(out.where, { folder: wt, branch: 'feat/x', own: true });
+  assert.deepEqual(out.commits.map(c => c.subject), ['Add b (X-1)']);
+});
+
+test('L3: with no local base branch, origin\'s copy of it is the base', async () => {
+  const { dir, main } = repo();
+  const home = path.join(dir, 'home2');
+  const clone = path.join(home, 'clone');
+  fs.mkdirSync(home);
+  git(dir, 'clone', '-q', main, clone);
+  git(clone, 'checkout', '-q', '-b', 'feat/y');
+  git(clone, 'branch', '-q', '-D', 'main');
+  fs.writeFileSync(path.join(clone, 'y.txt'), 'y\n');
+  git(clone, 'add', '-A');
+  git(clone, 'commit', '-qm', 'Add y');
+  const byDefault = await agentProduced({ agent: { ...baseAgent, workingIn: { projectId: 'p1', root: clone, branch: 'feat/y', at: 1 } }, home, messages: [], walkthroughs: [] });
+  assert.deepEqual(byDefault.commits.map(c => c.subject), ['Add y'], 'origin/HEAD names main, found as origin/main');
+  const wt = { path: clone, cwd: clone, branch: 'feat/y', base: 'main', baseCommit: '', repoRoot: clone, gitDir: path.join(clone, '.git') };
+  const byWorktree = await agentProduced({ agent: { ...baseAgent, worktree: wt }, home: null, messages: [], walkthroughs: [] });
+  assert.deepEqual(byWorktree.commits.map(c => c.subject), ['Add y'], 'a worktree base found as origin/main');
+});
+
+test('L4: the git half is read once per agent until the turn ends, the panel asks fresh, the folder changes or a minute passes', async () => {
+  const { home, wt, main } = repo();
+  let calls = 0;
+  const counting: GitRunner = (args, cwd) => { calls++; return readGit(args, cwd); };
+  const cache = new ProducedCache();
+  const agent: Agent = { ...baseAgent, workingIn: { projectId: 'p1', root: wt, branch: 'feat/x', at: 1 } };
+  const read = (over: { now?: number; fresh?: boolean; agent?: Agent; messages?: PeerMessage[] } = {}) =>
+    agentProduced({ agent: over.agent ?? agent, home, messages: over.messages ?? [], walkthroughs: [], git: counting, cache, now: over.now ?? 1000, fresh: over.fresh });
+  const first = await read();
+  const used = calls;
+  assert.ok(used > 0);
+  const [a, b] = await Promise.all([read(), read()]);
+  assert.equal(calls, used, 'reused, also by callers at the same time');
+  assert.deepEqual(a.commits, first.commits);
+  assert.deepEqual(b.uncommitted, first.uncommitted);
+  const withReport = await read({ messages: [message({ id: 'r', ts: 2, report: { outcome: 'done', summary: 'New.', evidence: '' } })] });
+  assert.equal(withReport.reports.length, 1, 'reports are always current');
+  assert.equal(calls, used, 'and cost no git');
+  await read({ fresh: true });
+  assert.equal(calls, used * 2, 'the panel opening reads again');
+  cache.invalidate(agent.id);
+  await read();
+  assert.equal(calls, used * 3, 'a turn end reads again');
+  await read({ now: 1000 + PRODUCED_TTL_MS });
+  assert.equal(calls, used * 4, 'a minute later reads again');
+  await read({ now: 1000 + PRODUCED_TTL_MS, agent: { ...agent, workingIn: { projectId: 'p1', root: main, branch: 'main', at: 2 } } });
+  assert.ok(calls > used * 4, 'another folder is another reading');
+  const manager = fs.readFileSync(new URL('../server/manager.ts', import.meta.url), 'utf8');
+  assert.match(manager, /private onTurnEnd\(agentId: string, result: TurnResult\): void \{\n    this\.producedCache\.invalidate\(agentId\);/);
+  const app = fs.readFileSync(new URL('../server/app.ts', import.meta.url), 'utf8');
+  assert.match(app, /manager\.produced\(param\(req, 'id'\), req\.query\.fresh === '1'\)/);
 });
