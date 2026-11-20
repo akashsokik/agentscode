@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -23,7 +23,7 @@ function world(quit: 'exits' | 'hangs' | 'holds') {
   const serverUp = path.join(dir, 'server.up');
   const opened = path.join(dir, 'opened');
   const app = path.join(dir, 'Applications', 'PodCode.app');
-  const build = path.join(dir, 'release', 'PodCode.app');
+  const build = path.join(dir, 'release', 'mac-arm64', 'PodCode.app');
   for (const [root, mark] of [[app, 'old'], [build, 'new']] as const) {
     fs.mkdirSync(path.join(root, 'Contents', 'MacOS'), { recursive: true });
     fs.writeFileSync(path.join(root, 'Contents', 'MacOS', 'PodCode'), '#!/bin/sh\n', { mode: 0o755 });
@@ -79,6 +79,7 @@ test('a normal quit: the new build goes in, the old one is kept, and the app is 
     assert.equal(code, 0, out);
     assert.equal(w.isAlive(before), false);
     assert.equal(w.installed(), 'new');
+    assert.equal(execFileSync('/usr/bin/xattr', ['-p', 'com.podcode.build-root', w.app], { encoding: 'utf8' }).trimEnd(), fs.realpathSync(w.dir));
     assert.equal(fs.readFileSync(path.join(w.dir, 'PodCode.app.prev', 'build.txt'), 'utf8'), 'old');
     assert.equal(fs.readFileSync(w.opened, 'utf8').trim(), w.app);
     assert.equal(fs.readFileSync(`${w.opened}.env`, 'utf8'), '', 'the opened app inherits none of the path overrides it was given');
