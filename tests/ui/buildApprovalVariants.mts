@@ -1,5 +1,5 @@
 /** Build the component regression as a local file. No server, app data or providers are used.
- * node tests/ui/buildApprovalVariants.mts [output-directory]
+ * node tests/ui/buildApprovalVariants.mts [output-directory] [browser-entry]
  * Open the printed file URL; wait for body[data-result] and assert it equals "passed".
  */
 import { build } from 'vite';
@@ -9,14 +9,15 @@ import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const outDir = process.argv[2] ? resolve(process.argv[2]) : mkdtempSync(resolve(tmpdir(), 'podcode-approval-variants-'));
+const entry = process.argv[3] ? resolve(process.argv[3]) : fileURLToPath(new URL('../../docs/demos/ACH-67/build/approvalVariants.tsx', import.meta.url));
 await build({
   configFile: false, base: './', logLevel: 'warn',
   define: { 'process.env.NODE_ENV': JSON.stringify('production') },
   build: {
     outDir, emptyOutDir: false, minify: true, target: 'es2022',
-    lib: { entry: fileURLToPath(new URL('../../docs/demos/ACH-67/build/approvalVariants.tsx', import.meta.url)), name: 'ApprovalVariantChecks', formats: ['iife'], fileName: () => 'checks.js' },
+    lib: { entry, name: 'ComponentChecks', formats: ['iife'], fileName: () => 'checks.js' },
   },
 });
 const html = resolve(outDir, 'index.html');
-writeFileSync(html, '<!doctype html><meta charset="utf-8"><title>Approval variant regression</title><script defer src="./checks.js"></script>');
+writeFileSync(html, '<!doctype html><meta charset="utf-8"><title>Component regression</title><script defer src="./checks.js"></script>');
 console.log(pathToFileURL(html).href);

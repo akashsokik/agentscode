@@ -1,14 +1,6 @@
-import type { Agent } from '../../shared/types.ts';
+import type { Agent, AgentProduced } from '../../shared/types.ts';
 export type OverviewTarget = {kind:'diff';agentId:string}|{kind:'commit';projectId:string|undefined;hash:string}|{kind:'walkthrough';agentId:string;id:string;title:string}|{kind:'report';conversationId:string};
-/** Structural ACH-73 fallback while the server/shared-types commit is integrated. */
-export interface ProducedSnapshot {
-  at:number;
-  where:{folder:string;branch:string|null;own:boolean}|null;
-  commits:{hash:string;subject:string;at:number}[];
-  uncommitted:{files:number;added:number;removed:number}|null;
-  walkthroughs:{id:string;title:string;createdAt:number;branch?:string;commit?:string}[];
-  reports:{messageId:string;conversationId:string;toAgentId:string;toName:string;outcome:'passed'|'failed'|'blocked'|'done';summary:string;at:number}[];
-}
+export type ProducedSnapshot = AgentProduced;
 export interface OverviewOutputRecord {id:string;kind:'diff'|'commit'|'walkthrough'|'report';title:string;detail:string;at:number;outcome?:string;needsUser?:boolean;target:OverviewTarget}
 export function outputRecords(agent:Agent, source:ProducedSnapshot):OverviewOutputRecord[] {
   const projectId=agent.workingIn?.projectId || agent.projectIds?.[0];

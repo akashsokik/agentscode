@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Agent } from '../../shared/types.ts';
 import { api } from '../api.ts';
 import { open, openToSide, setProject } from '../layout.ts';
@@ -19,14 +19,20 @@ export function useOverviewData(agent:Agent,team:boolean):{produced:OverviewOutp
   const list=team?(agents??[]):[agent];
   const signature=list.map(a=>`${a.id}:${a.status}:${a.turns}`).join('|');
   const [snapshots,setSnapshots]=useState<Record<string,ProducedSnapshot>>({});
+  const opened=useRef({scope:'',ids:new Set<string>()});
   useEffect(()=>{
     let alive=true,running=false;
+    const scope=`${team?'team':'agent'}:${agent.id}`;
+    if(opened.current.scope!==scope)opened.current={scope,ids:new Set()};
     setSnapshots({});
     const load=async()=>{
       if(running)return;running=true;
       const next:Record<string,ProducedSnapshot>={};let cursor=0;
       const worker=async()=>{while(alive&&cursor<list.length){const a=list[cursor++];try{
-        const response=await fetch(`/api/agents/${encodeURIComponent(a.id)}/produced`);
+        // An opening needs current disk state; turn-end/timer refreshes use the server cache.
+        const fresh=!opened.current.ids.has(a.id);
+        opened.current.ids.add(a.id);
+        const response=await fetch(`/api/agents/${encodeURIComponent(a.id)}/produced${fresh?'?fresh=1':''}`);
         if(!response.ok)continue;
         const data=await response.json() as ProducedSnapshot;
         if(Array.isArray(data.commits)&&Array.isArray(data.walkthroughs)&&Array.isArray(data.reports))next[a.id]=data;

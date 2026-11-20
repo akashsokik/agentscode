@@ -33,6 +33,17 @@ for(const [state,name] of [['working','Ellis'],['waiting','Rowan'],['idle','June
 
 }
 const lead=await manager.create({name:'SuperAgent',engine:'codex',projectIds:null},{super:true});ids.team=lead.id;lead.dreaming=false;lead.status='idle';
+// Optional real ACH-73 source records, entirely in the temporary fixture. No MCP publication,
+// message delivery or live agent turn: these are synthetic persisted records for UI validation.
+if(process.env.ACH67_REAL_PRODUCED==='1'){
+  const author=store.agents.get(ids.working)!;
+  if(!author.home?.startsWith(home))throw new Error('Expected a temporary agent home');
+  const id='20261120-00000001',dir=path.join(author.home,'walkthroughs',id);fs.mkdirSync(dir,{recursive:true});
+  const walkthrough={id,agentId:author.id,agentName:author.name,title:'Keyboard search, ready to try',summary:'Synthetic fixture walkthrough.',stepCount:0,createdAt:Date.now()-600_000,projectId:project.id,branch:author.worktree!.branch,commit:git(['-C',author.worktree!.path,'rev-parse','HEAD']),steps:[]};
+  fs.writeFileSync(path.join(dir,'walkthrough.json'),JSON.stringify(walkthrough));fs.writeFileSync(path.join(dir,'walkthrough.md'),'# Synthetic fixture walkthrough\n');
+  store.conversations.push({id:'fixture-conversation',startedBy:author.id,messageLimit:12,stopped:false,createdAt:Date.now()-720_000});
+  store.messages.push({id:'fixture-report',conversationId:'fixture-conversation',fromAgentId:author.id,fromName:author.name,toAgentId:lead.id,toName:lead.name,text:'Search tests passed',expectsReply:false,ts:Date.now()-720_000,status:'delivered',report:{outcome:'passed',summary:'Search tests passed',evidence:'Synthetic fixture result.'}});
+}
 // Seed an actual existing-shape pending question; no live provider is involved.
 const a={id:'demo-question',agentId:ids.waiting,createdAt:Date.now()-120_000,type:'question',toolName:'AskUserQuestion',title:'Search empty state',detail:'',description:'',canAlwaysAllow:false,questions:[{header:'Empty state',question:'Which empty state should the search use?',options:[{label:'Keep the helpful hint',description:''},{label:'Keep it minimal',description:''}],multiSelect:false}]} as const;
 const pending=(manager as unknown as {approvals:Map<string,unknown>}).approvals;

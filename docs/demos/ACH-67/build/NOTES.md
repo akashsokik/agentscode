@@ -1,5 +1,7 @@
 # ACH-67: approved Work sheet implementation
 
+Current status: integrated Produced-only ACH-73 tip `e922f4b` on this feature branch; uses shared AgentProduced with fresh-on-open requests. Real-backend fixture validation and 1,156 tests passed. No plans, main merge, restart or push. See final integration section below.
+
 Base: local main `a9157e0` (six commits ahead of origin at start). Fetched origin before branching `feat/ACH-67-overview-build`; did not reset or push local main. Demo reference: `954b55c`, concept A (ACH-D98), updated by the later ACH-D100 decision: no plan steps or step bars. This implements the real web panel and retains the approved tab menu (ACH-D92). Initial implementation 9da5158 is superseded by the D100 follow-up; integrate the branch tip, not 9da alone.
 
 ## Change
@@ -11,13 +13,13 @@ Base: local main `a9157e0` (six commits ahead of origin at start). Fetched origi
 - Tabs use existing ContextMenu/MenuRow, IconTab, HeaderButton and fitPanelTabs. MenuRow/ContextMenu gained checkbox semantics and checkbox keyboard traversal. Preferences live in the existing persisted layout, separately per agent/SuperAgent panel. The open tab and last configured tab are guarded. A hidden view opened from CommandPalette is transient; leaving it re-hides it. Overflow fits only configured plus active views. Reset restores that panel type.
 - Footer Message opens the agent and focuses its existing composer; Stop uses api.stop; diff opens the current first changed file in the existing diff view; branch opens existing Work/project/branch selection. No new generic UI component.
 
-## ACH-73 contract and integration status
+## ACH-73 contract (initial UI-only phase)
 
 Coordinated file ownership with Ada by PodCode message before data integration. Read her concrete shared/types.ts + server/app.ts contract read-only and sent acceptance:
 
 - `GET /api/agents/:id/produced -> {at,where,commits,uncommitted,walkthroughs,reports}` (exact structural fallback in overviewModel.ts).
 
-Ada owns server/shared types; this UI commit edits neither. Her commit is not merged here. Therefore UI adapter uses a typed Produced structural fallback and omits unavailable output. ACH-D100 drops all plan data from both workstreams; the UI has no plan field, parser, collector, segmented meter or step list. The final combined server/UI integration must be checked after ACH-73 lands; this evidence does **not** claim verification of her server git attribution.
+Ada owns server/shared types. This paragraph records the initial UI-only phase; the combined validation below supersedes its integration limitation. Her commit was not merged during that initial phase. Therefore UI adapter uses a typed Produced structural fallback and omits unavailable output. ACH-D100 drops all plan data from both workstreams; the UI has no plan field, parser, collector, segmented meter or step list. The final combined server/UI integration must be checked after ACH-73 lands; this evidence does **not** claim verification of her server git attribution.
 
 Now shows task/activity and elapsed time only, for every engine. No steps, bar, percentage or ETA. Claude’s disabled todo tool remains untouched. Outputs distinguish current uncommitted snapshots (and unknown attribution in shared checkouts), commits, authored walkthroughs and agent-reported results. A blocked report alone is not treated as a user approval. A waiting agent with no loaded approval directs the user to its conversation rather than saying nothing is waiting.
 
@@ -25,7 +27,7 @@ Output requests only run while Overview is mounted, refresh every 15 seconds, an
 
 ## Tests and verification
 
-Commands on this UI tree:
+Initial UI-only checks (the final combined result is below):
 
 - `npm run typecheck`: exit 0 (web, server and desktop configs).
 - `npm test`: 1,144 passed, 0 failed/cancelled/skipped. Includes the full existing suite, not only the new tests.
@@ -36,7 +38,7 @@ New tests:
 
 - `tests/panelTabVisibility.test.ts`: malformed/old saved config, canonical order, active and last view protection, transient reveal, per-panel persistence/reset, keyboard/overflow filtering.
 - `tests/overviewPresentation.test.ts`: working/waiting/idle/error, elapsed/unknown start, stale current-task handling.
-- `tests/overviewData.test.ts`: uncommitted vs shared attribution and reported result labeling. The former plan tests were removed with plan UI, per ACH-D100.
+- `tests/overviewOutputRows.test.ts` (renamed before combining Ada’s server test of the original name): uncommitted vs shared attribution and reported result labeling. The former plan tests were removed with plan UI, per ACH-D100.
 
 Built UI was served by the real createServer on **127.0.0.1:4777** against a fresh temporary HOME/PODCODE_HOME and a fresh temporary Git project/worktrees. FakeRunner prevented provider calls; superWake was disabled. Used actual UserKey one-time login. `fixture.mts` documents the setup. No real user data was read or mutated.
 
@@ -53,7 +55,7 @@ Browser assertions passed:
 7. Narrow overflow excluded user-hidden Notes.
 8. Interaction checks reported no page exceptions. Final captures use an isolated browser context with fixture layout injected before app startup, then assert each expected agent header and 372px panel width before capture. This corrects a bootstrap layout race in an earlier screenshot pass. Final comparison images assert both embedded images loaded.
 
-Temporary server stopped after capture. No live app restart, local main merge or push. Review and combined ACH-73 validation remain for the coordinator.
+Temporary server stopped after capture. No live app restart, local main merge or push. Independent review remains for the coordinator. Combined ACH-73 validation was completed in the later phase below.
 
 ## Screenshots
 
@@ -96,3 +98,17 @@ IconTab now renders an explicitly fitted showLabel as a whole, non-shrinking wor
 `tests/ui/panelTabLabels.browser.mjs` exports checkPanelTabLabels(page, spec) for an authenticated fresh Playwright context against fixture.mts. Spec fields: origin, agentId, projectId, panelType (agent or super), artifactDir. It navigates every tab, using overflow when necessary, at 260/320/372px and audits clipping ancestors for 14 animation frames after each switch. It verifies the selected tab and its whole label, then records screenshots. It does not start a server or call any provider. Produced is not mocked in this run; the not-yet-integrated endpoint is safely absent. This check concerns tab geometry only.
 
 Final results: 15 agent cases + 21 SuperAgent cases, 504 sampled frames, zero clipped labels/page exceptions. Focused fit/visibility tests: 12/12. Full suite: 1,145/1,145; typecheck and build exited 0. Logs: /tmp/ach67-label-{tests,typecheck,build}.log. New PNGs: label-after-agent-320.png, label-after-super-320.png, label-after-agent-260.png, label-after-super-260.png; comparison-labels-320.png compares the actual old transition with the final 320px strip. All were captured from the built UI against a fresh temporary data directory with FakeRunner. Temporary server stopped.
+
+## Final Produced-only integration
+
+Merged Ada's `e922f4b` (Produced only, based on local main bedf566) into this feature branch. Main was not modified. The only prospective merge collision was both workstreams naming tests/overviewData.test.ts; the UI test was renamed to overviewOutputRows.test.ts before merging, retaining both suites. Server/shared files match Ada's tip exactly. Her base also carries Hal's chip changes; none were hand-edited here. The UI's structural fallback is now an alias of the committed shared AgentProduced type. Missing/unavailable endpoint data is still safely omitted at runtime.
+
+Each Overview opening/agent selection sends fresh=1 once per agent. Status/turn and 15s refreshes use plain GET and server caching; activity changes cause no extra load. The actual React hook fixture overviewRefresh.tsx passes seven checks: opening, activity-only update, turn end, timer, new selection, returning selection, and unmount/remount with timer cleanup. Replay with `node tests/ui/buildApprovalVariants.mts /tmp/ach67-overview-refresh docs/demos/ACH-67/build/overviewRefresh.tsx`; open the printed file and assert body[data-result] equals passed. Its explicit DOM/JSX typecheck also passed.
+
+For real backend validation, run `ACH67_REAL_PRODUCED=1 node docs/demos/ACH-67/build/fixture.mts` after building. This seeds synthetic persisted report and walkthrough records in the temporary data directory only; it neither publishes a walkthrough nor delivers a message or starts a live agent. Git commits/changes are real temporary worktree data. Playwright used actual user-key authentication and no HTTP response fulfillment.
+
+Verified: fresh=1 request on Overview open and reopen; real endpoint own=true, one branch commit, one current changed file, one stored walkthrough and one stored report. After adding a three-line untracked fixture file, cached GET retained files=1/added=1; fresh=1 returned files=2/added=4. The real UI rendered all four output kinds together, plus working/waiting/idle/team states without plan meters. Clicking each output selected its actual existing diff path (SearchView.tsx), Work view, walkthrough ID and Comms conversation ID. This tests routing and real output reads, not a provider run.
+
+Current built captures: integrated-{working,waiting,idle,team}-{app,panel}.png. Integrated-comparison-{working,waiting,idle,team}.png and their HTML pages compare the real-backend UI with the earlier A reference (D100 intentionally removes its bar). Initial contract-fixture screenshots remain as historical evidence; these integrated captures supersede their backend limitation.
+
+Final combined source checks: typecheck exit 0, build exit 0, full Node suite 1,156 passed/0 failed/0 skipped. Logs /tmp/ach67-combined-{typecheck,build,tests}.log. Separate hook lifecycle browser check: 7 passed/0 failed. Temporary server stopped; no real data or provider calls, app restart, main merge or push. Independent review remains.
