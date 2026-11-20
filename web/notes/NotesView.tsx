@@ -114,7 +114,7 @@ function Row({ entry, words = [] }: { entry: RefSummary; words?: readonly string
   return (
     <PanelRow
       id={entry.id}
-      title={<span className="flex min-w-0 items-center gap-2"><StaticChip summary={entry} glyph={false} /><span className="truncate"><Highlight text={entry.title} words={words} /></span></span>}
+      title={<span className="flex min-w-0 items-center gap-2"><StaticChip summary={entry} /><span className="min-w-0 flex-1 truncate"><Highlight text={entry.title} words={words} /></span></span>}
       label={`${kindWord(entry.kind)} ${entry.id}: ${entry.title}${status}${entry.by ? `, by ${entry.by}` : ''}, ${shortDate(entry.date)}${entry.replacedBy ? `, ${entry.kind === 'N' ? 'outdated' : 'replaced'} by ${entry.replacedBy}` : entry.replaces ? `, replaces ${entry.replaces}` : ''}`}
       dim={old}
       meta={old && entry.replacedBy
@@ -268,7 +268,7 @@ function RefWithTitle({ id }: { id: string }) {
   return (
     <span className="flex min-w-0 items-center gap-1.5">
       {other ? <RefChip id={id} /> : <span className="font-mono">{id}</span>}
-      {other ? <span className="min-w-0 truncate">{other.title}</span> : null}
+      {other ? <span className="min-w-0 flex-1 truncate">{other.title}</span> : null}
     </span>
   );
 }
@@ -293,7 +293,7 @@ function DetailBody({ detail }: { detail: RefDetail }) {
   ];
   if (detail.addedBy) rows.push(['Recorded by', <><WhoAvatar name={detail.addedBy} /><span className="truncate">{detail.addedBy}</span></>]);
   if (detail.commits.length) rows.push([detail.commits.length === 1 ? 'Commit' : 'Commits', <span className="flex flex-wrap gap-x-2 font-mono text-[var(--link-color)]">{detail.commits.map(c => <CommitChip key={c} sha={c} />)}</span>]);
-  if (issues.length) rows.push([issues.length === 1 ? 'Issue' : 'Issues', <span className="flex min-w-0 flex-col gap-1 py-1">{issues.map(i => <span key={i.issueId} className="flex min-w-0 items-center gap-1.5"><IssueKeyChip issueKey={i.key} /><span className="min-w-0 truncate">{i.title}</span></span>)}</span>]);
+  if (issues.length) rows.push([issues.length === 1 ? 'Issue' : 'Issues', <span className="flex min-w-0 flex-col gap-1 py-1">{issues.map(i => <span key={i.issueId} className="flex min-w-0 items-center gap-1.5"><IssueKeyChip issueKey={i.key} /><span className="min-w-0 flex-1 truncate">{i.title}</span></span>)}</span>]);
   if (detail.related.length) rows.push(['Related', <span className="flex min-w-0 flex-col gap-1 py-1">{detail.related.map(r => <RefWithTitle key={r} id={r} />)}</span>]);
   if (detail.otherLinks.length) {
     rows.push(['Links', <span className="flex min-w-0 flex-col py-1">{detail.otherLinks.map(link => (

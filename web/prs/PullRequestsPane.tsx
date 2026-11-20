@@ -375,7 +375,7 @@ function Commits({ pr, detail, now }: { pr: PullRequest; detail: PrDetail; now: 
           <p className="flex h-5 min-w-0 items-center gap-1.5 font-sans text-[12px] text-content/50">
             <span className="min-w-0 truncate text-content">{c.headline}</span>
             <span aria-hidden>·</span>
-            <span className="shrink-0">{c.author}</span>
+            <span className="min-w-0 truncate">{c.author}</span>
             <CommitChip sha={c.oid} title={c.headline} author={c.author} />
             {c.at ? <span className="ml-auto shrink-0 tabular-nums text-[11px] text-content/40">{relativeTime(Date.parse(c.at), now)}</span> : null}
           </p>

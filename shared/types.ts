@@ -124,6 +124,26 @@ export interface Agent {
   workingIn?: WorkingIn;
 }
 
+/**
+ * What an agent produced recently, for the Overview (ACH-73, GET /api/agents/:id/produced). Read on
+ * request from git, its walkthroughs and its reports; each item carries its own time. A source that
+ * is missing gives [] or null, never a guess.
+ */
+export interface AgentProduced {
+  /** When this was read. */
+  at: number;
+  /** The folder it works in and the branch there; `own` is its own worktree, not a shared project checkout. */
+  where: { folder: string; branch: string | null; own: boolean } | null;
+  /** Commits on its own branch that are not on the base branch, newest first. [] on the base branch or a shared checkout. */
+  commits: { hash: string; subject: string; at: number }[];
+  /** Uncommitted changes there now (a snapshot, not attributed to the agent when `own` is false); null outside git. */
+  uncommitted: { files: number; added: number; removed: number } | null;
+  /** Walkthroughs it published, newest first. */
+  walkthroughs: { id: string; title: string; createdAt: number; branch?: string; commit?: string }[];
+  /** Results it sent with report_result, newest first. */
+  reports: { messageId: string; conversationId: string; toAgentId: string; toName: string; outcome: Report['outcome']; summary: string; at: number }[];
+}
+
 export interface WorkingIn {
   /** The project the folder belongs to. */
   projectId: string;
